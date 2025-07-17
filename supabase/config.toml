@@ -1,0 +1,46 @@
+project_id = "rclpyipeytqbamiwcuih"
+
+[functions.cancel-paypal-subscription]
+verify_jwt = true
+
+[functions.create-chat-with-greeting]
+verify_jwt = true
+
+[functions.chat]
+verify_jwt = true
+
+[functions.chat-stream]
+verify_jwt = true
+
+[functions.create-credit-purchase]
+verify_jwt = true
+
+[functions.create-paypal-subscription]
+verify_jwt = true
+
+[functions.finalize-credit-purchase]
+verify_jwt = true
+
+[functions.verify-paypal-subscription]
+verify_jwt = true
+
+[functions.upgrade-subscription]
+verify_jwt = true
+
+[functions.verify-upgrade-payment]
+verify_jwt = true
+
+[functions.complete-subscription-upgrade]
+verify_jwt = true
+
+[functions.handle-upgrade]
+verify_jwt = true
+
+[functions.initiate-upgrade]
+verify_jwt = true
+
+[functions.paypal-webhook]
+verify_jwt = false
+
+[functions.test-openrouter]
+verify_jwt = false
