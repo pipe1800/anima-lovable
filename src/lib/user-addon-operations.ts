@@ -16,9 +16,9 @@ export interface AddonSettings {
 export const defaultAddonSettings: AddonSettings = {
   dynamicWorldInfo: false,
   enhancedMemory: false,
-  moodTracking: false,
-  clothingInventory: false,
-  locationTracking: false,
+  moodTracking: true,  // Enable for testing
+  clothingInventory: true,  // Enable for testing
+  locationTracking: true,  // Enable for testing
   timeAndWeather: false,
   relationshipStatus: false,
   characterPosition: false,
@@ -34,6 +34,8 @@ export const getUserCharacterAddonSettings = async (
   characterId: string
 ): Promise<AddonSettings> => {
   try {
+    console.log('🔧 Getting addon settings for user:', userId, 'character:', characterId);
+    
     const { data, error } = await supabase
       .from('user_character_addons')
       .select('addon_settings')
@@ -43,16 +45,26 @@ export const getUserCharacterAddonSettings = async (
 
     if (error) {
       console.error('Error fetching addon settings:', error);
+      console.log('🔧 Using default settings due to error');
       return defaultAddonSettings;
     }
 
     if (!data) {
+      console.log('🔧 No database record found, using default settings:', defaultAddonSettings);
       return defaultAddonSettings;
     }
 
-    return { ...defaultAddonSettings, ...(data.addon_settings as unknown as AddonSettings) };
+    const merged = { ...defaultAddonSettings, ...(data.addon_settings as unknown as AddonSettings) };
+    console.log('🔧 Found database record, merging with defaults:', {
+      database: data.addon_settings,
+      defaults: defaultAddonSettings,
+      merged: merged
+    });
+    
+    return merged;
   } catch (error) {
     console.error('Error fetching addon settings:', error);
+    console.log('🔧 Using default settings due to exception');
     return defaultAddonSettings;
   }
 };

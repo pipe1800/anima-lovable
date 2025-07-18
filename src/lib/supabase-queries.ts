@@ -526,10 +526,11 @@ export const getChatMessages = async (chatId: string, limit = 50, offset = 0) =>
       content,
       is_ai_message,
       created_at,
-      author_id
+      author_id,
+      message_order
     `)
     .eq('chat_id', chatId)
-    .order('created_at', { ascending: false }) // Get newest messages first
+    .order('message_order', { ascending: false }) // Get newest messages first by message order
     .range(offset, offset + limit - 1)
 
   // Reverse to show oldest first in UI
@@ -549,10 +550,11 @@ export const getRecentChatMessages = async (chatId: string, limit = 20) => {
       is_ai_message,
       created_at,
       author_id,
-      current_context
+      current_context,
+      message_order
     `)
     .eq('chat_id', chatId)
-    .order('created_at', { ascending: false })
+    .order('message_order', { ascending: false })
     .limit(limit)
 
   if (error) return { data: [], error };
@@ -607,7 +609,7 @@ export const getRecentChatMessages = async (chatId: string, limit = 20) => {
  * Get earlier messages for infinite scroll
  * This function ALWAYS preserves historical context data regardless of current addon settings
  */
-export const getEarlierChatMessages = async (chatId: string, beforeTimestamp: string, limit = 20) => {
+export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder: number, limit = 20) => {
   const { data, error } = await supabase
     .from('messages')
     .select(`
@@ -616,11 +618,12 @@ export const getEarlierChatMessages = async (chatId: string, beforeTimestamp: st
       is_ai_message,
       created_at,
       author_id,
-      current_context
+      current_context,
+      message_order
     `)
     .eq('chat_id', chatId)
-    .lt('created_at', beforeTimestamp)
-    .order('created_at', { ascending: false })
+    .lt('message_order', beforeMessageOrder)
+    .order('message_order', { ascending: false })
     .limit(limit)
 
   if (error) return { data: [], error };
@@ -675,13 +678,25 @@ export const getEarlierChatMessages = async (chatId: string, beforeTimestamp: st
  * Create a new message in a chat
  */
 export const createMessage = async (chatId: string, authorId: string, content: string, isAiMessage: boolean = false) => {
+  // Get the next message order for this chat
+  const { data: lastMessage } = await supabase
+    .from('messages')
+    .select('message_order')
+    .eq('chat_id', chatId)
+    .order('message_order', { ascending: false })
+    .limit(1)
+    .single();
+
+  const nextMessageOrder = (lastMessage?.message_order || 0) + 1;
+
   const { data, error } = await supabase
     .from('messages')
     .insert({
       chat_id: chatId,
       author_id: authorId,
       content: content,
-      is_ai_message: isAiMessage
+      is_ai_message: isAiMessage,
+      message_order: nextMessageOrder
     })
     .select()
     .single()

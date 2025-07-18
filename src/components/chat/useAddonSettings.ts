@@ -9,7 +9,10 @@ export const useAddonSettings = (characterId: string) => {
     queryKey: ['addon-settings', user?.id, characterId],
     queryFn: async () => {
       if (!user?.id || !characterId) return null;
-      return await getUserCharacterAddonSettings(user.id, characterId);
+      console.log('🔧 Fetching addon settings for character:', characterId);
+      const settings = await getUserCharacterAddonSettings(user.id, characterId);
+      console.log('🔧 Fetched addon settings:', settings);
+      return settings;
     },
     enabled: !!user?.id && !!characterId,
     staleTime: 0, // Always consider data stale for real-time updates

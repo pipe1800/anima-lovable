@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
-import { useChatMessages, useRealtimeMessages, useMessagePolling } from '@/hooks/useChat';
-import type { Message, TrackedContext } from '@/hooks/useChat';
+import type { Message, TrackedContext } from '@/types/chat';
 import { MessageGroup } from './MessageGroup';
 import { groupMessages } from '@/utils/messageGrouping';
 import { ContextDisplay } from './ContextDisplay';
@@ -25,25 +24,36 @@ interface ChatMessagesProps {
   trackedContext?: TrackedContext;
   streamingMessage?: string;
   isStreaming?: boolean;
+  // Props that should come from parent ChatInterface (using the hook)
+  messages?: Message[];
+  hasMore?: boolean;
+  isFetchingNextPage?: boolean;
+  isLoadingMessages?: boolean;
+  fetchNextPage?: () => void;
+  isRealtimeConnected?: boolean;
+  debugInfo?: string[];
 }
 
-const ChatMessages = ({ chatId, character, trackedContext, streamingMessage, isStreaming }: ChatMessagesProps) => {
+const ChatMessages = ({ 
+  chatId, 
+  character, 
+  trackedContext, 
+  streamingMessage, 
+  isStreaming,
+  messages = [],
+  hasMore = false,
+  isFetchingNextPage = false,
+  isLoadingMessages = false,
+  fetchNextPage,
+  isRealtimeConnected = false,
+  debugInfo = []
+}: ChatMessagesProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [backgroundImage, setBackgroundImage] = React.useState<string | null>(null);
   
-  const {
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    isLoading,
-    error
-  } = useChatMessages(chatId);
-
-  // Enable real-time updates with fallback polling
-  const { isSubscribed, debugInfo } = useRealtimeMessages(chatId);
-  useMessagePolling(chatId, isSubscribed);
+  // Messages should be passed from parent ChatInterface to avoid duplicate hook usage
+  // const { ... } = useOptimizedChat(chatId, character.id); // REMOVED - conflicts with parent hook
   
   // Load addon settings for context filtering
   const { data: addonSettings } = useAddonSettings(character.id);
@@ -74,76 +84,66 @@ const ChatMessages = ({ chatId, character, trackedContext, streamingMessage, isS
     };
   }, [chatId]);
 
-  // Use only fetched messages from database (single source of truth)
-  const allMessages = React.useMemo(() => {
-    return data?.pages?.flatMap(page => page.messages) || [];
-  }, [data?.pages]);
-
   // Extract most recent context from AI messages
   const mostRecentContext = React.useMemo(() => {
-    if (!allMessages.length) return trackedContext;
+    if (!messages.length) return trackedContext;
     
     // Find the most recent AI message with context
-    for (let i = allMessages.length - 1; i >= 0; i--) {
-      const message = allMessages[i];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
       if (!message.isUser && message.current_context) {
         return message.current_context;
       }
     }
     
     return trackedContext;
-  }, [allMessages, trackedContext]);
+  }, [messages, trackedContext]);
 
   // Group messages for better visual organization
   const messageGroups = React.useMemo(() => {
-    return groupMessages(allMessages);
-  }, [allMessages]);
+    return groupMessages(messages);
+  }, [messages]);
 
-  // Auto scroll to bottom for new messages
+  // Consolidated smart auto-scroll effect with better timing
   useEffect(() => {
-    if (allMessages.length > 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [allMessages.length]);
-
-  // Auto scroll to bottom during streaming
-  useEffect(() => {
-    if (isStreaming && streamingMessage) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [isStreaming, streamingMessage]);
-
-  // Scroll to bottom on initial load
-  useEffect(() => {
-    if (!isLoading && allMessages.length > 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-    }
-  }, [isLoading, allMessages.length]);
-
-  const handleLoadEarlier = () => {
-    if (hasNextPage && !isFetchingNextPage) {
-      const currentScrollHeight = messagesContainerRef.current?.scrollHeight || 0;
+    const shouldAutoScroll = () => {
+      // Don't scroll during initial loading unless we have messages
+      if (isLoadingMessages && messages.length === 0) return false;
       
-      fetchNextPage().then(() => {
-        // Maintain scroll position after loading earlier messages
-        setTimeout(() => {
-          if (messagesContainerRef.current) {
-            const newScrollHeight = messagesContainerRef.current.scrollHeight;
-            const scrollDiff = newScrollHeight - currentScrollHeight;
-            messagesContainerRef.current.scrollTop = scrollDiff;
-          }
-        }, 100);
+      // Always scroll for new messages (debounced)
+      if (messages.length > 0) return true;
+      
+      // Scroll during streaming
+      if (isStreaming && streamingMessage) return true;
+      
+      return false;
+    };
+
+    if (shouldAutoScroll()) {
+      // Use requestAnimationFrame for smoother scrolling
+      requestAnimationFrame(() => {
+        const behavior = isLoadingMessages ? 'auto' : 'smooth';
+        messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
       });
     }
-  };
+  }, [messages.length, isStreaming, streamingMessage, isLoadingMessages]);
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-red-400">Failed to load messages</div>
-      </div>
-    );
-  }
+  const handleLoadEarlier = () => {
+    if (hasMore && !isFetchingNextPage && fetchNextPage) {
+      const currentScrollHeight = messagesContainerRef.current?.scrollHeight || 0;
+      
+      fetchNextPage();
+      
+      // Maintain scroll position after loading earlier messages
+      setTimeout(() => {
+        if (messagesContainerRef.current) {
+          const newScrollHeight = messagesContainerRef.current.scrollHeight;
+          const scrollDiff = newScrollHeight - currentScrollHeight;
+          messagesContainerRef.current.scrollTop = scrollDiff;
+        }
+      }, 100);
+    }
+  };
 
   // Show empty state when no chat is selected
   if (!chatId) {
@@ -157,7 +157,7 @@ const ChatMessages = ({ chatId, character, trackedContext, streamingMessage, isS
     );
   }
 
-  if (isLoading) {
+  if (isLoadingMessages) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-white flex items-center gap-2">
@@ -185,7 +185,7 @@ const ChatMessages = ({ chatId, character, trackedContext, streamingMessage, isS
       )}
       <div className="relative z-10">
       {/* Load Earlier Messages Button */}
-      {hasNextPage && (
+      {hasMore && (
         <div className="flex justify-center mb-4">
           <Button
             onClick={handleLoadEarlier}
@@ -226,28 +226,7 @@ const ChatMessages = ({ chatId, character, trackedContext, streamingMessage, isS
         </div>
       )}
 
-      {/* Streaming Message Display - Appears in correct position */}
-      {isStreaming && streamingMessage && (
-        <div className="animate-fade-in mb-6">
-          <div className="flex gap-3">
-            <Avatar className="w-8 h-8 flex-shrink-0">
-              <AvatarImage src={character.avatar} alt={character.name} />
-              <AvatarFallback>{character.fallback}</AvatarFallback>
-            </Avatar>
-            
-            <div className="flex flex-col gap-1 max-w-[80%] items-start">
-              <div className="px-4 py-2 text-sm bg-muted text-muted-foreground rounded-lg">
-                <FormattedMessage 
-                  content={streamingMessage}
-                  className="whitespace-pre-wrap"
-                />
-                <span className="inline-block w-2 h-5 bg-primary animate-pulse ml-1"></span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* Messages are already integrated with streaming via the hook */}
       <div ref={messagesEndRef} />
       </div>
     </div>

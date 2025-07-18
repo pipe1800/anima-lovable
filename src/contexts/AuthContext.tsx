@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
@@ -133,13 +132,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state change:', event, session?.user?.id);
+      
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+
+      // Handle session refresh
+      if (event === 'TOKEN_REFRESHED') {
+        console.log('✅ Token refreshed successfully');
+      }
+      
+      // Handle auth errors
+      if (event === 'SIGNED_OUT') {
+        console.log('User signed out');
+        // Clear any cached data if needed
+      }
     });
 
-    return () => subscription.unsubscribe();
+    // Set up automatic token refresh monitoring
+    const refreshInterval = setInterval(async () => {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      if (currentSession) {
+        const expiresAt = currentSession.expires_at;
+        const currentTime = Math.floor(Date.now() / 1000);
+        const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
+        
+        // Refresh if token expires in less than 10 minutes
+        if (timeUntilExpiry > 0 && timeUntilExpiry < 600) {
+          console.log('Proactively refreshing token...');
+          await supabase.auth.refreshSession();
+        }
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(refreshInterval);
+    };
   }, []);
 
   // Fetch profile and subscription when user changes

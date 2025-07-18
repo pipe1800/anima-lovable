@@ -18,15 +18,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { toast } from 'sonner';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { ChatConfigurationTab } from './ChatConfigurationTab';
-import type { TrackedContext } from '@/hooks/useChat';
-
-interface Character {
-  id: string;
-  name: string;
-  tagline: string;
-  avatar: string;
-  fallback: string;
-}
+import type { TrackedContext, Character } from '@/types/chat';
 
 interface ChatLayoutProps {
   character: Character;

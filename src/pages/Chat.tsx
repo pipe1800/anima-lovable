@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -8,7 +7,7 @@ import ChatInterface from '@/components/chat/ChatInterface';
 import { ChatLayout } from '@/components/chat/ChatLayout';
 import OnboardingChecklist from '@/components/OnboardingChecklist';
 import { TutorialManager } from '@/components/tutorial/TutorialManager';
-import type { TrackedContext } from '@/hooks/useChat';
+import type { TrackedContext } from '@/types/chat';
 
 const Chat = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -18,6 +17,7 @@ const Chat = () => {
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [characterData, setCharacterData] = useState<any>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [trackedContext, setTrackedContext] = useState<TrackedContext>({
     moodTracking: 'No context',
     clothingInventory: 'No context',
@@ -78,6 +78,13 @@ const Chat = () => {
     return () => subscription.unsubscribe();
   }, [navigate, loading]);
 
+  // Initialize currentChatId from existingChatId
+  useEffect(() => {
+    if (existingChatId && !currentChatId) {
+      setCurrentChatId(existingChatId);
+    }
+  }, [existingChatId, currentChatId]);
+
   // Character data fetching effect - MOVED TO TOP
   useEffect(() => {
     // Skip if no user or still loading
@@ -86,6 +93,15 @@ const Chat = () => {
     // Initialize character data from selectedCharacter if available
     if (selectedCharacter) {
       setCharacterData(selectedCharacter);
+      
+      // If we have a selectedCharacter but no chat ID, this means the user
+      // came from a character profile but chat creation failed or is in progress.
+      // We should redirect back to the character profile to let them retry.
+      if (!existingChatId && !chatId && !currentChatId) {
+        console.log('⚠️ No chat ID found for selectedCharacter, redirecting to character profile');
+        navigate(`/character/${selectedCharacter.id}`);
+        return;
+      }
       return;
     }
     
@@ -121,7 +137,7 @@ const Chat = () => {
     };
     
     fetchCharacter();
-  }, [user, loading, characterId, selectedCharacter, navigate]);
+  }, [user, loading, characterId, selectedCharacter, navigate, existingChatId, chatId, currentChatId]);
 
   const handleFirstMessage = async () => {
     if (isFirstMessage && !onboardingCompleted) {
@@ -222,14 +238,14 @@ const Chat = () => {
         {/* Main Chat Layout */}
         <ChatLayout 
           character={character} 
-          currentChatId={existingChatId}
+          currentChatId={currentChatId}
           trackedContext={trackedContext}
           onContextUpdate={setTrackedContext}
         >
           <ChatInterface
             character={character}
             onFirstMessage={handleFirstMessage}
-            existingChatId={existingChatId}
+            existingChatId={currentChatId}
             trackedContext={trackedContext}
             onContextUpdate={setTrackedContext}
           />

@@ -7,14 +7,11 @@ import { Heart, MessageCircle } from 'lucide-react';
 import { getRecommendedCharacters, toggleCharacterFavorite, isCharacterFavorited } from '@/lib/supabase-queries';
 import { useCurrentUser } from '@/hooks/useProfile';
 import { toast } from 'sonner';
+import type { Character as BaseCharacter } from '@/types/chat';
 
-interface Character {
-  id: string;
-  name: string;
-  short_description: string;
-  avatar_url: string;
-  interaction_count: number;
-  character_definitions: Array<{ greeting: string }>;
+// Extend the base Character type with onboarding-specific fields
+interface Character extends BaseCharacter {
+  character_definitions?: Array<{ greeting: string }>;
   likes_count?: number;
   favorited?: boolean;
 }

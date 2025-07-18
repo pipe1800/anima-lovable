@@ -3,7 +3,7 @@ import { formatMessageTime } from "@/utils/messageGrouping";
 import { ContextDisplay } from "./ContextDisplay";
 import { FormattedMessage } from "@/components/ui/FormattedMessage";
 import OptimizedMessageFormatter from "./OptimizedMessageFormatter";
-import type { TrackedContext, Message } from "@/hooks/useChat";
+import type { TrackedContext, Message, Character } from '@/types/chat';
 
 interface MessageGroupData {
   id: string;
@@ -11,13 +11,6 @@ interface MessageGroupData {
   isUser: boolean;
   timestamp: Date;
   showTimestamp: boolean;
-}
-
-interface Character {
-  id: string;
-  name: string;
-  avatar: string;
-  fallback: string;
 }
 
 interface MessageGroupProps {
@@ -36,6 +29,15 @@ interface MessageGroupProps {
 
 export function MessageGroup({ group, character, trackedContext, addonSettings }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
+
+  // Debug streaming message updates
+  const streamingMessage = messages.find(m => m.id === 'streaming-temp');
+  if (streamingMessage) {
+    console.log('🎭 MessageGroup rendering streaming message:', {
+      contentLength: streamingMessage.content.length,
+      preview: streamingMessage.content.substring(0, 30) + '...'
+    });
+  }
 
   return (
     <div className="mb-6">
@@ -56,7 +58,7 @@ export function MessageGroup({ group, character, trackedContext, addonSettings }
         <div className={`flex flex-col gap-1 max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
           {messages.map((message, index) => (
             <div
-              key={message.id}
+              key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
               className={`px-4 py-2 text-sm ${
                 isUser
                   ? 'bg-primary text-primary-foreground'
@@ -79,9 +81,14 @@ export function MessageGroup({ group, character, trackedContext, addonSettings }
               }`}
             >
               <FormattedMessage 
+                key={message.id === 'streaming-temp' ? `content-${message.content.length}` : undefined}
                 content={message.content}
                 className="whitespace-pre-wrap"
               />
+              {/* Show streaming indicator for temporary streaming messages */}
+              {message.id === 'streaming-temp' && (
+                <span className="inline-block w-2 h-5 bg-primary animate-pulse ml-1"></span>
+              )}
             </div>
           ))}
         </div>

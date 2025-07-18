@@ -3,13 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-
-export interface Character {
-  id: string;
-  name: string;
-  avatar_url?: string | null;
-  short_description?: string | null;
-}
+import { handleChatError } from '@/utils/chatErrorHandling';
+import { getUserCharacterAddonSettings } from '@/lib/user-addon-operations';
+import type { Character } from '@/types/chat';
 
 export const useChatCreation = () => {
   const [isCreating, setIsCreating] = useState(false);
@@ -24,11 +20,17 @@ export const useChatCreation = () => {
 
     try {
       console.log(`🚀 Creating chat with ${character.name} (attempt ${retryCount + 1})`);
+      console.log(`🔍 Chat creation request:`, { characterId: character.id, userId: user.id });
+      
+      // Get user's addon settings for this character
+      const addonSettings = await getUserCharacterAddonSettings(user.id, character.id);
+      console.log('📊 Addon settings for character:', addonSettings);
       
       const { data, error } = await supabase.functions.invoke('create-chat-with-greeting', {
         body: {
           character_id: character.id,
-          character_name: character.name
+          character_name: character.name,
+          addonSettings: addonSettings
         }
       });
 
@@ -63,6 +65,12 @@ export const useChatCreation = () => {
   };
 
   const startChat = async (character: Character) => {
+    // Prevent double-clicks and concurrent calls
+    if (isCreating) {
+      console.log('⏭️ Chat creation already in progress, ignoring duplicate call');
+      return;
+    }
+
     // Check authentication first
     if (!user || !session) {
       toast({
@@ -117,10 +125,13 @@ export const useChatCreation = () => {
     } catch (error: any) {
       console.error('❌ Start chat failed:', error);
       
+      // Use standardized error handling
+      const chatError = handleChatError(error, 'starting chat', false);
+      
       // Show error toast
       toast({
         title: "Chat Creation Failed",
-        description: error.message || "Failed to start chat. Please try again.",
+        description: chatError.message,
         variant: "destructive",
       });
 
