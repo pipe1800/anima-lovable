@@ -87,7 +87,7 @@ export function MessageGroup({ group, character, trackedContext, addonSettings }
               />
               {/* Show streaming indicator for temporary streaming messages */}
               {message.id === 'streaming-temp' && (
-                <span className="inline-block w-2 h-5 bg-primary animate-pulse ml-1"></span>
+                <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-1 align-middle"></span>
               )}
             </div>
           ))}

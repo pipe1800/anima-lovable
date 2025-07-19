@@ -74,8 +74,7 @@ export const useChatStreaming = (
         selectedPersonaId
       };
       
-      // No need to create temp messages - backend handles everything!
-      // Just set streaming state to show loading indicator
+      // ✅ FIX: Prevent multiple streaming instances
       if (dispatch) {
         dispatch({
           type: 'SET_STREAMING',
@@ -137,25 +136,30 @@ export const useChatStreaming = (
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
               if (data === '[DONE]') {
-                // Stop streaming state
-                if (dispatch) {
-                  dispatch({
-                    type: 'SET_STREAMING',
-                    payload: { isStreaming: false, message: '' }
-                  });
-                }
+                // ✅ FIX: Don't clear streaming state immediately to prevent flickering
+                // Keep the streaming message visible until database message appears
+                console.log('🔄 Stream completed, keeping message visible until database sync...');
                 
-                // Clear streaming flag
+                // Clear streaming flag but keep the message visible
                 if (isStreamingRef) {
                   isStreamingRef.current = false;
                 }
                 
-                // Invalidate queries to refresh with database messages
+                // ✅ FIX: Staggered invalidation - immediate for fast sync
                 queryClient.invalidateQueries({ 
                   queryKey: ['chat', 'messages', chatId],
                   exact: true 
                 });
-                console.log('🔄 Stream completed, refreshing database messages');
+                
+                // ✅ FIX: Auto-clear streaming state after a short delay if no DB message appears
+                setTimeout(() => {
+                  if (dispatch) {
+                    dispatch({
+                      type: 'SET_STREAMING',
+                      payload: { isStreaming: false, message: '' }
+                    });
+                  }
+                }, 2000); // 2 second safety timeout
                 
                 const endTime = Date.now();
                 console.log(`Streaming completed in ${endTime - startTime}ms`);
@@ -168,7 +172,13 @@ export const useChatStreaming = (
                   const content = parsed.choices[0].delta.content;
                   fullMessage += content;
                   
-                  // No need to update temp messages - backend handles real-time updates
+                  // ✅ FIX: Update streaming state with current content for real-time display
+                  if (dispatch) {
+                    dispatch({
+                      type: 'SET_STREAMING',
+                      payload: { isStreaming: true, message: fullMessage }
+                    });
+                  }
                 }
               } catch (e) {
                 // Skip invalid JSON chunks
@@ -183,9 +193,15 @@ export const useChatStreaming = (
       return { content: fullMessage };
       
     } catch (error) {
-      // Clear streaming flag on error
+      // ✅ FIX: Always clear streaming state on error
       if (isStreamingRef) {
         isStreamingRef.current = false;
+      }
+      if (dispatch) {
+        dispatch({
+          type: 'SET_STREAMING',
+          payload: { isStreaming: false, message: '' }
+        });
       }
       console.error('Streaming error:', error);
       throw error;

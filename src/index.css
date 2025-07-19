@@ -107,4 +107,87 @@ All colors MUST be HSL.
   p {
     @apply text-muted-foreground leading-relaxed;
   }
+
+  /* ✅ Custom Scrollbar Design - Dark theme with orange accents */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(220, 13%, 9%); /* matches --card background */
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(220, 13%, 20%); /* matches --border */
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(24, 100%, 50%); /* vibrant orange on hover */
+  }
+
+  ::-webkit-scrollbar-thumb:active {
+    background: hsl(24, 100%, 45%); /* slightly darker orange when active */
+  }
+
+  /* Firefox scrollbar styling */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(220, 13%, 20%) hsl(220, 13%, 9%);
+  }
+
+  /* Chat messages container specific styling */
+  .chat-messages-container {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(220, 13%, 20%) transparent;
+    scroll-behavior: smooth;
+  }
+
+  .chat-messages-container::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .chat-messages-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .chat-messages-container::-webkit-scrollbar-thumb {
+    background: hsl(220, 13%, 15%);
+    border-radius: 3px;
+    opacity: 0.7;
+    transition: all 0.2s ease;
+  }
+
+  .chat-messages-container::-webkit-scrollbar-thumb:hover {
+    background: hsl(24, 100%, 50%);
+    opacity: 1;
+  }
+
+  /* Hover effect for the scrollbar area */
+  .chat-messages-container:hover::-webkit-scrollbar-thumb {
+    opacity: 1;
+  }
+
+  /* Sidebar and other UI elements */
+  .sidebar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb {
+    background: hsl(220, 13%, 15%);
+    border-radius: 3px;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb:hover {
+    background: hsl(24, 100%, 50%);
+  }
+
+  /* Form elements and inputs with custom styling */
+  .custom-input {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(220, 13%, 20%) hsl(220, 13%, 15%);
+  }
 }

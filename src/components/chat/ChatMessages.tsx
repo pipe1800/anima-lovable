@@ -99,10 +99,35 @@ const ChatMessages = ({
     return trackedContext;
   }, [messages, trackedContext]);
 
-  // Group messages for better visual organization
+  // Group messages for better visual organization with streaming support
   const messageGroups = React.useMemo(() => {
-    return groupMessages(messages);
-  }, [messages]);
+    const allMessages = [...messages];
+    
+    // ✅ FIX: Better duplicate prevention for streaming messages
+    if (isStreaming && streamingMessage) {
+      const hasMatchingMessage = messages.some(msg => 
+        !msg.isUser && 
+        !msg.id.includes('optimistic') &&
+        (
+          msg.content.trim() === streamingMessage.trim() ||
+          msg.content.includes(streamingMessage.substring(0, 50)) // Partial match for safety
+        )
+      );
+      
+      // Only add streaming message if no matching database message exists
+      if (!hasMatchingMessage) {
+        allMessages.push({
+          id: 'streaming-temp',
+          content: streamingMessage,
+          isUser: false,
+          timestamp: new Date(),
+          status: 'sending'
+        } as Message);
+      }
+    }
+    
+    return groupMessages(allMessages as any);
+  }, [messages, isStreaming, streamingMessage]);
 
   // Consolidated smart auto-scroll effect with better timing
   useEffect(() => {
@@ -171,7 +196,7 @@ const ChatMessages = ({
   return (
     <div 
       ref={messagesContainerRef}
-      className="flex-1 overflow-y-auto p-6 space-y-6 font-['Open_Sans',_sans-serif] relative"
+      className="flex-1 overflow-y-auto p-6 space-y-6 font-['Open_Sans',_sans-serif] relative chat-messages-container"
       style={{
         backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
         backgroundSize: 'cover',

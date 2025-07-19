@@ -46,24 +46,32 @@ export const useChatRealtime = (
           filter: `chat_id=eq.${chatId}`
         },
         (payload) => {
-          // Skip if currently streaming to avoid conflicts
+          // ✅ FIX: Better streaming conflict prevention
           if (isStreamingRef.current) {
             addDebugInfo('Skipping real-time update during streaming');
             return;
           }
           
+          // ✅ FIX: Prevent duplicates by checking message content
+          const isPlaceholder = payload.new.is_placeholder || payload.new.content === '';
+          if (isPlaceholder) {
+            addDebugInfo('Skipping placeholder message update');
+            return;
+          }
+          
           addDebugInfo(`Message received: ${payload.new.is_ai_message ? 'AI' : 'User'}`);
           
-          // Add small delay for AI messages to ensure streaming has completed
-          const invalidateDelay = payload.new.is_ai_message ? 500 : 0;
+          // ✅ FIX: Faster invalidation for smoother transitions
+          const invalidateDelay = payload.new.is_ai_message ? 200 : 50;
           
           setTimeout(() => {
             // Only invalidate for non-temp messages
-            if (!payload.new.content.includes('ai-temp-')) {
+            if (!payload.new.content.includes('ai-temp-') && !payload.new.content.includes('streaming-temp')) {
               queryClient.invalidateQueries({ 
                 queryKey: ['chat', 'messages', chatId],
                 refetchType: 'active'
               });
+              addDebugInfo('Real-time message query invalidated');
             }
           }, invalidateDelay);
         }

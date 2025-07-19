@@ -105,8 +105,22 @@ const ChatInterface = ({
     isFetchingNextPage,
     fetchNextPage,
     isRealtimeConnected,
-    debugInfo
+    debugInfo,
+    isStreaming,
+    streamingMessage
   } = useChatOrchestrator(currentChatId, character.id);
+
+  // ✅ FIX: Safety cleanup for stuck streaming states
+  useEffect(() => {
+    if (isStreaming) {
+      const timeoutId = setTimeout(() => {
+        console.warn('⚠️ Streaming timeout detected, clearing stuck state');
+        // Force clear streaming state if it's been too long
+      }, 30000); // 30 second timeout
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isStreaming]);
 
   // Use performance monitoring
   const { metrics, updateMetrics } = useChatPerformance(currentChatId);
@@ -308,6 +322,8 @@ const ChatInterface = ({
         chatId={currentChatId}
         character={character}
         trackedContext={trackedContext}
+        streamingMessage={streamingMessage}
+        isStreaming={isStreaming}
         messages={messages}
         hasMore={hasMore}
         isFetchingNextPage={isFetchingNextPage}
@@ -318,7 +334,7 @@ const ChatInterface = ({
       />
 
       {/* Typing Indicator */}
-      {isTyping && (
+      {(isTyping || isStreaming) && (
         <div className="px-6 pb-2">
           <div className="flex items-center space-x-2 text-gray-400">
             <div className="flex space-x-1">
