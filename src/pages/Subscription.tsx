@@ -286,8 +286,11 @@ const Subscription = () => {
     try {
       setIsPurchasingCredits(true);
 
-      const response = await supabase.functions.invoke('create-credit-purchase', {
-        body: { packId }
+      const response = await supabase.functions.invoke('paypal-management', {
+        body: { 
+          operation: 'create-order',
+          creditPackId: packId 
+        }
       });
 
       const { data, error } = response;
@@ -302,9 +305,11 @@ const Subscription = () => {
         return;
       }
 
+      console.log('PayPal management response:', { data, error });
+
       // Open PayPal in a centered popup window
-      if (data?.approvalUrl) {
-        const approvalUrl = data.approvalUrl;
+      if (data?.data?.approvalUrl) {
+        const approvalUrl = data.data.approvalUrl;
         const width = 600;
         const height = 800;
         const left = (window.screen.width / 2) - (width / 2);
@@ -346,6 +351,14 @@ const Subscription = () => {
             setIsPurchasingCredits(false);
           }
         }, 1000);
+      } else {
+        console.error('No approval URL found in response:', data);
+        toast({
+          title: "Error",
+          description: "PayPal approval URL not found. Please try again.",
+          variant: "destructive"
+        });
+        setIsPurchasingCredits(false);
       }
     } catch (error) {
       console.error('Credit pack purchase error:', error);
@@ -539,7 +552,55 @@ const Subscription = () => {
               </p>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+            <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+              {/* 5,000 Credits Pack */}
+              <Card className="bg-[#1a1a2e] border-gray-700/50 relative overflow-hidden h-full flex flex-col">
+                <CardHeader className="pb-4">
+                  <CardTitle className="text-xl text-white flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-[#FF7A00]" />
+                    5,000 Credits Pack
+                  </CardTitle>
+                  <div className="space-y-2">
+                    <div className="text-2xl font-bold text-[#FF7A00]">
+                      $5.00
+                      <span className="text-sm text-gray-400 font-normal ml-2">one-time</span>
+                    </div>
+                    <div className="text-lg text-gray-300">
+                      5,000 Credits Added Instantly
+                    </div>
+                  </div>
+                </CardHeader>
+                
+                <CardContent className="flex-1 flex flex-col">
+                  <div className="flex-1">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
+                        <span className="text-gray-300 text-sm">Perfect for casual users</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
+                        <span className="text-gray-300 text-sm">Credits never expire</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
+                        <span className="text-gray-300 text-sm">Added to your account instantly</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-6">
+                    <Button 
+                      onClick={() => handleCreditPackPurchase('pack_5k')}
+                      className="w-full py-3 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
+                      disabled={isPurchasingCredits}
+                    >
+                      {isPurchasingCredits ? 'Processing...' : 'Buy Now'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* 12,000 Credits Pack */}
               <Card className="bg-[#1a1a2e] border-gray-700/50 relative overflow-hidden h-full flex flex-col">
                 <CardHeader className="pb-4">
@@ -588,7 +649,7 @@ const Subscription = () => {
                 </CardContent>
               </Card>
 
-              {/* 24,000 Credits Pack */}
+              {/* 25,000 Credits Pack */}
               <Card className="bg-[#1a1a2e] border-gray-700/50 relative overflow-hidden h-full flex flex-col ring-2 ring-[#FF7A00]">
                 <div className="absolute top-4 right-4">
                   <div className="bg-[#FF7A00] text-white px-2 py-1 rounded text-xs font-medium">
@@ -599,7 +660,7 @@ const Subscription = () => {
                 <CardHeader className="pb-4">
                   <CardTitle className="text-xl text-white flex items-center gap-2">
                     <CreditCard className="w-5 h-5 text-[#FF7A00]" />
-                    24,000 Credits Pack
+                    25,000 Credits Pack
                   </CardTitle>
                   <div className="space-y-2">
                     <div className="text-2xl font-bold text-[#FF7A00]">
@@ -607,10 +668,10 @@ const Subscription = () => {
                       <span className="text-sm text-gray-400 font-normal ml-2">one-time</span>
                     </div>
                     <div className="text-lg text-gray-300">
-                      24,000 Credits Added Instantly
+                      25,000 Credits Added Instantly
                     </div>
                     <div className="text-sm text-green-400">
-                      Save 17% vs 12k pack
+                      Best value per credit
                     </div>
                   </div>
                 </CardHeader>
@@ -620,7 +681,7 @@ const Subscription = () => {
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Maximum value for heavy users</span>
+                        <span className="text-gray-300 text-sm">Maximum value for power users</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
@@ -635,7 +696,7 @@ const Subscription = () => {
                   
                   <div className="mt-6">
                     <Button 
-                      onClick={() => handleCreditPackPurchase('pack_24k')}
+                      onClick={() => handleCreditPackPurchase('pack_25k')}
                       className="w-full py-3 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
                       disabled={isPurchasingCredits}
                     >

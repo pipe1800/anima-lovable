@@ -11,7 +11,37 @@ import type {
 /**
  * Order Operations Handler
  * 
- * Extracted from existing working functions:
+ * Extracted from         // Get the actual credit pack UUID if we used a string identifier
+        let actualCreditPackId = creditPackId;
+        
+        if (!isUUID) {
+          // We need to look up the UUID for the purchase record
+          const { data: fullCreditPack, error: uuidError } = await supabaseAdmin
+            .from('credit_packs')
+            .select('id')
+            .eq('name', creditPack.name)
+            .eq('is_active', true)
+            .single();
+            
+          if (uuidError || !fullCreditPack) {
+            console.error('[CAPTURE-ORDER] Failed to get credit pack UUID:', uuidError);
+            return;
+          }
+          
+          actualCreditPackId = fullCreditPack.id;
+        }
+        
+        // Record the purchase
+        const { error: purchaseError } = await supabaseAdmin
+          .from('credit_pack_purchases')
+          .insert({
+            user_id: user.id,
+            credit_pack_id: actualCreditPackId,
+            amount_paid: parseFloat(creditPack.price.toString()),
+            credits_granted: creditPack.credits_granted,
+            paypal_order_id: orderID,
+            status: 'completed'
+          });rking functions:
  * - create-paypal-order/index.ts (167 lines)
  * - capture-paypal-order/index.ts (196 lines)
  */
@@ -65,15 +95,55 @@ export async function handleCreateOrder(
     // ============================================================================
     // CREDIT PACK LOOKUP
     // ============================================================================
-    const { data: creditPack, error: packError } = await supabase
-      .from('credit_packs')
-      .select('name, price, credits_granted, is_active')
-      .eq('id', creditPackId)
-      .eq('is_active', true)
-      .single();
+    let creditPack;
+    let creditPackError;
+    
+    // Check if creditPackId is a UUID or a string identifier
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(creditPackId);
+    
+    console.log('[CREATE-ORDER] Credit pack ID type check:', { creditPackId, isUUID });
+    
+    if (isUUID) {
+      // Lookup by UUID (new system)
+      console.log('[CREATE-ORDER] Looking up credit pack by UUID');
+      const result = await supabase
+        .from('credit_packs')
+        .select('name, price, credits_granted, is_active')
+        .eq('id', creditPackId)
+        .eq('is_active', true)
+        .single();
+      creditPack = result.data;
+      creditPackError = result.error;
+    } else {
+      // Lookup by name for legacy string identifiers
+      const packNameMap = {
+        'pack_5k': 'Starter Pack',     // 5,000 credits for $5.00
+        'pack_12k': 'Boost Pack',      // 12,000 credits for $10.00
+        'pack_25k': 'Power Pack'       // 25,000 credits for $20.00
+      };
+      
+      const packName = packNameMap[creditPackId];
+      console.log('[CREATE-ORDER] Looking up credit pack by name:', { creditPackId, packName });
+      
+      if (packName) {
+        const result = await supabase
+          .from('credit_packs')
+          .select('name, price, credits_granted, is_active')
+          .eq('name', packName)
+          .eq('is_active', true)
+          .single();
+        creditPack = result.data;
+        creditPackError = result.error;
+        console.log('[CREATE-ORDER] Credit pack lookup result:', { creditPack, creditPackError });
+      } else {
+        creditPackError = { message: `Unknown credit pack identifier: ${creditPackId}` };
+        console.log('[CREATE-ORDER] Unknown credit pack identifier:', creditPackId);
+      }
+    }
 
-    if (packError || !creditPack) {
-      throw new Error('Credit pack not found');
+    if (creditPackError || !creditPack) {
+      console.error('[CREATE-ORDER] Credit pack lookup failed:', { creditPackError, creditPack });
+      throw new Error(`Credit pack not found for identifier: ${creditPackId}`);
     }
 
     console.log('[CREATE-ORDER] Credit pack found:', {
@@ -101,10 +171,21 @@ export async function handleCreateOrder(
           },
           description: `${creditPack.name} - ${creditPack.credits_granted} credits`
         }
-      ]
+      ],
+      application_context: {
+        return_url: `${req.headers.get("origin")}/credit-purchase-verification?pack_id=${creditPackId}`,
+        cancel_url: `${req.headers.get("origin")}/subscription`,
+        brand_name: 'Anima',
+        locale: 'en-US',
+        landing_page: 'LOGIN',
+        shipping_preference: 'NO_SHIPPING',
+        user_action: 'PAY_NOW'
+      }
     };
 
-    const response = await fetch('https://api-m.paypal.com/v2/checkout/orders', {
+    console.log('[CREATE-ORDER] Creating PayPal order with data:', JSON.stringify(orderData, null, 2));
+
+    const response = await fetch('https://api-m.sandbox.paypal.com/v2/checkout/orders', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -113,14 +194,27 @@ export async function handleCreateOrder(
       body: JSON.stringify(orderData)
     });
 
+    console.log('[CREATE-ORDER] PayPal API response:', { 
+      status: response.status, 
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[CREATE-ORDER] PayPal order creation failed:', errorText);
       throw new Error(`Failed to create PayPal order: ${response.status} - ${errorText}`);
     }
 
     const paypalOrder = await response.json();
     
     console.log('[CREATE-ORDER] PayPal order created successfully:', paypalOrder.id);
+
+    // Find the approval link
+    const approvalLink = paypalOrder.links?.find((link: any) => link.rel === 'approve')?.href;
+    if (!approvalLink) {
+      throw new Error("No approval link found in PayPal response");
+    }
 
     // ============================================================================
     // SUCCESS RESPONSE
@@ -129,6 +223,7 @@ export async function handleCreateOrder(
       success: true,
       data: {
         orderID: paypalOrder.id,
+        approvalUrl: approvalLink,
         amount: creditPack.price,
         description: creditPack.name
       }
@@ -169,15 +264,62 @@ export async function handleCaptureOrder(
     // ============================================================================
     // CREDIT PACK LOOKUP
     // ============================================================================
-    const { data: creditPack, error: packError } = await supabase
-      .from('credit_packs')
-      .select('name, price, credits_granted, is_active')
-      .eq('id', creditPackId)
-      .eq('is_active', true)
-      .single();
+    let creditPack;
+    let creditPackError;
+    
+    // Check if creditPackId is a UUID or a string identifier
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(creditPackId);
+    
+    console.log('[CAPTURE-ORDER] Credit pack ID type check:', { creditPackId, isUUID });
+    
+    if (isUUID) {
+      // Lookup by UUID (new system)
+      console.log('[CAPTURE-ORDER] Looking up credit pack by UUID');
+      const result = await supabase
+        .from('credit_packs')
+        .select('name, price, credits_granted, is_active')
+        .eq('id', creditPackId)
+        .eq('is_active', true)
+        .single();
+      creditPack = result.data;
+      creditPackError = result.error;
+    } else {
+      // Lookup by name for legacy string identifiers
+      const packNameMap = {
+        'pack_5k': 'Starter Pack',     // 5,000 credits for $5.00
+        'pack_12k': 'Boost Pack',      // 12,000 credits for $10.00
+        'pack_25k': 'Power Pack'       // 25,000 credits for $20.00
+      };
+      
+      const packName = packNameMap[creditPackId];
+      console.log('[CAPTURE-ORDER] Looking up credit pack by name:', { creditPackId, packName });
+      
+      if (packName) {
+        // First, let's see what credit packs exist
+        const { data: allPacks, error: allPacksError } = await supabase
+          .from('credit_packs')
+          .select('id, name, price, credits_granted, is_active');
+        
+        console.log('[CAPTURE-ORDER] All credit packs in database:', { allPacks, allPacksError });
+        
+        const result = await supabase
+          .from('credit_packs')
+          .select('name, price, credits_granted, is_active')
+          .eq('name', packName)
+          .eq('is_active', true)
+          .single();
+        creditPack = result.data;
+        creditPackError = result.error;
+        console.log('[CAPTURE-ORDER] Credit pack lookup result:', { creditPack, creditPackError });
+      } else {
+        creditPackError = { message: `Unknown credit pack identifier: ${creditPackId}` };
+        console.log('[CAPTURE-ORDER] Unknown credit pack identifier:', creditPackId);
+      }
+    }
 
-    if (packError || !creditPack) {
-      throw new Error('Credit pack not found');
+    if (creditPackError || !creditPack) {
+      console.error('[CAPTURE-ORDER] Credit pack lookup failed:', { creditPackError, creditPack });
+      throw new Error(`Credit pack not found for identifier: ${creditPackId}`);
     }
 
     console.log('[CAPTURE-ORDER] Credit pack verified:', {
@@ -195,7 +337,7 @@ export async function handleCaptureOrder(
     // ============================================================================
     // CAPTURE PAYPAL ORDER
     // ============================================================================
-    const response = await fetch(`https://api-m.paypal.com/v2/checkout/orders/${orderID}/capture`, {
+    const response = await fetch(`https://api-m.sandbox.paypal.com/v2/checkout/orders/${orderID}/capture`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -233,12 +375,32 @@ export async function handleCaptureOrder(
     // ============================================================================
     const backgroundTask = async () => {
       try {
+        // Get the actual credit pack UUID if we used a string identifier
+        let actualCreditPackId = creditPackId;
+        
+        if (!isUUID) {
+          // We need to look up the UUID for the purchase record
+          const { data: fullCreditPack, error: uuidError } = await supabaseAdmin
+            .from('credit_packs')
+            .select('id')
+            .eq('name', creditPack.name)
+            .eq('is_active', true)
+            .single();
+            
+          if (uuidError || !fullCreditPack) {
+            console.error('[CAPTURE-ORDER] Failed to get credit pack UUID:', uuidError);
+            return;
+          }
+          
+          actualCreditPackId = fullCreditPack.id;
+        }
+        
         // Record the purchase
         const { error: purchaseError } = await supabaseAdmin
           .from('credit_pack_purchases')
           .insert({
             user_id: user.id,
-            credit_pack_id: creditPackId,
+            credit_pack_id: actualCreditPackId,
             amount_paid: parseFloat(creditPack.price.toString()),
             credits_granted: creditPack.credits_granted,
             paypal_order_id: orderID,

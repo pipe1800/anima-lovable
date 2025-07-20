@@ -54,18 +54,25 @@ const CreditPurchaseVerification = () => {
       }
 
       try {
-        console.log('Calling finalize-credit-purchase with:', { orderId: token });
+        console.log('Calling paypal-management with capture-order operation:', { orderId: token, packId });
         
-        const { data, error } = await supabase.functions.invoke('finalize-credit-purchase', {
+        // We need to get the credit pack ID from the pack_id parameter
+        if (!packId) {
+          throw new Error('Missing credit pack ID parameter');
+        }
+        
+        const { data, error } = await supabase.functions.invoke('paypal-management', {
           body: { 
-            orderId: token
+            operation: 'capture-order',
+            orderID: token,
+            creditPackId: packId
           }
         });
 
-        console.log('Finalization response:', { data, error });
+        console.log('Capture response:', { data, error });
 
         if (error) {
-          console.error('Finalization error:', error);
+          console.error('Capture error:', error);
           setStatus('error');
           setMessage(`Purchase finalization failed: ${error.message || 'Unknown error'}`);
           toast({
@@ -79,14 +86,14 @@ const CreditPurchaseVerification = () => {
         if (data?.success) {
           setStatus('success');
           setPurchaseDetails({
-            creditPack: data.creditPack,
-            creditsAdded: data.creditsAdded,
-            amountPaid: data.amountPaid
+            creditPack: data.data?.creditPack,
+            creditsAdded: data.data?.creditsGranted,
+            amountPaid: data.data?.amountPaid
           });
-          setMessage(`Success! ${data.creditsAdded?.toLocaleString()} credits have been added to your account.`);
+          setMessage(`Success! ${data.data?.creditsGranted?.toLocaleString()} credits have been added to your account.`);
           toast({
             title: "Credits Purchased!",
-            description: `${data.creditsAdded?.toLocaleString()} credits have been added to your account.`,
+            description: `${data.data?.creditsGranted?.toLocaleString()} credits have been added to your account.`,
           });
           
           // Send success message to parent window and close popup

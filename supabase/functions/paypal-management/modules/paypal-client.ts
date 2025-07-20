@@ -10,9 +10,18 @@ export async function getPayPalAccessToken(): Promise<string> {
   const clientId = Deno.env.get('PAYPAL_CLIENT_ID');
   const clientSecret = Deno.env.get('PAYPAL_CLIENT_SECRET');
   
+  console.log('[PAYPAL-CLIENT] Checking credentials:', { 
+    clientIdExists: !!clientId, 
+    clientSecretExists: !!clientSecret,
+    clientIdLength: clientId?.length || 0,
+    clientSecretLength: clientSecret?.length || 0
+  });
+  
   if (!clientId || !clientSecret) {
     throw new Error('PayPal credentials not configured');
   }
+
+  console.log('[PAYPAL-CLIENT] Making token request to:', `${PAYPAL_BASE_URL}/v1/oauth2/token`);
 
   const response = await fetch(`${PAYPAL_BASE_URL}/v1/oauth2/token`, {
     method: 'POST',
@@ -23,13 +32,25 @@ export async function getPayPalAccessToken(): Promise<string> {
     body: 'grant_type=client_credentials'
   });
 
+  console.log('[PAYPAL-CLIENT] Token request response:', { 
+    status: response.status, 
+    statusText: response.statusText,
+    headers: Object.fromEntries(response.headers.entries())
+  });
+
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('PayPal token request failed:', errorText);
-    throw new Error('Failed to get PayPal access token');
+    console.error('[PAYPAL-CLIENT] Token request failed:', errorText);
+    throw new Error(`Failed to get PayPal access token: ${response.status} - ${errorText}`);
   }
 
   const tokenData: PayPalAccessToken = await response.json();
+  console.log('[PAYPAL-CLIENT] Token obtained successfully:', { 
+    tokenType: tokenData.token_type,
+    expiresIn: tokenData.expires_in,
+    tokenLength: tokenData.access_token?.length || 0
+  });
+  
   return tokenData.access_token;
 }
 

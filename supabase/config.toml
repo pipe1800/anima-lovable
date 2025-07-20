@@ -1,49 +1,31 @@
 project_id = "rclpyipeytqbamiwcuih"
 
-[functions.finalize-and-resubscribe]
-verify_jwt = false
-
-[functions.cancel-paypal-subscription]
-verify_jwt = true
-
 [functions.create-chat-with-greeting]
 verify_jwt = true
 
-[functions.chat]
+[functions.create-basic-chat]
 verify_jwt = true
 
-[functions.chat-stream]
+[functions.paypal-management]
 verify_jwt = true
 
 [functions.create-credit-purchase]
 verify_jwt = true
 
-[functions.create-paypal-subscription]
+[functions.chat-management]
 verify_jwt = true
 
 [functions.finalize-credit-purchase]
 verify_jwt = true
 
-[functions.verify-paypal-subscription]
+[functions.cleanup-contaminated-messages]
 verify_jwt = true
 
-[functions.upgrade-subscription]
+[functions.chat-stream]
 verify_jwt = true
 
-[functions.verify-upgrade-payment]
+[functions.extract-chat-context]
 verify_jwt = true
 
-[functions.complete-subscription-upgrade]
-verify_jwt = true
-
-[functions.handle-upgrade]
-verify_jwt = true
-
-[functions.initiate-upgrade]
-verify_jwt = true
-
-[functions.paypal-webhook]
-verify_jwt = false
-
-[functions.test-openrouter]
+[functions.monthly-credit-reset]
 verify_jwt = false
