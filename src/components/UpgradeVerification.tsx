@@ -30,18 +30,17 @@ export const UpgradeVerification = () => {
         return;
       }
 
-      // Call the handle-upgrade function in the background without waiting
-      supabase.functions.invoke('handle-upgrade', {
+      // Use paypal-management to verify the subscription in the background
+      supabase.functions.invoke('paypal-management', {
         body: { 
-          orderId: token,
-          subscriptionId,
-          targetPlanId
+          operation: 'verify-subscription',
+          subscriptionId: subscriptionId
         }
       }).then(({ data, error }) => {
         // Log the result but don't change the UI based on it
-        console.log('Background handle-upgrade result:', { data, error });
+        console.log('Background verification result:', { data, error });
       }).catch((error) => {
-        console.error('Background handle-upgrade error:', error);
+        console.error('Background verification error:', error);
       });
 
       // Immediately show success message

@@ -181,7 +181,7 @@ export const useUserSubscription = () => {
         .from('subscriptions')
         .select(`
           *,
-          plans(*)
+          plan:plans(*)
         `)
         .eq('user_id', user.id)
         .eq('status', 'active')

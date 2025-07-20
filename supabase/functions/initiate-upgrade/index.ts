@@ -18,6 +18,9 @@ serve(async (req)=>{
   }
   try {
     logStep("Function started");
+    
+    // Get origin from request for dynamic URL construction
+    const origin = req.headers.get("origin") || "https://rclpyipeytqbamiwcuih.supabase.co";
     // Initialize Supabase client for authentication
     const supabaseClient = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "");
     // Authenticate the user
@@ -52,9 +55,8 @@ serve(async (req)=>{
     const accessToken = tokenData.access_token;
     logStep("PayPal access token obtained");
     // Create new PayPal subscription with user ID in custom_id
-    const siteUrl = Deno.env.get("SITE_URL");
-    const returnUrl = new URL('/upgrade-verification', siteUrl);
-    const cancelUrl = new URL('/settings?tab=billing', siteUrl);
+    const returnUrl = new URL('/upgrade-verification', origin);
+    const cancelUrl = new URL('/settings?tab=billing', origin);
     const createSubResponse = await fetch(`${paypalBaseUrl}/v1/billing/subscriptions`, {
       method: 'POST',
       headers: {

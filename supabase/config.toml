@@ -1,5 +1,8 @@
 project_id = "rclpyipeytqbamiwcuih"
 
+[functions.finalize-and-resubscribe]
+verify_jwt = false
+
 [functions.cancel-paypal-subscription]
 verify_jwt = true
 

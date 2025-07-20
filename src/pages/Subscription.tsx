@@ -110,34 +110,64 @@ const Subscription = () => {
   }, [user, toast]);
 
   const handleSubscriptionAction = (targetPlan: Plan) => {
+    console.log('🎯 handleSubscriptionAction called with plan:', targetPlan);
+    console.log('👤 User subscription:', userSubscription);
+    
     // Check if this is an upgrade case that needs confirmation
     if (userSubscription && userSubscription.plan.name === 'True Fan' && targetPlan.name === 'The Whale') {
+      console.log('🔄 Showing upgrade confirmation for True Fan → The Whale');
       // Show confirmation dialog for True Fan → The Whale upgrade
       setPlanToUpgradeTo(targetPlan);
       setShowUpgradeConfirmation(true);
     } else {
+      console.log('📝 Proceeding directly with subscription action');
       // For other cases (new subscriptions from guest users), proceed directly
       processSubscriptionAction(targetPlan);
     }
   };
 
   const processSubscriptionAction = async (targetPlan: Plan) => {
+    console.log('🚀 processSubscriptionAction started with plan:', targetPlan);
+    
     try {
       setIsUpgrading(true);
       setShowUpgradeConfirmation(false);
 
       let response;
+      console.log('🔍 Checking subscription conditions...');
+      console.log('  - userSubscription:', userSubscription);
+      console.log('  - targetPlan:', targetPlan);
       
       // Check if user has an active subscription and if it's the specific upgrade case
       if (userSubscription && userSubscription.plan.name === 'True Fan' && targetPlan.name === 'The Whale') {
-        // True Fan upgrading to The Whale - use initiate-upgrade like in BillingSettings
-        response = await supabase.functions.invoke('initiate-upgrade');
+        console.log('📈 True Fan upgrading to The Whale - using upgrade subscription flow');
+        
+        if (!userSubscription.paypal_subscription_id) {
+          throw new Error('No PayPal subscription ID found for existing subscription');
+        }
+        
+        // True Fan upgrading to The Whale - use upgrade subscription flow
+        response = await supabase.functions.invoke('paypal-management', {
+          body: {
+            operation: 'create-subscription',
+            planId: targetPlan.id, // We'll map this to the upgrade PayPal plan in the backend
+            upgradeFromSubscriptionId: userSubscription.paypal_subscription_id // Pass the current subscription to upgrade from
+          }
+        });
       } else if (!userSubscription || userSubscription.plan.name === 'Guest Pass') {
-        // Guest user or Guest Pass user - create new subscription
-        response = await supabase.functions.invoke('create-paypal-subscription', {
-          body: { planId: targetPlan.id }
+        console.log('👋 Guest user or Guest Pass - creating new subscription');
+        console.log('   - Calling paypal-management with operation: create-subscription');
+        console.log('   - planId:', targetPlan.id);
+        
+        // Guest user or Guest Pass user - create new subscription using consolidated function
+        response = await supabase.functions.invoke('paypal-management', {
+          body: { 
+            operation: 'create-subscription',
+            planId: targetPlan.id 
+          }
         });
       } else {
+        console.log('❌ Invalid subscription action');
         // Invalid action
         toast({
           title: "Error",
@@ -147,10 +177,11 @@ const Subscription = () => {
         return;
       }
 
+      console.log('📥 Function response received:', response);
       const { data, error } = response;
 
       if (error) {
-        console.error('Subscription action error:', error);
+        console.error('❌ Subscription action error:', error);
         toast({
           title: "Error",
           description: "Failed to process subscription action",
@@ -159,9 +190,35 @@ const Subscription = () => {
         return;
       }
 
-      // Open PayPal in a centered popup window
-      if (data?.approvalUrl || (data?.success && data?.approvalUrl)) {
-        const approvalUrl = data.approvalUrl;
+      console.log('✅ Response data:', data);
+
+      // Handle both old and new response formats
+      let approvalUrl = null;
+      
+      // New consolidated function format: {success: true, data: {approve_url: ...}}
+      if (data?.success && data?.data?.approve_url) {
+        approvalUrl = data.data.approve_url;
+        console.log('🔗 Found approval URL in new format:', approvalUrl);
+      }
+      // Legacy format: {success: true, data: {approvalUrl: ...}}
+      else if (data?.success && data?.data?.approvalUrl) {
+        approvalUrl = data.data.approvalUrl;
+        console.log('🔗 Found approval URL in legacy format:', approvalUrl);
+      }
+      // Old format: {approvalUrl: ...}
+      else if (data?.approvalUrl) {
+        approvalUrl = data.approvalUrl;
+        console.log('🔗 Found approval URL in old format:', approvalUrl);
+      }
+      // Handle direct response data
+      else if (data?.data && !data?.success && data.data.approvalUrl) {
+        approvalUrl = data.data.approvalUrl;
+        console.log('🔗 Found approval URL in direct data format:', approvalUrl);
+      }
+      
+      if (approvalUrl) {
+        console.log('🔗 Opening PayPal popup with URL:', approvalUrl);
+        
         const width = 600;
         const height = 800;
         const left = (window.screen.width / 2) - (width / 2);
@@ -200,6 +257,19 @@ const Subscription = () => {
             window.location.reload();
           }
         }, 1000);
+      } else {
+        console.log('❌ No approval URL found in response');
+        console.log('   - data?.success:', data?.success);
+        console.log('   - data?.data?.approve_url:', data?.data?.approve_url);
+        console.log('   - data?.data?.approvalUrl:', data?.data?.approvalUrl);
+        console.log('   - Full data structure:', JSON.stringify(data, null, 2));
+        
+        toast({
+          title: "Error",
+          description: "No PayPal approval URL received. Please try again.",
+          variant: "destructive"
+        });
+        setIsUpgrading(false);
       }
     } catch (error) {
       console.error('Subscription action error:', error);
@@ -592,19 +662,19 @@ const Subscription = () => {
             <AlertDialogHeader>
               <AlertDialogTitle className="text-white">Confirm Your Plan Upgrade</AlertDialogTitle>
               <AlertDialogDescription className="text-gray-300">
-                <div className="space-y-3">
-                  <p>You are upgrading from <strong>True Fan</strong> to <strong>The Whale</strong> plan.</p>
-                  <div className="bg-gray-800/50 rounded-lg p-4 space-y-2">
-                    <p>• <strong>One-time charge:</strong> $10.00 (charged now)</p>
-                    <p>• <strong>Credits bonus:</strong> 17,000 credits added immediately</p>
-                    <p>• <strong>Next billing:</strong> $24.95/month starting next cycle</p>
-                  </div>
-                  <p className="text-sm text-gray-400">
-                    Your subscription will continue with the new plan benefits and pricing.
-                  </p>
-                </div>
+                You are upgrading from <strong>True Fan</strong> to <strong>The Whale</strong> plan.
               </AlertDialogDescription>
             </AlertDialogHeader>
+            <div className="space-y-3 mb-4">
+              <div className="bg-gray-800/50 rounded-lg p-4 space-y-2">
+                <div>• <strong>One-time charge:</strong> $10.00 (charged now)</div>
+                <div>• <strong>Credits bonus:</strong> 17,000 credits added immediately</div>
+                <div>• <strong>Next billing:</strong> $24.95/month starting next cycle</div>
+              </div>
+              <div className="text-sm text-gray-400">
+                Your subscription will continue with the new plan benefits and pricing.
+              </div>
+            </div>
             <AlertDialogFooter>
               <AlertDialogCancel className="border-gray-600 text-white hover:bg-gray-800">
                 Cancel

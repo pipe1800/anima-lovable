@@ -163,31 +163,12 @@ const App = () => (
               </AuthenticatedLayout>
             </OnboardingGuard>
           } />
-          <Route path="/paypal-verification" element={
-            <OnboardingGuard requireOnboardingComplete={true}>
-              <AuthenticatedLayout>
-                <PayPalVerification />
-              </AuthenticatedLayout>
-            </OnboardingGuard>
-          } />
-          <Route path="/upgrade-verification" element={
-            <OnboardingGuard requireOnboardingComplete={true}>
-              <AuthenticatedLayout>
-                <UpgradeVerification />
-              </AuthenticatedLayout>
-            </OnboardingGuard>
-          } />
+          <Route path="/paypal-verification" element={<PayPalVerification />} />
+          <Route path="/upgrade-verification" element={<UpgradeVerification />} />
           <Route path="/credit-purchase-verification" element={
             <OnboardingGuard requireOnboardingComplete={true}>
               <AuthenticatedLayout>
                 <CreditPurchaseVerification />
-              </AuthenticatedLayout>
-            </OnboardingGuard>
-          } />
-          <Route path="/finalize-upgrade" element={
-            <OnboardingGuard requireOnboardingComplete={true}>
-              <AuthenticatedLayout>
-                <UpgradeVerification />
               </AuthenticatedLayout>
             </OnboardingGuard>
           } />

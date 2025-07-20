@@ -168,31 +168,6 @@ export const useChatOrchestrator = (chatId: string | null, characterId: string) 
     }
   }, [currentContext, state.trackedContext]);
   
-  // ✅ FIX: Enhanced auto-clear streaming state when database message appears
-  useEffect(() => {
-    if (state.isStreaming && state.streamingMessage) {
-      // More precise matching to ensure we only clear when the exact message appears
-      const hasMatchingDbMessage = allMessages.some(msg => 
-        !msg.isUser && 
-        !msg.id.includes('streaming-temp') &&
-        !msg.id.includes('optimistic') &&
-        msg.content.trim() === state.streamingMessage.trim() &&
-        msg.status !== 'sending' // Ensure it's a real database message
-      );
-      
-      if (hasMatchingDbMessage) {
-        console.log('🔄 Exact database message found, clearing streaming state immediately');
-        // Use a small delay to ensure smooth transition
-        setTimeout(() => {
-          dispatch({
-            type: 'SET_STREAMING',
-            payload: { isStreaming: false, message: '' }
-          });
-        }, 100); // Very short delay for smooth transition
-      }
-    }
-  }, [allMessages, state.isStreaming, state.streamingMessage, dispatch]);
-  
   // Clean up optimistic user messages when database versions appear
   useEffect(() => {
     const dbMessages = messagesQuery.data?.pages?.flatMap(page => page.messages) || [];

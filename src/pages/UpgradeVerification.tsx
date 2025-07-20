@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 const useQuery = () => {
   return new URLSearchParams(useLocation().search);
@@ -12,48 +13,90 @@ const useQuery = () => {
 const UpgradeVerification = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useAuth();
   const query = useQuery();
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'auth-required'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
+  const [hasProcessed, setHasProcessed] = useState(false); // Use a simple flag instead of isProcessing
 
   useEffect(() => {
-    const processUpgrade = () => {
-      // The subscription_id is now in the URL from PayPal's redirect
-      const paypalSubscriptionId = query.get('subscription_id');
+    // Wait for user authentication to be determined
+    if (user === undefined) {
+      // Still loading authentication
+      return;
+    }
+    
+    if (!user) {
+      setStatus('auth-required');
+      setErrorMessage('Please sign in to complete your upgrade verification.');
+      return;
+    }
 
-      if (!paypalSubscriptionId) {
-        setErrorMessage("No subscription ID found in URL. Cannot verify upgrade.");
-        setStatus('error');
-        return;
-      }
+    // Prevent multiple executions with a simple flag
+    if (hasProcessed) {
+      console.log('[UPGRADE-VERIFICATION] Already processed, skipping...');
+      return;
+    }
 
-      // Call the finalize-and-resubscribe function in the background without waiting
-      supabase.functions.invoke('finalize-and-resubscribe', {
-        body: { subscription_id: paypalSubscriptionId },
-      }).then(({ data, error }) => {
-        // Log the result but don't change the UI based on it
-        console.log('Background finalize-and-resubscribe result:', { data, error });
-      }).catch((error) => {
-        console.error('Background finalize-and-resubscribe error:', error);
-      });
-
-      // Immediately show success message
-      setStatus('success');
+    const processUpgrade = async () => {
+      setHasProcessed(true); // Set flag immediately to prevent re-runs
       
-      // Send success message to parent window and close popup
-      setTimeout(() => {
-        if (window.opener) {
-          window.opener.postMessage({ paypal_status: 'success' }, '*');
-          window.close();
-        } else {
-          // Fallback if not in popup
-          navigate('/settings?tab=billing');
+      try {
+        // The subscription_id is now in the URL from PayPal's redirect
+        const paypalSubscriptionId = query.get('subscription_id');
+
+        if (!paypalSubscriptionId) {
+          setErrorMessage("No subscription ID found in URL. Cannot verify upgrade.");
+          setStatus('error');
+          return;
         }
-      }, 7000);
+
+        console.log('[UPGRADE-VERIFICATION] Starting upgrade verification with subscription ID:', paypalSubscriptionId);
+
+        // Use paypal-management to verify the subscription
+        const { data, error } = await supabase.functions.invoke('paypal-management', {
+          body: { 
+            operation: 'verify-subscription',
+            subscriptionId: paypalSubscriptionId
+          }
+        });
+
+        console.log('[UPGRADE-VERIFICATION] Verification response:', { data, error });
+
+        if (error) {
+          console.error('[UPGRADE-VERIFICATION] Verification error:', error);
+          setStatus('error');
+          setErrorMessage(`Upgrade verification failed: ${error.message || 'Unknown error'}`);
+          return;
+        }
+
+        if (data?.success && data?.data?.verified) {
+          setStatus('success');
+          console.log('[UPGRADE-VERIFICATION] Upgrade verification successful');
+          
+          // Send success message to parent window and close popup
+          setTimeout(() => {
+            if (window.opener) {
+              window.opener.postMessage({ paypal_status: 'success' }, '*');
+              window.close();
+            } else {
+              // Fallback if not in popup
+              navigate('/settings?tab=billing');
+            }
+          }, 3000);
+        } else {
+          setStatus('error');
+          setErrorMessage('Upgrade verification failed. Please contact support.');
+        }
+      } catch (error) {
+        console.error('[UPGRADE-VERIFICATION] Verification error:', error);
+        setStatus('error');
+        setErrorMessage('An error occurred during upgrade verification. Please contact support.');
+      }
     };
 
     processUpgrade();
-  }, [query, navigate]);
+  }, [user]); // Only depend on user, not navigate or query which can change
 
   const renderContent = () => {
     switch (status) {
@@ -61,7 +104,7 @@ const UpgradeVerification = () => {
         return (
           <div className="text-center">
             <Loader2 className="w-12 h-12 mx-auto animate-spin text-[#FF7A00]" />
-            <p className="mt-4 text-white">Finalizing your upgrade...</p>
+            <p className="mt-4 text-white">Verifying your upgrade...</p>
             <p className="text-gray-400">Please do not close this window.</p>
           </div>
         );
@@ -69,8 +112,8 @@ const UpgradeVerification = () => {
         return (
           <div className="text-center">
             <CheckCircle className="w-12 h-12 mx-auto text-green-500" />
-            <p className="mt-4 text-white text-xl font-bold">Success!</p>
-            <p className="text-gray-300">Your upgrade is processing. Your plan will be updated in a few moments.</p>
+            <p className="mt-4 text-white text-xl font-bold">Upgrade Confirmed!</p>
+            <p className="text-gray-300">Your subscription has been successfully upgraded to The Whale plan.</p>
             <p className="text-sm text-gray-400 mt-4">Success! Closing window...</p>
           </div>
         );
@@ -86,6 +129,20 @@ const UpgradeVerification = () => {
               variant="outline"
             >
               Back to Billing
+            </Button>
+          </div>
+        );
+      case 'auth-required':
+        return (
+          <div className="text-center">
+            <XCircle className="w-12 h-12 mx-auto text-red-500" />
+            <p className="mt-4 text-white text-xl font-bold">Authentication Required</p>
+            <p className="text-gray-300 bg-gray-800/50 p-2 rounded-md my-2">{errorMessage}</p>
+            <Button
+              onClick={() => navigate('/auth')}
+              className="mt-6 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
+            >
+              Sign In to Complete Upgrade
             </Button>
           </div>
         );

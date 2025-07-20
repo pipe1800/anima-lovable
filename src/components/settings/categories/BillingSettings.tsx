@@ -23,7 +23,7 @@ interface UserSubscription {
   id: string;
   status: string;
   current_period_end: string;
-  paypal_subscription_id: string;
+  paypal_subscription_id: string | null;
   plan: Plan;
 }
 
@@ -56,56 +56,91 @@ export const BillingSettings = () => {
     setIsChangingPlan(true);
     setShowUpgradeConfirmation(false);
     try {
-      // Call the new initiate-upgrade function that creates the PayPal subscription
-      const { data, error } = await supabase.functions.invoke('initiate-upgrade');
+      // Find The Whale plan ID
+      const whalePlan = availablePlans.find(plan => plan.name === 'The Whale');
+      if (!whalePlan) {
+        throw new Error('The Whale plan not found');
+      }
+
+      if (!userSubscription?.paypal_subscription_id) {
+        throw new Error('No PayPal subscription ID found');
+      }
+
+      console.log('🚀 Starting upgrade process:', {
+        whalePlanId: whalePlan.id,
+        whalePlanName: whalePlan.name,
+        currentSubscriptionId: userSubscription.paypal_subscription_id,
+        currentPlanName: userSubscription.plan.name
+      });
+
+      // Create upgrade subscription using the special upgrade plan
+      const { data, error } = await supabase.functions.invoke('paypal-management', {
+        body: {
+          operation: 'create-subscription',
+          planId: whalePlan.id, // We'll map this to the upgrade PayPal plan in the backend
+          upgradeFromSubscriptionId: userSubscription.paypal_subscription_id // Pass the current subscription to upgrade from
+        }
+      });
 
       if (error) {
         throw new Error(error.message);
       }
 
-      if (data?.success && data?.approvalUrl) {
-        // Open PayPal in a centered popup window
-        const approvalUrl = data.approvalUrl;
-        const width = 600;
-        const height = 800;
-        const left = (window.screen.width / 2) - (width / 2);
-        const top = (window.screen.height / 2) - (height / 2);
-        
-        setShowPaymentModal(true);
-        
-        const popup = window.open(
-          approvalUrl,
-          'paypal-payment',
-          `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-        );
-        
-        // Set up message listener for popup communication
-        const handleMessage = (event: MessageEvent) => {
-          if (event.data?.paypal_status === 'success') {
-            // Payment successful, clean up and redirect
-            window.removeEventListener('message', handleMessage);
-            setShowPaymentModal(false);
-            setIsChangingPlan(false);
-            // Redirect to billing settings
-            window.location.href = '/settings?tab=billing';
-          }
-        };
-        
-        window.addEventListener('message', handleMessage);
-        
-        // Monitor popup closure as fallback
-        const checkClosed = setInterval(() => {
-          if (popup?.closed) {
-            clearInterval(checkClosed);
-            window.removeEventListener('message', handleMessage);
-            setShowPaymentModal(false);
-            setIsChangingPlan(false);
-            // Refresh subscription data to update status
-            refetchSubscription();
-          }
-        }, 1000);
+      if (data?.success) {
+        if (data.data?.requires_approval && data.data?.approve_url) {
+          // PayPal requires approval - open approval URL
+          const approvalUrl = data.data.approve_url;
+          const width = 600;
+          const height = 800;
+          const left = (window.screen.width / 2) - (width / 2);
+          const top = (window.screen.height / 2) - (height / 2);
+          
+          setShowPaymentModal(true);
+          
+          const popup = window.open(
+            approvalUrl,
+            'paypal-approval',
+            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+          );
+          
+          // Set up message listener for popup communication
+          const handleMessage = (event: MessageEvent) => {
+            if (event.data?.paypal_status === 'success') {
+              // Payment successful, clean up and redirect
+              window.removeEventListener('message', handleMessage);
+              setShowPaymentModal(false);
+              setIsChangingPlan(false);
+              // Refresh subscription data
+              refetchSubscription();
+              toast({
+                title: "Upgrade Successful!",
+                description: "Your plan has been upgraded to The Whale.",
+              });
+            }
+          };
+          
+          window.addEventListener('message', handleMessage);
+          
+          // Check if popup was closed without completion
+          const checkClosed = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(checkClosed);
+              window.removeEventListener('message', handleMessage);
+              setShowPaymentModal(false);
+              setIsChangingPlan(false);
+            }
+          }, 1000);
+        } else {
+          // Upgrade completed immediately without approval needed
+          setIsChangingPlan(false);
+          await refetchSubscription();
+          toast({
+            title: "Upgrade Successful!",
+            description: "Your plan has been upgraded to The Whale.",
+          });
+        }
       } else {
-        throw new Error(data?.error || "Could not get PayPal approval URL.");
+        throw new Error('Upgrade failed');
       }
     } catch (error) {
       console.error('Upgrade error:', error);
@@ -122,7 +157,11 @@ export const BillingSettings = () => {
   const handleCancelSubscription = async () => {
     setIsCancelling(true);
     try {
-      const { data, error } = await supabase.functions.invoke('cancel-paypal-subscription');
+      const { data, error } = await supabase.functions.invoke('paypal-management', {
+        body: {
+          operation: 'cancel-subscription'
+        }
+      });
 
       if (error) {
         throw new Error(error.message);
@@ -131,7 +170,7 @@ export const BillingSettings = () => {
       if (data?.success) {
         toast({
           title: "Subscription Cancelled",
-          description: "Your subscription has been cancelled successfully.",
+          description: "Your subscription has been cancelled and you've been automatically moved to the Guest Pass plan.",
         });
         // Refresh the subscription data
         await refetchSubscription();
@@ -197,15 +236,15 @@ export const BillingSettings = () => {
             <div className="bg-gray-800/50 rounded-lg p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  {userSubscription.plans.name === 'The Whale' ? (
+                  {userSubscription.plan.name === 'The Whale' ? (
                     <Crown className="w-6 h-6 text-[#FF7A00]" />
                   ) : (
                     <Zap className="w-6 h-6 text-[#FF7A00]" />
                   )}
                   <div>
-                    <h4 className="text-white font-medium">{userSubscription.plans.name}</h4>
+                    <h4 className="text-white font-medium">{userSubscription.plan.name}</h4>
                     <p className="text-gray-400 text-sm">
-                      {userSubscription.plans.monthly_credits_allowance.toLocaleString()} credits/month
+                      {userSubscription.plan.monthly_credits_allowance.toLocaleString()} credits/month
                     </p>
                   </div>
                 </div>
@@ -218,12 +257,12 @@ export const BillingSettings = () => {
                   Next billing date: {formatDate(userSubscription.current_period_end)}
                 </span>
                 <span className="text-white font-semibold">
-                  ${userSubscription.plans.price_monthly}/month
+                  ${userSubscription.plan.price_monthly}/month
                 </span>
               </div>
 
               {/* Show upgrade button only if the current plan is 'True Fan' */}
-              {userSubscription.plans.name === 'True Fan' && (
+              {userSubscription.plan.name === 'True Fan' && (
                 <>
                   <Separator className="bg-gray-700 my-4" />
                   <div className="bg-orange-900/20 border border-orange-700/30 rounded-lg p-4 flex items-center justify-between">
@@ -268,7 +307,7 @@ export const BillingSettings = () => {
           {userSubscription && userSubscription.status === 'active' && (
             <div className="mt-4 flex gap-3">
               {/* Upgrade Plan Button for True Fan users */}
-              {userSubscription.plans.name === 'True Fan' && (
+              {userSubscription.plan.name === 'True Fan' && (
                 <Button 
                   onClick={handleUpgradeClick}
                   disabled={isChangingPlan}
@@ -296,34 +335,41 @@ export const BillingSettings = () => {
                 <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
                   <AlertDialogHeader>
                     <AlertDialogTitle className="text-white">Cancel Subscription</AlertDialogTitle>
-                  <AlertDialogDescription className="text-gray-300">
-                    <div className="space-y-3">
-                      <p>Are you sure you want to cancel your subscription? You'll continue to have access to your plan features until {formatDate(userSubscription.current_period_end)}, but your subscription will not renew.</p>
-                      
-                      <div>
-                        <p className="font-medium mb-2">If you cancel your membership, you will lose access to the following benefits:</p>
-                        <div className="bg-gray-800/50 rounded-lg p-3">
-                          {userSubscription.plans.features && 
-                           typeof userSubscription.plans.features === 'object' && 
-                           userSubscription.plans.features !== null &&
-                           'features' in userSubscription.plans.features &&
-                           Array.isArray((userSubscription.plans.features as any).features) ? (
-                            <ul className="space-y-1">
-                              {((userSubscription.plans.features as any).features as string[]).map((feature: string, idx: number) => (
-                                <li key={idx} className="flex items-start gap-2">
-                                  <span className="text-red-400 mt-1">•</span>
-                                  <span className="text-sm">{feature}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="text-sm">All premium features and benefits</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </AlertDialogDescription>
+                    <AlertDialogDescription className="text-gray-300">
+                      Are you sure you want to cancel your subscription? You'll continue to have access to your plan features until {formatDate(userSubscription.current_period_end)}, after which you'll be automatically moved to the Guest Pass plan.
+                    </AlertDialogDescription>
                   </AlertDialogHeader>
+                  
+                  <div className="py-4">
+                    <div className="text-gray-300 mb-3">
+                      <span className="font-medium">When you cancel, you'll be moved to the Guest Pass plan and lose access to the following premium benefits:</span>
+                    </div>
+                    <div className="bg-gray-800/50 rounded-lg p-3">
+                      {userSubscription.plan.features && 
+                       typeof userSubscription.plan.features === 'object' && 
+                       userSubscription.plan.features !== null &&
+                       'features' in userSubscription.plan.features &&
+                       Array.isArray((userSubscription.plan.features as any).features) ? (
+                        <ul className="space-y-1">
+                          {((userSubscription.plan.features as any).features as string[]).map((feature: string, idx: number) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <span className="text-red-400 mt-1">•</span>
+                              <span className="text-sm text-gray-300">{feature}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="text-sm text-gray-300">All premium features and benefits</span>
+                      )}
+                    </div>
+                    
+                    <div className="mt-3 p-3 bg-blue-900/20 border border-blue-700/30 rounded-lg">
+                      <p className="text-sm text-blue-300">
+                        <strong>Guest Pass includes:</strong> Basic chat functionality with limited credits and features.
+                      </p>
+                    </div>
+                  </div>
+                  
                   <AlertDialogFooter>
                     <AlertDialogCancel className="border-gray-600 text-white hover:bg-gray-800">
                       Keep Subscription
