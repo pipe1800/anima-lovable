@@ -5,6 +5,7 @@ import type {
   CurrentContext,
   TemplateContext 
 } from '../types/interfaces.ts';
+import type { GlobalChatSettings } from '../../_shared/settings-mapper.ts';
 
 /**
  * Database operations and utilities
@@ -52,14 +53,50 @@ export async function fetchConversationHistory(
 export async function fetchUserProfile(
   userId: string,
   supabase: SupabaseClient
-): Promise<{ username?: string } | null> {
-  const { data: userProfile } = await supabase
+): Promise<any> {
+  const { data: profile, error } = await supabase
     .from('profiles')
     .select('username')
     .eq('id', userId)
     .single();
 
-  return userProfile;
+  if (error) {
+    console.error('Profile error:', error);
+    return null;
+  }
+
+  return profile;
+}
+
+export async function fetchUserGlobalSettings(
+  userId: string,
+  supabaseAdmin: SupabaseClient
+): Promise<GlobalChatSettings | null> {
+  const { data: settings, error } = await supabaseAdmin
+    .from('user_global_chat_settings')
+    .select(`
+      dynamic_world_info,
+      enhanced_memory,
+      mood_tracking,
+      clothing_inventory,
+      location_tracking,
+      time_and_weather,
+      relationship_status,
+      character_position,
+      chain_of_thought,
+      few_shot_examples,
+      streaming_mode,
+      font_size
+    `)
+    .eq('user_id', userId)
+    .single();
+
+  if (error) {
+    console.error('Global settings error:', error);
+    return null;
+  }
+
+  return settings;
 }
 
 export async function fetchSelectedPersona(

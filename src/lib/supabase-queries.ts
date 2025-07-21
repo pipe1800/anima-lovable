@@ -499,23 +499,6 @@ export const getUserChats = async (userId: string) => {
 }
 
 /**
- * Create a new chat session
- */
-export const createChat = async (userId: string, characterId: string, title?: string) => {
-  const { data, error } = await supabase
-    .from('chats')
-    .insert({
-      user_id: userId,
-      character_id: characterId,
-      title: title
-    })
-    .select()
-    .single()
-
-  return { data, error }
-}
-
-/**
  * Get messages for a chat with pagination
  */
 export const getChatMessages = async (chatId: string, limit = 50, offset = 0) => {
@@ -674,43 +657,8 @@ export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder:
   return { data: messagesWithContext, error: null };
 }
 
-/**
- * Create a new message in a chat
- */
-export const createMessage = async (chatId: string, authorId: string, content: string, isAiMessage: boolean = false) => {
-  // Get the next message order for this chat
-  const { data: lastMessage } = await supabase
-    .from('messages')
-    .select('message_order')
-    .eq('chat_id', chatId)
-    .order('message_order', { ascending: false })
-    .limit(1)
-    .single();
-
-  const nextMessageOrder = (lastMessage?.message_order || 0) + 1;
-
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      chat_id: chatId,
-      author_id: authorId,
-      content: content,
-      is_ai_message: isAiMessage,
-      message_order: nextMessageOrder
-    })
-    .select()
-    .single()
-
-  // Update the chat's last_message_at timestamp
-  if (!error && data) {
-    await supabase
-      .from('chats')
-      .update({ last_message_at: new Date().toISOString() })
-      .eq('id', chatId)
-  }
-
-  return { data, error }
-}
+// NOTE: Message creation is now handled by edge functions (chat-management, chat-stream)
+// Direct database message creation has been replaced with proper edge function calls
 
 /**
  * Consume credits for a user

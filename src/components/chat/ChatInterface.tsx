@@ -1,20 +1,37 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import { Send, Wand2, Zap, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { InsufficientCreditsModal } from './InsufficientCreditsModal';
 import ChatMessages from './ChatMessages';
 import { useAuth } from '@/contexts/AuthContext';
-import { useChatOrchestrator } from '@/hooks/useChatOrchestrator';
+import { useChatUnified } from '@/hooks/useChatUnified'; // ✅ PHASE 2: Single unified hook
 import { useChatPerformance } from '@/hooks/useChatPerformance';
 import type { TrackedContext } from '@/types/chat';
-import { useAddonSettings } from './useAddonSettings';
+import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { supabase } from '@/integrations/supabase/client';
-import PerformanceMonitor from './PerformanceMonitor';
-import { DatabaseBatchOperations } from './DatabaseBatchOperations';
-import { AddonDebugPanel } from '@/components/debug/AddonDebugPanel';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import { useQueryClient } from '@tanstack/react-query';
+
+// ============================================================================
+// PHASE 3: LAZY LOADED COMPONENTS - Performance Optimization
+// ============================================================================
+
+// Debug components - Only load in development or when needed
+const PerformanceMonitor = lazy(() => import('./PerformanceMonitor'));
+const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
+  default: module.AddonDebugPanel
+})));
+const DatabaseBatchOperations = lazy(() => import('./DatabaseBatchOperations').then(module => ({
+  default: module.DatabaseBatchOperations
+})));
+
+// Loading fallback for heavy components
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center p-4">
+    <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
+  </div>
+);
 
 interface Character {
   id: string;
@@ -57,26 +74,25 @@ const ChatInterface = ({
     if (!currentChatId && user && character) {
       const initializeChat = async () => {
         try {
-          const { data: newChat, error } = await supabase
-            .from('chats')
-            .insert({
-              user_id: user.id,
-              character_id: character.id,
-              title: `Chat with ${character.name}`,
-              model_id: 'openai/gpt-4o-mini'
-            })
-            .select()
-            .single();
+          const { data, error } = await supabase.functions.invoke('chat-management', {
+            body: {
+              operation: 'create-basic',
+              charactersData: [{
+                id: character.id,
+                name: character.name
+              }]
+            }
+          });
           
           if (error) throw error;
           
-          if (newChat) {
-            setCurrentChatId(newChat.id);
+          if (data?.success && data?.chat_id) {
+            setCurrentChatId(data.chat_id);
             // Update URL
             window.history.replaceState(
               null, 
               '', 
-              `/chat/${character.id}/${newChat.id}`
+              `/chat/${character.id}/${data.chat_id}`
             );
           }
         } catch (error) {
@@ -108,7 +124,7 @@ const ChatInterface = ({
     debugInfo,
     isStreaming,
     streamingMessage
-  } = useChatOrchestrator(currentChatId, character.id);
+  } = useChatUnified(currentChatId, character.id); // ✅ PHASE 2: Single unified hook
 
   // ✅ FIX: Safety cleanup for stuck streaming states
   useEffect(() => {
@@ -126,10 +142,21 @@ const ChatInterface = ({
   const { metrics, updateMetrics } = useChatPerformance(currentChatId);
 
   // Use addon settings hook for real-time updates
-  const { data: addonSettings } = useAddonSettings(character.id);
+  const { data: globalSettings } = useUserGlobalChatSettings();
   
   // Fallback to default settings if loading
-  const currentAddonSettings = addonSettings || {
+  const currentAddonSettings = globalSettings ? {
+    dynamicWorldInfo: globalSettings.dynamic_world_info,
+    enhancedMemory: globalSettings.enhanced_memory,
+    moodTracking: globalSettings.mood_tracking,
+    clothingInventory: globalSettings.clothing_inventory,
+    locationTracking: globalSettings.location_tracking,
+    timeAndWeather: globalSettings.time_and_weather,
+    relationshipStatus: globalSettings.relationship_status,
+    characterPosition: globalSettings.character_position,
+    chainOfThought: globalSettings.chain_of_thought,
+    fewShotExamples: globalSettings.few_shot_examples,
+  } : {
     dynamicWorldInfo: false,
     enhancedMemory: false,
     moodTracking: false,
@@ -306,8 +333,10 @@ const ChatInterface = ({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Debug Panel */}
-      <AddonDebugPanel characterId={character.id} userId={user?.id} />
+      {/* Debug Panel - Lazy loaded for performance */}
+      <Suspense fallback={<LoadingSpinner />}>
+        <AddonDebugPanel characterId={character.id} userId={user?.id} />
+      </Suspense>
       
       {/* Insufficient Credits Modal */}
       <InsufficientCreditsModal
@@ -317,12 +346,12 @@ const ChatInterface = ({
         onUpgrade={handleUpgrade}
       />
       
-      {/* Messages Area */}
+      {/* Messages Area - Simplified without frontend streaming */}
       <ChatMessages 
         chatId={currentChatId}
         character={character}
         trackedContext={trackedContext}
-        streamingMessage={streamingMessage}
+        streamingMessage="" 
         isStreaming={isStreaming}
         messages={messages}
         hasMore={hasMore}
@@ -333,19 +362,23 @@ const ChatInterface = ({
         debugInfo={debugInfo}
       />
 
-      {/* Typing Indicator */}
-      {(isTyping || isStreaming) && (
-        <div className="px-6 pb-2">
-          <div className="flex items-center space-x-2 text-gray-400">
-            <div className="flex space-x-1">
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-            </div>
-            <span className="text-sm">{character.name} is typing...</span>
+      {/* Typing Indicator with Reserved Space */}
+      <div className="px-6 pb-2 min-h-[2.5rem] flex items-center">
+        <div 
+          className={`flex items-center space-x-2 text-gray-400 transition-all duration-300 ${
+            (isTyping || isStreaming) ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+          }`}
+        >
+          <div className="flex space-x-1">
+            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
           </div>
+          <span className="text-sm">
+            {isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`}
+          </span>
         </div>
-      )}
+      </div>
 
       {/* Input Form */}
       <form onSubmit={handleSendMessage} className="p-4 border-t bg-background">
@@ -369,21 +402,25 @@ const ChatInterface = ({
         </div>
       </form>
 
-      {/* Performance Monitor */}
+      {/* Performance Monitor - Lazy loaded for better performance */}
       {showPerformanceMonitor && (
         <div className="fixed bottom-4 right-4 z-50">
-          <PerformanceMonitor chatId={currentChatId} isVisible={showPerformanceMonitor} />
+          <Suspense fallback={<LoadingSpinner />}>
+            <PerformanceMonitor chatId={currentChatId} isVisible={showPerformanceMonitor} />
+          </Suspense>
         </div>
       )}
       
-      {/* Database Batch Operations */}
+      {/* Database Batch Operations - Lazy loaded for development */}
       {showDatabaseOps && (
         <div className="fixed bottom-4 right-96 z-50">
-          <DatabaseBatchOperations 
-            chatId={currentChatId} 
-            characterId={character.id}
-            isVisible={showDatabaseOps} 
-          />
+          <Suspense fallback={<LoadingSpinner />}>
+            <DatabaseBatchOperations 
+              chatId={currentChatId} 
+              characterId={character.id}
+              isVisible={showDatabaseOps} 
+            />
+          </Suspense>
         </div>
       )}
     </div>

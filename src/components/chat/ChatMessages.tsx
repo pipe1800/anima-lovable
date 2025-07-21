@@ -1,11 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import type { Message, TrackedContext } from '@/types/chat';
 import { MessageGroup } from './MessageGroup';
 import { groupMessages } from '@/utils/messageGrouping';
 import { ContextDisplay } from './ContextDisplay';
-import { useAddonSettings } from './useAddonSettings';
+import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import OptimizedMessageFormatter from './OptimizedMessageFormatter';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FormattedMessage } from "@/components/ui/FormattedMessage";
@@ -53,10 +53,9 @@ const ChatMessages = ({
   const [backgroundImage, setBackgroundImage] = React.useState<string | null>(null);
   
   // Messages should be passed from parent ChatInterface to avoid duplicate hook usage
-  // const { ... } = useOptimizedChat(chatId, character.id); // REMOVED - conflicts with parent hook
   
   // Load addon settings for context filtering
-  const { data: addonSettings } = useAddonSettings(character.id);
+  const { data: globalSettings } = useUserGlobalChatSettings();
 
   // Load background image for current chat
   useEffect(() => {
@@ -99,67 +98,20 @@ const ChatMessages = ({
     return trackedContext;
   }, [messages, trackedContext]);
 
-  // Group messages for better visual organization with streaming support
-  const messageGroups = React.useMemo(() => {
-    const allMessages = [...messages];
-    
-    // ✅ FIX: Better duplicate prevention for streaming messages
-    if (isStreaming && streamingMessage) {
-      const hasMatchingMessage = messages.some(msg => 
-        !msg.isUser && 
-        !msg.id.includes('optimistic') &&
-        (
-          msg.content.trim() === streamingMessage.trim() ||
-          msg.content.includes(streamingMessage.substring(0, 50)) // Partial match for safety
-        )
-      );
-      
-      // Only add streaming message if no matching database message exists
-      if (!hasMatchingMessage) {
-        allMessages.push({
-          id: 'streaming-temp',
-          content: streamingMessage,
-          isUser: false,
-          timestamp: new Date(),
-          status: 'sending'
-        } as Message);
-      }
-    }
-    
-    return groupMessages(allMessages as any);
-  }, [messages, isStreaming, streamingMessage]);
+  // ✅ SIMPLIFIED: Basic message grouping without complex streaming logic
+  const messageGroups = useMemo(() => {
+    // ✅ SIMPLIFIED: No frontend streaming message display
+    // Backend handles all message persistence, frontend just shows database messages
+    return groupMessages(messages as any);
+  }, [messages]);
 
-  // Consolidated smart auto-scroll effect with better timing
-  useEffect(() => {
-    const shouldAutoScroll = () => {
-      // Don't scroll during initial loading unless we have messages
-      if (isLoadingMessages && messages.length === 0) return false;
-      
-      // Always scroll for new messages (debounced)
-      if (messages.length > 0) return true;
-      
-      // Scroll during streaming
-      if (isStreaming && streamingMessage) return true;
-      
-      return false;
-    };
-
-    if (shouldAutoScroll()) {
-      // Use requestAnimationFrame for smoother scrolling
-      requestAnimationFrame(() => {
-        const behavior = isLoadingMessages ? 'auto' : 'smooth';
-        messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
-      });
-    }
-  }, [messages.length, isStreaming, streamingMessage, isLoadingMessages]);
-
-  const handleLoadEarlier = () => {
+  // ✅ PHASE 3: Memoized scroll handler to prevent recreation
+  const handleLoadEarlier = useCallback(() => {
     if (hasMore && !isFetchingNextPage && fetchNextPage) {
       const currentScrollHeight = messagesContainerRef.current?.scrollHeight || 0;
       
       fetchNextPage();
       
-      // Maintain scroll position after loading earlier messages
       setTimeout(() => {
         if (messagesContainerRef.current) {
           const newScrollHeight = messagesContainerRef.current.scrollHeight;
@@ -168,7 +120,24 @@ const ChatMessages = ({
         }
       }, 100);
     }
-  };
+  }, [hasMore, isFetchingNextPage, fetchNextPage]);
+
+  // ✅ PHASE 3: Optimized auto-scroll with better performance
+  useEffect(() => {
+    const shouldAutoScroll = () => {
+      if (isLoadingMessages && messages.length === 0) return false;
+      return messages.length > 0 || (isStreaming && streamingMessage);
+    };
+
+    if (shouldAutoScroll()) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ 
+          behavior: isLoadingMessages ? 'auto' : 'smooth', 
+          block: 'end' 
+        });
+      });
+    }
+  }, [messages.length, isStreaming, streamingMessage, isLoadingMessages]);
 
   // Show empty state when no chat is selected
   if (!chatId) {
@@ -238,7 +207,14 @@ const ChatMessages = ({
             group={group} 
             character={character}
             trackedContext={mostRecentContext}
-            addonSettings={addonSettings}
+            addonSettings={globalSettings ? {
+              moodTracking: globalSettings.mood_tracking,
+              clothingInventory: globalSettings.clothing_inventory,
+              locationTracking: globalSettings.location_tracking,
+              timeAndWeather: globalSettings.time_and_weather,
+              relationshipStatus: globalSettings.relationship_status,
+              characterPosition: globalSettings.character_position,
+            } : undefined}
           />
         ))
       ) : (

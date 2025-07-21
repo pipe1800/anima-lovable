@@ -77,6 +77,7 @@ export function calculateCreditCost(
   let addonPercentage = 0;
   if (addonSettings) {
     if (addonSettings.dynamicWorldInfo) addonPercentage += 10;
+    // Enhanced Memory removed - will be variable cost based on chat length (future implementation)
     if (addonSettings.moodTracking) addonPercentage += 5;
     if (addonSettings.clothingInventory) addonPercentage += 5;
     if (addonSettings.locationTracking) addonPercentage += 5;

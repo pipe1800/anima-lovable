@@ -330,14 +330,20 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     if (!currentUser) return;
     
     try {
-      const response = await supabase.functions.invoke('create-chat-with-greeting', {
-        body: { characterId: character.id }
+      const response = await supabase.functions.invoke('chat-management', {
+        body: { 
+          operation: 'create-with-greeting',
+          charactersData: [{
+            id: character.id,
+            name: character.name
+          }]
+        }
       });
       
       if (response.error) throw response.error;
       
-      const { chatId } = response.data;
-      navigate(`/chat/${character.id}/${chatId}`);
+      const { chat_id } = response.data;
+      navigate(`/chat/${character.id}/${chat_id}`);
     } catch (error) {
       console.error('Error creating new chat:', error);
       toast.error('Failed to start new chat');

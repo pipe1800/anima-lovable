@@ -25,13 +25,19 @@ ${character.description ? `Description: ${replaceTemplatesFn(character.descripti
 ${character.scenario ? `Scenario: ${replaceTemplatesFn(typeof character.scenario === 'string' ? character.scenario : JSON.stringify(character.scenario))}` : ''}
 
 IMPORTANT DIALOGUE GUIDELINES:
-- Focus primarily on dialogue and conversation
+- You are ONLY the character, never speak for the user
+- NEVER write the user's responses or actions
+- NEVER continue the conversation for the user
+- STOP your response when it's the user's turn to speak
+- Focus primarily on dialogue and conversation as the character
 - Use direct speech frequently with quotation marks
 - Keep narrative descriptions brief and essential
-- Respond with natural, engaging conversation
+- Respond with natural, engaging conversation as your character
 - Express emotions and thoughts through words and dialogue
 - Avoid lengthy descriptive paragraphs
 - Make your character feel alive through speech
+
+CRITICAL: You must ONLY play your character. Never write what the user says, thinks, or does. Stop your response when it's the user's turn to speak.
 
 Stay in character and engage in natural dialogue with the user.`;
 

@@ -93,15 +93,6 @@ const Chat = () => {
     // Initialize character data from selectedCharacter if available
     if (selectedCharacter) {
       setCharacterData(selectedCharacter);
-      
-      // If we have a selectedCharacter but no chat ID, this means the user
-      // came from a character profile but chat creation failed or is in progress.
-      // We should redirect back to the character profile to let them retry.
-      if (!existingChatId && !chatId && !currentChatId) {
-        console.log('⚠️ No chat ID found for selectedCharacter, redirecting to character profile');
-        navigate(`/character/${selectedCharacter.id}`);
-        return;
-      }
       return;
     }
     

@@ -114,13 +114,16 @@ CREATE TABLE public.message_context (
 CREATE TABLE public.messages (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   chat_id uuid NOT NULL,
-  author_id uuid NOT NULL,
+  author_id uuid,
   is_ai_message boolean NOT NULL DEFAULT false,
   content text NOT NULL,
   token_cost integer,
   model_id text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   current_context jsonb,
+  message_order integer NOT NULL DEFAULT 1,
+  is_placeholder boolean DEFAULT false,
+  updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT messages_pkey PRIMARY KEY (id),
   CONSTRAINT messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
   CONSTRAINT messages_author_id_fkey FOREIGN KEY (author_id) REFERENCES auth.users(id)
@@ -200,16 +203,13 @@ CREATE TABLE public.tags (
   name text NOT NULL UNIQUE,
   CONSTRAINT tags_pkey PRIMARY KEY (id)
 );
-CREATE TABLE public.user_character_addons (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  character_id uuid NOT NULL,
-  addon_settings jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT user_character_addons_pkey PRIMARY KEY (id),
-  CONSTRAINT user_character_addons_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT user_character_addons_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
+CREATE TABLE public.user_character_addons_backup (
+  id uuid,
+  user_id uuid,
+  character_id uuid,
+  addon_settings jsonb,
+  created_at timestamp with time zone,
+  updated_at timestamp with time zone
 );
 CREATE TABLE public.user_character_world_info_settings (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -218,7 +218,18 @@ CREATE TABLE public.user_character_world_info_settings (
   world_info_id uuid NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT user_character_world_info_settings_pkey PRIMARY KEY (id)
+  CONSTRAINT user_character_world_info_settings_pkey PRIMARY KEY (id),
+  CONSTRAINT user_character_world_info_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT user_character_world_info_settings_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
+  CONSTRAINT user_character_world_info_settings_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
+);
+CREATE TABLE public.user_character_world_info_settings_backup (
+  id uuid,
+  user_id uuid,
+  character_id uuid,
+  world_info_id uuid,
+  created_at timestamp with time zone,
+  updated_at timestamp with time zone
 );
 CREATE TABLE public.user_chat_context (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -230,6 +241,26 @@ CREATE TABLE public.user_chat_context (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_chat_context_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.user_global_chat_settings (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL UNIQUE,
+  dynamic_world_info boolean DEFAULT false,
+  enhanced_memory boolean DEFAULT false,
+  mood_tracking boolean DEFAULT true,
+  clothing_inventory boolean DEFAULT true,
+  location_tracking boolean DEFAULT true,
+  time_and_weather boolean DEFAULT false,
+  relationship_status boolean DEFAULT false,
+  character_position boolean DEFAULT false,
+  chain_of_thought boolean DEFAULT false,
+  few_shot_examples boolean DEFAULT false,
+  streaming_mode character varying DEFAULT 'smooth'::character varying CHECK (streaming_mode::text = ANY (ARRAY['instant'::character varying, 'smooth'::character varying]::text[])),
+  font_size character varying DEFAULT 'normal'::character varying CHECK (font_size::text = ANY (ARRAY['small'::character varying, 'normal'::character varying, 'large'::character varying]::text[])),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT user_global_chat_settings_pkey PRIMARY KEY (id),
+  CONSTRAINT user_global_chat_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.user_onboarding_progress (
   user_id uuid NOT NULL,

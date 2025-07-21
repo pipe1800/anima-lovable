@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useAddonSettings } from '@/components/chat/useAddonSettings';
+import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
@@ -10,37 +10,38 @@ interface AddonStatusDebugProps {
 
 export const AddonStatusDebug = ({ characterId }: AddonStatusDebugProps) => {
   const { user } = useAuth();
-  const { data: addonSettings, isLoading } = useAddonSettings(characterId);
+  const { data: globalSettings, isLoading } = useUserGlobalChatSettings();
 
   if (isLoading) {
-    return <div>Loading addon settings...</div>;
+    return <div>Loading global settings...</div>;
   }
 
-  if (!addonSettings) {
-    return <div>No addon settings found</div>;
+  if (!globalSettings) {
+    return <div>No global settings found (using defaults)</div>;
   }
 
   const addonList = [
-    { key: 'moodTracking', label: 'Mood Tracking' },
-    { key: 'clothingInventory', label: 'Clothing Inventory' },
-    { key: 'locationTracking', label: 'Location Tracking' },
-    { key: 'timeAndWeather', label: 'Time & Weather' },
-    { key: 'relationshipStatus', label: 'Relationship Status' },
-    { key: 'characterPosition', label: 'Character Position' },
-    { key: 'dynamicWorldInfo', label: 'Dynamic World Info' },
-    { key: 'chainOfThought', label: 'Chain of Thought' },
-    { key: 'fewShotExamples', label: 'Few Shot Examples' },
+    { key: 'mood_tracking', label: 'Mood Tracking' },
+    { key: 'clothing_inventory', label: 'Clothing Inventory' },
+    { key: 'location_tracking', label: 'Location Tracking' },
+    { key: 'time_and_weather', label: 'Time & Weather' },
+    { key: 'relationship_status', label: 'Relationship Status' },
+    { key: 'character_position', label: 'Character Position' },
+    { key: 'dynamic_world_info', label: 'Dynamic World Info' },
+    { key: 'enhanced_memory', label: 'Enhanced Memory' },
+    { key: 'chain_of_thought', label: 'Chain of Thought' },
+    { key: 'few_shot_examples', label: 'Few Shot Examples' },
   ];
 
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
-        <CardTitle>Addon Status Debug</CardTitle>
+        <CardTitle>Global Settings Debug</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
           <div className="text-sm text-muted-foreground">
-            Character ID: {characterId}
+            Character ID: {characterId} (Note: Now using global settings)
           </div>
           <div className="text-sm text-muted-foreground">
             User ID: {user?.id}
@@ -49,8 +50,8 @@ export const AddonStatusDebug = ({ characterId }: AddonStatusDebugProps) => {
             {addonList.map((addon) => (
               <div key={addon.key} className="flex items-center justify-between">
                 <span className="text-sm">{addon.label}:</span>
-                <Badge variant={addonSettings[addon.key as keyof typeof addonSettings] ? 'default' : 'secondary'}>
-                  {addonSettings[addon.key as keyof typeof addonSettings] ? 'Enabled' : 'Disabled'}
+                <Badge variant={globalSettings[addon.key as keyof typeof globalSettings] ? 'default' : 'secondary'}>
+                  {globalSettings[addon.key as keyof typeof globalSettings] ? 'Enabled' : 'Disabled'}
                 </Badge>
               </div>
             ))}

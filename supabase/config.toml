@@ -1,24 +1,9 @@
 project_id = "rclpyipeytqbamiwcuih"
 
-[functions.create-chat-with-greeting]
-verify_jwt = true
-
-[functions.create-basic-chat]
-verify_jwt = true
-
 [functions.paypal-management]
 verify_jwt = true
 
-[functions.create-credit-purchase]
-verify_jwt = true
-
 [functions.chat-management]
-verify_jwt = true
-
-[functions.finalize-credit-purchase]
-verify_jwt = true
-
-[functions.cleanup-contaminated-messages]
 verify_jwt = true
 
 [functions.chat-stream]
@@ -27,5 +12,5 @@ verify_jwt = true
 [functions.extract-chat-context]
 verify_jwt = true
 
-[functions.monthly-credit-reset]
+[functions.admin-utilities]
 verify_jwt = false

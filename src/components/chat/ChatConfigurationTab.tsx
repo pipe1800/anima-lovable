@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, ChevronDown, Plus, Upload, Image, X } from 'lucide-react';
+import { Settings, ChevronDown, Plus, Upload, Image, X, Zap, Type } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -8,12 +8,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { WorldInfoDropdown } from './WorldInfoDropdown';
-import { getUserCharacterAddonSettings, saveUserCharacterAddonSettings, calculateAddonCreditCost, validateAddonSettings, type AddonSettings } from '@/lib/user-addon-operations';
+import { useUserGlobalChatSettings, useUpdateGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Persona } from '@/lib/persona-operations';
 import { useQueryClient } from '@tanstack/react-query';
+import { UserGlobalChatSettings } from '@/types/chatSettings';
 
 interface ChatConfigurationTabProps {
   characterId: string;
@@ -42,123 +44,110 @@ export const ChatConfigurationTab = ({
 }: ChatConfigurationTabProps) => {
   const { subscription } = useAuth();
   const queryClient = useQueryClient();
-  const [addonSettings, setAddonSettings] = useState<AddonSettings>({
-    dynamicWorldInfo: false,
-    enhancedMemory: false,
-    moodTracking: false,
-    clothingInventory: false,
-    locationTracking: false,
-    timeAndWeather: false,
-    relationshipStatus: false,
-    characterPosition: false,
-    chainOfThought: false,
-    fewShotExamples: false,
-  });
-  const [tempAddonSettings, setTempAddonSettings] = useState<AddonSettings>({
-    dynamicWorldInfo: false,
-    enhancedMemory: false,
-    moodTracking: false,
-    clothingInventory: false,
-    locationTracking: false,
-    timeAndWeather: false,
-    relationshipStatus: false,
-    characterPosition: false,
-    chainOfThought: false,
-    fewShotExamples: false,
-  });
+  
+  // Use global chat settings instead of character-specific settings
+  const { data: globalSettings, isLoading: settingsLoading } = useUserGlobalChatSettings();
+  const updateGlobalSettings = useUpdateGlobalChatSettings();
+  
   const [saving, setSaving] = useState(false);
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  
+  // Track pending changes
+  const [pendingChanges, setPendingChanges] = useState<Partial<UserGlobalChatSettings>>({});
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Current effective settings (merging global settings with pending changes)
+  const effectiveSettings = globalSettings ? { ...globalSettings, ...pendingChanges } : null;
 
   // Determine user's subscription tier
   const userPlan = subscription?.plan?.name || 'Guest Pass';
   const isGuestPass = userPlan === 'Guest Pass';
   const isTrueFanOrWhale = userPlan === 'True Fan' || userPlan === 'The Whale';
 
-  // Count active stateful tracking addons for Guest Pass limits
-  const activeStatefulAddons = [
-    tempAddonSettings.moodTracking,
-    tempAddonSettings.clothingInventory,
-    tempAddonSettings.locationTracking,
-    tempAddonSettings.timeAndWeather,
-    tempAddonSettings.relationshipStatus,
-    tempAddonSettings.characterPosition,
-  ].filter(Boolean).length;
+  // Count active stateful tracking addons for Guest Pass limits (using effective settings)
+  const activeStatefulAddons = effectiveSettings ? [
+    effectiveSettings.mood_tracking,
+    effectiveSettings.clothing_inventory,
+    effectiveSettings.location_tracking,
+    effectiveSettings.time_and_weather,
+    effectiveSettings.relationship_status,
+    effectiveSettings.character_position,
+  ].filter(Boolean).length : 0;
 
   const addonCategories = {
     'Core Enhancements': {
-      dynamicWorldInfo: { 
+      dynamic_world_info: { 
         name: 'Dynamic World Info', 
         cost: 10, 
         description: 'Enhanced world knowledge',
         available: true,
         dynamicCost: null
       },
-      enhancedMemory: { 
+      enhanced_memory: { 
         name: 'Enhanced Memory', 
         cost: 0, 
         description: isTrueFanOrWhale 
-          ? 'Better conversation memory' 
-          : 'Upgrade to True Fan or Whale to unlock',
-        available: isTrueFanOrWhale,
-        dynamicCost: isTrueFanOrWhale ? 'Cost calculated per chat' : null
+          ? 'Better conversation memory (Included in your plan)' 
+          : 'Better conversation memory - Upgrade to True Fan or Whale to unlock',
+        available: true,
+        dynamicCost: null
       },
     },
-    'Stateful Character Tracking': {
-      moodTracking: { 
+    'Character Tracking': {
+      mood_tracking: { 
         name: 'Mood Tracking', 
         cost: 5, 
         description: 'Track character emotions',
-        available: isTrueFanOrWhale || tempAddonSettings.moodTracking || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || effectiveSettings?.mood_tracking || activeStatefulAddons < 2,
         dynamicCost: null
       },
-      clothingInventory: { 
+      clothing_inventory: { 
         name: 'Clothing Inventory', 
         cost: 5, 
         description: 'Track character outfits',
-        available: isTrueFanOrWhale || tempAddonSettings.clothingInventory || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || globalSettings?.clothing_inventory || activeStatefulAddons < 2,
         dynamicCost: null
       },
-      locationTracking: { 
+      location_tracking: { 
         name: 'Location Tracking', 
         cost: 5, 
         description: 'Track current location',
-        available: isTrueFanOrWhale || tempAddonSettings.locationTracking || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || globalSettings?.location_tracking || activeStatefulAddons < 2,
         dynamicCost: null
       },
-      timeAndWeather: { 
+      time_and_weather: { 
         name: 'Time & Weather', 
         cost: 5, 
         description: 'Real-time environment',
-        available: isTrueFanOrWhale || tempAddonSettings.timeAndWeather || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || globalSettings?.time_and_weather || activeStatefulAddons < 2,
         dynamicCost: null
       },
-      relationshipStatus: { 
+      relationship_status: { 
         name: 'Relationship Status', 
         cost: 5, 
         description: 'Track relationships',
-        available: isTrueFanOrWhale || tempAddonSettings.relationshipStatus || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || globalSettings?.relationship_status || activeStatefulAddons < 2,
         dynamicCost: null
       },
-      characterPosition: { 
+      character_position: { 
         name: 'Character Position', 
         cost: 5, 
         description: 'Track character\'s physical position and body language',
-        available: isTrueFanOrWhale || tempAddonSettings.characterPosition || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || globalSettings?.character_position || activeStatefulAddons < 2,
         dynamicCost: null
       },
     },
     'Advanced Prompting Toolkit': {
-      chainOfThought: { 
+      chain_of_thought: { 
         name: 'Chain of Thought', 
         cost: 30, 
         description: isTrueFanOrWhale 
           ? 'Advanced reasoning' 
-          : 'Upgrade to True Fan or Whale to unlock',
+          : 'Advanced reasoning - Upgrade to True Fan or Whale to unlock',
         available: isTrueFanOrWhale,
         dynamicCost: null
       },
-      fewShotExamples: { 
+      few_shot_examples: { 
         name: 'Few Shot Examples', 
         cost: 7, 
         description: 'Better response quality',
@@ -168,8 +157,77 @@ export const ChatConfigurationTab = ({
     }
   };
 
+  // Handler functions for global settings - now tracks changes instead of immediately saving
+  const handleToggleAddon = (addonKey: keyof Pick<UserGlobalChatSettings, 
+    'dynamic_world_info' | 'enhanced_memory' | 'mood_tracking' | 'clothing_inventory' | 
+    'location_tracking' | 'time_and_weather' | 'relationship_status' | 'character_position' | 
+    'chain_of_thought' | 'few_shot_examples'>) => {
+    
+    if (!globalSettings) return;
+
+    const currentValue = effectiveSettings?.[addonKey] ?? globalSettings[addonKey];
+    const newValue = !currentValue;
+    
+    // Update pending changes
+    const newPendingChanges = {
+      ...pendingChanges,
+      [addonKey]: newValue
+    };
+    
+    setPendingChanges(newPendingChanges);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleStreamingModeChange = (mode: 'instant' | 'smooth') => {
+    if (!globalSettings) return;
+    
+    const newPendingChanges = {
+      ...pendingChanges,
+      streaming_mode: mode
+    };
+    
+    setPendingChanges(newPendingChanges);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleFontSizeChange = (fontSize: 'small' | 'normal' | 'large') => {
+    if (!globalSettings) return;
+    
+    const newPendingChanges = {
+      ...pendingChanges,
+      font_size: fontSize
+    };
+    
+    setPendingChanges(newPendingChanges);
+    setHasUnsavedChanges(true);
+  };
+
+  // Save all pending changes
+  const handleSaveChanges = async () => {
+    if (!hasUnsavedChanges || Object.keys(pendingChanges).length === 0) return;
+    
+    try {
+      setSaving(true);
+      await updateGlobalSettings.mutateAsync(pendingChanges);
+      toast.success('Settings saved successfully');
+      setPendingChanges({});
+      setHasUnsavedChanges(false);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Discard pending changes
+  const handleDiscardChanges = () => {
+    setPendingChanges({});
+    setHasUnsavedChanges(false);
+    toast.info('Changes discarded');
+  };
+
   useEffect(() => {
-    loadAddonSettings();
     // Load background image for current chat
     if (currentChatId) {
       const savedBackground = localStorage.getItem(`chat-background-${currentChatId}`);
@@ -177,83 +235,7 @@ export const ChatConfigurationTab = ({
         setBackgroundImage(savedBackground);
       }
     }
-  }, [characterId, userId, currentChatId]);
-
-  const loadAddonSettings = async () => {
-    try {
-      const settings = await getUserCharacterAddonSettings(userId, characterId);
-      setAddonSettings(settings);
-      setTempAddonSettings(settings);
-    } catch (error) {
-      console.error('Error loading addon settings:', error);
-      toast.error('Failed to load addon settings');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleToggleAddon = (addonKey: keyof AddonSettings) => {
-    const newSettings = {
-      ...tempAddonSettings,
-      [addonKey]: !tempAddonSettings[addonKey]
-    };
-
-    const validation = validateAddonSettings(newSettings, userPlan);
-    if (!validation.valid) {
-      const error = validation.errors[0];
-      if (error.includes('Enhanced Memory') || error.includes('Chain of Thought')) {
-        toast.error('This addon requires True Fan or Whale subscription. Upgrade to unlock advanced features!');
-      } else if (error.includes('stateful tracking')) {
-        toast.error('Guest Pass users are limited to 2 stateful tracking addons. Upgrade for unlimited access!');
-      } else {
-        toast.error(error);
-      }
-      return;
-    }
-
-    setTempAddonSettings(newSettings);
-  };
-
-  const handleSaveConfiguration = async () => {
-    setSaving(true);
-    
-    try {
-      // Optimistic update - apply settings immediately for better UX
-      setAddonSettings(tempAddonSettings);
-      
-      // Invalidate and update the cache immediately with optimistic data
-      queryClient.setQueryData(['addon-settings', userId, characterId], tempAddonSettings);
-      
-      // Save addon settings to database
-      const addonResult = await saveUserCharacterAddonSettings(userId, characterId, tempAddonSettings);
-      if (!addonResult.success) {
-        // Rollback on failure
-        setAddonSettings(addonSettings);
-        queryClient.setQueryData(['addon-settings', userId, characterId], addonSettings);
-        throw new Error(addonResult.error || 'Failed to save addon settings');
-      }
-      
-      // Invalidate cache to ensure fresh data across all components
-      await queryClient.invalidateQueries({ 
-        queryKey: ['addon-settings', userId, characterId] 
-      });
-
-      // Apply background image immediately if there's one set
-      if (backgroundImage && currentChatId) {
-        // Trigger background update event for ChatMessages component
-        window.dispatchEvent(new CustomEvent('background-image-updated', { 
-          detail: { chatId: currentChatId, backgroundImage } 
-        }));
-      }
-      
-      toast.success('Configuration saved successfully');
-    } catch (error) {
-      console.error('Error saving configuration:', error);
-      toast.error('Failed to save configuration. Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  };
+  }, [currentChatId]);
 
   const handleBackgroundImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -279,13 +261,18 @@ export const ChatConfigurationTab = ({
     }
   };
 
-  const totalCost = calculateAddonCreditCost(tempAddonSettings);
-  const hasUnsavedChanges = JSON.stringify(addonSettings) !== JSON.stringify(tempAddonSettings);
-
-  if (loading) {
+  if (settingsLoading) {
     return (
       <div className="p-4">
         <div className="text-gray-400 text-center py-8">Loading configuration...</div>
+      </div>
+    );
+  }
+
+  if (!globalSettings) {
+    return (
+      <div className="p-4">
+        <div className="text-gray-400 text-center py-8">Failed to load settings. Please try refreshing the page.</div>
       </div>
     );
   }
@@ -349,10 +336,163 @@ export const ChatConfigurationTab = ({
               className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
             >
               <Plus className="w-4 h-4" />
-              <span>Create New Persona</span>
+                            <span>Create New Persona</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      </Card>
+
+      {/* Global Addon Settings */}
+      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-white font-medium text-sm">Global Addon Settings</h3>
+          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
+            Applies to all chats
+          </Badge>
+        </div>
+
+        <div className="space-y-4">
+          {Object.entries(addonCategories).map(([categoryName, addons]) => (
+            <div key={categoryName} className="space-y-3">
+              <h4 className="text-gray-300 font-medium text-sm border-b border-gray-700/30 pb-1">
+                {categoryName}
+              </h4>
+              <div className="grid grid-cols-2 gap-3">
+                {Object.entries(addons).map(([key, details]) => {
+                  const isEnabled = effectiveSettings?.[key as keyof UserGlobalChatSettings] as boolean;
+                  return (
+                    <div key={key} className={`flex flex-col p-3 rounded-lg border ${
+                      details.available 
+                        ? 'bg-[#0f0f0f] border-gray-700/30' 
+                        : 'bg-gray-900/50 border-gray-700/20 opacity-60'
+                    }`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`font-medium text-sm ${
+                          details.available ? 'text-white' : 'text-gray-500'
+                        }`}>
+                          {details.name}
+                        </span>
+                        <Switch
+                          checked={isEnabled}
+                          onCheckedChange={() => handleToggleAddon(key as any)}
+                          disabled={saving || !details.available}
+                          className="data-[state=checked]:bg-[#FF7A00]"
+                        />
+                      </div>
+                      <p className={`text-xs mb-2 ${
+                        details.available ? 'text-gray-400' : 'text-gray-500'
+                      }`}>
+                        {details.description}
+                      </p>
+                      <div className="flex items-center justify-end">
+                        {details.dynamicCost ? (
+                          <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 h-5">
+                            Dynamic
+                          </Badge>
+                        ) : details.cost > 0 && (
+                          <Badge variant="outline" className="text-xs border-[#FF7A00] text-[#FF7A00] h-5">
+                            +{details.cost}%
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* Limitation notices */}
+              {categoryName === 'Character Tracking' && isGuestPass && activeStatefulAddons >= 2 && (
+                <div className="mt-2 p-3 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
+                    <p className="text-yellow-400 text-xs font-medium">
+                      Guest Pass Limit Reached
+                    </p>
+                  </div>
+                  <p className="text-yellow-300 text-xs mt-1">
+                    You've activated the maximum number of tracking addons. Upgrade to True Fan or Whale for unlimited access.
+                  </p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Streaming Settings */}
+      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-blue-400" />
+            <h3 className="text-white font-medium text-sm">Response Mode</h3>
+          </div>
+          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
+            Global
+          </Badge>
+        </div>
+        
+        <RadioGroup 
+          value={effectiveSettings?.streaming_mode || globalSettings?.streaming_mode} 
+          onValueChange={handleStreamingModeChange}
+          className="flex gap-6"
+        >
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="instant" id="instant" />
+            <Label htmlFor="instant" className="cursor-pointer text-gray-300">
+              <div className="flex flex-col">
+                <span className="font-medium text-white">Instant</span>
+                <span className="text-xs text-gray-400">Complete response at once</span>
+              </div>
+            </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="smooth" id="smooth" />
+            <Label htmlFor="smooth" className="cursor-pointer text-gray-300">
+              <div className="flex flex-col">
+                <span className="font-medium text-white">Smooth</span>
+                <span className="text-xs text-gray-400">Real-time streaming</span>
+              </div>
+            </Label>
+          </div>
+        </RadioGroup>
+      </Card>
+
+      {/* Font Size Settings */}
+      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Type className="h-4 w-4 text-green-400" />
+            <h3 className="text-white font-medium text-sm">Font Size</h3>
+          </div>
+          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
+            Global
+          </Badge>
+        </div>
+        
+        <RadioGroup 
+          value={effectiveSettings?.font_size || globalSettings?.font_size} 
+          onValueChange={handleFontSizeChange}
+          className="flex gap-6"
+        >
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="small" id="small" />
+            <Label htmlFor="small" className="cursor-pointer text-gray-300">
+              <span className="font-medium text-white text-sm">Small</span>
+            </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="normal" id="normal" />
+            <Label htmlFor="normal" className="cursor-pointer text-gray-300">
+              <span className="font-medium text-white">Normal</span>
+            </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="large" id="large" />
+            <Label htmlFor="large" className="cursor-pointer text-gray-300">
+              <span className="font-medium text-white text-lg">Large</span>
+            </Label>
+          </div>
+        </RadioGroup>
       </Card>
 
       {/* World Info Selection */}
@@ -367,7 +507,7 @@ export const ChatConfigurationTab = ({
         <WorldInfoDropdown 
           isVisible={true}
           onWorldInfoSelect={onWorldInfoSelect}
-          disabled={!tempAddonSettings.dynamicWorldInfo}
+          disabled={!globalSettings.dynamic_world_info}
           selectedWorldInfoId={selectedWorldInfoId}
         />
       </Card>
@@ -379,9 +519,7 @@ export const ChatConfigurationTab = ({
         
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <Label htmlFor="background-upload" className="text-gray-300 text-sm">
-              Custom Background Image
-            </Label>
+            <span className="text-gray-300 text-sm">Background Image</span>
             {backgroundImage && (
               <Button
                 variant="ghost"
@@ -428,102 +566,35 @@ export const ChatConfigurationTab = ({
         </div>
       </Card>
 
-      {/* Character Addons */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white font-medium text-sm">Character Addons</h3>
-          {totalCost > 0 && (
-            <Badge variant="outline" className="border-[#FF7A00] text-[#FF7A00]">
-              +{totalCost}%
-            </Badge>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          {Object.entries(addonCategories).map(([categoryName, addons]) => (
-            <div key={categoryName} className="space-y-3">
-              <h4 className="text-gray-300 font-medium text-sm border-b border-gray-700/30 pb-1">
-                {categoryName}
-              </h4>
-              <div className="grid grid-cols-2 gap-3">
-                {Object.entries(addons).map(([key, details]) => (
-                  <div key={key} className={`flex flex-col p-3 rounded-lg border ${
-                    details.available 
-                      ? 'bg-[#0f0f0f] border-gray-700/30' 
-                      : 'bg-gray-900/50 border-gray-700/20 opacity-60'
-                  }`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className={`font-medium text-sm ${
-                        details.available ? 'text-white' : 'text-gray-500'
-                      }`}>
-                        {details.name}
-                      </span>
-                      <Switch
-                        checked={tempAddonSettings[key as keyof AddonSettings]}
-                        onCheckedChange={() => handleToggleAddon(key as keyof AddonSettings)}
-                        disabled={saving || !details.available}
-                        className="data-[state=checked]:bg-[#FF7A00]"
-                      />
-                    </div>
-                    <p className={`text-xs mb-2 ${
-                      details.available ? 'text-gray-400' : 'text-gray-500'
-                    }`}>
-                      {details.description}
-                    </p>
-                    <div className="flex items-center justify-end">
-                      {details.dynamicCost ? (
-                        <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 h-5">
-                          Dynamic
-                        </Badge>
-                      ) : details.cost > 0 && (
-                        <Badge variant="outline" className="text-xs border-[#FF7A00] text-[#FF7A00] h-5">
-                          +{details.cost}%
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              
-              {/* Limitation notices */}
-              {categoryName === 'Stateful Character Tracking' && isGuestPass && activeStatefulAddons >= 2 && (
-                <div className="mt-2 p-3 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
-                    <p className="text-yellow-400 text-xs font-medium">
-                      Guest Pass Limit Reached
-                    </p>
-                  </div>
-                  <p className="text-yellow-300 text-xs mt-1">
-                    You've activated the maximum number of tracking addons. Upgrade to True Fan or Whale for unlimited access.
-                  </p>
-                </div>
+      {/* Save Button - Fixed Position */}
+      {hasUnsavedChanges && (
+        <div className="fixed bottom-6 right-6 z-50">
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handleDiscardChanges}
+              disabled={saving}
+              className="bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700"
+            >
+              Discard
+            </Button>
+            <Button
+              onClick={handleSaveChanges}
+              disabled={saving || !hasUnsavedChanges}
+              className="bg-[#FF7A00] hover:bg-[#FF8A10] text-white shadow-lg"
+            >
+              {saving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
               )}
-            </div>
-          ))}
-        </div>
-
-        {totalCost > 0 && (
-          <div className="border-t border-gray-700/50 pt-3 mt-4">
-            <div className="flex items-center justify-center space-x-2">
-              <div className="w-1.5 h-1.5 bg-[#FF7A00] rounded-full"></div>
-              <p className="text-gray-400 text-xs text-center">
-                Active addons increase message cost by {totalCost}%
-              </p>
-            </div>
+            </Button>
           </div>
-        )}
-      </Card>
-
-      {/* Save Configuration */}
-      <Button 
-        onClick={handleSaveConfiguration}
-        className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white"
-        disabled={saving || !hasUnsavedChanges}
-      >
-        <Settings className="w-4 h-4 mr-2" />
-        {saving ? 'Saving...' : 'Save Configuration'}
-      </Button>
+        </div>
+      )}
     </div>
   );
 };

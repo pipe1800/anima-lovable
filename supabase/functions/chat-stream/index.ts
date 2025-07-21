@@ -1,12 +1,12 @@
 // Import our modular components
-import { authenticateUser, createCorsResponse, createErrorResponse } from './modules/auth.ts';
+import { authenticateUser, createCorsResponse, createErrorResponse } from '../_shared/auth.ts';
+import { mapGlobalSettingsToAddonSettings } from '../_shared/settings-mapper.ts';
 import { 
   extractInitialContext, 
   extractContextFromResponse, 
   saveContextUpdates 
 } from './modules/context-extractor.ts';
 import { 
-  StreamingOptimizer, 
   createStreamingResponse, 
   processStreamBuffer, 
   parseStreamChunk,
@@ -22,6 +22,7 @@ import {
   fetchCharacterData,
   fetchConversationHistory,
   fetchUserProfile,
+  fetchUserGlobalSettings,
   fetchSelectedPersona,
   fetchCurrentContext,
   getNextMessageOrder,
@@ -107,7 +108,7 @@ Deno.serve(async (req) => {
     // ============================================================================
     console.log('📥 Parsing request body...');
     const requestBody = await req.json();
-    const { chatId, message, characterId, addonSettings, selectedPersonaId } = requestBody;
+    const { chatId, message, characterId, selectedPersonaId } = requestBody;
 
     if (!chatId || !message || !characterId) {
       console.error('❌ Missing required fields:', { chatId: !!chatId, message: !!message, characterId: !!characterId });
@@ -133,6 +134,7 @@ Deno.serve(async (req) => {
       character,
       messageHistory,
       userProfile,
+      globalSettings,
       selectedPersona,
       planAndModel,
       nextUserMessageOrder
@@ -140,12 +142,17 @@ Deno.serve(async (req) => {
       fetchCharacterData(characterId, supabaseAdmin),
       fetchConversationHistory(chatId, supabase),
       fetchUserProfile(user.id, supabase),
+      fetchUserGlobalSettings(user.id, supabaseAdmin),
       fetchSelectedPersona(selectedPersonaId, user.id, supabase),
       getUserPlanAndModel(user.id, supabaseAdmin),
       getNextMessageOrder(chatId, supabase)
     ]);
 
     console.log('Selected model for user tier:', planAndModel.model);
+
+    // Convert global settings to addon settings for backward compatibility
+    const addonSettings = globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : {};
+    console.log('📋 Mapped addon settings from global settings:', addonSettings);
 
     // ============================================================================
     // BILLING & CREDIT MANAGEMENT
@@ -264,9 +271,8 @@ Deno.serve(async (req) => {
     }
 
     // ============================================================================
-    // OPTIMIZED STREAMING RESPONSE
+    // SIMPLIFIED STREAMING RESPONSE
     // ============================================================================
-    const streamingOptimizer = new StreamingOptimizer(startTime);
     const encoder = new TextEncoder();
 
     const readable = new ReadableStream({
@@ -277,6 +283,8 @@ Deno.serve(async (req) => {
 
           let fullResponse = '';
           let buffer = '';
+          let lastUpdate = Date.now();
+          let lastLength = 0;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -295,12 +303,15 @@ Deno.serve(async (req) => {
               const { content, isDone } = parseStreamChunk(line);
 
               if (isDone) {
-                // Save the final message immediately for completion
+                // ✅ SIMPLIFIED: Save final message immediately for instant UI feedback
                 const finalMessage = fullResponse.trim();
-                if (finalMessage) {
-                  console.log('💾 Saving final message immediately...');
+                if (finalMessage && placeholder?.id) {
+                  console.log('💾 Saving final message with immediate real-time trigger...');
 
-                  // Basic context for immediate save
+                  // Update placeholder content first
+                  await updateMessageContent(supabaseAdmin, placeholder.id, finalMessage);
+
+                  // Convert placeholder to real message (this triggers real-time subscription)
                   const basicContext: CurrentContext = {
                     moodTracking: 'No context',
                     clothingInventory: 'No context',
@@ -323,33 +334,31 @@ Deno.serve(async (req) => {
 
                   await updateChatLastActivity(supabase, chatId, characterId);
 
-                  // Background context extraction (non-blocking)
-                  console.log('🔄 Starting background context extraction...');
-                  extractContextFromResponse(
-                    character,
-                    messageHistory,
-                    message,
-                    finalMessage,
-                    addonSettings,
-                    openRouterKey,
-                    (content) => replaceTemplates(content, templateContext),
-                    supabase,
-                    user.id,
-                    chatId,
-                    characterId
-                  )
-                    .then(extractedContext => {
-                      if (extractedContext && addonSettings) {
-                        console.log('💾 Updating context with extracted data...');
-                        return saveContextUpdates(extractedContext, addonSettings, user.id, chatId, characterId, supabaseAdmin);
-                      }
-                    })
-                    .then(() => {
-                      console.log('✅ Background context processing completed');
-                    })
-                    .catch(error => {
-                      console.error('❌ Background context extraction failed:', error);
-                    });
+                  // ✅ SIMPLIFIED: Background context extraction (non-blocking)
+                  // This won't affect the immediate UI response
+                  if (addonSettings && Object.values(addonSettings).some(Boolean)) {
+                    extractContextFromResponse(
+                      character,
+                      messageHistory,
+                      message,
+                      finalMessage,
+                      addonSettings,
+                      openRouterKey,
+                      (content) => replaceTemplates(content, templateContext),
+                      supabase,
+                      user.id,
+                      chatId,
+                      characterId
+                    )
+                      .then(extractedContext => {
+                        if (extractedContext && addonSettings) {
+                          return saveContextUpdates(extractedContext, addonSettings, user.id, chatId, characterId, supabaseAdmin);
+                        }
+                      })
+                      .catch(error => {
+                        console.error('❌ Background context extraction failed:', error);
+                      });
+                  }
                 }
 
                 // Send completion signal
@@ -361,10 +370,15 @@ Deno.serve(async (req) => {
               if (content) {
                 fullResponse += content;
 
-                // Optimized database updates
-                const update = streamingOptimizer.processStreamChunk(content, fullResponse);
-                if (update.shouldUpdateDatabase) {
+                // ✅ SIMPLIFIED: Less frequent database updates during streaming
+                // Only update every 2 seconds or 200 characters to reduce I/O
+                const now = Date.now();
+                const shouldUpdate = (now - lastUpdate > 2000) || (fullResponse.length - lastLength > 200);
+                
+                if (shouldUpdate && placeholder?.id) {
                   await updateMessageContent(supabaseAdmin, placeholder.id, fullResponse);
+                  lastUpdate = now;
+                  lastLength = fullResponse.length;
                 }
 
                 // Always forward chunks to frontend for real-time display
@@ -397,7 +411,6 @@ Deno.serve(async (req) => {
 
     const endTime = Date.now();
     console.log(`⚡ Streaming initiated in ${endTime - startTime}ms`);
-    console.log('📊 Performance metrics:', streamingOptimizer.getPerformanceMetrics());
 
     return createStreamingResponse(readable);
 

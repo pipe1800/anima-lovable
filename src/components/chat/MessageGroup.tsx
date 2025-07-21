@@ -1,3 +1,4 @@
+import React, { memo } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatMessageTime } from "@/utils/messageGrouping";
 import { ContextDisplay } from "./ContextDisplay";
@@ -27,17 +28,9 @@ interface MessageGroupProps {
   };
 }
 
-export function MessageGroup({ group, character, trackedContext, addonSettings }: MessageGroupProps) {
+// ✅ PHASE 3: Memoized component to prevent unnecessary re-renders
+export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
-
-  // Debug streaming message updates
-  const streamingMessage = messages.find(m => m.id === 'streaming-temp');
-  if (streamingMessage) {
-    console.log('🎭 MessageGroup rendering streaming message:', {
-      contentLength: streamingMessage.content.length,
-      preview: streamingMessage.content.substring(0, 30) + '...'
-    });
-  }
 
   return (
     <div className="mb-6">
@@ -81,14 +74,10 @@ export function MessageGroup({ group, character, trackedContext, addonSettings }
               }`}
             >
               <FormattedMessage 
-                key={message.id === 'streaming-temp' ? `content-${message.content.length}` : undefined}
                 content={message.content}
                 className="whitespace-pre-wrap"
               />
-              {/* Show streaming indicator for temporary streaming messages */}
-              {message.id === 'streaming-temp' && (
-                <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-1 align-middle"></span>
-              )}
+              {/* Removed streaming indicator - no longer needed with simplified approach */}
             </div>
           ))}
         </div>
@@ -131,4 +120,4 @@ export function MessageGroup({ group, character, trackedContext, addonSettings }
       )}
     </div>
   );
-}
+}); // ✅ PHASE 3: Close memo function properly
