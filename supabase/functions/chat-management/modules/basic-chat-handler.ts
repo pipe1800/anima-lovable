@@ -1,4 +1,5 @@
 import type { CreateBasicChatRequest, ChatResponse } from '../types/index.ts';
+import { getBestPersonaForNewChat } from './database.ts';
 
 export async function handleCreateBasicChat(
   request: CreateBasicChatRequest,
@@ -6,7 +7,7 @@ export async function handleCreateBasicChat(
   supabase: any
 ): Promise<ChatResponse> {
   try {
-    const { charactersData } = request;
+    const { charactersData, selectedPersonaId } = request;
     
     if (!charactersData || charactersData.length === 0) {
       throw new Error('No character data provided');
@@ -16,22 +17,29 @@ export async function handleCreateBasicChat(
     const character_id = character.id;
     const character_name = character.name;
 
-    console.log('Creating basic chat for user:', user.id, 'character:', character_id);
+    console.log('Creating basic chat for user:', user.id, 'character:', character_id, 'persona:', selectedPersonaId);
+
+    // If no persona ID provided, get the best persona for this user/character combo
+    const effectivePersonaId = selectedPersonaId || await getBestPersonaForNewChat(user.id, character_id, supabase);
+    console.log('Effective persona ID:', effectivePersonaId);
 
     // Fast operations only - parallel where possible
-    const [userProfileResult, characterDetailsResult, defaultPersonaResult] = await Promise.allSettled([
+    const [userProfileResult, characterDetailsResult, selectedPersonaResult] = await Promise.allSettled([
       supabase.from('profiles').select('username').eq('id', user.id).single(),
       supabase.from('characters').select(`
         *,
         character_definitions (*)
       `).eq('id', character_id).single(),
-      supabase.from('personas').select('name').eq('user_id', user.id).limit(1).single()
+      // Fetch the effective persona (last used or first created)
+      effectivePersonaId ? 
+        supabase.from('personas').select('name, bio, lore').eq('id', effectivePersonaId).eq('user_id', user.id).single() :
+        Promise.resolve({ status: 'fulfilled', value: { data: null } })
     ]);
 
     // Extract results
     const userProfile = userProfileResult.status === 'fulfilled' ? userProfileResult.value.data : null;
     let characterDetails = characterDetailsResult.status === 'fulfilled' ? characterDetailsResult.value.data : null;
-    const defaultPersona = defaultPersonaResult.status === 'fulfilled' ? defaultPersonaResult.value.data : null;
+    const selectedPersona = selectedPersonaResult.status === 'fulfilled' ? selectedPersonaResult.value.data : null;
 
     // Fallback: Try character_definitions if not found in characters
     if (!characterDetails) {
@@ -62,6 +70,7 @@ export async function handleCreateBasicChat(
         user_id: user.id,
         character_id: character_id,
         title: `Chat with ${character_name}`,
+        selected_persona_id: effectivePersonaId,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         last_message_at: new Date().toISOString()
@@ -80,7 +89,7 @@ export async function handleCreateBasicChat(
     const replaceTemplates = (content: string): string => {
       if (!content) return content;
       
-      const userName = defaultPersona?.name || userProfile?.username || 'User';
+      const userName = selectedPersona?.name || userProfile?.username || 'User';
       const charName = character_name || 'Character';
       
       return content

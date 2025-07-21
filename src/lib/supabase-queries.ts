@@ -657,7 +657,7 @@ export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder:
   return { data: messagesWithContext, error: null };
 }
 
-// NOTE: Message creation is now handled by edge functions (chat-management, chat-stream)
+// NOTE: Message creation is now handled by the unified chat-management edge function
 // Direct database message creation has been replaced with proper edge function calls
 
 /**

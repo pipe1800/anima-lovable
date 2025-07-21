@@ -6,10 +6,26 @@
  */
 
 import type { 
-  CharacterData, 
-  UserPersona, 
-  UserProfile 
-} from '../types/interfaces.ts';
+  Character
+} from '../types/streaming-interfaces.ts';
+
+// Define missing types locally
+interface CharacterData extends Character {
+  world_info?: any[];
+  context_settings?: any;
+}
+
+interface UserPersona {
+  id: string;
+  name?: string;
+  bio?: string;
+  lore?: string;
+}
+
+interface UserProfile {
+  id: string;
+  username?: string;
+}
 
 /**
  * Fetch comprehensive character data with fallback logic

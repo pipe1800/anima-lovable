@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, ChevronDown, Plus, Upload, Image, X, Zap, Type } from 'lucide-react';
+import { Settings, ChevronDown, Plus, Upload, Image, X, Zap, Type, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,8 @@ import { toast } from 'sonner';
 import { Persona } from '@/lib/persona-operations';
 import { useQueryClient } from '@tanstack/react-query';
 import { UserGlobalChatSettings } from '@/types/chatSettings';
+import { updateChatSelectedPersona } from '@/lib/chat-persona-operations';
+import { updateUserDefaultPersona } from '@/lib/character-persona-operations';
 
 interface ChatConfigurationTabProps {
   characterId: string;
@@ -23,7 +25,10 @@ interface ChatConfigurationTabProps {
   personas: Persona[];
   selectedPersona: Persona | null;
   setSelectedPersona: (persona: Persona | null) => void;
+  onPersonaSaved?: () => void; // Callback to notify parent that persona was saved
   setShowPersonaModal: (show: boolean) => void;
+  setShowEditPersonaModal?: (show: boolean) => void;
+  setPersonaToEdit?: (persona: Persona | null) => void;
   worldInfoDropdownVisible: boolean;
   onWorldInfoSelect: (worldInfo: any) => void;
   currentChatId?: string;
@@ -37,10 +42,13 @@ export const ChatConfigurationTab = ({
   selectedPersona,
   setSelectedPersona,
   setShowPersonaModal,
+  setShowEditPersonaModal,
+  setPersonaToEdit,
   worldInfoDropdownVisible,
   onWorldInfoSelect,
   currentChatId,
-  selectedWorldInfoId
+  selectedWorldInfoId,
+  onPersonaSaved
 }: ChatConfigurationTabProps) => {
   const { subscription } = useAuth();
   const queryClient = useQueryClient();
@@ -54,10 +62,17 @@ export const ChatConfigurationTab = ({
   
   // Track pending changes
   const [pendingChanges, setPendingChanges] = useState<Partial<UserGlobalChatSettings>>({});
+  const [pendingPersonaId, setPendingPersonaId] = useState<string | null>(null);
+  const [hasPersonaChange, setHasPersonaChange] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Current effective settings (merging global settings with pending changes)
   const effectiveSettings = globalSettings ? { ...globalSettings, ...pendingChanges } : null;
+  
+  // Display persona shows pending selection or current selection
+  const displayPersona = hasPersonaChange
+    ? personas.find(p => p.id === pendingPersonaId) || null
+    : selectedPersona;
 
   // Determine user's subscription tier
   const userPlan = subscription?.plan?.name || 'Guest Pass';
@@ -202,15 +217,53 @@ export const ChatConfigurationTab = ({
     setHasUnsavedChanges(true);
   };
 
+  const handlePersonaChange = (personaId: string | null) => {
+    setPendingPersonaId(personaId);
+    setHasPersonaChange(true);
+    setHasUnsavedChanges(true);
+  };
+
   // Save all pending changes
   const handleSaveChanges = async () => {
-    if (!hasUnsavedChanges || Object.keys(pendingChanges).length === 0) return;
+    if (!hasUnsavedChanges || (Object.keys(pendingChanges).length === 0 && !hasPersonaChange)) return;
     
     try {
       setSaving(true);
-      await updateGlobalSettings.mutateAsync(pendingChanges);
+      
+      // Save global settings if there are any changes
+      if (Object.keys(pendingChanges).length > 0) {
+        await updateGlobalSettings.mutateAsync(pendingChanges);
+      }
+      
+      // Apply persona change if there is one
+      if (hasPersonaChange) {
+        console.log('💾 Persona change detected. Current chat ID:', currentChatId);
+        if (currentChatId) {
+          console.log('💾 Saving persona change:', pendingPersonaId);
+          
+          // Save persona to database for this chat (can be null to clear persona)
+          await updateChatSelectedPersona(currentChatId, pendingPersonaId);
+          
+          // Also update the user's default persona for future chats
+          await updateUserDefaultPersona(userId, pendingPersonaId);
+          
+          // Update local state immediately to prevent flicker
+          const newPersona = pendingPersonaId 
+            ? personas.find(p => p.id === pendingPersonaId) || null 
+            : null;
+          setSelectedPersona(newPersona);
+          
+          // Notify parent to reload persona data (but local state is already updated)
+          if (onPersonaSaved) {
+            onPersonaSaved();
+          }
+        }
+      }
+      
       toast.success('Settings saved successfully');
       setPendingChanges({});
+      setPendingPersonaId(null);
+      setHasPersonaChange(false);
       setHasUnsavedChanges(false);
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -223,6 +276,8 @@ export const ChatConfigurationTab = ({
   // Discard pending changes
   const handleDiscardChanges = () => {
     setPendingChanges({});
+    setPendingPersonaId(null);
+    setHasPersonaChange(false);
     setHasUnsavedChanges(false);
     toast.info('Changes discarded');
   };
@@ -288,29 +343,48 @@ export const ChatConfigurationTab = ({
           </Badge>
         </div>
         
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button 
-              variant="ghost" 
-              className="w-full justify-between text-gray-400 hover:text-white hover:bg-gray-800 px-3 border border-gray-600/50"
-            >
-              <div className="flex items-center space-x-2">
-                <Avatar className="w-6 h-6">
-                  <AvatarImage src={selectedPersona?.avatar_url || undefined} alt={selectedPersona?.name} />
-                  <AvatarFallback className="bg-[#FF7A00] text-white text-xs">
-                    {selectedPersona?.name?.split(' ').map(n => n[0]).join('') || 'P'}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="text-sm">{selectedPersona?.name || 'Select Persona'}</span>
-              </div>
-              <ChevronDown className="w-4 h-4" />
-            </Button>
-          </DropdownMenuTrigger>
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost" 
+                className="flex-1 justify-between text-gray-400 hover:text-white hover:bg-gray-800 px-3 border border-gray-600/50"
+              >
+                <div className="flex items-center space-x-2">
+                  <Avatar className="w-6 h-6">
+                    <AvatarImage src={displayPersona?.avatar_url || undefined} alt={displayPersona?.name} />
+                    <AvatarFallback className="bg-[#FF7A00] text-white text-xs">
+                      {displayPersona?.name?.split(' ').map(n => n[0]).join('') || '-'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm">{displayPersona?.name || 'No Persona'}</span>
+                </div>
+                <ChevronDown className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64 bg-[#1a1a2e] border-gray-700/50 z-50">
+            <DropdownMenuItem
+              onClick={() => handlePersonaChange(null)}
+              className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer"
+            >
+              <Avatar className="w-8 h-8">
+                <AvatarFallback className="bg-gray-600 text-white text-xs">
+                  -
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <div className="text-white font-medium">No Persona</div>
+                <div className="text-gray-400 text-sm">Use default user context</div>
+              </div>
+              {!displayPersona && (
+                <div className="w-2 h-2 bg-[#FF7A00] rounded-full" />
+              )}
+            </DropdownMenuItem>
+            {personas.length > 0 && <DropdownMenuSeparator className="bg-gray-700/50" />}
             {personas.map((persona) => (
               <DropdownMenuItem
                 key={persona.id}
-                onClick={() => setSelectedPersona(persona)}
+                onClick={() => handlePersonaChange(persona.id)}
                 className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer"
               >
                 <Avatar className="w-8 h-8">
@@ -325,7 +399,7 @@ export const ChatConfigurationTab = ({
                     <div className="text-gray-400 text-sm truncate">{persona.bio}</div>
                   )}
                 </div>
-                {selectedPersona?.id === persona.id && (
+                {displayPersona?.id === persona.id && (
                   <div className="w-2 h-2 bg-[#FF7A00] rounded-full" />
                 )}
               </DropdownMenuItem>
@@ -340,6 +414,25 @@ export const ChatConfigurationTab = ({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        
+        {/* Edit Persona Button */}
+        {displayPersona && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => {
+              if (setPersonaToEdit && setShowEditPersonaModal) {
+                setPersonaToEdit(displayPersona);
+                setShowEditPersonaModal(true);
+              }
+            }}
+            className="text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-600/50"
+            title="Edit Persona"
+          >
+            <Edit className="w-4 h-4" />
+          </Button>
+        )}
+      </div>
       </Card>
 
       {/* Global Addon Settings */}

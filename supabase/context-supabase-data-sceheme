@@ -53,10 +53,8 @@ CREATE TABLE public.characters (
   interaction_count integer NOT NULL DEFAULT 0,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  default_persona_id uuid,
   CONSTRAINT characters_pkey PRIMARY KEY (id),
-  CONSTRAINT characters_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES auth.users(id),
-  CONSTRAINT fk_characters_default_persona FOREIGN KEY (default_persona_id) REFERENCES public.personas(id)
+  CONSTRAINT characters_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.chats (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -66,9 +64,11 @@ CREATE TABLE public.chats (
   last_message_at timestamp with time zone,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  selected_persona_id uuid,
   CONSTRAINT chats_pkey PRIMARY KEY (id),
   CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
+  CONSTRAINT chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
+  CONSTRAINT fk_chats_selected_persona FOREIGN KEY (selected_persona_id) REFERENCES public.personas(id)
 );
 CREATE TABLE public.credit_pack_purchases (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -178,8 +178,10 @@ CREATE TABLE public.profiles (
   onboarding_survey_data jsonb,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  default_persona_id uuid,
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
-  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
+  CONSTRAINT fk_profiles_default_persona FOREIGN KEY (default_persona_id) REFERENCES public.personas(id)
 );
 CREATE TABLE public.public_app_settings (
   setting_key text NOT NULL,

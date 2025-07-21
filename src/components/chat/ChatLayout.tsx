@@ -19,6 +19,8 @@ import { toast } from 'sonner';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { ChatConfigurationTab } from './ChatConfigurationTab';
 import type { TrackedContext, Character } from '@/types/chat';
+import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
+import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 
 interface ChatLayoutProps {
   character: Character;
@@ -26,9 +28,10 @@ interface ChatLayoutProps {
   currentChatId?: string;
   trackedContext?: TrackedContext;
   onContextUpdate?: (context: TrackedContext) => void;
+  onPersonaChange?: (personaId: string | null) => void;
 }
 
-export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate }: ChatLayoutProps) => {
+export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange }: ChatLayoutProps) => {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'history' | 'details' | 'config'>('details');
   const [chatHistory, setChatHistory] = useState<any[]>([]);
@@ -44,6 +47,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   const [showPersonaModal, setShowPersonaModal] = useState(false);
+  const [showEditPersonaModal, setShowEditPersonaModal] = useState(false);
+  const [personaToEdit, setPersonaToEdit] = useState<Persona | null>(null);
   const [currentPersona, setCurrentPersona] = useState({
     name: '',
     bio: '',
@@ -73,8 +78,31 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           // Load user personas
           const userPersonas = await getUserPersonas();
           setPersonas(userPersonas);
-          if (userPersonas.length > 0) {
-            setSelectedPersona(userPersonas[0]);
+          
+          // Load selected persona for current chat (if currentChatId exists)
+          if (currentChatId) {
+            try {
+              const chatPersonaData = await getChatSelectedPersona(currentChatId);
+              if (chatPersonaData.personas) {
+                setSelectedPersona(chatPersonaData.personas as Persona);
+              } else {
+                // No persona explicitly set for this chat, use best persona
+                const bestPersonaId = await getBestPersonaForNewChat(user.id);
+                const bestPersona = bestPersonaId ? userPersonas.find(p => p.id === bestPersonaId) : null;
+                setSelectedPersona(bestPersona || null);
+              }
+            } catch (error) {
+              console.error('Error loading chat persona:', error);
+              // Error loading, use best persona
+              const bestPersonaId = await getBestPersonaForNewChat(user.id);
+              const bestPersona = bestPersonaId ? userPersonas.find(p => p.id === bestPersonaId) : null;
+              setSelectedPersona(bestPersona || null);
+            }
+          } else {
+            // No chat ID, use best persona for new chat
+            const bestPersonaId = await getBestPersonaForNewChat(user.id);
+            const bestPersona = bestPersonaId ? userPersonas.find(p => p.id === bestPersonaId) : null;
+            setSelectedPersona(bestPersona || null);
           }
           
           // Check if character is liked
@@ -120,6 +148,33 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
     loadData();
   }, [character.id]);
+
+  // Notify parent when persona changes
+  useEffect(() => {
+    if (onPersonaChange) {
+      console.log('🎭 ChatLayout: Notifying parent of persona change:', selectedPersona?.id);
+      onPersonaChange(selectedPersona?.id || null);
+    }
+  }, [selectedPersona, onPersonaChange]);
+
+  // Reload persona data for current chat
+  const handlePersonaSaved = async () => {
+    if (!currentChatId || !currentUser) return;
+    
+    console.log('🔄 Reloading persona data after save for chat:', currentChatId);
+    try {
+      const chatPersonaData = await getChatSelectedPersona(currentChatId);
+      if (chatPersonaData.personas) {
+        console.log('💾 Loaded persona from DB:', chatPersonaData.personas.name);
+        setSelectedPersona(chatPersonaData.personas as Persona);
+      } else {
+        console.log('💾 No persona found in DB, setting to null');
+        setSelectedPersona(null);
+      }
+    } catch (error) {
+      console.error('Error reloading persona after save:', error);
+    }
+  };
 
   const handleEditCharacter = () => {
     navigate(`/character-creator?edit=${character.id}`);
@@ -336,7 +391,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           charactersData: [{
             id: character.id,
             name: character.name
-          }]
+          }],
+          selectedPersonaId: selectedPersona?.id || null
         }
       });
       
@@ -670,10 +726,13 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                   selectedPersona={selectedPersona}
                   setSelectedPersona={setSelectedPersona}
                   setShowPersonaModal={setShowPersonaModal}
+                  setShowEditPersonaModal={setShowEditPersonaModal}
+                  setPersonaToEdit={setPersonaToEdit}
                   worldInfoDropdownVisible={worldInfoDropdownVisible}
                   onWorldInfoSelect={handleWorldInfoSelect}
                   currentChatId={currentChatId}
                   selectedWorldInfoId={selectedWorldInfoId}
+                  onPersonaSaved={handlePersonaSaved}
                 />
               )}
             </div>
@@ -795,6 +854,170 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               >
                 <Plus className="w-4 h-4 mr-2" />
                 {isCreatingPersona ? 'Creating...' : 'Create Persona'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Persona Modal */}
+      <Dialog open={showEditPersonaModal} onOpenChange={setShowEditPersonaModal}>
+        <DialogContent className="bg-[#1a1a2e] border-gray-700/50 text-white max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-white">Edit Persona</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+              <p className="text-blue-200 text-sm text-center">
+                Edit your persona details. Changes will apply to future conversations.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Avatar Upload */}
+              <div className="text-center">
+                <label className="block text-sm font-medium text-gray-300 mb-3">
+                  Persona Avatar
+                </label>
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    id="edit-persona-avatar"
+                    disabled={isCreatingPersona}
+                  />
+                  <label 
+                    htmlFor="edit-persona-avatar"
+                    className="cursor-pointer inline-block"
+                  >
+                    <Avatar className="w-20 h-20 mx-auto">
+                      <AvatarImage 
+                        src={personaToEdit?.avatar_url || undefined} 
+                        alt="Persona" 
+                      />
+                      <AvatarFallback className="bg-[#FF7A00] text-white text-lg">
+                        {personaToEdit?.name?.split(' ').map(n => n[0]).join('') || 'P'}
+                      </AvatarFallback>
+                    </Avatar>
+                  </label>
+                  <div className="mt-2 text-xs text-gray-400">
+                    Click to upload avatar
+                  </div>
+                </div>
+              </div>
+
+              {/* Form Fields */}
+              <div className="space-y-4">
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Name
+                  </label>
+                  <Input
+                    placeholder="Enter persona name..."
+                    value={personaToEdit?.name || ''}
+                    onChange={(e) => setPersonaToEdit(prev => prev ? { ...prev, name: e.target.value } : null)}
+                    maxLength={50}
+                    className="bg-[#121212] border-gray-600 text-white placeholder:text-gray-500 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20"
+                    disabled={isCreatingPersona}
+                  />
+                </div>
+
+                {/* Bio */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Bio
+                  </label>
+                  <Textarea
+                    placeholder="Brief description of this persona..."
+                    value={personaToEdit?.bio || ''}
+                    onChange={(e) => setPersonaToEdit(prev => prev ? { ...prev, bio: e.target.value } : null)}
+                    maxLength={200}
+                    className="bg-[#121212] border-gray-600 text-white placeholder:text-gray-500 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20 resize-none"
+                    rows={3}
+                    disabled={isCreatingPersona}
+                  />
+                  <p className="text-xs text-gray-500 mt-1 text-right">
+                    {(personaToEdit?.bio || '').length}/200 characters
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Background & Lore */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Background & Lore
+              </label>
+              <Textarea
+                placeholder="Detailed background, personality traits, history..."
+                value={personaToEdit?.lore || ''}
+                onChange={(e) => setPersonaToEdit(prev => prev ? { ...prev, lore: e.target.value } : null)}
+                maxLength={500}
+                className="bg-[#121212] border-gray-600 text-white placeholder:text-gray-500 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20 resize-none"
+                rows={4}
+                disabled={isCreatingPersona}
+              />
+              <p className="text-xs text-gray-500 mt-1 text-right">
+                {(personaToEdit?.lore || '').length}/500 characters
+              </p>
+            </div>
+
+            <div className="flex space-x-3">
+              <Button
+                onClick={() => {
+                  setShowEditPersonaModal(false);
+                  setPersonaToEdit(null);
+                }}
+                variant="outline"
+                className="flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-gray-300"
+                disabled={isCreatingPersona}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!personaToEdit?.name.trim()) return;
+                  
+                  try {
+                    setIsCreatingPersona(true);
+                    const { updatePersona } = await import('@/lib/persona-operations');
+                    
+                    const updatedPersona = await updatePersona(personaToEdit.id, {
+                      name: personaToEdit.name,
+                      bio: personaToEdit.bio,
+                      lore: personaToEdit.lore,
+                    });
+
+                    // Update local state
+                    setPersonas(prev => prev.map(p => p.id === updatedPersona.id ? updatedPersona : p));
+                    if (selectedPersona?.id === updatedPersona.id) {
+                      setSelectedPersona(updatedPersona);
+                    }
+
+                    setShowEditPersonaModal(false);
+                    setPersonaToEdit(null);
+                    toast.success('Persona updated successfully!');
+                  } catch (error) {
+                    console.error('Error updating persona:', error);
+                    toast.error('Failed to update persona');
+                  } finally {
+                    setIsCreatingPersona(false);
+                  }
+                }}
+                className="flex-1 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-bold"
+                disabled={isCreatingPersona || !personaToEdit?.name.trim()}
+              >
+                {isCreatingPersona ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                    Updating...
+                  </>
+                ) : (
+                  'Update Persona'
+                )}
               </Button>
             </div>
           </div>

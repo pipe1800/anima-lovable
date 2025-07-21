@@ -178,7 +178,6 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           creator_id: string
-          default_persona_id: string | null
           id: string
           interaction_count: number
           name: string
@@ -190,7 +189,6 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           creator_id: string
-          default_persona_id?: string | null
           id?: string
           interaction_count?: number
           name: string
@@ -202,7 +200,6 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           creator_id?: string
-          default_persona_id?: string | null
           id?: string
           interaction_count?: number
           name?: string
@@ -226,6 +223,7 @@ export type Database = {
           created_at: string
           id: string
           last_message_at: string | null
+          selected_persona_id: string | null
           title: string | null
           updated_at: string
           user_id: string
@@ -235,6 +233,7 @@ export type Database = {
           created_at?: string
           id?: string
           last_message_at?: string | null
+          selected_persona_id?: string | null
           title?: string | null
           updated_at?: string
           user_id: string
@@ -244,6 +243,7 @@ export type Database = {
           created_at?: string
           id?: string
           last_message_at?: string | null
+          selected_persona_id?: string | null
           title?: string | null
           updated_at?: string
           user_id?: string
@@ -254,6 +254,13 @@ export type Database = {
             columns: ["character_id"]
             isOneToOne: false
             referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_chats_selected_persona"
+            columns: ["selected_persona_id"]
+            isOneToOne: false
+            referencedRelation: "personas"
             referencedColumns: ["id"]
           },
         ]
@@ -566,6 +573,7 @@ export type Database = {
           avatar_url: string | null
           bio: string | null
           created_at: string
+          default_persona_id: string | null
           id: string
           onboarding_completed: boolean
           onboarding_survey_data: Json | null
@@ -576,6 +584,7 @@ export type Database = {
           avatar_url?: string | null
           bio?: string | null
           created_at?: string
+          default_persona_id?: string | null
           id: string
           onboarding_completed?: boolean
           onboarding_survey_data?: Json | null
@@ -586,6 +595,7 @@ export type Database = {
           avatar_url?: string | null
           bio?: string | null
           created_at?: string
+          default_persona_id?: string | null
           id?: string
           onboarding_completed?: boolean
           onboarding_survey_data?: Json | null

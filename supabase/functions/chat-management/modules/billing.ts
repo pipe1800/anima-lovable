@@ -1,4 +1,4 @@
-import type { AddonSettings, CreditInfo, PlanInfo, SupabaseClient } from '../types/interfaces.ts';
+import type { AddonSettings, CreditInfo, PlanInfo, SupabaseClient } from '../types/streaming-interfaces.ts';
 
 /**
  * Credit calculation and billing utilities

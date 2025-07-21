@@ -18,6 +18,7 @@ const Chat = () => {
   const [characterData, setCharacterData] = useState<any>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [trackedContext, setTrackedContext] = useState<TrackedContext>({
     moodTracking: 'No context',
     clothingInventory: 'No context',
@@ -130,38 +131,23 @@ const Chat = () => {
     fetchCharacter();
   }, [user, loading, characterId, selectedCharacter, navigate, existingChatId, chatId, currentChatId]);
 
-  const handleFirstMessage = async () => {
-    if (isFirstMessage && !onboardingCompleted) {
-      setIsFirstMessage(false);
-      
-      // Mark onboarding as completed in user metadata
-      if (user) {
-        try {
-          const { error } = await supabase.auth.updateUser({
-            data: { 
-              onboarding_completed: true
-            }
-          });
-          
-          if (error) {
-            console.error('Error updating user metadata:', error);
-          } else {
-            console.log('Onboarding marked as completed in handleFirstMessage');
-            setOnboardingCompleted(true);
-            
-            // Set localStorage flag for tutorial trigger
-            localStorage.setItem('justCompletedOnboarding', 'true');
-            
-            // Hide onboarding after completion animation
-            setTimeout(() => {
-              setShowOnboarding(false);
-            }, 3000);
-          }
-        } catch (error) {
-          console.error('Error completing onboarding:', error);
-        }
-      }
+    const handleFirstMessage = () => {
+    setIsFirstMessage(false);
+    setOnboardingCompleted(true);
+    
+    if (showOnboarding) {
+      setTimeout(() => setShowOnboarding(false), 3000);
     }
+  };
+
+  const handlePersonaChange = (personaId: string | null) => {
+    console.log('🎭 Chat page: Persona changed to:', personaId);
+    setSelectedPersonaId(personaId);
+  };
+
+  const handleChatCreated = (chatId: string) => {
+    console.log('💬 Chat page: New chat created with ID:', chatId);
+    setCurrentChatId(chatId);
   };
 
   if (loading) {
@@ -232,6 +218,7 @@ const Chat = () => {
           currentChatId={currentChatId}
           trackedContext={trackedContext}
           onContextUpdate={setTrackedContext}
+          onPersonaChange={handlePersonaChange}
         >
           <ChatInterface
             character={character}
@@ -239,6 +226,8 @@ const Chat = () => {
             existingChatId={currentChatId}
             trackedContext={trackedContext}
             onContextUpdate={setTrackedContext}
+            selectedPersonaId={selectedPersonaId}
+            onChatCreated={handleChatCreated}
           />
         </ChatLayout>
 

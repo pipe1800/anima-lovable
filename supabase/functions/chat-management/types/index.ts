@@ -1,4 +1,4 @@
-export type ChatOperation = 'create-basic' | 'create-with-greeting' | 'extract-context';
+export type ChatOperation = 'create-basic' | 'create-with-greeting' | 'extract-context' | 'send-message';
 
 export interface BaseChatRequest {
   operation: ChatOperation;
@@ -29,11 +29,13 @@ export interface BaseChatRequest {
 
 export interface CreateBasicChatRequest extends BaseChatRequest {
   operation: 'create-basic';
+  selectedPersonaId?: string | null;
 }
 
 export interface CreateWithGreetingRequest extends BaseChatRequest {
   operation: 'create-with-greeting';
   greeting?: string;
+  selectedPersonaId?: string | null;
 }
 
 export interface ExtractContextRequest {
@@ -58,7 +60,16 @@ export interface ExtractContextRequest {
   }>;
 }
 
-export type ChatManagementRequest = CreateBasicChatRequest | CreateWithGreetingRequest | ExtractContextRequest;
+export interface SendMessageRequest {
+  operation: 'send-message';
+  chatId: string;
+  message: string;
+  characterId: string;
+  selectedPersonaId?: string | null;
+  addonSettings?: any;
+}
+
+export type ChatManagementRequest = CreateBasicChatRequest | CreateWithGreetingRequest | ExtractContextRequest | SendMessageRequest;
 
 export interface ChatResponse {
   success: boolean;

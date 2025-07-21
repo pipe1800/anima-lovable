@@ -1,32 +1,24 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
-import { Send, Wand2, Zap, Database } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { InsufficientCreditsModal } from './InsufficientCreditsModal';
 import ChatMessages from './ChatMessages';
 import { useAuth } from '@/contexts/AuthContext';
-import { useChatUnified } from '@/hooks/useChatUnified'; // ✅ PHASE 2: Single unified hook
+import { useChatUnified } from '@/hooks/useChatUnified';
 import { useChatPerformance } from '@/hooks/useChatPerformance';
 import type { TrackedContext } from '@/types/chat';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { supabase } from '@/integrations/supabase/client';
+import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import { useQueryClient } from '@tanstack/react-query';
 
-// ============================================================================
-// PHASE 3: LAZY LOADED COMPONENTS - Performance Optimization
-// ============================================================================
-
-// Debug components - Only load in development or when needed
-const PerformanceMonitor = lazy(() => import('./PerformanceMonitor'));
+// Debug components - Only load when needed
 const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
   default: module.AddonDebugPanel
 })));
-const DatabaseBatchOperations = lazy(() => import('./DatabaseBatchOperations').then(module => ({
-  default: module.DatabaseBatchOperations
-})));
 
-// Loading fallback for heavy components
+// Loading fallback for debug components
 const LoadingSpinner = () => (
   <div className="flex items-center justify-center p-4">
     <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
@@ -47,6 +39,8 @@ interface ChatInterfaceProps {
   existingChatId?: string;
   trackedContext?: TrackedContext;
   onContextUpdate?: (context: TrackedContext) => void;
+  selectedPersonaId?: string | null;
+  onChatCreated?: (chatId: string) => void; // New callback for when chat is created
 }
 
 const ChatInterface = ({
@@ -54,15 +48,15 @@ const ChatInterface = ({
   onFirstMessage,
   existingChatId,
   trackedContext: parentTrackedContext,
-  onContextUpdate
+  onContextUpdate,
+  selectedPersonaId: propSelectedPersonaId,
+  onChatCreated
 }: ChatInterfaceProps) => {
   const [inputValue, setInputValue] = useState('');
   const [isFirstMessage, setIsFirstMessage] = useState(true);
   const [currentChatId, setCurrentChatId] = useState<string | null>(existingChatId || null);
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(propSelectedPersonaId || null);
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
-  const [showPerformanceMonitor, setShowPerformanceMonitor] = useState(false);
-  const [showDatabaseOps, setShowDatabaseOps] = useState(false);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -80,7 +74,8 @@ const ChatInterface = ({
               charactersData: [{
                 id: character.id,
                 name: character.name
-              }]
+              }],
+              selectedPersonaId: propSelectedPersonaId
             }
           });
           
@@ -88,6 +83,8 @@ const ChatInterface = ({
           
           if (data?.success && data?.chat_id) {
             setCurrentChatId(data.chat_id);
+            // Notify parent component about the new chat ID
+            onChatCreated?.(data.chat_id);
             // Update URL
             window.history.replaceState(
               null, 
@@ -213,23 +210,26 @@ const ChatInterface = ({
     }
   }, []);
 
-  // Fetch user's default persona for template replacement
+  // Sync selected persona when prop changes
   useEffect(() => {
-    if (!user) return;
+    if (propSelectedPersonaId !== undefined) {
+      console.log('🔄 ChatInterface: Persona prop changed to:', propSelectedPersonaId);
+      setSelectedPersonaId(propSelectedPersonaId);
+    }
+  }, [propSelectedPersonaId]);
+
+  // Fetch user's best persona for template replacement (only if no persona prop provided)
+  useEffect(() => {
+    if (!user || propSelectedPersonaId !== undefined) return;
     
-    const fetchUserPersona = async () => {
-      const { data: personas } = await supabase
-        .from('personas')
-        .select('id, name')
-        .eq('user_id', user.id)
-        .limit(1);
-      
-      if (personas && personas.length > 0) {
-        setSelectedPersonaId(personas[0].id);
+    const fetchBestPersona = async () => {
+      const bestPersonaId = await getBestPersonaForNewChat(user.id);
+      if (bestPersonaId) {
+        setSelectedPersonaId(bestPersonaId);
       }
     };
     
-    fetchUserPersona();
+    fetchBestPersona();
   }, [user]);
 
   // Memoize send handler
@@ -401,28 +401,6 @@ const ChatInterface = ({
           </button>
         </div>
       </form>
-
-      {/* Performance Monitor - Lazy loaded for better performance */}
-      {showPerformanceMonitor && (
-        <div className="fixed bottom-4 right-4 z-50">
-          <Suspense fallback={<LoadingSpinner />}>
-            <PerformanceMonitor chatId={currentChatId} isVisible={showPerformanceMonitor} />
-          </Suspense>
-        </div>
-      )}
-      
-      {/* Database Batch Operations - Lazy loaded for development */}
-      {showDatabaseOps && (
-        <div className="fixed bottom-4 right-96 z-50">
-          <Suspense fallback={<LoadingSpinner />}>
-            <DatabaseBatchOperations 
-              chatId={currentChatId} 
-              characterId={character.id}
-              isVisible={showDatabaseOps} 
-            />
-          </Suspense>
-        </div>
-      )}
     </div>
   );
 };

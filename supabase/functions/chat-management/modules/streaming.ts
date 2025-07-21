@@ -1,4 +1,4 @@
-import type { StreamingUpdate, CORS_HEADERS } from '../types/interfaces.ts';
+import type { StreamingUpdate, CORS_HEADERS } from '../types/streaming-interfaces.ts';
 
 /**
  * Streaming optimization utilities

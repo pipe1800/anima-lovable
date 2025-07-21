@@ -4,7 +4,7 @@ import type {
   TemplateContext, 
   ContextData, 
   SupabaseClient 
-} from '../types/interfaces.ts';
+} from '../types/streaming-interfaces.ts';
 
 /**
  * Context extraction utilities for addon features
@@ -12,7 +12,115 @@ import type {
  * This keeps context extraction separate from message generation models
  */
 
+/**
+ * Extract consolidated context from multiple characters and world infos
+ * This is the correct function for chat-management extract-context operation
+ */
 export async function extractInitialContext(
+  charactersData: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    context?: string;
+    scenario?: string;
+    personality?: string;
+    first_message?: string;
+    message_example?: string;
+    example_conversations?: string;
+  }>,
+  worldInfos: Array<{
+    id: string;
+    name: string;
+    content: string;
+    keywords: string[];
+  }>,
+  chatId: string,
+  maxTokens: number = 4000
+): Promise<{ context: string; characterCount: number; worldInfoCount: number; totalTokens: number }> {
+  console.log('🧠 Extracting initial context for multiple characters and world infos');
+  console.log(`Characters: ${charactersData.length}, World Infos: ${worldInfos.length}, Max Tokens: ${maxTokens}`);
+
+  let consolidatedContext = '';
+  let tokenCount = 0;
+
+  // Process characters
+  if (charactersData && charactersData.length > 0) {
+    consolidatedContext += '[CHARACTERS]\n';
+    
+    for (const character of charactersData) {
+      const characterContext = `
+Name: ${character.name}
+${character.description ? `Description: ${character.description}` : ''}
+${character.scenario ? `Scenario: ${character.scenario}` : ''}
+${character.personality ? `Personality: ${character.personality}` : ''}
+${character.context ? `Context: ${character.context}` : ''}
+${character.first_message ? `First Message: ${character.first_message}` : ''}
+${character.example_conversations ? `Example Conversations: ${character.example_conversations}` : ''}
+`;
+      
+      // Estimate token count (rough approximation: 1 token ≈ 4 characters)
+      const characterTokens = Math.ceil(characterContext.length / 4);
+      
+      if (tokenCount + characterTokens <= maxTokens) {
+        consolidatedContext += characterContext + '\n';
+        tokenCount += characterTokens;
+      } else {
+        console.log(`⏭️ Skipping character ${character.name} - would exceed token limit`);
+      }
+    }
+    
+    consolidatedContext += '[/CHARACTERS]\n\n';
+  }
+
+  // Process world infos
+  if (worldInfos && worldInfos.length > 0) {
+    consolidatedContext += '[WORLD INFORMATION]\n';
+    
+    for (const worldInfo of worldInfos) {
+      const worldInfoContext = `
+Name: ${worldInfo.name}
+Keywords: ${worldInfo.keywords.join(', ')}
+Content: ${worldInfo.content}
+`;
+      
+      // Estimate token count
+      const worldInfoTokens = Math.ceil(worldInfoContext.length / 4);
+      
+      if (tokenCount + worldInfoTokens <= maxTokens) {
+        consolidatedContext += worldInfoContext + '\n';
+        tokenCount += worldInfoTokens;
+      } else {
+        console.log(`⏭️ Skipping world info ${worldInfo.name} - would exceed token limit`);
+      }
+    }
+    
+    consolidatedContext += '[/WORLD INFORMATION]\n\n';
+  }
+
+  // Add metadata
+  consolidatedContext += `[METADATA]
+Chat ID: ${chatId}
+Total Characters: ${charactersData.length}
+Total World Infos: ${worldInfos.length}
+Estimated Tokens: ${tokenCount}
+Generated At: ${new Date().toISOString()}
+[/METADATA]`;
+
+  console.log(`✅ Context extracted - ${tokenCount} tokens, ${charactersData.length} characters, ${worldInfos.length} world infos`);
+
+  return {
+    context: consolidatedContext,
+    characterCount: charactersData.length,
+    worldInfoCount: worldInfos.length,
+    totalTokens: tokenCount
+  };
+}
+
+/**
+ * AI-powered context extraction for individual character (for addon features)
+ * This is the original function for chat-stream style context extraction
+ */
+export async function extractCharacterContext(
   character: Character,
   addonSettings: AddonSettings,
   openRouterKey: string,
@@ -47,7 +155,7 @@ Return only the JSON object with no additional text. If a field is not mentioned
       headers: {
         'Authorization': `Bearer ${openRouterKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': Deno.env.get('SITE_URL') || 'https://yourapp.com',
+        'HTTP-Referer': globalThis.Deno?.env?.get('SITE_URL') || 'https://yourapp.com',
         'X-Title': 'AnimaChat-InitialContext'
       },
       body: JSON.stringify({
@@ -178,7 +286,7 @@ Return ONLY the JSON object with no additional text.`;
       headers: {
         'Authorization': `Bearer ${openRouterKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': Deno.env.get('SITE_URL') || 'https://yourapp.com',
+        'HTTP-Referer': globalThis.Deno?.env?.get('SITE_URL') || 'https://yourapp.com',
         'X-Title': 'AnimaChat-Context'
       },
       body: JSON.stringify({

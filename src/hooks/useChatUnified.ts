@@ -221,6 +221,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       }
       
       const requestPayload = {
+        operation: 'send-message',
         chatId,
         message: userMessage,
         characterId,
@@ -234,10 +235,10 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         payload: { isStreaming: true, message: '' }
       });
       
-      // Make streaming request to existing chat-stream function
+      // Make streaming request to unified chat-management function
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rclpyipeytqbamiwcuih.supabase.co';
       
-      const response = await fetch(`${supabaseUrl}/functions/v1/chat-stream`, {
+      const response = await fetch(`${supabaseUrl}/functions/v1/chat-management`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -469,7 +470,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       });
       
       try {
-        // Call streaming function - reuses existing chat-stream edge function
+        // Call unified chat-management function for streaming
         const aiResult = await invokeStreamingAI(chatId, content, characterId, user.id, trackedContext, addonSettings, selectedPersonaId);
         
         // ✅ SIMPLIFIED: Single invalidation after completion

@@ -4,7 +4,7 @@ import type {
   TemplateContext, 
   CurrentContext,
   ConversationMessage 
-} from '../types/interfaces.ts';
+} from '../types/streaming-interfaces.ts';
 
 /**
  * Message generation and AI response handling
@@ -17,12 +17,28 @@ export function buildSystemPrompt(
   addonSettings: AddonSettings,
   templateContext: TemplateContext,
   currentContext: CurrentContext,
+  selectedPersona: { name?: string; bio?: string; lore?: string } | null,
   replaceTemplatesFn: (content: string) => string
 ): string {
   let systemPrompt = `You are ${replaceTemplatesFn(character.personality_summary || 'a helpful assistant')}.
     
 ${character.description ? `Description: ${replaceTemplatesFn(character.description)}` : ''}
-${character.scenario ? `Scenario: ${replaceTemplatesFn(typeof character.scenario === 'string' ? character.scenario : JSON.stringify(character.scenario))}` : ''}
+${character.scenario ? `Scenario: ${replaceTemplatesFn(typeof character.scenario === 'string' ? character.scenario : JSON.stringify(character.scenario))}` : ''}`;
+
+  // Add user persona information if available
+  if (selectedPersona && (selectedPersona.bio || selectedPersona.lore)) {
+    systemPrompt += '\n\n[USER PERSONA INFORMATION]';
+    if (selectedPersona.bio) {
+      systemPrompt += `\nUser Bio: ${selectedPersona.bio}`;
+    }
+    if (selectedPersona.lore) {
+      systemPrompt += `\nUser Background & Lore: ${selectedPersona.lore}`;
+    }
+    systemPrompt += '\nRespond to the user accordingly, taking their persona traits and background into consideration.';
+    systemPrompt += '\n[/USER PERSONA INFORMATION]';
+  }
+
+  systemPrompt += `
 
 IMPORTANT DIALOGUE GUIDELINES:
 - You are ONLY the character, never speak for the user
@@ -120,7 +136,7 @@ export async function generateAIResponse(
     headers: {
       'Authorization': `Bearer ${openRouterKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': Deno.env.get('SITE_URL') || 'https://yourapp.com',
+      'HTTP-Referer': globalThis.Deno?.env?.get('SITE_URL') || 'https://yourapp.com',
       'X-Title': 'AnimaChat-Streaming'
     },
     body: JSON.stringify({

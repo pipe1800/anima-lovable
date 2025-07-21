@@ -4,7 +4,7 @@ import type {
   Character, 
   CurrentContext,
   TemplateContext 
-} from '../types/interfaces.ts';
+} from '../types/streaming-interfaces.ts';
 import type { GlobalChatSettings } from '../../_shared/settings-mapper.ts';
 
 /**
@@ -103,17 +103,129 @@ export async function fetchSelectedPersona(
   selectedPersonaId: string | undefined,
   userId: string,
   supabase: SupabaseClient
-): Promise<{ name?: string; bio?: string } | null> {
+): Promise<{ name?: string; bio?: string; lore?: string } | null> {
   if (!selectedPersonaId) return null;
 
   const { data: persona } = await supabase
     .from('personas')
-    .select('name, bio')
+    .select('name, bio, lore')
     .eq('id', selectedPersonaId)
     .eq('user_id', userId)
     .single();
 
   return persona;
+}
+
+/**
+ * Get the user's last used persona ID from their most recent chat
+ */
+async function getUserLastUsedPersona(userId: string, supabase: SupabaseClient): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('chats')
+    .select('selected_persona_id')
+    .eq('user_id', userId)
+    .not('selected_persona_id', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data.selected_persona_id;
+}
+
+/**
+ * Get the user's default persona (first created persona if no recent usage)
+ */
+async function getUserDefaultPersona(userId: string, supabase: SupabaseClient): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('personas')
+    .select('id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data.id;
+}
+
+/**
+ * Get the best persona for a new chat based on user's default persona
+ */
+export async function getBestPersonaForNewChat(userId: string, characterId: string, supabase: SupabaseClient): Promise<string | null> {
+  // Get the user's default persona from their profile
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('default_persona_id')
+    .eq('id', userId)
+    .single();
+
+  if (profileError || !profile?.default_persona_id) {
+    console.log('🎭 No user default persona found, trying user\'s first persona');
+    // Fallback to user's first created persona
+    const { data: persona, error: personaError } = await supabase
+      .from('personas')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (personaError || !persona) {
+      console.log('🎭 No user personas found');
+      return null;
+    }
+
+    return persona.id;
+  }
+
+  // Verify the persona still exists and belongs to this user
+  const { data: persona, error: personaError } = await supabase
+    .from('personas')
+    .select('id')
+    .eq('id', profile.default_persona_id)
+    .eq('user_id', userId)
+    .single();
+
+  if (personaError || !persona) {
+    console.log('🎭 User default persona not found or doesn\'t belong to user');
+    return null;
+  }
+
+  console.log('🎭 Using user default persona:', profile.default_persona_id);
+  return profile.default_persona_id;
+}
+
+/**
+ * Fetch the selected persona for a chat from the chat table
+ */
+export async function fetchChatSelectedPersona(
+  chatId: string,
+  userId: string,
+  supabase: SupabaseClient
+): Promise<{ name?: string; bio?: string; lore?: string } | null> {
+  const { data: chat } = await supabase
+    .from('chats')
+    .select(`
+      selected_persona_id,
+      personas:selected_persona_id(
+        name,
+        bio,
+        lore
+      )
+    `)
+    .eq('id', chatId)
+    .eq('user_id', userId)
+    .single();
+
+  if (!chat?.personas) return null;
+  return chat.personas;
 }
 
 export async function fetchCurrentContext(
