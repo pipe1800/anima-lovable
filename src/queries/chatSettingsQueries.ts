@@ -124,8 +124,8 @@ export const useAddonSettings = (characterId?: string) => {
       timeAndWeather: globalSettings.time_and_weather,
       relationshipStatus: globalSettings.relationship_status,
       characterPosition: globalSettings.character_position,
-      chainOfThought: globalSettings.chain_of_thought,
-      fewShotExamples: globalSettings.few_shot_examples,
+      chainOfThought: false, // Temporarily disabled - coming soon
+      fewShotExamples: false, // Temporarily disabled - coming soon
     } : null,
     isLoading: !globalSettings,
     error: null,

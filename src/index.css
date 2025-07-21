@@ -190,4 +190,18 @@ All colors MUST be HSL.
     scrollbar-width: thin;
     scrollbar-color: hsl(220, 13%, 20%) hsl(220, 13%, 15%);
   }
+
+  /* Coming Soon badge shimmer animation */
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  .animate-shimmer {
+    animation: shimmer 3s ease-in-out infinite;
+  }
 }

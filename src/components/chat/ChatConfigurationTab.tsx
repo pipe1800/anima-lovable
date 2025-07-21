@@ -69,6 +69,27 @@ export const ChatConfigurationTab = ({
   // Current effective settings (merging global settings with pending changes)
   const effectiveSettings = globalSettings ? { ...globalSettings, ...pendingChanges } : null;
   
+  // Calculate total addon cost percentage
+  const calculateTotalAddonCost = () => {
+    if (!effectiveSettings) return 0;
+    
+    let totalCost = 0;
+    if (effectiveSettings.dynamic_world_info) totalCost += 10;
+    // Enhanced Memory is 0% for True Fan/Whale, not included in cost calculation
+    if (effectiveSettings.mood_tracking) totalCost += 5;
+    if (effectiveSettings.clothing_inventory) totalCost += 5;
+    if (effectiveSettings.location_tracking) totalCost += 5;
+    if (effectiveSettings.time_and_weather) totalCost += 5;
+    if (effectiveSettings.relationship_status) totalCost += 5;
+    if (effectiveSettings.character_position) totalCost += 5;
+    if (effectiveSettings.chain_of_thought) totalCost += 30;
+    if (effectiveSettings.few_shot_examples) totalCost += 7;
+    
+    return totalCost;
+  };
+  
+  const totalAddonCost = calculateTotalAddonCost();
+  
   // Display persona shows pending selection or current selection
   const displayPersona = hasPersonaChange
     ? personas.find(p => p.id === pendingPersonaId) || null
@@ -156,18 +177,18 @@ export const ChatConfigurationTab = ({
       chain_of_thought: { 
         name: 'Chain of Thought', 
         cost: 30, 
-        description: isTrueFanOrWhale 
-          ? 'Advanced reasoning' 
-          : 'Advanced reasoning - Upgrade to True Fan or Whale to unlock',
-        available: isTrueFanOrWhale,
-        dynamicCost: null
+        description: 'Advanced reasoning capabilities - Coming Soon',
+        available: false, // Disabled for now
+        dynamicCost: null,
+        comingSoon: true // New property to indicate coming soon status
       },
       few_shot_examples: { 
         name: 'Few Shot Examples', 
         cost: 7, 
-        description: 'Better response quality',
-        available: true,
-        dynamicCost: null
+        description: 'Better response quality through examples - Coming Soon',
+        available: false, // Disabled for now
+        dynamicCost: null,
+        comingSoon: true // New property to indicate coming soon status
       },
     }
   };
@@ -435,6 +456,23 @@ export const ChatConfigurationTab = ({
       </div>
       </Card>
 
+      {/* World Info Selection */}
+      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white font-medium text-sm">World Info</h3>
+          <Badge variant="outline" className="border-[#FF7A00] text-[#FF7A00] text-xs">
+            Dynamic
+          </Badge>
+        </div>
+        
+        <WorldInfoDropdown 
+          isVisible={true}
+          onWorldInfoSelect={onWorldInfoSelect}
+          disabled={!effectiveSettings?.dynamic_world_info}
+          selectedWorldInfoId={selectedWorldInfoId}
+        />
+      </Card>
+
       {/* Global Addon Settings */}
       <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-4">
@@ -453,39 +491,59 @@ export const ChatConfigurationTab = ({
               <div className="grid grid-cols-2 gap-3">
                 {Object.entries(addons).map(([key, details]) => {
                   const isEnabled = effectiveSettings?.[key as keyof UserGlobalChatSettings] as boolean;
+                  const isComingSoon = (details as any).comingSoon;
                   return (
                     <div key={key} className={`flex flex-col p-3 rounded-lg border ${
-                      details.available 
+                      details.available && !isComingSoon
                         ? 'bg-[#0f0f0f] border-gray-700/30' 
                         : 'bg-gray-900/50 border-gray-700/20 opacity-60'
                     }`}>
                       <div className="flex items-center justify-between mb-2">
                         <span className={`font-medium text-sm ${
-                          details.available ? 'text-white' : 'text-gray-500'
+                          details.available && !isComingSoon ? 'text-white' : 'text-gray-500'
                         }`}>
                           {details.name}
                         </span>
-                        <Switch
-                          checked={isEnabled}
-                          onCheckedChange={() => handleToggleAddon(key as any)}
-                          disabled={saving || !details.available}
-                          className="data-[state=checked]:bg-[#FF7A00]"
-                        />
+                        {isComingSoon ? (
+                          <div className="relative overflow-hidden">
+                            <div className="flex items-center justify-center px-3 py-1.5 bg-gradient-to-r from-indigo-600/10 to-blue-600/10 border border-indigo-400/30 rounded-lg backdrop-blur-sm">
+                              <div className="flex items-center space-x-1">
+                                <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-pulse"></div>
+                                <span className="text-[11px] font-semibold text-indigo-300 uppercase tracking-wider">
+                                  Coming Soon
+                                </span>
+                              </div>
+                            </div>
+                            {/* Subtle shimmer effect */}
+                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer"></div>
+                          </div>
+                        ) : (
+                          <Switch
+                            checked={isEnabled}
+                            onCheckedChange={() => handleToggleAddon(key as any)}
+                            disabled={saving || !details.available}
+                            className="data-[state=checked]:bg-[#FF7A00]"
+                          />
+                        )}
                       </div>
                       <p className={`text-xs mb-2 ${
-                        details.available ? 'text-gray-400' : 'text-gray-500'
+                        details.available && !isComingSoon ? 'text-gray-400' : 'text-gray-500'
                       }`}>
                         {details.description}
                       </p>
                       <div className="flex items-center justify-end">
-                        {details.dynamicCost ? (
-                          <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 h-5">
-                            Dynamic
-                          </Badge>
-                        ) : details.cost > 0 && (
-                          <Badge variant="outline" className="text-xs border-[#FF7A00] text-[#FF7A00] h-5">
-                            +{details.cost}%
-                          </Badge>
+                        {!isComingSoon && (
+                          <>
+                            {details.dynamicCost ? (
+                              <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 h-5">
+                                Dynamic
+                              </Badge>
+                            ) : details.cost > 0 && (
+                              <Badge variant="outline" className="text-xs border-[#FF7A00] text-[#FF7A00] h-5">
+                                +{details.cost}%
+                              </Badge>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -509,6 +567,41 @@ export const ChatConfigurationTab = ({
               )}
             </div>
           ))}
+        </div>
+      </Card>
+
+      {/* Total Cost Indicator */}
+      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-[#FF7A00]" />
+            <h3 className="text-white font-medium text-sm">Message Cost</h3>
+          </div>
+          <Badge 
+            variant="outline" 
+            className={`border-gray-600 text-xs ${
+              totalAddonCost > 0 ? 'text-[#FF7A00] border-[#FF7A00]' : 'text-gray-400'
+            }`}
+          >
+            Total: +{totalAddonCost}%
+          </Badge>
+        </div>
+        
+        <div className="text-sm text-gray-300">
+          <p className="mb-2">
+            Base message cost varies by subscription plan
+          </p>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-400">Addon increase:</span>
+            <span className={`font-medium ${totalAddonCost > 0 ? 'text-[#FF7A00]' : 'text-gray-400'}`}>
+              {totalAddonCost > 0 ? `+${totalAddonCost}%` : 'None'}
+            </span>
+          </div>
+          {totalAddonCost > 0 && (
+            <div className="mt-2 p-2 bg-[#FF7A00]/10 border border-[#FF7A00]/20 rounded text-xs text-[#FF7A00]">
+              💡 Active addons will increase your message costs
+            </div>
+          )}
         </div>
       </Card>
 
@@ -586,23 +679,6 @@ export const ChatConfigurationTab = ({
             </Label>
           </div>
         </RadioGroup>
-      </Card>
-
-      {/* World Info Selection */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-white font-medium text-sm">World Info</h3>
-          <Badge variant="outline" className="border-[#FF7A00] text-[#FF7A00] text-xs">
-            Dynamic
-          </Badge>
-        </div>
-        
-        <WorldInfoDropdown 
-          isVisible={true}
-          onWorldInfoSelect={onWorldInfoSelect}
-          disabled={!globalSettings.dynamic_world_info}
-          selectedWorldInfoId={selectedWorldInfoId}
-        />
       </Card>
 
       {/* Background Image */}

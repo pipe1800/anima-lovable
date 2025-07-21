@@ -19,6 +19,8 @@ const Chat = () => {
   const [characterLoading, setCharacterLoading] = useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
+  const [creditsBalance, setCreditsBalance] = useState<number>(0);
   const [trackedContext, setTrackedContext] = useState<TrackedContext>({
     moodTracking: 'No context',
     clothingInventory: 'No context',
@@ -141,11 +143,22 @@ const Chat = () => {
   };
 
   const handlePersonaChange = (personaId: string | null) => {
-    console.log('🎭 Chat page: Persona changed to:', personaId);
     setSelectedPersonaId(personaId);
   };
 
-  const handleChatCreated = (chatId: string) => {
+  const handleWorldInfoChange = (worldInfoId: string | null) => {
+    console.log('🌍 Chat.tsx: World info change received:', worldInfoId);
+    setSelectedWorldInfoId(worldInfoId);
+  };
+
+  // Log world info changes
+  useEffect(() => {
+    console.log('🌍 Chat.tsx: selectedWorldInfoId state changed to:', selectedWorldInfoId);
+  }, [selectedWorldInfoId]);
+
+  const handleCreditsUpdate = (balance: number) => {
+    setCreditsBalance(balance);
+  };  const handleChatCreated = (chatId: string) => {
     console.log('💬 Chat page: New chat created with ID:', chatId);
     setCurrentChatId(chatId);
   };
@@ -219,6 +232,8 @@ const Chat = () => {
           trackedContext={trackedContext}
           onContextUpdate={setTrackedContext}
           onPersonaChange={handlePersonaChange}
+          onWorldInfoChange={handleWorldInfoChange}
+          creditsBalance={creditsBalance}
         >
           <ChatInterface
             character={character}
@@ -227,7 +242,9 @@ const Chat = () => {
             trackedContext={trackedContext}
             onContextUpdate={setTrackedContext}
             selectedPersonaId={selectedPersonaId}
+            selectedWorldInfoId={selectedWorldInfoId}
             onChatCreated={handleChatCreated}
+            onCreditsUpdate={handleCreditsUpdate}
           />
         </ChatLayout>
 

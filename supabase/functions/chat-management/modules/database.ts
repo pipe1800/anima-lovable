@@ -99,6 +99,152 @@ export async function fetchUserGlobalSettings(
   return settings;
 }
 
+export async function fetchUserSelectedWorldInfo(
+  userId: string,
+  characterId: string,
+  worldInfoId: string | null,
+  supabase: SupabaseClient
+): Promise<Array<{ keywords: string[]; entry_text: string }> | null> {
+  console.log('🌍 fetchUserSelectedWorldInfo called with:', { 
+    userId, 
+    characterId, 
+    worldInfoId,
+    worldInfoIdType: typeof worldInfoId,
+    worldInfoIdNull: worldInfoId === null,
+    worldInfoIdUndefined: worldInfoId === undefined,
+    worldInfoIdEmpty: worldInfoId === ''
+  });
+
+  if (!worldInfoId) {
+    console.log('❌ No worldInfoId provided, returning null');
+    return null;
+  }
+
+  console.log('🌍 Fetching world info entries for:', worldInfoId);
+
+  // First, verify user has access to this world info (either owns it or has it in collection)
+  const { data: worldInfoAccess, error: accessError } = await supabase
+    .from('world_infos')
+    .select('id, creator_id, name')
+    .eq('id', worldInfoId)
+    .single();
+
+  console.log('🔍 World info access check:', { 
+    worldInfoAccess, 
+    accessError,
+    worldInfoId 
+  });
+
+  if (!worldInfoAccess) {
+    console.log('❌ World info not found:', worldInfoId);
+    return null;
+  }
+
+  // Check if user owns the world info or has it in their collection
+  const isOwner = worldInfoAccess.creator_id === userId;
+  let hasAccess = isOwner;
+
+  console.log('👤 Ownership check:', { 
+    isOwner, 
+    worldInfoCreatorId: worldInfoAccess.creator_id, 
+    userId 
+  });
+
+  if (!isOwner) {
+    const { data: userWorldInfo, error: collectionError } = await supabase
+      .from('world_info_users')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('world_info_id', worldInfoId)
+      .single();
+
+    console.log('📚 Collection access check:', { 
+      userWorldInfo, 
+      collectionError 
+    });
+
+    hasAccess = !!userWorldInfo;
+  }
+
+  if (!hasAccess) {
+    console.log('❌ User does not have access to world info:', worldInfoId);
+    return null;
+  }
+
+  console.log('✅ User has access to world info:', worldInfoId);
+
+  // Fetch world info entries
+  const { data: entries, error } = await supabase
+    .from('world_info_entries')
+    .select('keywords, entry_text')
+    .eq('world_info_id', worldInfoId);
+
+  console.log('📝 World info entries query result:', { 
+    entries, 
+    error,
+    entriesCount: entries?.length || 0,
+    firstEntryKeywords: entries?.[0]?.keywords,
+    firstEntryText: entries?.[0]?.entry_text?.substring(0, 100) + '...'
+  });
+
+  if (error) {
+    console.error('❌ Error fetching world info entries:', error);
+    return null;
+  }
+
+  console.log(`✅ Fetched ${entries?.length || 0} world info entries`);
+  
+  // Log each entry for debugging
+  entries?.forEach((entry, index) => {
+    console.log(`📋 Entry ${index + 1}:`, {
+      keywords: entry.keywords,
+      textLength: entry.entry_text?.length || 0,
+      textPreview: entry.entry_text?.substring(0, 50) + '...'
+    });
+  });
+
+  return entries || [];
+}
+
+export async function fetchCharacterMemories(
+  userId: string,
+  characterId: string,
+  supabase: SupabaseClient
+): Promise<Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null> {
+  console.log('🧠 Fetching character memories for:', { userId, characterId });
+
+  try {
+    const { data: memories, error } = await supabase
+      .from('character_memories')
+      .select('summary_content, trigger_keywords, created_at')
+      .eq('user_id', userId)
+      .eq('character_id', characterId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Error fetching character memories:', error);
+      return null;
+    }
+
+    console.log(`✅ Fetched ${memories?.length || 0} character memories`);
+    
+    // Log each memory for debugging
+    memories?.forEach((memory, index) => {
+      console.log(`🧠 Memory ${index + 1}:`, {
+        keywords: memory.trigger_keywords,
+        contentLength: memory.summary_content?.length || 0,
+        contentPreview: memory.summary_content?.substring(0, 100) + '...',
+        createdAt: memory.created_at
+      });
+    });
+
+    return memories || [];
+  } catch (error) {
+    console.error('❌ Unexpected error fetching character memories:', error);
+    return null;
+  }
+}
+
 export async function fetchSelectedPersona(
   selectedPersonaId: string | undefined,
   userId: string,

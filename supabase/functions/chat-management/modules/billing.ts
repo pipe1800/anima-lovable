@@ -84,8 +84,9 @@ export function calculateCreditCost(
     if (addonSettings.timeAndWeather) addonPercentage += 5;
     if (addonSettings.relationshipStatus) addonPercentage += 5;
     if (addonSettings.characterPosition) addonPercentage += 5;
-    if (addonSettings.chainOfThought) addonPercentage += 30;
-    if (addonSettings.fewShotExamples) addonPercentage += 7;
+    // Chain of Thought and Few Shot Examples temporarily disabled - coming soon
+    // if (addonSettings.chainOfThought) addonPercentage += 30;
+    // if (addonSettings.fewShotExamples) addonPercentage += 7;
   }
 
   const totalCost = Math.ceil(baseCost * (1 + addonPercentage / 100));

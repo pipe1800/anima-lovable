@@ -6,6 +6,7 @@ import { handleCreateBasicChat } from './modules/basic-chat-handler.ts';
 import { handleCreateWithGreeting } from './modules/greeting-processor.ts';
 import { handleExtractContext } from './modules/extract-context-handler.ts';
 import { handleSendMessage } from './modules/send-message-handler.ts';
+import { handleCreateMemory } from './modules/memory-handler.ts';
 
 // Import types
 import type { 
@@ -13,7 +14,8 @@ import type {
   ChatResponse,
   CreateBasicChatRequest,
   CreateWithGreetingRequest,
-  ExtractContextRequest
+  ExtractContextRequest,
+  CreateMemoryRequest
 } from './types/index.ts';
 
 /**
@@ -26,6 +28,7 @@ import type {
  * ✅ 'create-with-greeting' - Create chat with custom greeting and context
  * ✅ 'send-message'        - Stream AI responses with full persona context
  * ✅ 'extract-context'     - Extract context for existing chats
+ * ✅ 'create-memory'       - Create AI-powered chat memory summaries
  * 
  * Key Features:
  * ✅ Authentication & Authorization
@@ -59,7 +62,7 @@ globalThis.Deno.serve(async (req) => {
       message: 'Unified chat management function is working',
       timestamp: new Date().toISOString(),
       version: 'v3-unified',
-      operations: ['create-basic', 'create-with-greeting', 'send-message', 'extract-context']
+      operations: ['create-basic', 'create-with-greeting', 'send-message', 'extract-context', 'create-memory']
     });
   }
 
@@ -131,6 +134,16 @@ globalThis.Deno.serve(async (req) => {
         console.log('🎯 Routing to context extraction...');
         response = await handleExtractContext(
           requestBody as ExtractContextRequest,
+          user,
+          supabase,
+          supabaseAdmin
+        );
+        break;
+
+      case 'create-memory':
+        console.log('🎯 Routing to memory creation...');
+        response = await handleCreateMemory(
+          requestBody as CreateMemoryRequest,
           user,
           supabase,
           supabaseAdmin

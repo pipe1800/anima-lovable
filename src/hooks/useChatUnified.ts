@@ -194,7 +194,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     userId: string,
     trackedContext?: TrackedContext,
     addonSettings?: any,
-    selectedPersonaId?: string | null
+    selectedPersonaId?: string | null,
+    selectedWorldInfoId?: string | null
   ) => {
     const startTime = Date.now();
     isStreamingRef.current = true;
@@ -226,10 +227,9 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         message: userMessage,
         characterId,
         addonSettings,
-        selectedPersonaId
-      };
-      
-      // Set initial streaming state
+        selectedPersonaId,
+        selectedWorldInfoId
+      };      // Set initial streaming state
       dispatch({
         type: 'SET_STREAMING',
         payload: { isStreaming: true, message: '' }
@@ -406,7 +406,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       characterId,
       trackedContext,
       addonSettings,
-      selectedPersonaId
+      selectedPersonaId,
+      selectedWorldInfoId
     }: { 
       chatId: string; 
       content: string; 
@@ -414,6 +415,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       trackedContext?: TrackedContext;
       addonSettings?: any;
       selectedPersonaId?: string | null;
+      selectedWorldInfoId?: string | null;
     }) => {
       if (!user) throw new Error('User not authenticated');
       
@@ -471,7 +473,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       
       try {
         // Call unified chat-management function for streaming
-        const aiResult = await invokeStreamingAI(chatId, content, characterId, user.id, trackedContext, addonSettings, selectedPersonaId);
+        const aiResult = await invokeStreamingAI(chatId, content, characterId, user.id, trackedContext, addonSettings, selectedPersonaId, selectedWorldInfoId);
         
         // ✅ SIMPLIFIED: Single invalidation after completion
         queryClient.invalidateQueries({ 
@@ -546,7 +548,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   const handleSendMessage = useCallback(async (
     content: string, 
     addonSettings?: any,
-    selectedPersonaId?: string | null
+    selectedPersonaId?: string | null,
+    selectedWorldInfoId?: string | null
   ) => {
     if (!user || !chatId || !content.trim()) return;
     
@@ -563,7 +566,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         characterId,
         trackedContext: state.trackedContext,
         addonSettings,
-        selectedPersonaId
+        selectedPersonaId,
+        selectedWorldInfoId
       });
       
       return result;

@@ -23,9 +23,11 @@ import {
   fetchConversationHistory,
   fetchUserProfile,
   fetchUserGlobalSettings,
+  fetchUserSelectedWorldInfo,
   fetchSelectedPersona,
   fetchChatSelectedPersona,
   fetchCurrentContext,
+  fetchCharacterMemories,
   getNextMessageOrder,
   saveUserMessage,
   createPlaceholderMessage,
@@ -63,14 +65,22 @@ export async function handleSendMessage(
   const startTime = Date.now();
   
   try {
-    const { chatId, message, characterId, selectedPersonaId, addonSettings } = request;
+    const { chatId, message, characterId, selectedPersonaId, selectedWorldInfoId, addonSettings } = request;
 
     if (!chatId || !message || !characterId) {
       console.error('❌ Missing required fields:', { chatId: !!chatId, message: !!message, characterId: !!characterId });
       return createErrorResponse('Missing required fields', 400);
     }
 
-    console.log('✅ Required fields validated:', { chatId, characterId, messageLength: message.length });
+    console.log('✅ Required fields validated:', { 
+      chatId, 
+      characterId, 
+      messageLength: message.length,
+      hasSelectedWorldInfo: !!selectedWorldInfoId,
+      selectedWorldInfoId: selectedWorldInfoId || 'none',
+      selectedWorldInfoIdType: typeof selectedWorldInfoId,
+      addonSettings: addonSettings || 'none provided'
+    });
 
     // ============================================================================
     // DATABASE OPERATIONS - PARALLEL FETCHING (same as chat-stream)
@@ -84,7 +94,9 @@ export async function handleSendMessage(
       globalSettings,
       chatSelectedPersona,
       planAndModel,
-      nextUserMessageOrder
+      nextUserMessageOrder,
+      worldInfoEntries,
+      characterMemories
     ] = await Promise.all([
       fetchCharacterData(characterId, supabaseAdmin),
       fetchConversationHistory(chatId, supabase),
@@ -92,7 +104,9 @@ export async function handleSendMessage(
       fetchUserGlobalSettings(user.id, supabaseAdmin),
       fetchChatSelectedPersona(chatId, user.id, supabase),
       getUserPlanAndModel(user.id, supabaseAdmin),
-      getNextMessageOrder(chatId, supabase)
+      getNextMessageOrder(chatId, supabase),
+      fetchUserSelectedWorldInfo(user.id, characterId, selectedWorldInfoId || null, supabase),
+      fetchCharacterMemories(user.id, characterId, supabase)
     ]);
 
     // Use chat's selected persona, or fallback to request persona, or fallback to null
@@ -101,6 +115,16 @@ export async function handleSendMessage(
 
     // Convert global settings to addon settings for backward compatibility
     const effectiveAddonSettings = globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {});
+
+    console.log('🌍 World Info Status:', {
+      requested: !!selectedWorldInfoId,
+      fetched: !!worldInfoEntries,
+      entriesCount: worldInfoEntries?.length || 0,
+      dynamicWorldInfoEnabled: effectiveAddonSettings?.dynamicWorldInfo || false,
+      globalSettings: globalSettings ? 'loaded' : 'not loaded',
+      effectiveAddonSettings: effectiveAddonSettings,
+      worldInfoEntries: worldInfoEntries
+    });
 
     // ============================================================================
     // BILLING & CREDIT MANAGEMENT (same as chat-stream)
@@ -145,7 +169,11 @@ export async function handleSendMessage(
       templateContext,
       currentContext,
       selectedPersona,
-      (content) => replaceTemplates(content, templateContext)
+      (content) => replaceTemplates(content, templateContext),
+      worldInfoEntries,
+      message,
+      messageHistory,
+      characterMemories
     );
 
     const conversationMessages = buildConversationMessages(systemPrompt, messageHistory, message);

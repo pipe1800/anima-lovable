@@ -40,7 +40,9 @@ interface ChatInterfaceProps {
   trackedContext?: TrackedContext;
   onContextUpdate?: (context: TrackedContext) => void;
   selectedPersonaId?: string | null;
+  selectedWorldInfoId?: string | null;
   onChatCreated?: (chatId: string) => void; // New callback for when chat is created
+  onCreditsUpdate?: (balance: number) => void; // New callback for credits balance updates
 }
 
 const ChatInterface = ({
@@ -50,7 +52,9 @@ const ChatInterface = ({
   trackedContext: parentTrackedContext,
   onContextUpdate,
   selectedPersonaId: propSelectedPersonaId,
-  onChatCreated
+  selectedWorldInfoId,
+  onChatCreated,
+  onCreditsUpdate
 }: ChatInterfaceProps) => {
   const [inputValue, setInputValue] = useState('');
   const [isFirstMessage, setIsFirstMessage] = useState(true);
@@ -188,6 +192,13 @@ const ChatInterface = ({
     }
   }, [trackedContext, parentTrackedContext, onContextUpdate]);
 
+  // Update parent with credits balance whenever it changes
+  useEffect(() => {
+    if (onCreditsUpdate && typeof creditsBalance === 'number') {
+      onCreditsUpdate(creditsBalance);
+    }
+  }, [creditsBalance, onCreditsUpdate]);
+
   // Initialize chat for existing chat
   useEffect(() => {
     if (existingChatId) {
@@ -251,7 +262,8 @@ const ChatInterface = ({
       await sendMessage(
         messageContent,
         currentAddonSettings,
-        selectedPersonaId
+        selectedPersonaId,
+        selectedWorldInfoId
       );
 
       // Update metrics

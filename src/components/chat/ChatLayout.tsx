@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronRight, Settings, Search, Heart, Star, MessageCircle, Info, Edit, User, Plus, Upload, X, ChevronDown, Trash2 } from 'lucide-react';
+import { ChevronRight, Settings, Search, Heart, Star, MessageCircle, Info, Edit, User, Plus, Upload, X, ChevronDown, Trash2, Zap, Brain } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getUserChats, getCharacterDetails } from '@/lib/supabase-queries';
 import { getUserPersonas, createPersona, deletePersona, type Persona } from '@/lib/persona-operations';
+import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +19,9 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import { toast } from 'sonner';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { ChatConfigurationTab } from './ChatConfigurationTab';
+import { MemoriesDialog } from './MemoriesDialog';
+import { useCharacterMemories } from '@/hooks/useCharacterMemories';
+import { calculateMemoryCreditCost, getMemoryCostExplanation } from '@/lib/memory-cost-calculator';
 import type { TrackedContext, Character } from '@/types/chat';
 import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
 import { getBestPersonaForNewChat } from '@/lib/user-preferences';
@@ -29,9 +33,11 @@ interface ChatLayoutProps {
   trackedContext?: TrackedContext;
   onContextUpdate?: (context: TrackedContext) => void;
   onPersonaChange?: (personaId: string | null) => void;
+  onWorldInfoChange?: (worldInfoId: string | null) => void;
+  creditsBalance?: number;
 }
 
-export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange }: ChatLayoutProps) => {
+export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange, creditsBalance }: ChatLayoutProps) => {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'history' | 'details' | 'config'>('details');
   const [chatHistory, setChatHistory] = useState<any[]>([]);
@@ -59,8 +65,29 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   
   // Tutorial state
   const { handleStepAction, worldInfoDropdownVisible, disableInteractions } = useTutorial();
-  const [selectedWorldInfo, setSelectedWorldInfo] = useState<any>(null);
   const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
+  
+  // Enhanced Memory state
+  const { data: globalSettings } = useUserGlobalChatSettings();
+  const [isCreatingMemory, setIsCreatingMemory] = useState(false);
+  const [currentChatMessageCount, setCurrentChatMessageCount] = useState(0);
+  
+  // Memories Dialog state
+  const [showMemoriesDialog, setShowMemoriesDialog] = useState(false);
+  const { memories, loading: memoriesLoading, error: memoriesError, refreshMemories } = useCharacterMemories(
+    character.id,
+    currentUser?.id
+  );
+  
+  // Debug Enhanced Memory detection
+  useEffect(() => {
+    console.log('🧠 Enhanced Memory Debug:', {
+      globalSettings,
+      enhancedMemoryEnabled: globalSettings?.enhanced_memory,
+      currentChatId,
+      shouldShowButton: globalSettings?.enhanced_memory && currentChatId
+    });
+  }, [globalSettings, currentChatId]);
   
   const navigate = useNavigate();
 
@@ -127,16 +154,57 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         const { data: charDetails } = await getCharacterDetails(character.id);
         setCharacterDetails(charDetails);
         
+        // Get message count for current chat (for memory cost calculation)
+        if (currentChatId && user) {
+          try {
+            const { count, error } = await supabase
+              .from('messages')
+              .select('*', { count: 'exact', head: true })
+              .eq('chat_id', currentChatId);
+            if (error) {
+              console.error('Error fetching message count:', error);
+              setCurrentChatMessageCount(0);
+            } else {
+              setCurrentChatMessageCount(count || 0);
+            }
+          } catch (error) {
+            console.error('Error fetching message count:', error);
+            setCurrentChatMessageCount(0);
+          }
+        } else {
+          setCurrentChatMessageCount(0);
+        }
+        
         // Load user's world info selection for this character
         if (user) {
           try {
             const { getUserCharacterWorldInfo } = await import('@/lib/user-world-info-operations');
             const result = await getUserCharacterWorldInfo(user.id, character.id);
+            console.log('🌍 ChatLayout: Loading world info selection:', {
+              userId: user.id,
+              characterId: character.id,
+              result: result
+            });
             if (result.worldInfoId) {
               setSelectedWorldInfoId(result.worldInfoId);
+              console.log('✅ ChatLayout: Set selectedWorldInfoId to:', result.worldInfoId);
+              
+              // Notify parent component
+              if (onWorldInfoChange) {
+                console.log('📤 ChatLayout: Notifying parent of loaded world info:', result.worldInfoId);
+                onWorldInfoChange(result.worldInfoId);
+              }
+            } else {
+              console.log('📝 ChatLayout: No world info selection found for this character');
+              
+              // Notify parent that no world info is selected
+              if (onWorldInfoChange) {
+                console.log('📤 ChatLayout: Notifying parent of no world info selection');
+                onWorldInfoChange(null);
+              }
             }
           } catch (error) {
-            console.error('Error loading user world info selection:', error);
+            console.error('❌ ChatLayout: Error loading user world info selection:', error);
           }
         }
       } catch (error) {
@@ -239,32 +307,33 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     handleStepAction('right-panel-toggled');
   };
 
-  const handleWorldInfoSelect = async (worldInfo: any) => {
-    setSelectedWorldInfo(worldInfo);
+    const handleWorldInfoSelect = async (worldInfo: { id: string; name: string } | null) => {
+    console.log('🌍 ChatLayout: World info selection changed:', worldInfo);
     setSelectedWorldInfoId(worldInfo?.id || null);
     
-    // Save user's world info selection to database
-    if (!currentUser) return;
+    // Notify parent component
+    if (onWorldInfoChange) {
+      console.log('📤 ChatLayout: Notifying parent of world info change:', worldInfo?.id || null);
+      onWorldInfoChange(worldInfo?.id || null);
+    }
     
+    if (!currentUser || !character?.id) {
+      console.warn('⚠️ ChatLayout: Missing user or character for world info save');
+      return;
+    }
+
     try {
       const { saveUserCharacterWorldInfo, removeUserCharacterWorldInfo } = await import('@/lib/user-world-info-operations');
       
       if (worldInfo) {
         const result = await saveUserCharacterWorldInfo(currentUser.id, character.id, worldInfo.id);
-        if (!result.success) {
-          console.error('Failed to save world info selection:', result.error);
-          toast.error('Failed to save world info selection');
-        }
+        console.log('💾 ChatLayout: Save world info selection result:', result);
       } else {
         const result = await removeUserCharacterWorldInfo(currentUser.id, character.id);
-        if (!result.success) {
-          console.error('Failed to remove world info selection:', result.error);
-          toast.error('Failed to remove world info selection');
-        }
+        console.log('🗑️ ChatLayout: Remove world info selection result:', result);
       }
     } catch (error) {
-      console.error('Error handling world info selection:', error);
-      toast.error('Error updating world info selection');
+      console.error('❌ ChatLayout: Error saving world info selection:', error);
     }
   };
 
@@ -406,6 +475,44 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
+  // Enhanced Memory handler
+  const handleCreateMemory = async () => {
+    if (!currentUser || !currentChatId || isCreatingMemory) return;
+    
+    setIsCreatingMemory(true);
+    
+    try {
+      const response = await supabase.functions.invoke('chat-management', {
+        body: {
+          operation: 'create-memory',
+          chatId: currentChatId,
+          characterId: character.id
+        }
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message || 'Failed to create memory');
+      }
+      
+      // The backend returns { success: true, message: '...', data: {...} }
+      if (response.data?.success) {
+        const creditCost = response.data.data?.creditCost || 0;
+        toast.success('Memory created successfully! 🧠', {
+          description: `Conversation summarized with ${response.data.data?.messageCount || 0} messages processed. ${creditCost} credits deducted.`,
+        });
+      } else {
+        throw new Error(response.data?.message || response.data?.error || 'Failed to create memory');
+      }
+    } catch (error) {
+      console.error('Error creating memory:', error);
+      toast.error('Failed to create memory', {
+        description: error.message || 'Please try again later.',
+      });
+    } finally {
+      setIsCreatingMemory(false);
+    }
+  };
+
   const isCharacterOwner = currentUser && characterDetails && currentUser.id === characterDetails.creator_id;
 
   return (
@@ -432,6 +539,86 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           </div>
           
           <div className="flex items-center space-x-3">
+            {/* Credits Balance */}
+            {creditsBalance !== undefined && (
+              <div className="flex items-center space-x-2 px-3 py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg">
+                <Zap className="w-3 h-3 text-[#FF7A00]" />
+                <span className="text-sm font-medium text-white">{creditsBalance.toLocaleString()}</span>
+                <span className="text-xs text-gray-400">credits</span>
+              </div>
+            )}
+            
+            {/* Create Memory Button */}
+            {globalSettings?.enhanced_memory && currentChatId && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isCreatingMemory}
+                    className="bg-[#0f0f0f] border-purple-500/50 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 hover:border-purple-400 transition-all duration-200"
+                    title="Create memory from this conversation"
+                  >
+                    {isCreatingMemory ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin mr-2" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Brain className="w-3 h-3 mr-2" />
+                        Create Memory
+                      </>
+                    )}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-white flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-purple-400" />
+                      Create Character Memory
+                    </AlertDialogTitle>
+                    <AlertDialogDescription className="text-gray-300">
+                      This will use AI to summarize your current conversation with {character.name} and save it as a memory. 
+                      The memory will help the character remember important details from your interactions.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  
+                  {/* Credit Cost Information - Outside of AlertDialogDescription to avoid nesting issues */}
+                  <div className="bg-purple-900/20 border border-purple-500/30 rounded-md p-3 mb-4">
+                    <div className="flex items-center gap-2 text-purple-300 text-sm">
+                      <Zap className="w-4 h-4" />
+                      <span className="font-medium">Credit Cost:</span>
+                    </div>
+                    <div className="text-sm text-gray-300 mt-1">
+                      {currentChatMessageCount > 0 ? (
+                        <>
+                          <strong className="text-white">{getMemoryCostExplanation(currentChatMessageCount)}</strong>
+                          <br />
+                          <span className="text-xs text-gray-400 mt-1">
+                            Based on {currentChatMessageCount} message{currentChatMessageCount !== 1 ? 's' : ''} in this conversation
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-yellow-300">Loading message count...</span>
+                      )}
+                    </div>
+                  </div>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="bg-gray-700 text-white hover:bg-gray-600">
+                      Cancel
+                    </AlertDialogCancel>
+                    <AlertDialogAction 
+                      onClick={handleCreateMemory}
+                      className="bg-purple-600 text-white hover:bg-purple-700"
+                    >
+                      Create Memory
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+            
             {/* Settings Menu */}
             <Button
               variant="ghost"
@@ -685,6 +872,17 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                             >
                               <Edit className="w-4 h-4 mr-2" />
                               Edit Character
+                            </Button>
+                          )}
+                          {/* View Memories Button - Only show if Enhanced Memory is enabled */}
+                          {globalSettings?.enhanced_memory && (
+                            <Button
+                              onClick={() => setShowMemoriesDialog(true)}
+                              variant="outline"
+                              className="w-full bg-transparent border-[#FF7A00]/50 hover:bg-[#FF7A00]/10 hover:text-[#FF7A00] text-[#FF7A00] border-[#FF7A00]/30"
+                            >
+                              <Brain className="w-4 h-4 mr-2" />
+                              View Memories ({memories.length})
                             </Button>
                           )}
                           <div className="flex space-x-3">
@@ -1023,6 +1221,17 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Memories Dialog */}
+      <MemoriesDialog
+        open={showMemoriesDialog}
+        onOpenChange={setShowMemoriesDialog}
+        memories={memories}
+        loading={memoriesLoading}
+        error={memoriesError}
+        characterName={character.name}
+        onRefresh={refreshMemories}
+      />
     </div>
   );
 };
