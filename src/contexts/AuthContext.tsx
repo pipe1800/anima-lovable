@@ -75,7 +75,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
       
-      console.log('✅ Subscription loaded successfully:', data);
       setSubscription(data || null);
     } catch (error) {
       console.error('❌ Subscription fetch exception:', error);
@@ -143,7 +142,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Handle session refresh
       if (event === 'TOKEN_REFRESHED') {
-        console.log('✅ Token refreshed successfully');
       }
       
       // Handle auth errors

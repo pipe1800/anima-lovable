@@ -241,7 +241,6 @@ export const getUserCharacters = async (userId: string) => {
  * Get character with full details (respects visibility rules)
  */
 export const getCharacterDetails = async (characterId: string) => {
-  console.log('🔍 getCharacterDetails called with characterId:', characterId)
 
   const { data, error } = await supabase
     .from('characters')
@@ -258,7 +257,6 @@ export const getCharacterDetails = async (characterId: string) => {
     .eq('id', characterId)
     .maybeSingle()
 
-  console.log('📊 Character query result:', { data, error })
 
   if (error || !data) {
     console.error('❌ Failed to fetch character:', error)
@@ -266,7 +264,6 @@ export const getCharacterDetails = async (characterId: string) => {
   }
 
   // Fetch creator profile separately
-  console.log('🔍 Fetching creator profile for userId:', data.creator_id)
   const { data: creatorData, error: creatorError } = await supabase
     .from('profiles')
     .select('id, username, avatar_url')
@@ -276,7 +273,6 @@ export const getCharacterDetails = async (characterId: string) => {
   console.log('👤 Creator query result:', { creatorData, creatorError })
 
   // Fetch character definition separately
-  console.log('🔍 Fetching character definition for characterId:', characterId)
   const { data: definitionData, error: definitionError } = await supabase
     .from('character_definitions')
     .select('greeting, description, personality_summary, scenario')
@@ -286,7 +282,6 @@ export const getCharacterDetails = async (characterId: string) => {
   console.log('📄 Definition query result:', { definitionData, definitionError })
 
   // Fetch character tags separately
-  console.log('🔍 Fetching character tags for characterId:', characterId)
   const { data: tagsData, error: tagsError } = await supabase
     .from('character_tags')
     .select(`
@@ -305,7 +300,6 @@ export const getCharacterDetails = async (characterId: string) => {
     tags: tagsData || []
   }
 
-  console.log('✅ Final character with details:', characterWithDetails)
 
   return { data: characterWithDetails, error: null }
 }
@@ -522,7 +516,7 @@ export const getChatMessages = async (chatId: string, limit = 50, offset = 0) =>
 
 /**
  * Get recent messages for a chat (for quick loading)
- * This function ALWAYS preserves historical context data regardless of current addon settings
+ * Context is now stored in messages.current_context by Edge Function
  */
 export const getRecentChatMessages = async (chatId: string, limit = 20) => {
   const { data, error } = await supabase
@@ -544,20 +538,12 @@ export const getRecentChatMessages = async (chatId: string, limit = 20) => {
   
   const messages = data.reverse();
   
-  // Fetch ALL context updates for these messages - NEVER filter based on current addon settings
-  // Historical context must be preserved regardless of current settings
+  // Context is now stored in messages.current_context - old tables removed
   const messageIds = messages.map(msg => msg.id);
-  const { data: contextData } = await supabase
-    .from('message_context')
-    .select('message_id, context_updates')
-    .in('message_id', messageIds);
+  const contextData = []; // Empty since tables were removed
   
-  // Fetch current context state for the chat (only for inheritance, not filtering)
-  const { data: currentContextData } = await supabase
-    .from('user_chat_context')
-    .select('context_type, current_context')
-    .eq('chat_id', chatId)
-    .neq('current_context', 'No context');
+  // Current context also moved to new system
+  const currentContextData = []; // Empty since table was removed
   
   // Build current context state for inheritance
   const currentContext = {};
@@ -613,20 +599,12 @@ export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder:
   
   const messages = data.reverse();
   
-  // Fetch ALL context updates for these messages - NEVER filter based on current addon settings
-  // Historical context must be preserved regardless of current settings
+  // Context is now stored in messages.current_context - old tables removed
   const messageIds = messages.map(msg => msg.id);
-  const { data: contextData } = await supabase
-    .from('message_context')
-    .select('message_id, context_updates')
-    .in('message_id', messageIds);
+  const contextData = []; // Empty since tables were removed
   
-  // Fetch current context state for the chat (only for inheritance, not filtering)
-  const { data: currentContextData } = await supabase
-    .from('user_chat_context')
-    .select('context_type, current_context')
-    .eq('chat_id', chatId)
-    .neq('current_context', 'No context');
+  // Current context also moved to new system
+  const currentContextData = []; // Empty since table was removed
   
   // Build current context state for inheritance
   const currentContext = {};

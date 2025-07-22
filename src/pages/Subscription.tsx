@@ -110,7 +110,6 @@ const Subscription = () => {
   }, [user, toast]);
 
   const handleSubscriptionAction = (targetPlan: Plan) => {
-    console.log('🎯 handleSubscriptionAction called with plan:', targetPlan);
     console.log('👤 User subscription:', userSubscription);
     
     // Check if this is an upgrade case that needs confirmation
@@ -134,7 +133,6 @@ const Subscription = () => {
       setShowUpgradeConfirmation(false);
 
       let response;
-      console.log('🔍 Checking subscription conditions...');
       console.log('  - userSubscription:', userSubscription);
       console.log('  - targetPlan:', targetPlan);
       
@@ -190,7 +188,6 @@ const Subscription = () => {
         return;
       }
 
-      console.log('✅ Response data:', data);
 
       // Handle both old and new response formats
       let approvalUrl = null;

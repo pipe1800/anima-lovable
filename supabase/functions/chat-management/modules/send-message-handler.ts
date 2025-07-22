@@ -3,9 +3,7 @@ import { mapGlobalSettingsToAddonSettings } from '../../_shared/settings-mapper.
 
 // Import from local modules (consolidated)
 import { 
-  extractCharacterContext, 
-  extractContextFromResponse, 
-  saveContextUpdates 
+  extractCharacterContext
 } from './context-extractor.ts';
 import { 
   createStreamingErrorResponse,
@@ -267,23 +265,41 @@ export async function handleSendMessage(
 
                   await updateChatLastActivity(supabase, chatId, characterId);
 
-                  // Background context extraction (non-blocking)
-                  if (effectiveAddonSettings && Object.values(effectiveAddonSettings).some(Boolean)) {
-                    extractContextFromResponse(
-                      character,
-                      messageHistory,
-                      message,
-                      finalMessage,
-                      effectiveAddonSettings,
-                      openRouterKey,
-                      (content) => replaceTemplates(content, templateContext),
-                      supabase,
-                      user.id,
-                      chatId,
-                      characterId
-                    ).catch(error => {
-                      console.error('Background context extraction error:', error);
+                  // Trigger addon context extraction after message is saved
+                  console.log('🔍 Triggering addon context extraction...');
+                  try {
+                    const supabaseUrl = (() => {
+                      try {
+                        return globalThis.Deno?.env?.get('SUPABASE_URL');
+                      } catch {
+                        return process?.env?.SUPABASE_URL;
+                      }
+                    })();
+                    
+                    // Get the Authorization header from the original request
+                    const authHeader = req.headers.get('authorization');
+                    
+                    const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': authHeader || '',
+                        'Content-Type': 'application/json'
+                      },
+                      body: JSON.stringify({
+                        chat_id: chatId,
+                        character_id: characterId,
+                        addon_settings: effectiveAddonSettings,
+                        mode: 'conversation'
+                      })
                     });
+                    
+                    if (extractResponse.ok) {
+                      console.log('✅ Addon context extraction triggered successfully');
+                    } else {
+                      console.error('❌ Failed to trigger addon context extraction:', extractResponse.status);
+                    }
+                  } catch (extractError) {
+                    console.error('💥 Error triggering addon context extraction:', extractError);
                   }
 
                   console.log(`✅ Message streaming completed in ${Date.now() - startTime}ms`);

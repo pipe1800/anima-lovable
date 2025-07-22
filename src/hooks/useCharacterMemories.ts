@@ -49,7 +49,6 @@ export const useCharacterMemories = (characterId: string | null, userId: string 
         return;
       }
 
-      console.log('✅ Fetched memories:', data?.data?.length || 0);
       setMemories(data?.data || []);
     } catch (err) {
       console.error('❌ Unexpected error fetching memories:', err);

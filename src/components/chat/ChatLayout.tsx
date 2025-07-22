@@ -187,7 +187,6 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
             });
             if (result.worldInfoId) {
               setSelectedWorldInfoId(result.worldInfoId);
-              console.log('✅ ChatLayout: Set selectedWorldInfoId to:', result.worldInfoId);
               
               // Notify parent component
               if (onWorldInfoChange) {

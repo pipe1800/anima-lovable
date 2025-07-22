@@ -20,5 +20,4 @@ export async function updateUserDefaultPersona(
     throw error;
   }
 
-  console.log('✅ User default persona updated successfully');
 }

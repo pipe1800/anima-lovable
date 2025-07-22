@@ -505,15 +505,12 @@ export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
       .single();
 
     // Fetch entries
-    console.log('🔍 Debug: Fetching entries for world info ID:', worldInfoId);
     const { data: entries, error: entriesError } = await supabase
       .from('world_info_entries')
       .select('*')
       .eq('world_info_id', worldInfoId)
       .order('created_at', { ascending: false });
 
-    console.log('🔍 Debug: Entries query result:', { entries, entriesError });
-    console.log('🔍 Debug: Entries count:', entries?.length);
 
     if (entriesError) {
       console.error('Error fetching entries:', entriesError);

@@ -380,33 +380,45 @@ export async function fetchCurrentContext(
   characterId: string,
   supabase: SupabaseClient
 ): Promise<CurrentContext> {
-  const { data: currentContextData } = await supabase
-    .from('user_chat_context')
-    .select('context_type, current_context')
+  // Query the correct table: chat_context
+  const { data: contextData, error } = await supabase
+    .from('chat_context')
+    .select('current_context')
     .eq('user_id', userId)
     .eq('chat_id', chatId)
-    .eq('character_id', characterId);
+    .eq('character_id', characterId)
+    .single();
 
-  const currentContext: CurrentContext = {};
-  
-  if (currentContextData) {
-    currentContextData.forEach((ctx) => {
-      if (ctx.current_context && ctx.current_context !== 'No context') {
-        const contextKey = ctx.context_type === 'mood' ? 'moodTracking'
-          : ctx.context_type === 'clothing' ? 'clothingInventory'
-          : ctx.context_type === 'location' ? 'locationTracking'
-          : ctx.context_type === 'time_weather' ? 'timeAndWeather'
-          : ctx.context_type === 'relationship' ? 'relationshipStatus'
-          : ctx.context_type === 'character_position' ? 'characterPosition'
-          : null;
-
-        if (contextKey) {
-          currentContext[contextKey as keyof CurrentContext] = ctx.current_context;
-        }
-      }
-    });
+  if (error || !contextData?.current_context) {
+    console.log('No context found in chat_context table for chat:', chatId);
+    return {};
   }
 
+  // The context is stored in database format, convert to interface format
+  const dbContext = contextData.current_context;
+  const currentContext: CurrentContext = {};
+  
+  // Convert database field names to interface field names
+  if (dbContext.mood && dbContext.mood !== 'No context') {
+    currentContext.moodTracking = dbContext.mood;
+  }
+  if (dbContext.clothing && dbContext.clothing !== 'No context') {
+    currentContext.clothingInventory = dbContext.clothing;
+  }
+  if (dbContext.location && dbContext.location !== 'No context') {
+    currentContext.locationTracking = dbContext.location;
+  }
+  if (dbContext.time_weather && dbContext.time_weather !== 'No context') {
+    currentContext.timeAndWeather = dbContext.time_weather;
+  }
+  if (dbContext.relationship && dbContext.relationship !== 'No context') {
+    currentContext.relationshipStatus = dbContext.relationship;
+  }
+  if (dbContext.character_position && dbContext.character_position !== 'No context') {
+    currentContext.characterPosition = dbContext.character_position;
+  }
+
+  console.log('✅ Fetched and converted context:', { dbContext, currentContext });
   return currentContext;
 }
 

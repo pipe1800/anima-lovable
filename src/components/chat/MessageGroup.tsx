@@ -93,6 +93,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
           {(() => {
             // Get the most recent message in the group for context
             const latestMessage = messages[messages.length - 1];
+            
             const hasContextUpdates = latestMessage.contextUpdates && Object.keys(latestMessage.contextUpdates).length > 0;
             const hasCurrentContext = latestMessage.current_context && Object.keys(latestMessage.current_context).length > 0;
             const hasEnabledAddons = addonSettings && (
@@ -104,11 +105,21 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
               addonSettings.characterPosition
             );
             
+            console.log('🏷️ MessageGroup context check:', {
+              hasContextUpdates,
+              hasCurrentContext,
+              hasEnabledAddons,
+              latestMessageId: latestMessage.id,
+              addonSettings,
+              willShowContext: hasContextUpdates || hasCurrentContext || hasEnabledAddons
+            });
+            
             if (hasContextUpdates || hasCurrentContext || hasEnabledAddons) {
               return (
                 <ContextDisplay 
+                  context={trackedContext}
                   contextUpdates={latestMessage.contextUpdates} 
-                  currentContext={latestMessage.current_context || trackedContext}
+                  currentContext={trackedContext || latestMessage.current_context}
                   addonSettings={addonSettings}
                   className="mt-2"
                 />

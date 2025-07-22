@@ -43,6 +43,7 @@ interface ChatInterfaceProps {
   selectedWorldInfoId?: string | null;
   onChatCreated?: (chatId: string) => void; // New callback for when chat is created
   onCreditsUpdate?: (balance: number) => void; // New callback for credits balance updates
+  onMessageSent?: () => Promise<void>; // New callback for when message is sent
 }
 
 const ChatInterface = ({
@@ -54,7 +55,8 @@ const ChatInterface = ({
   selectedPersonaId: propSelectedPersonaId,
   selectedWorldInfoId,
   onChatCreated,
-  onCreditsUpdate
+  onCreditsUpdate,
+  onMessageSent
 }: ChatInterfaceProps) => {
   const [inputValue, setInputValue] = useState('');
   const [isFirstMessage, setIsFirstMessage] = useState(true);
@@ -114,7 +116,7 @@ const ChatInterface = ({
   const {
     messages,
     isTyping,
-    trackedContext,
+    trackedContext: unifiedTrackedContext,
     sendMessage,
     creditsBalance,
     isLoadingMessages,
@@ -126,6 +128,15 @@ const ChatInterface = ({
     isStreaming,
     streamingMessage
   } = useChatUnified(currentChatId, character.id); // ✅ PHASE 2: Single unified hook
+
+  // Use the prop context (from useContextManagement) as the primary source
+  // Fall back to unified hook context if prop context is not available
+  const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
+  
+  // Debug log to show which context is being used
+  useEffect(() => {
+    // Context selection debug information is available here if needed
+  }, [parentTrackedContext, unifiedTrackedContext, effectiveTrackedContext]);
 
   // ✅ FIX: Safety cleanup for stuck streaming states
   useEffect(() => {
@@ -170,27 +181,41 @@ const ChatInterface = ({
     fewShotExamples: false,
   };
 
-  // Sync tracked context with parent
+  // Sync tracked context with parent - only sync when there are meaningful differences
   useEffect(() => {
-    if (trackedContext && onContextUpdate) {
-      const isContextDifferent = (
-        parentTrackedContext.moodTracking !== trackedContext.moodTracking ||
-        parentTrackedContext.clothingInventory !== trackedContext.clothingInventory ||
-        parentTrackedContext.locationTracking !== trackedContext.locationTracking ||
-        parentTrackedContext.timeAndWeather !== trackedContext.timeAndWeather ||
-        parentTrackedContext.relationshipStatus !== trackedContext.relationshipStatus ||
-        parentTrackedContext.characterPosition !== trackedContext.characterPosition
-      );
-
-      if (isContextDifferent) {
-        console.log('🔄 Syncing context from orchestrator to parent:', {
+    if (effectiveTrackedContext && onContextUpdate) {
+      // Check if contexts have meaningful differences (ignore "No context" values)
+      const hasValidParentContext = Object.values(parentTrackedContext).some(value => value !== 'No context');
+      const hasValidEffectiveContext = Object.values(effectiveTrackedContext).some(value => value !== 'No context');
+      
+      // Only sync if the effective context has valid content and parent doesn't, 
+      // or if there are actual differences in valid content
+      if (!hasValidParentContext && hasValidEffectiveContext) {
+        console.log('🔄 Syncing context from orchestrator to parent (parent has no valid context):', {
           from: parentTrackedContext,
-          to: trackedContext
+          to: effectiveTrackedContext
         });
-        onContextUpdate(trackedContext);
+        onContextUpdate(effectiveTrackedContext);
+      } else if (hasValidParentContext && hasValidEffectiveContext) {
+        const isContextDifferent = (
+          parentTrackedContext.moodTracking !== effectiveTrackedContext.moodTracking ||
+          parentTrackedContext.clothingInventory !== effectiveTrackedContext.clothingInventory ||
+          parentTrackedContext.locationTracking !== effectiveTrackedContext.locationTracking ||
+          parentTrackedContext.timeAndWeather !== effectiveTrackedContext.timeAndWeather ||
+          parentTrackedContext.relationshipStatus !== effectiveTrackedContext.relationshipStatus ||
+          parentTrackedContext.characterPosition !== effectiveTrackedContext.characterPosition
+        );
+
+        if (isContextDifferent) {
+          console.log('🔄 Syncing context from orchestrator to parent (contexts differ):', {
+            from: parentTrackedContext,
+            to: effectiveTrackedContext
+          });
+          onContextUpdate(effectiveTrackedContext);
+        }
       }
     }
-  }, [trackedContext, parentTrackedContext, onContextUpdate]);
+  }, [effectiveTrackedContext, parentTrackedContext, onContextUpdate]);
 
   // Update parent with credits balance whenever it changes
   useEffect(() => {
@@ -263,8 +288,14 @@ const ChatInterface = ({
         messageContent,
         currentAddonSettings,
         selectedPersonaId,
-        selectedWorldInfoId
+        selectedWorldInfoId,
+        effectiveTrackedContext // Pass the database context
       );
+
+      // Call the parent's callback to reload context
+      if (onMessageSent) {
+        await onMessageSent();
+      }
 
       // Update metrics
       const endTime = Date.now();
@@ -320,7 +351,7 @@ const ChatInterface = ({
         });
       }
     }
-  }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, isFirstMessage, onFirstMessage, toast, updateMetrics]);
+  }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, isFirstMessage, onFirstMessage, toast, updateMetrics, onMessageSent]);
 
   const handleUpgrade = () => {
     // Navigate to upgrade page or show upgrade modal
@@ -362,7 +393,7 @@ const ChatInterface = ({
       <ChatMessages 
         chatId={currentChatId}
         character={character}
-        trackedContext={trackedContext}
+        trackedContext={effectiveTrackedContext}
         streamingMessage="" 
         isStreaming={isStreaming}
         messages={messages}

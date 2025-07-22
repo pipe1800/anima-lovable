@@ -114,7 +114,6 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // ============================================================================
   const addDebugInfo = useCallback((info: string) => {
     dispatch({ type: 'ADD_DEBUG_INFO', payload: info });
-    console.log(`🔍 [Real-time] ${info}`);
   }, []);
 
   useEffect(() => {
@@ -162,6 +161,33 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
             });
             addDebugInfo('Real-time query invalidated');
           }, 100); // Single, consistent delay
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `chat_id=eq.${chatId}`
+        },
+        (payload) => {
+          // ✅ Handle context updates to messages
+          if (isStreamingRef.current) {
+            addDebugInfo('Skipping real-time update - streaming active');
+            return;
+          }
+          
+          addDebugInfo(`Message updated: ${payload.new.is_ai_message ? 'AI' : 'User'} context`);
+          
+          // Invalidate to pick up context updates
+          setTimeout(() => {
+            queryClient.invalidateQueries({ 
+              queryKey: queryKeys.chat.messages(chatId),
+              exact: true 
+            });
+            addDebugInfo('Real-time context update invalidated');
+          }, 100);
         }
       )
       .subscribe((status) => {
@@ -306,8 +332,44 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                     exact: true 
                   });
                   
+                  // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
+                  console.log('🔄 AI message completed, fetching fresh context...');
+                  setTimeout(async () => {
+                    try {
+                      const { data: contextData, error } = await supabase
+                        .from('chat_context')
+                        .select('current_context')
+                        .eq('chat_id', chatId)
+                        .eq('user_id', user.id)
+                        .eq('character_id', characterId)
+                        .maybeSingle();
+                      
+                      if (!error && contextData?.current_context) {
+                        console.log('✅ Fresh context fetched:', contextData.current_context);
+                        
+                        // Cast to expected context format
+                        const rawContext = contextData.current_context as any;
+                        
+                        // Convert to frontend format
+                        const convertedContext = {
+                          moodTracking: rawContext?.mood || 'No context',
+                          clothingInventory: rawContext?.clothing || 'No context',
+                          locationTracking: rawContext?.location || 'No context',
+                          timeAndWeather: rawContext?.time_weather || 'No context',
+                          relationshipStatus: rawContext?.relationship || 'No context',
+                          characterPosition: rawContext?.character_position || 'No context'
+                        };
+                        
+                        // Update the context state
+                        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
+                        console.log('🎯 Context updated in UI immediately!');
+                      }
+                    } catch (err) {
+                      console.error('❌ Failed to fetch fresh context:', err);
+                    }
+                  }, 1000); // 1 second delay for backend processing
+                  
                   const endTime = Date.now();
-                  console.log(`✅ Instant mode completed in ${endTime - startTime}ms`);
                   return { content: fullMessage };
                 }
                 
@@ -357,8 +419,81 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                     exact: true 
                   });
                   
+                  // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
+                  console.log('🔄 AI message completed (smooth mode), fetching fresh context...');
+                  setTimeout(async () => {
+                    try {
+                      const { data: contextData, error } = await supabase
+                        .from('chat_context')
+                        .select('current_context')
+                        .eq('chat_id', chatId)
+                        .eq('user_id', user.id)
+                        .eq('character_id', characterId)
+                        .maybeSingle();
+                      
+                      if (!error && contextData?.current_context) {
+                        console.log('✅ Fresh context fetched:', contextData.current_context);
+                        
+                        // Cast to expected context format
+                        const rawContext = contextData.current_context as any;
+                        
+                        // Convert to frontend format
+                        const convertedContext = {
+                          moodTracking: rawContext?.mood || 'No context',
+                          clothingInventory: rawContext?.clothing || 'No context',
+                          locationTracking: rawContext?.location || 'No context',
+                          timeAndWeather: rawContext?.time_weather || 'No context',
+                          relationshipStatus: rawContext?.relationship || 'No context',
+                          characterPosition: rawContext?.character_position || 'No context'
+                        };
+                        
+                        // Update the context state
+                        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
+                        console.log('🎯 Context updated in UI immediately!');
+                      }
+                    } catch (err) {
+                      console.error('❌ Failed to fetch fresh context:', err);
+                    }
+                  }, 1000); // 1 second delay for backend processing
+                  
+                  // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
+                  console.log('🔄 AI message completed (smooth mode), fetching fresh context...');
+                  setTimeout(async () => {
+                    try {
+                      const { data: contextData, error } = await supabase
+                        .from('chat_context')
+                        .select('current_context')
+                        .eq('chat_id', chatId)
+                        .eq('user_id', user.id)
+                        .eq('character_id', characterId)
+                        .maybeSingle();
+                      
+                      if (!error && contextData?.current_context) {
+                        console.log('✅ Fresh context fetched:', contextData.current_context);
+                        
+                        // Cast to expected context format
+                        const rawContext = contextData.current_context as any;
+                        
+                        // Convert to frontend format
+                        const convertedContext = {
+                          moodTracking: rawContext?.mood || 'No context',
+                          clothingInventory: rawContext?.clothing || 'No context',
+                          locationTracking: rawContext?.location || 'No context',
+                          timeAndWeather: rawContext?.time_weather || 'No context',
+                          relationshipStatus: rawContext?.relationship || 'No context',
+                          characterPosition: rawContext?.character_position || 'No context'
+                        };
+                        
+                        // Update the context state
+                        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
+                        console.log('🎯 Context updated in UI immediately!');
+                      }
+                    } catch (err) {
+                      console.error('❌ Failed to fetch fresh context:', err);
+                    }
+                  }, 1000); // 1 second delay for backend processing
+                  
                   const endTime = Date.now();
-                  console.log(`✅ Smooth mode completed in ${endTime - startTime}ms`);
                   return { content: fullMessage };
                 }
                 
@@ -522,7 +657,9 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
 
   // Extract context from messages
   const extractedContext = useMemo(() => {
-    if (!allMessages.length) return state.trackedContext;
+    if (!allMessages.length) {
+      return state.trackedContext;
+    }
     
     // Find most recent AI message with context
     for (let i = allMessages.length - 1; i >= 0; i--) {
@@ -538,6 +675,10 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // Update context when extracted context changes
   useEffect(() => {
     if (extractedContext !== state.trackedContext) {
+      console.log('🔄 useChatUnified: Updating context:', {
+        from: state.trackedContext,
+        to: extractedContext
+      });
       dispatch({ type: 'UPDATE_CONTEXT', payload: extractedContext });
     }
   }, [extractedContext, state.trackedContext]);
@@ -549,7 +690,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     content: string, 
     addonSettings?: any,
     selectedPersonaId?: string | null,
-    selectedWorldInfoId?: string | null
+    selectedWorldInfoId?: string | null,
+    overrideContext?: any
   ) => {
     if (!user || !chatId || !content.trim()) return;
     
@@ -564,7 +706,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         chatId,
         content,
         characterId,
-        trackedContext: state.trackedContext,
+        trackedContext: overrideContext || state.trackedContext,
         addonSettings,
         selectedPersonaId,
         selectedWorldInfoId

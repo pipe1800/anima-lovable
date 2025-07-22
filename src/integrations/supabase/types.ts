@@ -107,6 +107,60 @@ export type Database = {
           },
         ]
       }
+      character_memories: {
+        Row: {
+          character_id: string
+          chat_id: string
+          created_at: string | null
+          id: string
+          input_token_cost: number
+          message_count: number
+          summary_content: string
+          trigger_keywords: string[]
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          character_id: string
+          chat_id: string
+          created_at?: string | null
+          id?: string
+          input_token_cost: number
+          message_count: number
+          summary_content: string
+          trigger_keywords: string[]
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          character_id?: string
+          chat_id?: string
+          created_at?: string | null
+          id?: string
+          input_token_cost?: number
+          message_count?: number
+          summary_content?: string
+          trigger_keywords?: string[]
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "character_memories_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_memories_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "chats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       character_tags: {
         Row: {
           character_id: string
@@ -207,12 +261,59 @@ export type Database = {
           updated_at?: string
           visibility?: string
         }
+        Relationships: []
+      }
+      chat_context: {
+        Row: {
+          character_id: string
+          chat_id: string
+          created_at: string
+          current_context: Json
+          id: string
+          last_updated_by_message_id: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          character_id: string
+          chat_id: string
+          created_at?: string
+          current_context?: Json
+          id?: string
+          last_updated_by_message_id?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          character_id?: string
+          chat_id?: string
+          created_at?: string
+          current_context?: Json
+          id?: string
+          last_updated_by_message_id?: string | null
+          updated_at?: string
+          user_id?: string
+        }
         Relationships: [
           {
-            foreignKeyName: "fk_characters_default_persona"
-            columns: ["default_persona_id"]
+            foreignKeyName: "chat_context_character_id_fkey"
+            columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "personas"
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_context_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: true
+            referencedRelation: "chats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_context_last_updated_by_message_id_fkey"
+            columns: ["last_updated_by_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
         ]
@@ -351,84 +452,48 @@ export type Database = {
         }
         Relationships: []
       }
-      message_context: {
-        Row: {
-          character_id: string
-          chat_id: string
-          context_updates: Json
-          created_at: string
-          id: string
-          message_id: string
-          user_id: string
-        }
-        Insert: {
-          character_id: string
-          chat_id: string
-          context_updates?: Json
-          created_at?: string
-          id?: string
-          message_id: string
-          user_id: string
-        }
-        Update: {
-          character_id?: string
-          chat_id?: string
-          context_updates?: Json
-          created_at?: string
-          id?: string
-          message_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "message_context_chat_id_fkey"
-            columns: ["chat_id"]
-            isOneToOne: false
-            referencedRelation: "chats"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "message_context_message_id_fkey"
-            columns: ["message_id"]
-            isOneToOne: false
-            referencedRelation: "messages"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       messages: {
         Row: {
-          author_id: string
+          author_id: string | null
           chat_id: string
           content: string
           created_at: string
           current_context: Json | null
           id: string
           is_ai_message: boolean
+          is_placeholder: boolean | null
+          message_order: number
           model_id: string | null
           token_cost: number | null
+          updated_at: string | null
         }
         Insert: {
-          author_id: string
+          author_id?: string | null
           chat_id: string
           content: string
           created_at?: string
           current_context?: Json | null
           id?: string
           is_ai_message?: boolean
+          is_placeholder?: boolean | null
+          message_order?: number
           model_id?: string | null
           token_cost?: number | null
+          updated_at?: string | null
         }
         Update: {
-          author_id?: string
+          author_id?: string | null
           chat_id?: string
           content?: string
           created_at?: string
           current_context?: Json | null
           id?: string
           is_ai_message?: boolean
+          is_placeholder?: boolean | null
+          message_order?: number
           model_id?: string | null
           token_cost?: number | null
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -602,7 +667,15 @@ export type Database = {
           updated_at?: string
           username?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fk_profiles_default_persona"
+            columns: ["default_persona_id"]
+            isOneToOne: false
+            referencedRelation: "personas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       public_app_settings: {
         Row: {
@@ -672,40 +745,32 @@ export type Database = {
         }
         Relationships: []
       }
-      user_character_addons: {
+      user_character_addons_backup: {
         Row: {
-          addon_settings: Json
-          character_id: string
+          addon_settings: Json | null
+          character_id: string | null
           created_at: string | null
-          id: string
+          id: string | null
           updated_at: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
-          addon_settings?: Json
-          character_id: string
+          addon_settings?: Json | null
+          character_id?: string | null
           created_at?: string | null
-          id?: string
+          id?: string | null
           updated_at?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
-          addon_settings?: Json
-          character_id?: string
+          addon_settings?: Json | null
+          character_id?: string | null
           created_at?: string | null
-          id?: string
+          id?: string | null
           updated_at?: string | null
-          user_id?: string
+          user_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "user_character_addons_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "characters"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       user_character_world_info_settings: {
         Row: {
@@ -732,37 +797,103 @@ export type Database = {
           user_id?: string
           world_info_id?: string
         }
+        Relationships: [
+          {
+            foreignKeyName: "user_character_world_info_settings_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_character_world_info_settings_world_info_id_fkey"
+            columns: ["world_info_id"]
+            isOneToOne: false
+            referencedRelation: "world_infos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_character_world_info_settings_backup: {
+        Row: {
+          character_id: string | null
+          created_at: string | null
+          id: string | null
+          updated_at: string | null
+          user_id: string | null
+          world_info_id: string | null
+        }
+        Insert: {
+          character_id?: string | null
+          created_at?: string | null
+          id?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+          world_info_id?: string | null
+        }
+        Update: {
+          character_id?: string | null
+          created_at?: string | null
+          id?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+          world_info_id?: string | null
+        }
         Relationships: []
       }
-      user_chat_context: {
+      user_global_chat_settings: {
         Row: {
-          character_id: string
-          chat_id: string
-          context_type: string
-          created_at: string
-          current_context: string | null
+          chain_of_thought: boolean | null
+          character_position: boolean | null
+          clothing_inventory: boolean | null
+          created_at: string | null
+          dynamic_world_info: boolean | null
+          enhanced_memory: boolean | null
+          few_shot_examples: boolean | null
+          font_size: string | null
           id: string
-          updated_at: string
+          location_tracking: boolean | null
+          mood_tracking: boolean | null
+          relationship_status: boolean | null
+          streaming_mode: string | null
+          time_and_weather: boolean | null
+          updated_at: string | null
           user_id: string
         }
         Insert: {
-          character_id: string
-          chat_id: string
-          context_type: string
-          created_at?: string
-          current_context?: string | null
+          chain_of_thought?: boolean | null
+          character_position?: boolean | null
+          clothing_inventory?: boolean | null
+          created_at?: string | null
+          dynamic_world_info?: boolean | null
+          enhanced_memory?: boolean | null
+          few_shot_examples?: boolean | null
+          font_size?: string | null
           id?: string
-          updated_at?: string
+          location_tracking?: boolean | null
+          mood_tracking?: boolean | null
+          relationship_status?: boolean | null
+          streaming_mode?: string | null
+          time_and_weather?: boolean | null
+          updated_at?: string | null
           user_id: string
         }
         Update: {
-          character_id?: string
-          chat_id?: string
-          context_type?: string
-          created_at?: string
-          current_context?: string | null
+          chain_of_thought?: boolean | null
+          character_position?: boolean | null
+          clothing_inventory?: boolean | null
+          created_at?: string | null
+          dynamic_world_info?: boolean | null
+          enhanced_memory?: boolean | null
+          few_shot_examples?: boolean | null
+          font_size?: string | null
           id?: string
-          updated_at?: string
+          location_tracking?: boolean | null
+          mood_tracking?: boolean | null
+          relationship_status?: boolean | null
+          streaming_mode?: string | null
+          time_and_weather?: boolean | null
+          updated_at?: string | null
           user_id?: string
         }
         Relationships: []
@@ -994,6 +1125,24 @@ export type Database = {
       consume_credits: {
         Args: { user_id_param: string; credits_to_consume: number }
         Returns: boolean
+      }
+      create_chat_with_greeting: {
+        Args: {
+          p_character_id: string
+          p_user_id: string
+          p_user_message: string
+        }
+        Returns: string
+      }
+      create_new_chat_with_greeting: {
+        Args: { p_character_id: string; p_user_id: string }
+        Returns: string
+      }
+      get_chat_context: {
+        Args: { p_chat_id: string; p_user_id: string; p_character_id: string }
+        Returns: {
+          current_context: Json
+        }[]
       }
       get_user_role: {
         Args: Record<PropertyKey, never>
