@@ -162,7 +162,15 @@ export async function buildSystemPrompt(
   userMessage?: string,
   conversationHistory?: any[],
   characterMemories?: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null,
-  chatMode?: 'storytelling' | 'companion'
+  chatMode?: 'storytelling' | 'companion',
+  timeAwarenessData?: {
+    enabled: boolean;
+    delaySeconds: number;
+    userTimezone: string;
+    userLocalTime: string;
+    conversationTone?: string;
+    urgencyLevel?: string;
+  }
 ): Promise<string> {
   console.log('🎯 buildSystemPrompt called with:', {
     character: character ? 'loaded' : 'null',
@@ -286,6 +294,57 @@ Stay in character and engage in natural dialogue with the user.`;
     if (contextParts.length > 0) {
       systemPrompt += '\n\n[CURRENT CONTEXT]\n' + contextParts.join('\n') + '\n[/CURRENT CONTEXT]';
     }
+  }
+
+  // Add time awareness context if enabled
+  if (timeAwarenessData?.enabled) {
+    const formatDelay = (seconds: number): string => {
+      if (seconds < 60) return `${seconds} seconds`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`;
+      return `${Math.floor(seconds / 86400)} days`;
+    };
+
+    const getDelayCategory = (seconds: number): string => {
+      if (seconds < 300) return 'short'; // < 5 min
+      if (seconds < 1800) return 'medium'; // < 30 min
+      if (seconds < 7200) return 'long'; // < 2 hours
+      return 'very_long';
+    };
+
+    systemPrompt += `\n\n[TIME AWARENESS ACTIVE]
+Current time: ${timeAwarenessData.userLocalTime}
+Timezone: ${timeAwarenessData.userTimezone} (we share the same timezone)`;
+
+    // Only add delay information if there's an actual delay > 30 seconds
+    if (timeAwarenessData.delaySeconds > 30) {
+      const delayCategory = getDelayCategory(timeAwarenessData.delaySeconds);
+      const formattedDelay = formatDelay(timeAwarenessData.delaySeconds);
+
+      systemPrompt += `\nTime since your last message: ${formattedDelay}
+Delay category: ${delayCategory}`;
+
+      if (timeAwarenessData.conversationTone && timeAwarenessData.conversationTone !== 'No context') {
+        systemPrompt += `\nConversation tone: ${timeAwarenessData.conversationTone}`;
+      }
+      if (timeAwarenessData.urgencyLevel && timeAwarenessData.urgencyLevel !== 'No context') {
+        systemPrompt += `\nUrgency level: ${timeAwarenessData.urgencyLevel}`;
+      }
+    }
+
+    systemPrompt += `\n\nIMPORTANT: You and the user are in the same timezone (${timeAwarenessData.userTimezone}). When asked about time, respond with the actual current time (${timeAwarenessData.userLocalTime}), not a placeholder like {current_time}.`;
+
+    if (timeAwarenessData.delaySeconds > 30) {
+      systemPrompt += `\n\nBased on your character's personality, react appropriately to this delay:
+- Consider the time gap when crafting your response
+- Take into account the current time (are they likely sleeping, working, etc.)
+- Factor in the conversation tone and urgency level
+- React authentically based on your personality traits (patient vs impatient, understanding vs demanding, etc.)
+- You may acknowledge the delay if it fits your character, but don't always mention it
+- When discussing time, remember you both share the same current time`;
+    }
+    
+    systemPrompt += `\n[/TIME AWARENESS]`;
   }
 
   // Add addon context if enabled

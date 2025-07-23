@@ -103,6 +103,15 @@ export async function extractContextFromResponse(character, conversationContext,
     enabledFields.push('"character_position": "character\'s physical position, posture, or stance"');
     contextFields.character_position = 'character_position';
   }
+
+  // Add time awareness context extraction
+  if (addonSettings.timeAwareness) {
+    enabledFields.push('"conversation_tone": "current emotional tone (neutral/tense/romantic/playful/serious/angry/sad/excited)"');
+    enabledFields.push('"urgency_level": "conversation urgency (low/medium/high)"');
+    contextFields.conversation_tone = 'conversation_tone';
+    contextFields.urgency_level = 'urgency_level';
+  }
+
   if (enabledFields.length === 0) {
     console.log('No context addons enabled - skipping context extraction');
     return null;
@@ -216,6 +225,16 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
       setting: 'characterPosition',
       field: 'character_position',
       type: 'character_position'
+    },
+    {
+      setting: 'timeAwareness',
+      field: 'conversation_tone',
+      type: 'conversation_tone'
+    },
+    {
+      setting: 'timeAwareness',
+      field: 'urgency_level',
+      type: 'urgency_level'
     }
   ];
 
@@ -226,7 +245,9 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
     location: null,
     relationship: null,
     time_weather: null,
-    character_position: null
+    character_position: null,
+    conversation_tone: null,
+    urgency_level: null
   };
 
   let hasUpdates = false;
@@ -236,7 +257,12 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
       const newValue = extractedContext[field];
       // Only update if we got a meaningful value (not "No context")
       if (newValue !== 'No context') {
-        contextData[field === 'time_weather' ? 'time_weather' : field === 'character_position' ? 'character_position' : field] = newValue;
+        const contextKey = field === 'time_weather' ? 'time_weather' : 
+                          field === 'character_position' ? 'character_position' :
+                          field === 'conversation_tone' ? 'conversation_tone' :
+                          field === 'urgency_level' ? 'urgency_level' :
+                          field;
+        contextData[contextKey] = newValue;
         hasUpdates = true;
         console.log(`💾 Setting ${field} context:`, newValue);
       } else {
@@ -276,7 +302,9 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
             locationTracking: extractedContext.location || 'No context',
             timeAndWeather: extractedContext.time_weather || 'No context',
             relationshipStatus: extractedContext.relationship || 'No context',
-            characterPosition: extractedContext.character_position || 'No context'
+            characterPosition: extractedContext.character_position || 'No context',
+            conversationTone: extractedContext.conversation_tone || 'No context',
+            urgencyLevel: extractedContext.urgency_level || 'No context'
           };
           
           // Find the latest AI message in this chat

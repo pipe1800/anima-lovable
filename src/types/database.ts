@@ -7,6 +7,7 @@ export interface Profile {
   bio?: string;
   onboarding_completed: boolean;
   onboarding_survey_data?: any;
+  timezone?: string | null;
   created_at: string;
   updated_at: string;
 }

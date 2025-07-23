@@ -118,6 +118,11 @@ export async function handleSendMessage(
 
     // Convert global settings to addon settings for backward compatibility
     const effectiveAddonSettings = globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {});
+    
+    // Add time awareness from user character settings
+    if (userCharacterSettings?.time_awareness_enabled) {
+      effectiveAddonSettings.timeAwareness = true;
+    }
 
     console.log('🌍 World Info Status:', {
       requested: !!selectedWorldInfoId,
@@ -164,6 +169,83 @@ export async function handleSendMessage(
     const currentContext = await fetchCurrentContext(user.id, chatId, characterId, supabase);
 
     // ============================================================================
+    // TIME AWARENESS CALCULATION
+    // ============================================================================
+    let timeAwarenessData: {
+      enabled: boolean;
+      delaySeconds: number;
+      userTimezone: string;
+      userLocalTime: string;
+      conversationTone?: string;
+      urgencyLevel?: string;
+    } | undefined = undefined;
+    
+    if (userCharacterSettings?.time_awareness_enabled) {
+      // Always provide timezone and current time when time awareness is enabled
+      const userTimezone = userProfile?.timezone || 'UTC';
+      console.log('🐛 TIME AWARENESS DEBUG - userProfile:', {
+        userProfile,
+        timezone: userProfile?.timezone,
+        userTimezone,
+        profileExists: !!userProfile
+      });
+      
+      const userLocalTime = new Date().toLocaleString('en-US', { 
+        timeZone: userTimezone,
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      });
+      
+      // Get the last AI message timestamp for delay calculation
+      const lastAiMessage = messageHistory
+        .filter(msg => msg.is_ai_message)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+      let delaySeconds = 0;
+      let hasDelay = false;
+
+      if (lastAiMessage) {
+        const currentTime = new Date();
+        const lastMessageTime = new Date(lastAiMessage.created_at);
+        delaySeconds = Math.floor((currentTime.getTime() - lastMessageTime.getTime()) / 1000);
+        hasDelay = delaySeconds > 30;
+        console.log('🐛 TIMEZONE DEBUG:', {
+          userTimezoneFromProfile: userProfile?.timezone,
+          fallbackUserTimezone: userTimezone,
+          profileExists: !!userProfile,
+          delaySeconds,
+          hasDelay
+        });
+        
+        // Always create timeAwarenessData when time awareness is enabled
+        timeAwarenessData = {
+          enabled: true,
+          delaySeconds,
+          userTimezone,
+          userLocalTime,
+          conversationTone: (currentContext as any)?.conversationTone || undefined,
+          urgencyLevel: (currentContext as any)?.urgencyLevel || undefined
+        };
+
+        console.log('⏰ Time awareness activated:', {
+          delaySeconds,
+          formattedDelay: delaySeconds < 60 ? `${delaySeconds}s` : 
+                        delaySeconds < 3600 ? `${Math.floor(delaySeconds/60)}m` : 
+                        `${Math.floor(delaySeconds/3600)}h`,
+          userLocalTime,
+          userTimezone,
+          hasDelay,
+          conversationTone: timeAwarenessData.conversationTone,
+          urgencyLevel: timeAwarenessData.urgencyLevel
+        });
+      }
+    }
+
+    // ============================================================================
     // BUILD SYSTEM PROMPT & CONVERSATION (same as chat-stream)
     // ============================================================================
         const systemPrompt = await buildSystemPrompt(
@@ -178,7 +260,8 @@ export async function handleSendMessage(
       message,
       messageHistory,
       characterMemories,
-      userCharacterSettings?.chat_mode || 'storytelling'
+      userCharacterSettings?.chat_mode || 'storytelling',
+      timeAwarenessData
     );
 
     // Use new message-based budget management

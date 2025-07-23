@@ -28,6 +28,7 @@ export interface AddonSettings {
   characterPosition?: boolean;
   chainOfThought?: boolean;
   fewShotExamples?: boolean;
+  timeAwareness?: boolean;
 }
 
 /**

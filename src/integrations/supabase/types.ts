@@ -654,6 +654,7 @@ export type Database = {
           id: string
           onboarding_completed: boolean
           onboarding_survey_data: Json | null
+          timezone: string | null
           updated_at: string
           username: string
         }
@@ -665,6 +666,7 @@ export type Database = {
           id: string
           onboarding_completed?: boolean
           onboarding_survey_data?: Json | null
+          timezone?: string | null
           updated_at?: string
           username: string
         }
@@ -676,6 +678,7 @@ export type Database = {
           id?: string
           onboarding_completed?: boolean
           onboarding_survey_data?: Json | null
+          timezone?: string | null
           updated_at?: string
           username?: string
         }

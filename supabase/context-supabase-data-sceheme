@@ -79,7 +79,7 @@ CREATE TABLE public.chat_context (
   user_id uuid NOT NULL,
   character_id uuid NOT NULL,
   chat_id uuid NOT NULL UNIQUE,
-  current_context jsonb NOT NULL DEFAULT '{"mood": null, "clothing": null, "location": null, "relationship": null, "time_weather": null, "character_position": null}'::jsonb,
+  current_context jsonb NOT NULL DEFAULT '{"mood": null, "clothing": null, "location": null, "relationship": null, "time_weather": null, "urgency_level": null, "conversation_tone": null, "character_position": null}'::jsonb,
   last_updated_by_message_id uuid,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -204,6 +204,7 @@ CREATE TABLE public.profiles (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   default_persona_id uuid,
+  timezone text DEFAULT 'UTC'::text,
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
   CONSTRAINT fk_profiles_default_persona FOREIGN KEY (default_persona_id) REFERENCES public.personas(id)

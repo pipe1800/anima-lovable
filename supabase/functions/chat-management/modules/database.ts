@@ -63,7 +63,7 @@ export async function fetchUserProfile(
 ): Promise<any> {
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('username')
+    .select('username, timezone')
     .eq('id', userId)
     .single();
 

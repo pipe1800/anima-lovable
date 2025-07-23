@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronRight, Settings, Search, Heart, Star, MessageCircle, Info, Edit, User, Plus, Upload, X, ChevronDown, Trash2, Zap, Brain } from 'lucide-react';
+import { ChevronRight, Settings, Search, Heart, Star, MessageCircle, Info, Edit, User, Plus, Upload, X, ChevronDown, Trash2, Zap, Brain, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getUserChats, getCharacterDetails } from '@/lib/supabase-queries';
 import { getUserPersonas, createPersona, deletePersona, type Persona } from '@/lib/persona-operations';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { getUserCharacterSettings, upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
+import { getBrowserTimezone } from '@/utils/timezone';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -91,6 +93,11 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [pendingChatMode, setPendingChatMode] = useState<'storytelling' | 'companion' | null>(null);
   const [currentChat, setCurrentChat] = useState<any>(null);
   
+  // Time awareness state
+  const [timeAwarenessEnabled, setTimeAwarenessEnabled] = useState(false);
+  const [timeAwarenessLoading, setTimeAwarenessLoading] = useState(false);
+  const [userTimezone, setUserTimezone] = useState<string>('UTC');
+  
   // Debug Enhanced Memory detection
   useEffect(() => {
     console.log('🧠 Enhanced Memory Debug:', {
@@ -108,6 +115,9 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       try {
         const { data: { user } } = await supabase.auth.getUser();
         setCurrentUser(user);
+
+        // Set user timezone
+        setUserTimezone(getBrowserTimezone());
 
         if (user) {
           const { data: chats } = await getUserChats(user.id);
@@ -219,12 +229,13 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           }
         }
         
-        // Load user character settings (chat mode)
+        // Load user character settings (chat mode and time awareness)
         if (user) {
           try {
             const settings = await getUserCharacterSettings(user.id, character.id);
             if (settings) {
               setChatMode(settings.chat_mode);
+              setTimeAwarenessEnabled(settings.time_awareness_enabled || false);
             }
           } catch (error) {
             console.error('Error loading user character settings:', error);
@@ -532,6 +543,33 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       setChatModeLoading(false);
       setShowChangeModal(false);
       setPendingChatMode(null);
+    }
+  };
+
+  // Handle time awareness toggle
+  const handleTimeAwarenessChange = async (enabled: boolean) => {
+    if (!currentUser) return;
+    
+    setTimeAwarenessLoading(true);
+    
+    try {
+      // Update user character settings
+      await upsertUserCharacterSettings(currentUser.id, character.id, {
+        time_awareness_enabled: enabled
+      });
+      
+      setTimeAwarenessEnabled(enabled);
+      
+      toast.success(`Time awareness ${enabled ? 'enabled' : 'disabled'}`, {
+        description: enabled 
+          ? 'The character will now react to response delays based on their personality'
+          : 'The character will no longer react to response delays'
+      });
+    } catch (error) {
+      console.error('Error updating time awareness:', error);
+      toast.error('Failed to update time awareness setting');
+    } finally {
+      setTimeAwarenessLoading(false);
     }
   };
 
@@ -1038,12 +1076,40 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                       {currentUser && (
                         <div>
                           <h3 className="text-white font-semibold mb-3">Chat Settings</h3>
-                          <CharacterChatModeToggle
-                            chatMode={chatMode}
-                            onChange={handleChatModeChange}
-                            showWarning={false}
-                            disabled={chatModeLoading}
-                          />
+                          <div className="space-y-4">
+                            <CharacterChatModeToggle
+                              chatMode={chatMode}
+                              onChange={handleChatModeChange}
+                              showWarning={false}
+                              disabled={chatModeLoading}
+                            />
+                            
+                            {/* Time Awareness Toggle */}
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2">
+                                  <Clock className="w-4 h-4 text-[#FF7A00]" />
+                                  <span className="text-white text-sm font-medium">Time Awareness</span>
+                                </div>
+                                <Switch
+                                  checked={timeAwarenessEnabled}
+                                  onCheckedChange={handleTimeAwarenessChange}
+                                  disabled={timeAwarenessLoading}
+                                  className="data-[state=checked]:bg-[#FF7A00]"
+                                />
+                              </div>
+                              <p className="text-gray-400 text-xs leading-relaxed">
+                                When enabled, the character will react to how long you take to respond based on their personality. 
+                                Patient characters stay calm with delays, while impatient ones may show frustration.
+                              </p>
+                              {timeAwarenessEnabled && (
+                                <p className="text-gray-400 text-xs mt-2">
+                                  <Clock className="w-3 h-3 inline mr-1" />
+                                  Your timezone: {userTimezone}
+                                </p>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

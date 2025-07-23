@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { getPrivateProfile, getUserActiveSubscription } from '@/lib/supabase-queries';
+import { getBrowserTimezone, updateUserTimezone } from '@/utils/timezone';
 import type { Profile, Subscription, Plan } from '@/types/database';
 import { TutorialProvider } from './TutorialContext';
 
@@ -45,6 +46,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       console.error('Profile fetch failed:', error);
       setProfile(null);
+    }
+  };
+
+  const updateTimezoneIfNeeded = async () => {
+    if (!user?.id || !profile) return;
+    
+    const browserTimezone = getBrowserTimezone();
+    console.log('🌍 Detected browser timezone:', browserTimezone);
+    
+    // Check if timezone needs updating
+    if (profile.timezone !== browserTimezone) {
+      console.log('🔄 Updating user timezone from', profile.timezone, 'to', browserTimezone);
+      const success = await updateUserTimezone(user.id, browserTimezone);
+      if (success) {
+        // Update the profile state to reflect the change
+        setProfile(prev => prev ? { ...prev, timezone: browserTimezone } : null);
+        console.log('✅ User timezone updated successfully');
+      }
     }
   };
 
@@ -184,6 +203,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSubscription(null);
     }
   }, [user]);
+
+  // Update timezone when profile is loaded
+  useEffect(() => {
+    if (user && profile) {
+      updateTimezoneIfNeeded();
+    }
+  }, [user, profile]);
 
   const value = {
     user,
