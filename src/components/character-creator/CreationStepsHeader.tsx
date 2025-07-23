@@ -1,5 +1,7 @@
 import React from 'react';
-import { Check, Circle } from 'lucide-react';
+import { Check, Circle, Save, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
 interface Step {
   id: number;
   title: string;
@@ -9,21 +11,52 @@ interface CreationStepsHeaderProps {
   steps: Step[];
   currentStep: number;
   onStepChange: (stepId: number) => void;
+  isEditing?: boolean;
+  onSave?: () => Promise<void>;
+  isSaving?: boolean;
 }
 const CreationStepsHeader = ({
   steps,
   currentStep,
-  onStepChange
+  onStepChange,
+  isEditing = false,
+  onSave,
+  isSaving = false
 }: CreationStepsHeaderProps) => {
   return <div className="bg-[#1a1a2e]/90 backdrop-blur-sm border-b border-gray-700/50 py-[4px]">
       <div className="">
-        <div className="mb-6 hidden sm:block px-4 sm:px-6 lg:px-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
-            Character Creator
-          </h1>
-          <p className="text-gray-400 text-sm sm:text-base">
-            Create your AI character in {steps.length} simple steps
-          </p>
+        <div className="mb-6 hidden sm:block px-6 sm:px-8 lg:px-10 mt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+                Character Creator
+              </h1>
+              <p className="text-gray-400 text-sm sm:text-base">
+                Create your AI character in {steps.length} simple steps
+              </p>
+            </div>
+            
+            {/* Save Button - Only visible in edit mode */}
+            {isEditing && onSave && (
+              <Button
+                onClick={onSave}
+                disabled={isSaving}
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg transition-colors duration-300 flex items-center gap-2 ml-4"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Steps Progress Bar */}

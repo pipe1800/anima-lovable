@@ -20,10 +20,10 @@ import {
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { useDashboardData, useUserChatsPaginated } from '@/hooks/useDashboard';
+import { useDashboardData } from '@/hooks/useDashboard';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { supabase } from '@/integrations/supabase/client';
-import { deleteChat, deleteMultipleChats, deleteAllUserChats } from '@/lib/supabase-queries';
+import { deleteChat, deleteMultipleChats } from '@/lib/supabase-queries';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { 
@@ -55,9 +55,7 @@ export function DashboardContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const chatsPerPage = 10;
   
   // Use React Query hook for dashboard data
@@ -68,18 +66,8 @@ export function DashboardContent() {
     refetch
   } = useDashboardData();
 
-  // Use separate hook for paginated chats
-  const {
-    data: chatsData,
-    isLoading: chatsLoading,
-    error: chatsError,
-    refetch: refetchChats
-  } = useUserChatsPaginated(currentPage, chatsPerPage);
-
   // Extract data with fallbacks
-  const recentChats = chatsData?.data || [];
-  const totalChats = chatsData?.totalCount || 0;
-  const totalPages = chatsData?.totalPages || 1;
+  const recentChats = dashboardData?.chats || [];
   const myCharacters = dashboardData?.characters || [];
   const favoriteCharacters = dashboardData?.favorites || [];
   const userCredits = dashboardData?.credits || 0;
@@ -87,13 +75,16 @@ export function DashboardContent() {
   const creditsUsed = dashboardData?.creditsUsed || 0;
   const monthlyAllowance = subscription?.plan?.monthly_credits_allowance || 1000;
 
+  // Calculate pagination values early for use in useEffect
+  const totalChats = recentChats.length;
+  const totalPages = Math.max(1, Math.ceil(totalChats / chatsPerPage));
+
   // Refresh data on mount and when user changes
   useEffect(() => {
     if (user) {
       refetch();
-      refetchChats();
     }
-  }, [user, refetch, refetchChats]);
+  }, [user, refetch]);
 
   // Clear selections when page changes
   useEffect(() => {
@@ -102,11 +93,11 @@ export function DashboardContent() {
 
   // Clear selections when chats data changes (after deletion)
   useEffect(() => {
-    if (totalChats === 0) {
+    if (recentChats.length === 0) {
       setSelectedChats(new Set());
       setCurrentPage(1);
     }
-  }, [totalChats]);
+  }, [recentChats.length]);
 
   // Update current page if it's invalid (this can happen after deletions)
   useEffect(() => {
@@ -114,6 +105,8 @@ export function DashboardContent() {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
+
+  // ... keep existing code (DashboardContent hook setup)
 
   const handleContinueChat = (chat: any) => {
     navigate('/chat', { 
@@ -147,72 +140,42 @@ export function DashboardContent() {
     if (selectedChats.size === 0) return;
     
     setIsDeleting(true);
-    const chatIdsToDelete = Array.from(selectedChats);
-    console.log(`Dashboard: Starting deletion of ${chatIdsToDelete.length} chats:`, chatIdsToDelete);
-    
     try {
-      // Optimistic update - immediately remove chats from the UI
-      queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
-        if (!oldData) return oldData;
-        
-        const filteredChats = oldData.data.filter((chat: any) => !chatIdsToDelete.includes(chat.id));
-        console.log(`Optimistically removed ${chatIdsToDelete.length} chats from UI. Remaining: ${filteredChats.length}`);
-        return {
-          ...oldData,
-          data: filteredChats,
-          totalCount: oldData.totalCount - chatIdsToDelete.length,
-          totalPages: Math.ceil((oldData.totalCount - chatIdsToDelete.length) / chatsPerPage)
-        };
-      });
+      // Optimistically update the UI by removing selected chats from the display
+      const chatIdsToDelete = Array.from(selectedChats);
       
-      // Clear selection immediately
-      setSelectedChats(new Set());
-      
-      // Perform actual deletions in the background
+      // Delete each selected chat using the safe delete function
       const results = await deleteMultipleChats(chatIdsToDelete, user.id);
-      console.log('Dashboard: Deletion results:', results);
       
-      // Check for any errors and revert optimistic updates if needed
+      // Check for any errors
       const errors = results.filter(result => result.error);
       if (errors.length > 0) {
-        console.error('Dashboard: Errors deleting chats:', errors);
-        const failedChatIds = errors.map((_, index) => chatIdsToDelete[index]);
-        
-        // Revert optimistic update for failed deletions
-        queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
-          if (!oldData) return oldData;
-          
-          // We need to refetch to get the actual state, but for now just show error
-          toast.error(`Failed to delete ${errors.length} chat(s). Refreshing...`);
-          // Force a refresh to get correct state
-          setTimeout(() => refetchChats(), 1000);
-          return oldData;
-        });
-        
-        return;
+        console.error('Errors deleting chats:', errors);
+        toast.error(`Failed to delete ${errors.length} chat(s)`);
       }
       
       const successfulDeletions = chatIdsToDelete.length - errors.length;
-      console.log(`Dashboard: Successfully deleted ${successfulDeletions} chats`);
       if (successfulDeletions > 0) {
         toast.success(`Successfully deleted ${successfulDeletions} chat(s)`);
       }
       
-      // Refetch to load new chats and maintain 10 visible chats
-      await refetchChats();
+      // Clear selection
+      setSelectedChats(new Set());
       
-      // If we're on a page that's now empty, go to the previous page
-      const newTotalChats = totalChats - successfulDeletions;
-      const newTotalPages = Math.ceil(newTotalChats / chatsPerPage);
-      if (currentPage > newTotalPages && newTotalPages > 0) {
-        setCurrentPage(newTotalPages);
+      // Force invalidate and refetch the dashboard data
+      queryClient.removeQueries({ queryKey: ['dashboard', 'overview', user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard', 'overview', user.id] });
+      
+      // Reset to page 1 if current page would be empty after deletion
+      const remainingChats = recentChats.length - successfulDeletions;
+      const maxPages = Math.ceil(remainingChats / chatsPerPage);
+      if (currentPage > maxPages && maxPages > 0) {
+        setCurrentPage(Math.max(1, maxPages));
       }
       
     } catch (error) {
-      console.error('Dashboard: Error deleting chats:', error);
+      console.error('Error deleting chats:', error);
       toast.error('Failed to delete chats');
-      // Revert optimistic updates by refetching
-      refetchChats();
     } finally {
       setIsDeleting(false);
       setShowDeleteDialog(false);
@@ -223,18 +186,11 @@ export function DashboardContent() {
     e.stopPropagation();
     
     try {
-      // Optimistic update - immediately remove chat from the UI
-      queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
-        if (!oldData) return oldData;
+      const { error } = await deleteChat(chatId, user.id);
         
-        const filteredChats = oldData.data.filter((chat: any) => chat.id !== chatId);
-        return {
-          ...oldData,
-          data: filteredChats,
-          totalCount: oldData.totalCount - 1,
-          totalPages: Math.ceil((oldData.totalCount - 1) / chatsPerPage)
-        };
-      });
+      if (error) throw error;
+      
+      toast.success('Chat deleted successfully');
       
       // Remove from selection if it was selected
       if (selectedChats.has(chatId)) {
@@ -243,101 +199,24 @@ export function DashboardContent() {
         setSelectedChats(newSelection);
       }
       
-      // Perform actual deletion
-      const { error } = await deleteChat(chatId, user.id);
-        
-      if (error) {
-        // Revert optimistic update
-        toast.error('Failed to delete chat. Refreshing...');
-        setTimeout(() => refetchChats(), 1000);
-        return;
-      }
+      // Force invalidate and refetch the dashboard data
+      queryClient.removeQueries({ queryKey: ['dashboard', 'overview', user.id] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard', 'overview', user.id] });
       
-      toast.success('Chat deleted successfully');
-      
-      // Refetch to load new chats and maintain 10 visible chats
-      await refetchChats();
-      
-      // If we're on a page that's now empty, go to the previous page
-      const newTotalChats = totalChats - 1;
-      const newTotalPages = Math.ceil(newTotalChats / chatsPerPage);
-      if (currentPage > newTotalPages && newTotalPages > 0) {
-        setCurrentPage(newTotalPages);
+      // Reset to page 1 if current page would be empty after deletion
+      const remainingChats = recentChats.length - 1;
+      const maxPages = Math.ceil(remainingChats / chatsPerPage);
+      if (currentPage > maxPages && maxPages > 0) {
+        setCurrentPage(Math.max(1, maxPages));
       }
       
     } catch (error) {
       console.error('Error deleting chat:', error);
       toast.error('Failed to delete chat');
-      // Revert optimistic updates by refetching
-      refetchChats();
     }
   };
 
-  const handleDeleteAllChats = async () => {
-    if (totalChats === 0) {
-      toast.info('No chats to delete');
-      return;
-    }
-    
-    setIsDeletingAll(true);
-    console.log(`Dashboard: Starting deletion of all ${totalChats} chats for user ${user.id}`);
-    
-    try {
-      // Optimistic update - clear all chats from the UI immediately
-      queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
-        if (!oldData) return oldData;
-        
-        console.log(`Optimistically cleared all chats from UI`);
-        return {
-          ...oldData,
-          data: [],
-          totalCount: 0,
-          totalPages: 0
-        };
-      });
-      
-      // Clear selections and reset page
-      setSelectedChats(new Set());
-      setCurrentPage(1);
-      
-      // Perform actual deletion
-      const result = await deleteAllUserChats(user.id);
-      console.log('Dashboard: Delete all result:', result);
-      
-      if (result.error) {
-        console.error('Dashboard: Error deleting all chats:', result.error);
-        toast.error(`Failed to delete all chats: ${result.error}`);
-        // Revert optimistic update by refetching
-        setTimeout(() => refetchChats(), 1000);
-        return;
-      }
-      
-      const { success, error, deletedCount } = result;
-      console.log(`Dashboard: Successfully deleted ${deletedCount} chats`);
-      
-      if (success && deletedCount > 0) {
-        toast.success(`Successfully deleted all ${deletedCount} chat(s)`);
-      }
-      
-      if (!success && error) {
-        toast.warning(`Some chats could not be deleted: ${error}`);
-      }
-      
-      // Refetch to get the actual current state
-      await refetchChats();
-      
-    } catch (error) {
-      console.error('Dashboard: Error deleting all chats:', error);
-      toast.error('Failed to delete all chats');
-      // Revert optimistic updates by refetching
-      refetchChats();
-    } finally {
-      setIsDeletingAll(false);
-      setShowDeleteAllDialog(false);
-    }
-  };
-
-  if (authLoading || dataLoading || chatsLoading) {
+  if (authLoading || dataLoading) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-white">Loading your dashboard...</div>
@@ -353,7 +232,7 @@ export function DashboardContent() {
     );
   }
 
-  if (dashboardError || chatsError) {
+  if (dashboardError) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-center">
@@ -368,8 +247,13 @@ export function DashboardContent() {
   const isGuestPass = userTier === "Guest Pass";
   const username = profile?.username || user.email?.split('@')[0] || 'User';
 
-  // Format chats data (already paginated from API)
-  const formattedRecentChats = recentChats.map((chat: any) => ({
+  // Calculate pagination for recent chats with better handling
+  const validCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (validCurrentPage - 1) * chatsPerPage;
+  const endIndex = startIndex + chatsPerPage;
+  const paginatedChats = recentChats.slice(startIndex, endIndex);
+
+  const formattedRecentChats = paginatedChats.map((chat: any) => ({
     id: chat.id,
     character: {
       id: chat.character?.id,
@@ -408,6 +292,8 @@ export function DashboardContent() {
     creatorUsername: character.creator?.username || 'Unknown',
     originalCharacter: character
   }));
+
+  console.log('Formatted favorite characters:', formattedFavoriteCharacters);
 
   return (
     <div className="min-h-screen bg-[#121212]">
@@ -469,7 +355,7 @@ export function DashboardContent() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-gray-400 text-xs sm:text-sm">Active Chats</p>
-                  <p className="text-white text-lg sm:text-2xl font-bold">{totalChats}</p>
+                  <p className="text-white text-lg sm:text-2xl font-bold">{recentChats.length}</p>
                 </div>
                 <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8 text-[#FF7A00]" />
               </div>
@@ -520,43 +406,23 @@ export function DashboardContent() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-white text-xl sm:text-2xl">Your Dashboard</CardTitle>
               
-              <div className="flex items-center space-x-2">
-                {/* Delete All Button - Dev Only */}
-                {process.env.NODE_ENV === 'development' && totalChats > 0 && (
-                  <Button
-                    onClick={() => setShowDeleteAllDialog(true)}
-                    size="sm"
-                    variant="outline"
-                    className="bg-transparent border-red-600 text-red-400 hover:bg-red-600 hover:text-white transition-colors"
-                    disabled={isDeletingAll || isDeleting}
-                  >
-                    {isDeletingAll ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4 mr-2" />
-                    )}
-                    Delete All ({totalChats})
-                  </Button>
-                )}
-                
-                {/* Bulk Delete Button - Shows when chats are selected */}
-                {selectedChats.size > 0 && (
-                  <Button
-                    onClick={() => setShowDeleteDialog(true)}
-                    size="sm"
-                    variant="destructive"
-                    className="bg-red-600 hover:bg-red-700 text-white"
-                    disabled={isDeleting || isDeletingAll}
-                  >
-                    {isDeleting ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4 mr-2" />
-                    )}
-                    Delete {selectedChats.size} Chat{selectedChats.size > 1 ? 's' : ''}
-                  </Button>
-                )}
-              </div>
+              {/* Bulk Delete Button - Shows when chats are selected */}
+              {selectedChats.size > 0 && (
+                <Button
+                  onClick={() => setShowDeleteDialog(true)}
+                  size="sm"
+                  variant="destructive"
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4 mr-2" />
+                  )}
+                  Delete {selectedChats.size} Chat{selectedChats.size > 1 ? 's' : ''}
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent className="p-3 sm:p-6">
@@ -692,7 +558,7 @@ export function DashboardContent() {
                           <div className="flex justify-center items-center space-x-2 mt-4">
                             <Button
                               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                              disabled={currentPage === 1}
+                              disabled={validCurrentPage === 1}
                               variant="outline"
                               size="sm"
                               className="border-gray-700 text-gray-400 hover:text-white"
@@ -700,11 +566,11 @@ export function DashboardContent() {
                               Previous
                             </Button>
                             <span className="text-gray-400 text-sm">
-                              Page {currentPage} of {totalPages}
+                              Page {validCurrentPage} of {totalPages}
                             </span>
                             <Button
                               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                              disabled={currentPage === totalPages}
+                              disabled={validCurrentPage === totalPages}
                               variant="outline"
                               size="sm"
                               className="border-gray-700 text-gray-400 hover:text-white"
@@ -893,6 +759,8 @@ export function DashboardContent() {
               </Tabs>
           </CardContent>
         </Card>
+
+{/* Discord CTA section removed */}
       </div>
 
       {/* Delete Confirmation Dialog */}
@@ -927,51 +795,6 @@ export function DashboardContent() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Delete All Confirmation Dialog - Dev Only */}
-      <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
-        <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-white flex items-center">
-              <span className="bg-red-600 text-white text-xs px-2 py-1 rounded mr-2">DEV</span>
-              Delete All Chats
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-300">
-              <div className="space-y-2">
-                <p className="font-semibold text-red-400">⚠️ DANGER: This will delete ALL {totalChats} of your chats!</p>
-                <p>
-                  This will permanently delete all messages, context, and memories associated with every chat in your account.
-                  This action cannot be undone and is intended for development purposes only.
-                </p>
-                <p className="text-sm text-gray-400 italic">
-                  This button is only visible in development mode.
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleDeleteAllChats}
-              disabled={isDeletingAll}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {isDeletingAll ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Deleting All...
-                </>
-              ) : (
-                `Delete All ${totalChats} Chats`
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
-
-export default DashboardContent;

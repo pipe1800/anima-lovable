@@ -142,7 +142,7 @@ const CharacterCreator = () => {
       setCharacterData({
         name: character.name,
         avatar: character.avatar_url || '',
-        title: definitionData.title || '',
+        title: character.tagline || '',
         description: character.short_description || '',
         personality: {
           core_personality: character.definition?.[0]?.description || '',
@@ -486,6 +486,9 @@ const CharacterCreator = () => {
             steps={steps}
             currentStep={currentStep}
             onStepChange={handleStepChange}
+            isEditing={isEditing}
+            onSave={handleFinalize}
+            isSaving={isCreating}
           />
         </div>
 
@@ -501,6 +504,9 @@ const CharacterCreator = () => {
             steps={steps}
             currentStep={currentStep}
             onStepChange={handleStepChange}
+            isEditing={isEditing}
+            onSave={handleFinalize}
+            isSaving={isCreating}
           />
         </div>
 

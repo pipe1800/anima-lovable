@@ -22,6 +22,10 @@ export interface Character {
   interaction_count: number;
   created_at: string;
   updated_at: string;
+  // Extended properties for dashboard
+  tagline?: string;
+  actual_chat_count?: number;
+  likes_count?: number;
 }
 
 export interface CharacterDefinition {

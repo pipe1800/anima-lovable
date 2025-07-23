@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
-  getUserChats, 
+  getUserChats,
+  getUserChatsPaginated,
   getUserCharacters, 
   getUserCredits, 
   getUserSubscription,
@@ -18,8 +19,7 @@ export const useDashboardData = () => {
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
 
-      const [chatsResult, charactersResult, favoritesResult, creditsResult, subscriptionResult, creditsUsageResult] = await Promise.all([
-        getUserChats(userId),
+      const [charactersResult, favoritesResult, creditsResult, subscriptionResult, creditsUsageResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId),
         getUserCredits(userId),
@@ -28,14 +28,12 @@ export const useDashboardData = () => {
       ]);
 
       return {
-        chats: chatsResult.data || [],
         characters: charactersResult.data || [],
         favorites: favoritesResult.data || [],
         credits: creditsResult.data?.balance || 0,
         subscription: subscriptionResult.data,
         creditsUsed: creditsUsageResult.data?.used || 0,
         errors: {
-          chats: chatsResult.error,
           characters: charactersResult.error,
           favorites: favoritesResult.error,
           credits: creditsResult.error,
@@ -45,8 +43,26 @@ export const useDashboardData = () => {
       };
     },
     enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
+    staleTime: 30 * 1000, // 30 seconds - shorter for more responsive updates
+    gcTime: 5 * 60 * 1000, // 5 minutes
+  });
+};
+
+export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
+  const { user } = useAuth();
+  const userId = user?.id;
+
+  return useQuery({
+    queryKey: ['user', 'chats', 'paginated', userId, page, limit],
+    queryFn: async () => {
+      if (!userId) throw new Error('User not authenticated');
+      const result = await getUserChatsPaginated(userId, page, limit);
+      if (result.error) throw result.error;
+      return result;
+    },
+    enabled: !!userId,
+    staleTime: 30 * 1000, // 30 seconds
+    gcTime: 5 * 60 * 1000, // 5 minutes
   });
 };
 

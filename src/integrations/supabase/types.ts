@@ -242,6 +242,7 @@ export type Database = {
           interaction_count: number
           name: string
           short_description: string | null
+          tagline: string | null
           updated_at: string
           visibility: string
         }
@@ -253,6 +254,7 @@ export type Database = {
           interaction_count?: number
           name: string
           short_description?: string | null
+          tagline?: string | null
           updated_at?: string
           visibility?: string
         }
@@ -264,6 +266,7 @@ export type Database = {
           interaction_count?: number
           name?: string
           short_description?: string | null
+          tagline?: string | null
           updated_at?: string
           visibility?: string
         }
