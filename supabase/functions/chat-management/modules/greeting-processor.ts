@@ -236,7 +236,7 @@ export async function handleCreateWithGreeting(
   supabaseAdmin: any
 ): Promise<ChatResponse> {
   try {
-    const { charactersData, worldInfos, greeting, selectedPersonaId } = request;
+    const { charactersData, worldInfos, greeting, selectedPersonaId, chatMode } = request;
     
     if (!charactersData || charactersData.length === 0) {
       throw new Error('No character data provided');
@@ -265,7 +265,23 @@ export async function handleCreateWithGreeting(
       throw new Error('Character not found or access denied');
     }
 
-    // Create the chat record
+  // Determine chat mode - ALWAYS fetch from user settings first
+  const { data: userCharSettings } = await supabaseAdmin
+    .from('user_character_settings')
+    .select('chat_mode')
+    .eq('user_id', user.id)
+    .eq('character_id', character_id)
+    .single();
+
+  let effectiveChatMode: 'storytelling' | 'companion' = userCharSettings?.chat_mode || chatMode || 'storytelling';
+
+  console.log('🎭 Chat mode determination:', {
+    userSettingsChatMode: userCharSettings?.chat_mode,
+    providedChatMode: chatMode,
+    effectiveChatMode,
+    userId: user.id,
+    characterId: character_id
+  });    // Create the chat record
     const { data: chat, error: chatError } = await supabase
       .from('chats')
       .insert({
@@ -273,6 +289,7 @@ export async function handleCreateWithGreeting(
         character_id: character_id,
         title: `Chat with ${character_name}`,
         selected_persona_id: selectedPersonaId,
+        chat_mode: effectiveChatMode, // Add chat_mode to the insert
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         last_message_at: new Date().toISOString()

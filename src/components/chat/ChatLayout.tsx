@@ -24,6 +24,8 @@ import { MemoriesDialog } from './MemoriesDialog';
 import { useCharacterMemories } from '@/hooks/useCharacterMemories';
 import { calculateMemoryCreditCost, getMemoryCostExplanation } from '@/lib/memory-cost-calculator';
 import { CharacterChatModeToggle } from '@/components/character-creator/CharacterChatModeToggle';
+import { ChatModeMismatchModal } from '@/components/character-creator/ChatModeMismatchModal';
+import { ChatModeChangeModal } from '@/components/character-creator/ChatModeChangeModal';
 import type { TrackedContext, Character } from '@/types/chat';
 import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
 import { getBestPersonaForNewChat } from '@/lib/user-preferences';
@@ -84,6 +86,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // Chat mode state
   const [chatMode, setChatMode] = useState<'storytelling' | 'companion'>('storytelling');
   const [chatModeLoading, setChatModeLoading] = useState(false);
+  const [showMismatchModal, setShowMismatchModal] = useState(false);
+  const [showChangeModal, setShowChangeModal] = useState(false);
+  const [pendingChatMode, setPendingChatMode] = useState<'storytelling' | 'companion' | null>(null);
+  const [currentChat, setCurrentChat] = useState<any>(null);
   
   // Debug Enhanced Memory detection
   useEffect(() => {
@@ -222,6 +228,32 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
             }
           } catch (error) {
             console.error('Error loading user character settings:', error);
+          }
+        }
+        
+        // Load current chat data to check for mode mismatch
+        if (currentChatId && user) {
+          try {
+            const { data: chatData } = await supabase
+              .from('chats')
+              .select('chat_mode')
+              .eq('id', currentChatId)
+              .eq('user_id', user.id)
+              .single();
+            
+            if (chatData) {
+              setCurrentChat(chatData);
+              
+              // Check for mode mismatch
+              const settings = await getUserCharacterSettings(user.id, character.id);
+              const userCharMode = settings?.chat_mode || 'storytelling';
+              
+              if (chatData.chat_mode && chatData.chat_mode !== userCharMode) {
+                setShowMismatchModal(true);
+              }
+            }
+          } catch (error) {
+            console.error('Error loading current chat:', error);
           }
         }
       } catch (error) {
@@ -468,28 +500,73 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   // Handle chat mode changes
   const handleChatModeChange = async (mode: 'storytelling' | 'companion') => {
-    if (!currentUser || chatModeLoading) return;
+    // Show modal before making any changes
+    setPendingChatMode(mode);
+    setShowChangeModal(true);
+  };
+
+  // Handle confirming chat mode change
+  const handleConfirmChatModeChange = async () => {
+    if (!currentUser || !pendingChatMode) return;
     
     setChatModeLoading(true);
-    setChatMode(mode);
     
     try {
+      // Update user character settings
       await upsertUserCharacterSettings(currentUser.id, character.id, {
-        chat_mode: mode
+        chat_mode: pendingChatMode
       });
       
-      toast.success(`Chat mode updated to ${mode}`, {
-        description: mode === 'companion' 
-          ? 'Responses will focus on dialogue only'
-          : 'Responses will include rich descriptions and narrative'
+      setChatMode(pendingChatMode);
+      
+      // Create new chat with the new mode by triggering the start new chat function
+      await handleStartNewChat();
+      
+      toast.success(`Chat mode updated to ${pendingChatMode}`, {
+        description: 'A new chat has been created with the updated mode'
       });
     } catch (error) {
       console.error('Error updating chat mode:', error);
       toast.error('Failed to update chat mode');
-      // Revert the state on error
-      setChatMode(mode === 'companion' ? 'storytelling' : 'companion');
     } finally {
       setChatModeLoading(false);
+      setShowChangeModal(false);
+      setPendingChatMode(null);
+    }
+  };
+
+  // Handle creating new chat for mode mismatch
+  const handleCreateNewChatForMode = async () => {
+    if (!currentUser) return;
+    
+    try {
+      // Create new chat with current character mode
+      await handleStartNewChat();
+      setShowMismatchModal(false);
+    } catch (error) {
+      console.error('Error creating new chat:', error);
+      toast.error('Failed to create new chat');
+    }
+  };
+
+  // Handle changing character mode to match chat
+  const handleChangeCharacterMode = async () => {
+    if (!currentChat || !currentUser) return;
+    
+    try {
+      await upsertUserCharacterSettings(currentUser.id, character.id, {
+        chat_mode: currentChat.chat_mode
+      });
+      
+      setChatMode(currentChat.chat_mode);
+      setShowMismatchModal(false);
+      
+      toast.success(`Character mode changed to ${currentChat.chat_mode}`, {
+        description: 'Mode updated to match this chat'
+      });
+    } catch (error) {
+      console.error('Error changing character mode:', error);
+      toast.error('Failed to change character mode');
     }
   };
 
@@ -506,6 +583,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
             name: character.name
           }],
           selectedPersonaId: selectedPersona?.id || null
+          // Don't pass chatMode - let backend fetch from user settings
         }
       });
       
@@ -963,7 +1041,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                           <CharacterChatModeToggle
                             chatMode={chatMode}
                             onChange={handleChatModeChange}
-                            showWarning={true}
+                            showWarning={false}
                             disabled={chatModeLoading}
                           />
                         </div>
@@ -1288,6 +1366,27 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         error={memoriesError}
         characterName={character.name}
         onRefresh={refreshMemories}
+      />
+
+      {/* Chat Mode Mismatch Modal */}
+      <ChatModeMismatchModal
+        isOpen={showMismatchModal}
+        onClose={() => setShowMismatchModal(false)}
+        chatMode={currentChat?.chat_mode || 'storytelling'}
+        characterMode={chatMode}
+        onCreateNewChat={handleCreateNewChatForMode}
+        onChangeCharacterMode={handleChangeCharacterMode}
+      />
+
+      {/* Chat Mode Change Modal */}
+      <ChatModeChangeModal
+        isOpen={showChangeModal}
+        onClose={() => {
+          setShowChangeModal(false);
+          setPendingChatMode(null);
+        }}
+        newMode={pendingChatMode || 'storytelling'}
+        onConfirm={handleConfirmChatModeChange}
       />
     </div>
   );

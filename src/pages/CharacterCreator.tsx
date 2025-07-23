@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { getUserCredits } from '@/lib/supabase-queries';
+import { upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
 import FoundationStep from '@/components/character-creator/FoundationStep';
 import PersonalityStep from '@/components/character-creator/PersonalityStep';
 import DialogueStep from '@/components/character-creator/DialogueStep';
@@ -368,12 +369,28 @@ const CharacterCreator = () => {
       let character;
       if (isEditing && editingCharacterId) {
         character = await updateCharacter(editingCharacterId, characterData as CharacterCreationData);
+        
+        // Save chat mode settings for the character creator (user)
+        if (characterData.chatMode) {
+          await upsertUserCharacterSettings(user.id, editingCharacterId, {
+            chat_mode: characterData.chatMode
+          });
+        }
+        
         toast({
           title: "Character Updated!",
           description: `${character.name} has been successfully updated.`,
         });
       } else {
         character = await createCharacter(characterData as CharacterCreationData);
+        
+        // Save chat mode settings for the character creator (user)
+        if (characterData.chatMode && character.id) {
+          await upsertUserCharacterSettings(user.id, character.id, {
+            chat_mode: characterData.chatMode
+          });
+        }
+        
         toast({
           title: "Character Created!",
           description: `${character.name} has been successfully created.`,

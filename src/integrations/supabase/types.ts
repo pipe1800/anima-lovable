@@ -327,6 +327,8 @@ export type Database = {
       chats: {
         Row: {
           character_id: string
+          chat_mode: string
+          context_ceiling_warned: boolean | null
           created_at: string
           id: string
           last_message_at: string | null
@@ -337,6 +339,8 @@ export type Database = {
         }
         Insert: {
           character_id: string
+          chat_mode?: string
+          context_ceiling_warned?: boolean | null
           created_at?: string
           id?: string
           last_message_at?: string | null
@@ -347,6 +351,8 @@ export type Database = {
         }
         Update: {
           character_id?: string
+          chat_mode?: string
+          context_ceiling_warned?: boolean | null
           created_at?: string
           id?: string
           last_message_at?: string | null

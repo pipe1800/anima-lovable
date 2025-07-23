@@ -68,6 +68,9 @@ export interface Chat {
   last_message_at?: string;
   created_at: string;
   updated_at: string;
+  selected_persona_id?: string;
+  context_ceiling_warned?: boolean;
+  chat_mode: 'storytelling' | 'companion';
   character?: Character;
 }
 

@@ -36,6 +36,7 @@ export interface CreateWithGreetingRequest extends BaseChatRequest {
   operation: 'create-with-greeting';
   greeting?: string;
   selectedPersonaId?: string | null;
+  chatMode?: 'storytelling' | 'companion';
 }
 
 export interface ExtractContextRequest {
