@@ -315,8 +315,80 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
+                
+                // Check for new completion format with metadata first
+                try {
+                  const completionData = JSON.parse(data);
+                  if (completionData.done === true) {
+                    console.log('🏁 Instant mode - Stream completed');
+                    
+                    isStreamingRef.current = false;
+                    
+                    // Check for context ceiling warning
+                    if (completionData.metadata?.contextCeilingReached) {
+                      console.log('⚠️ Context ceiling reached, emitting warning');
+                      // Emit context ceiling event
+                      window.dispatchEvent(new CustomEvent('contextCeilingReached', {
+                        detail: {
+                          droppedMessages: completionData.metadata.droppedMessages,
+                          tokenUsage: completionData.metadata.tokenUsage
+                        }
+                      }));
+                    }
+                    
+                    // Clear streaming state and refresh to show complete message
+                    dispatch({
+                      type: 'SET_STREAMING',
+                      payload: { isStreaming: false, message: '' }
+                    });
+                    
+                    // Refresh messages to show final result
+                    queryClient.invalidateQueries({ 
+                      queryKey: queryKeys.chat.messages(chatId),
+                      exact: true 
+                    });
+                    
+                    // Context fetching logic...
+                    setTimeout(async () => {
+                      try {
+                        const { data: contextData, error } = await supabase
+                          .from('chat_context')
+                          .select('current_context')
+                          .eq('chat_id', chatId)
+                          .eq('user_id', user.id)
+                          .eq('character_id', characterId)
+                          .maybeSingle();
+                        
+                        if (!error && contextData?.current_context) {
+                          console.log('✅ Fresh context fetched:', contextData.current_context);
+                          
+                          const rawContext = contextData.current_context as any;
+                          const convertedContext = {
+                            moodTracking: rawContext?.mood || 'No context',
+                            clothingInventory: rawContext?.clothing || 'No context',
+                            locationTracking: rawContext?.location || 'No context',
+                            timeAndWeather: rawContext?.time_weather || 'No context',
+                            relationshipStatus: rawContext?.relationship || 'No context',
+                            characterPosition: rawContext?.character_position || 'No context'
+                          };
+                          
+                          dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
+                          console.log('🎯 Context updated in UI immediately!');
+                        }
+                      } catch (err) {
+                        console.error('❌ Failed to fetch fresh context:', err);
+                      }
+                    }, 1000);
+                    
+                    const endTime = Date.now();
+                    return { content: fullMessage };
+                  }
+                } catch (parseError) {
+                  // Not JSON or not completion format, try legacy format
+                }
+                
                 if (data === '[DONE]') {
-                  console.log('🏁 Instant mode - Stream completed');
+                  console.log('🏁 Instant mode - Stream completed (legacy)');
                   
                   isStreamingRef.current = false;
                   
@@ -402,8 +474,80 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
+                
+                // Check for new completion format with metadata first
+                try {
+                  const completionData = JSON.parse(data);
+                  if (completionData.done === true) {
+                    console.log('🏁 Smooth mode - Stream completed');
+                    
+                    isStreamingRef.current = false;
+                    
+                    // Check for context ceiling warning
+                    if (completionData.metadata?.contextCeilingReached) {
+                      console.log('⚠️ Context ceiling reached, emitting warning');
+                      // Emit context ceiling event
+                      window.dispatchEvent(new CustomEvent('contextCeilingReached', {
+                        detail: {
+                          droppedMessages: completionData.metadata.droppedMessages,
+                          tokenUsage: completionData.metadata.tokenUsage
+                        }
+                      }));
+                    }
+                    
+                    // Clear streaming state and refresh to show final message
+                    dispatch({
+                      type: 'SET_STREAMING',
+                      payload: { isStreaming: false, message: '' }
+                    });
+                    
+                    // Refresh messages to get the final database message
+                    queryClient.invalidateQueries({ 
+                      queryKey: queryKeys.chat.messages(chatId),
+                      exact: true 
+                    });
+                    
+                    // Context fetching logic...
+                    setTimeout(async () => {
+                      try {
+                        const { data: contextData, error } = await supabase
+                          .from('chat_context')
+                          .select('current_context')
+                          .eq('chat_id', chatId)
+                          .eq('user_id', user.id)
+                          .eq('character_id', characterId)
+                          .maybeSingle();
+                        
+                        if (!error && contextData?.current_context) {
+                          console.log('✅ Fresh context fetched:', contextData.current_context);
+                          
+                          const rawContext = contextData.current_context as any;
+                          const convertedContext = {
+                            moodTracking: rawContext?.mood || 'No context',
+                            clothingInventory: rawContext?.clothing || 'No context',
+                            locationTracking: rawContext?.location || 'No context',
+                            timeAndWeather: rawContext?.time_weather || 'No context',
+                            relationshipStatus: rawContext?.relationship || 'No context',
+                            characterPosition: rawContext?.character_position || 'No context'
+                          };
+                          
+                          dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
+                          console.log('🎯 Context updated in UI immediately!');
+                        }
+                      } catch (err) {
+                        console.error('❌ Failed to fetch fresh context:', err);
+                      }
+                    }, 1000);
+                    
+                    const endTime = Date.now();
+                    return { content: fullMessage };
+                  }
+                } catch (parseError) {
+                  // Not JSON or not completion format, try legacy format or streaming content
+                }
+                
                 if (data === '[DONE]') {
-                  console.log('🏁 Smooth mode - Stream completed');
+                  console.log('🏁 Smooth mode - Stream completed (legacy)');
                   
                   isStreamingRef.current = false;
                   

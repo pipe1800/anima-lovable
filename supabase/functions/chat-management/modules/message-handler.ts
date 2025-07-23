@@ -3,12 +3,48 @@ import type {
   AddonSettings, 
   TemplateContext, 
   CurrentContext,
-  ConversationMessage 
+  ConversationMessage,
+  SupabaseClient
 } from '../types/streaming-interfaces.ts';
+import {
+  estimateTokens,
+  calculateMessageTokens,
+} from './message-counter.ts';
+import { getMostRecentAutoSummary } from './auto-summary-new.ts';
 
 /**
  * Message generation and AI response handling
- * Handles system prompt building and OpenRouter API communication
+ * Handles system prompt   console.log('📤 OpenRouter request payload:', JSON.stringify({
+    model: payload.model,
+    messagesCount: payload.messages.length,
+    stream: payload.stream,
+    temperature: payload.temperature,
+    max_tokens: payload.max_tokens,
+    totalEstimatedTokens: payload.messages.reduce((total, msg) => total + estimateTokens(msg.content), 0),
+    messages: payload.messages.map((m, index) => ({ 
+      index,
+      role: m.role, 
+      contentLength: m.content.length,
+      estimatedTokens: estimateTokens(m.content),
+      contentPreview: m.content.substring(0, 200) + (m.content.length > 200 ? '...' : '')
+    }))
+  }, null, 2));
+
+  // CRITICAL: Calculate actual tokens being sent for debugging
+  const actualTokenCount = payload.messages.reduce((total, msg) => {
+    return total + estimateTokens(msg.content) + 4; // +4 for role overhead per message
+  }, 0);
+  
+  const systemMessage = payload.messages.find(m => m.role === 'system');
+  
+  console.log('🚨 TOKEN DISCREPANCY ANALYSIS:', {
+    calculatedTokensInPayload: actualTokenCount,
+    systemPromptTokens: systemMessage ? estimateTokens(systemMessage.content) : 0,
+    systemPromptLength: systemMessage?.content?.length || 0,
+    totalMessagesInPayload: payload.messages.length,
+    totalCharactersInPayload: payload.messages.reduce((sum, m) => sum + m.content.length, 0),
+    warningIfOver11k: actualTokenCount > 11000 ? '⚠️ EXCEEDS 11K TOKENS - SHOULD TRIGGER SUMMARY!' : 'Under 11k tokens'
+  });enRouter API communication
  * Separate from context extraction - uses user's plan-based model
  */
 
@@ -114,18 +150,19 @@ function getRelevantMemories(
     .slice(0, 3);
 }
 
-export function buildSystemPrompt(
+export async function buildSystemPrompt(
   character: Character,
   addonSettings: AddonSettings,
   templateContext: TemplateContext,
   currentContext: CurrentContext,
   selectedPersona: { name?: string; bio?: string; lore?: string } | null,
   replaceTemplatesFn: (content: string) => string,
+  supabase: SupabaseClient,
   worldInfoEntries?: Array<{ keywords: string[]; entry_text: string }> | null,
   userMessage?: string,
   conversationHistory?: any[],
   characterMemories?: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null
-): string {
+): Promise<string> {
   console.log('🎯 buildSystemPrompt called with:', {
     character: character ? 'loaded' : 'null',
     addonSettings,
@@ -313,6 +350,45 @@ Stay in character and engage in natural dialogue with the user.`;
     }
   }
 
+  // Add most recent auto-summary for context continuity
+  try {
+    console.log('🤖 About to retrieve most recent auto-summary - character details:', {
+      characterExists: !!character,
+      characterName: character?.name,
+      characterId: character?.id,
+      characterIdType: typeof character?.id,
+      characterIdValue: character?.id
+    });
+    
+    // Validate character.id before calling
+    if (!character?.id || character.id === 'undefined') {
+      console.warn('⚠️ Skipping auto-summary fetch - invalid character.id:', character?.id);
+    } else {
+      console.log('🤖 Retrieving most recent auto-summary for character:', character.id);
+      const latestSummary = await getMostRecentAutoSummary(character.id, supabase);
+    
+      if (latestSummary) {
+        systemPrompt += '\n\n[CONVERSATION SUMMARY]';
+        systemPrompt += '\nMost recent conversation summary:';
+        systemPrompt += `\n${latestSummary.summary_content}`;
+        systemPrompt += '\n[/CONVERSATION SUMMARY]';
+        systemPrompt += '\nUse this summary to maintain continuity with previous conversations.';
+        
+        console.log('✅ Most recent auto-summary added to system prompt:', {
+          summaryName: latestSummary.name,
+          summaryLength: latestSummary.summary_content.length,
+          messageCount: latestSummary.message_count,
+          createdAt: latestSummary.created_at
+        });
+      } else {
+        console.log('❌ No auto-summary found for character:', character.id);
+      }
+    }
+  } catch (error) {
+    console.error('⚠️ Error retrieving most recent auto-summary:', error);
+    // Continue without auto-summary - this is non-critical
+  }
+
   console.log('📝 Final system prompt length:', systemPrompt.length);
   console.log('📋 System prompt preview:', systemPrompt.substring(0, 500) + '...');
 
@@ -348,6 +424,30 @@ export async function generateAIResponse(
   openRouterKey: string
 ): Promise<Response> {
   console.log('🎯 Generating AI response with model:', model);
+  
+  const payload = {
+    model: model, // User's plan-based model (different from context extraction)
+    messages: messages,
+    stream: true,
+    temperature: 0.7,
+    max_tokens: 1000
+  };
+  
+  console.log('📤 OpenRouter request payload:', JSON.stringify({
+    model: payload.model,
+    messagesCount: payload.messages.length,
+    stream: payload.stream,
+    temperature: payload.temperature,
+    max_tokens: payload.max_tokens,
+    totalEstimatedTokens: payload.messages.reduce((total, msg) => total + estimateTokens(msg.content), 0),
+    messages: payload.messages.map((m, index) => ({ 
+      index,
+      role: m.role, 
+      contentLength: m.content.length,
+      estimatedTokens: estimateTokens(m.content),
+      contentPreview: m.content.substring(0, 200) + (m.content.length > 200 ? '...' : '')
+    }))
+  }, null, 2));
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -357,13 +457,7 @@ export async function generateAIResponse(
       'HTTP-Referer': globalThis.Deno?.env?.get('SITE_URL') || 'https://yourapp.com',
       'X-Title': 'AnimaChat-Streaming'
     },
-    body: JSON.stringify({
-      model: model, // User's plan-based model (different from context extraction)
-      messages: messages,
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 1000
-    })
+    body: JSON.stringify(payload)
   });
 
   return response;

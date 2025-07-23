@@ -114,7 +114,9 @@ export type Database = {
           created_at: string | null
           id: string
           input_token_cost: number
+          is_auto_summary: boolean | null
           message_count: number
+          name: string | null
           summary_content: string
           trigger_keywords: string[]
           updated_at: string | null
@@ -126,7 +128,9 @@ export type Database = {
           created_at?: string | null
           id?: string
           input_token_cost: number
+          is_auto_summary?: boolean | null
           message_count: number
+          name?: string | null
           summary_content: string
           trigger_keywords: string[]
           updated_at?: string | null
@@ -138,7 +142,9 @@ export type Database = {
           created_at?: string | null
           id?: string
           input_token_cost?: number
+          is_auto_summary?: boolean | null
           message_count?: number
+          name?: string | null
           summary_content?: string
           trigger_keywords?: string[]
           updated_at?: string | null

@@ -65,6 +65,13 @@ Return only the JSON object with no additional text. If a field is not mentioned
   return null;
 }
 export async function extractContextFromResponse(character, conversationContext, message, aiResponse, addonSettings, openRouterKey, replaceTemplatesFn, supabase, userId, chatId, characterId) {
+  console.log('🔍 CONTEXT EXTRACTION DEBUG: Function called', {
+    timestamp: new Date().toISOString(),
+    chatId,
+    characterId,
+    callStack: new Error().stack?.split('\n').slice(0, 5)
+  });
+  
   if (!addonSettings || !Object.values(addonSettings).some(Boolean)) {
     console.log('No addons enabled - skipping context extraction');
     return null;

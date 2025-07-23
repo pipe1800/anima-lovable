@@ -4,10 +4,12 @@ import { supabase } from '@/integrations/supabase/client';
 export interface CharacterMemory {
   id: string;
   chat_id: string;
+  name: string; // Added for auto-summary titles
   summary_content: string;
   trigger_keywords: string[];
   message_count: number;
   input_token_cost: number;
+  is_auto_summary: boolean; // Added to identify auto-summaries
   created_at: string;
   updated_at: string;
 }

@@ -69,6 +69,24 @@ const ChatInterface = ({
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  // Listen for auto-summary success events and show notification
+  useEffect(() => {
+    const handleAutoSummary = (event: CustomEvent) => {
+      console.log('✅ Auto-summary notification received:', event.detail);
+      toast({
+        title: "🧠 New Memory Added",
+        description: "Conversation automatically summarized to maintain performance.",
+        duration: 5000,
+      });
+    };
+
+    window.addEventListener('autoSummarySuccess', handleAutoSummary as EventListener);
+    
+    return () => {
+      window.removeEventListener('autoSummarySuccess', handleAutoSummary as EventListener);
+    };
+  }, [toast]);
+
   // Create chat if needed
   useEffect(() => {
     if (!currentChatId && user && character) {
@@ -378,7 +396,7 @@ const ChatInterface = ({
     <div className="flex flex-col h-full">
       {/* Debug Panel - Lazy loaded for performance */}
       <Suspense fallback={<LoadingSpinner />}>
-        <AddonDebugPanel characterId={character.id} userId={user?.id} />
+        <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
       </Suspense>
       
       {/* Insufficient Credits Modal */}

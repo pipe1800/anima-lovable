@@ -39,6 +39,8 @@ import {
   buildConversationMessages,
   generateAIResponse
 } from './message-handler.ts';
+import { buildConversationMessagesWithMessageBudget } from './message-counter.ts';
+import { triggerMessageBasedSummary, getMostRecentAutoSummary } from './auto-summary-new.ts';
 
 import type { SendMessageRequest } from '../types/index.ts';
 import type { 
@@ -161,20 +163,52 @@ export async function handleSendMessage(
     // ============================================================================
     // BUILD SYSTEM PROMPT & CONVERSATION (same as chat-stream)
     // ============================================================================
-    const systemPrompt = buildSystemPrompt(
+        const systemPrompt = await buildSystemPrompt(
       character,
       effectiveAddonSettings,
       templateContext,
       currentContext,
       selectedPersona,
       (content) => replaceTemplates(content, templateContext),
+      supabase,
       worldInfoEntries,
       message,
       messageHistory,
       characterMemories
     );
 
-    const conversationMessages = buildConversationMessages(systemPrompt, messageHistory, message);
+    // Use new message-based budget management
+    const conversationResult = await buildConversationMessagesWithMessageBudget(
+      systemPrompt,
+      messageHistory,
+      message,
+      planAndModel.maxContextTokens,
+      chatId,
+      supabase
+    );
+
+    const conversationMessages = conversationResult.messages;
+
+    // Check if we should warn about context ceiling
+    let shouldWarnContextCeiling = false;
+    if (conversationResult.truncated) {
+      // Check if we've already warned for this chat
+      const { data: chatData } = await supabase
+        .from('chats')
+        .select('context_ceiling_warned')
+        .eq('id', chatId)
+        .single();
+
+      if (!chatData?.context_ceiling_warned) {
+        shouldWarnContextCeiling = true;
+        
+        // Update chat to mark warning as shown
+        await supabase
+          .from('chats')
+          .update({ context_ceiling_warned: true })
+          .eq('id', chatId);
+      }
+    }
 
     // ============================================================================
     // AI RESPONSE GENERATION & STREAMING (adapted from chat-stream)
@@ -191,13 +225,58 @@ export async function handleSendMessage(
       return createErrorResponse('OpenRouter API key not configured', 500);
     }
 
+    // Check if we need to trigger a background summary
+    if (conversationResult.needsSummarization) {
+      console.log('🚨 AUTO-SUMMARY TRIGGERED! 5 AI responses reached, triggering background summarization...');
+      console.log('📊 Summary trigger details:', {
+        currentAiMessageCount: conversationResult.currentAiMessageCount,
+        nextSummaryAt: conversationResult.nextSummaryAt,
+        chatId: chatId,
+        characterId: characterId,
+        messagesToSummarizeCount: conversationResult.messagesToSummarize.length
+      });
+      
+      // Non-blocking call to the message-based summarization function
+      triggerMessageBasedSummary(
+        chatId,
+        user.id,
+        characterId,
+        conversationResult.messagesToSummarize,
+        character,
+        openRouterKey,
+        supabaseAdmin
+      ).then(summaryResult => {
+        if (summaryResult.success) {
+          console.log(`✅ Message-based summary completed successfully: ${summaryResult.summaryId} (${summaryResult.messageRange})`);
+        } else {
+          console.error(`❌ Message-based summary failed: ${summaryResult.error}`);
+        }
+      }).catch(error => {
+        console.error('❌ Summary promise caught error:', error);
+      });
+    } else {
+      console.log('📝 No auto-summary needed:', {
+        currentAiMessageCount: conversationResult.currentAiMessageCount,
+        nextSummaryAt: conversationResult.nextSummaryAt,
+        needsSummarization: conversationResult.needsSummarization
+      });
+    }
+
     const aiResponse = await generateAIResponse(conversationMessages, planAndModel.model, openRouterKey);
 
     // Enhanced error handling for AI API
     if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
       console.error('❌ OpenRouter API Error Status:', aiResponse.status);
+      console.error('❌ OpenRouter Error Details:', errorText);
+      console.error('❌ Request payload was:', JSON.stringify({
+        model: planAndModel.model,
+        messagesCount: conversationMessages.length,
+        messages: conversationMessages.map(m => ({ role: m.role, contentLength: m.content.length }))
+      }, null, 2));
+      
       return createStreamingErrorResponse(
-        `Status: ${aiResponse.status}`,
+        `Status: ${aiResponse.status} - ${errorText}`,
         planAndModel.model,
         planAndModel.plan
       );
@@ -315,8 +394,31 @@ export async function handleSendMessage(
             }
           }
 
-          // Send completion signal
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+          // Send completion signal with metadata
+          const completionData: any = { done: true };
+          
+          // Add context ceiling warning if needed
+          if (shouldWarnContextCeiling) {
+            completionData.metadata = {
+              contextCeilingReached: true,
+              droppedMessages: conversationResult.droppedMessages,
+              tokenUsage: {
+                total: conversationResult.totalTokens,
+                max: planAndModel.maxContextTokens,
+                percentUsed: Math.round((conversationResult.totalTokens / planAndModel.maxContextTokens) * 100)
+              }
+            };
+          }
+
+          // Add auto-summary trigger info if needed
+          if (conversationResult.needsSummarization) {
+            completionData.metadata = {
+              ...completionData.metadata,
+              autoSummaryTriggered: true
+            };
+          }
+          
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(completionData)}\n\n`));
           controller.close();
 
         } catch (streamError) {

@@ -18,7 +18,7 @@ export async function fetchCharacterData(
 ): Promise<Character> {
   const { data: character, error } = await supabaseAdmin
     .from('character_definitions')
-    .select('personality_summary, description, scenario, greeting')
+    .select('character_id, personality_summary, description, scenario, greeting')
     .eq('character_id', characterId)
     .single();
 
@@ -27,13 +27,20 @@ export async function fetchCharacterData(
     throw new Error('Character definition not found');
   }
 
-  return character;
+  // Return character with id field mapped correctly
+  return {
+    id: character.character_id, // Map character_id to id
+    personality_summary: character.personality_summary,
+    description: character.description,
+    scenario: character.scenario,
+    greeting: character.greeting
+  };
 }
 
 export async function fetchConversationHistory(
   chatId: string,
   supabase: SupabaseClient,
-  limit: number = 20
+  limit: number = 100
 ): Promise<any[]> {
   const { data: messageHistory, error } = await supabase
     .from('messages')
@@ -609,4 +616,81 @@ export function replaceTemplates(content: string, context: TemplateContext): str
     console.error('Template replacement error:', error);
     return content;
   }
+}
+
+export async function getLatestAutoSummary(
+  characterId: string,
+  supabase: SupabaseClient
+): Promise<{ name: string; summary_content: string; created_at: string; id: string } | null> {
+  console.log('🤖 Fetching latest auto-summary for character:', {
+    characterId: characterId,
+    characterIdType: typeof characterId,
+    characterIdValue: characterId,
+    isUndefined: characterId === undefined,
+    isStringUndefined: characterId === 'undefined'
+  });
+
+  // Add validation to prevent UUID errors
+  if (!characterId || characterId === 'undefined' || typeof characterId !== 'string') {
+    console.warn('⚠️ Invalid characterId for auto-summary fetch, skipping:', characterId);
+    return null;
+  }
+
+  try {
+    const { data: summary, error } = await supabase
+      .from('character_memories')
+      .select('id, name, summary_content, created_at')
+      .eq('character_id', characterId)
+      .eq('is_auto_summary', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('❌ Error fetching auto-summary:', error);
+      return null;
+    }
+
+    if (summary) {
+      console.log('✅ Found latest auto-summary:', {
+        id: summary.id,
+        name: summary.name,
+        createdAt: summary.created_at,
+      });
+    } else {
+      console.log('🤷 No auto-summary found for character:', characterId);
+    }
+
+    return summary;
+  } catch (error) {
+    console.error('❌ Unexpected error fetching auto-summary:', error);
+    return null;
+  }
+}
+
+export async function fetchMessagesForSummary(
+  chatId: string,
+  supabase: SupabaseClient,
+  limit: number = 100 // Fetch a good number of recent messages for token analysis
+): Promise<Message[]> {
+  console.log(`📚 Fetching last ${limit} messages for summary generation for chat:`, chatId);
+
+  const { data: messages, error } = await supabase
+    .from('messages')
+    .select('content, is_ai_message, created_at')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: false }) // Get the most recent ones
+    .limit(limit);
+
+  if (error) {
+    console.error('❌ Error fetching messages for summary:', error);
+    return [];
+  }
+
+  // The messages are fetched in descending order, so we need to reverse them
+  // to get the correct chronological order for the summary.
+  const chronologicalMessages = messages.reverse();
+
+  console.log(`✅ Fetched ${chronologicalMessages.length} messages for summary.`);
+  return chronologicalMessages;
 }
