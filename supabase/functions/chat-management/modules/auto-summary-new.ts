@@ -2,7 +2,7 @@ import type { SupabaseClient } from '../types/streaming-interfaces.ts';
 
 /**
  * Message-Based Auto-Summary Module
- * Handles automatic conversation summarization every 5 AI responses (changed for testing)
+ * Handles automatic conversation summarization every 15 AI responses
  */
 
 const MISTRAL_MODEL = 'mistralai/mistral-7b-instruct';
@@ -104,13 +104,6 @@ export async function generateMessageBasedSummary(
     ? Math.max(...aiMessagesInRange.map(m => m.aiSequenceNumber).filter(n => n != null))
     : aiMessagesInRange.length;
 
-  console.log('📊 Summary generation for range:', {
-    totalMessages: messagesToSummarize.length,
-    aiMessagesInRange: aiMessagesInRange.length,
-    aiSequenceRange: `${rangeStart}-${rangeEnd}`,
-    messageOrderRange: `${Math.min(...messagesToSummarize.map(m => m.message_order))}-${Math.max(...messagesToSummarize.map(m => m.message_order))}`
-  });
-
   const summaryPrompt = `You are a professional conversation analyst. Create a detailed summary of the following roleplay conversation.
 
 CRITICAL: You MUST respond with ONLY a valid JSON object in this EXACT format (no other text):
@@ -133,14 +126,6 @@ CONVERSATION TO SUMMARIZE:
 ${conversationText}
 
 REMEMBER: Return ONLY the JSON object, no additional text or formatting.`;
-
-  console.log('🤖 Generating message-based summary:', {
-    messagesCount: messagesToSummarize.length,
-    rangeStart,
-    rangeEnd,
-    estimatedTokens: Math.ceil(conversationText.length / 4),
-    tokenLimit: MAX_SUMMARY_TOKENS
-  });
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -171,13 +156,6 @@ REMEMBER: Return ONLY the JSON object, no additional text or formatting.`;
       throw new Error('No summary content returned from API');
     }
 
-    console.log('📝 Generated summary response:', {
-      model: MISTRAL_MODEL,
-      tokensUsed: data.usage?.total_tokens || 'unknown',
-      responseLength: summaryText.length,
-      preview: summaryText.substring(0, 200) + '...'
-    });
-
     // FIXED: Better parsing function
     return parseSummaryResponse(summaryText, messagesToSummarize, character.name || 'Character');
     
@@ -192,8 +170,6 @@ REMEMBER: Return ONLY the JSON object, no additional text or formatting.`;
  */
 function parseSummaryResponse(response: string, messages: any[], characterName: string): { title: string, content: string, keywords: string[] } {
   try {
-    console.log('📝 Parsing AI summary response, length:', response.length);
-    
     // Clean the response - remove any markdown formatting
     let cleanedResponse = response.trim();
     
@@ -207,18 +183,10 @@ function parseSummaryResponse(response: string, messages: any[], characterName: 
     // Try to extract JSON from the response
     const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error('❌ No JSON found in response');
       throw new Error('No JSON structure found');
     }
     
     const parsed = JSON.parse(jsonMatch[0]);
-    console.log('✅ Parsed JSON structure:', {
-      hasTitle: !!parsed.title,
-      hasSummary: !!parsed.summary,
-      hasKeywords: !!parsed.keywords,
-      keywordCount: parsed.keywords?.length || 0,
-      keywords: parsed.keywords
-    });
     
     // Validate structure
     if (parsed.summary && parsed.keywords && Array.isArray(parsed.keywords)) {
@@ -228,8 +196,6 @@ function parseSummaryResponse(response: string, messages: any[], characterName: 
         .map((k: string) => k.trim().toLowerCase())
         .slice(0, 10);
       
-      console.log('✅ Successfully extracted keywords:', cleanKeywords);
-      
       return {
         title: parsed.title || `${characterName} Conversation Summary`,
         content: parsed.summary, // Use the summary field, not the full JSON
@@ -237,12 +203,10 @@ function parseSummaryResponse(response: string, messages: any[], characterName: 
       };
     }
   } catch (error) {
-    console.error('❌ Failed to parse summary JSON:', error);
-    console.log('📝 Raw response (first 500 chars):', response.substring(0, 500));
+    // Silent fallback
   }
   
   // Fallback: Extract meaningful keywords from conversation
-  console.log('⚠️ Using fallback keyword extraction');
   const extractedKeywords = extractKeywordsFromMessages(messages, characterName);
   
   // Try to extract summary content if JSON parsing failed
@@ -257,89 +221,6 @@ function parseSummaryResponse(response: string, messages: any[], characterName: 
     content: summaryContent,
     keywords: extractedKeywords
   };
-}
-
-/**
- * Save auto-summary to character_memories table
- */
-export async function saveMessageBasedSummary(
-  summaryData: { title: string, content: string, keywords: string[] },
-  userId: string,
-  characterId: string,
-  chatId: string,
-  messagesToSummarize: any[],
-  supabase: SupabaseClient
-): Promise<string> {
-  // FIXED: Calculate range based on AI sequence numbers, not message_order
-  const aiMessagesInRange = messagesToSummarize.filter(m => m.is_ai_message);
-  
-  // Use AI sequence numbers if available, otherwise calculate from position
-  let rangeStart: number, rangeEnd: number;
-  
-  if (aiMessagesInRange.length > 0 && aiMessagesInRange[0].aiSequenceNumber) {
-    // Use the actual AI sequence numbers for accurate range
-    const sequenceNumbers = aiMessagesInRange.map(m => m.aiSequenceNumber).filter(n => n != null);
-    rangeStart = Math.min(...sequenceNumbers);
-    rangeEnd = Math.max(...sequenceNumbers);
-  } else {
-    // Fallback: Use simple counting based on AI message position  
-    console.warn('⚠️ AI sequence numbers not available for save, using position-based counting');
-    rangeStart = 1;
-    rangeEnd = aiMessagesInRange.length;
-  }
-    
-  // FIXED: Title shows actual AI message sequence range
-  const fullTitle = `${summaryData.title} (AI: ${rangeStart}-${rangeEnd})`;
-  
-  console.log('💾 FIXED Auto-summary save with AI sequence numbers:', {
-    title: fullTitle,
-    aiSequenceRange: `${rangeStart}-${rangeEnd}`,
-    totalMessagesInRange: messagesToSummarize.length,
-    aiMessagesInRange: aiMessagesInRange.length,
-    aiSequenceNumbers: aiMessagesInRange.map(m => m.aiSequenceNumber),
-    contentLength: summaryData.content.length,
-    keywords: summaryData.keywords
-  });
-
-  try {
-    const { data, error } = await supabase
-      .from('character_memories')
-      .insert({
-        user_id: userId,
-        character_id: characterId,
-        chat_id: chatId,
-        name: fullTitle,
-        summary_content: summaryData.content,
-        trigger_keywords: summaryData.keywords,
-        is_auto_summary: true,
-        message_count: rangeEnd, // Store the ending AI sequence number (NOT message_order)
-        input_token_cost: 0
-      })
-      .select('id')
-      .single();
-
-    if (error) {
-      console.error('❌ Failed to save auto-summary:', error);
-      throw new Error(`Database error: ${error.message}`);
-    }
-
-    if (!data?.id) {
-      throw new Error('No summary ID returned from database');
-    }
-
-    console.log('✅ Auto-summary saved successfully:', {
-      summaryId: data.id,
-      title: fullTitle,
-      messageRange: `${rangeStart}-${rangeEnd}`,
-      keywordCount: summaryData.keywords.length
-    });
-
-    return data.id;
-    
-  } catch (error) {
-    console.error('❌ Failed to save message-based summary:', error);
-    throw error;
-  }
 }
 
 /**
@@ -359,25 +240,14 @@ export async function triggerMessageBasedSummary(
   retryCount: number = 0
 ): Promise<SummaryResult> {
   const MAX_RETRIES = 3;
-  const requestId = crypto.randomUUID();
   const lockKey = `summary_${chatId}`;
-  
-  console.log(`🧠 Starting message-based auto-summary for chat ${chatId} (attempt ${retryCount + 1}) [${requestId}]`, {
-    messagesToSummarizeCount: messagesToSummarize.length,
-    characterId,
-    retryCount,
-    lockKey
-  });
   
   // CRITICAL FIX: Check if summary is already being processed for this chat
   if (summaryLocks.has(lockKey)) {
-    console.log(`🔒 Summary already in progress for chat ${chatId}, waiting for completion...`);
     try {
       const existingResult = await summaryLocks.get(lockKey)!;
-      console.log(`✅ Waited for existing summary completion:`, existingResult);
       return existingResult;
     } catch (error) {
-      console.log(`⚠️ Previous summary failed, returning error:`, error);
       return { success: false, error: 'Summary already in progress', note: 'Concurrent request' };
     }
   }
@@ -385,9 +255,6 @@ export async function triggerMessageBasedSummary(
   // Create and store the summary promise to prevent concurrent summaries
   const summaryPromise = (async (): Promise<SummaryResult> => {
     try {
-      console.log('🤖 Starting message-based auto-summary generation...');
-      console.log(`📊 Messages to summarize: ${messagesToSummarize.length}`);
-      
       // Check if we have messages to summarize
       if (!messagesToSummarize || messagesToSummarize.length === 0) {
         return { success: false, error: 'No messages to summarize' };
@@ -422,7 +289,6 @@ export async function triggerMessageBasedSummary(
       }
       
       if (aiMessagesInRange.length === 0) {
-        console.log('❌ No AI messages to summarize');
         return { success: false, error: 'No AI messages to summarize' };
       }
       
@@ -430,17 +296,8 @@ export async function triggerMessageBasedSummary(
       const aiSequenceStart = lastSummaryEndMessage + 1;
       const aiSequenceEnd = globalAiSequence; // This is now the actual last AI message number
       const rangeString = `${aiSequenceStart}-${aiSequenceEnd}`;
-      
-      console.log('📊 FIXED AI Sequence Calculation:', {
-        lastSummaryEndMessage,
-        aiSequenceStart,
-        aiSequenceEnd,
-        aiMessagesInRangeCount: aiMessagesInRange.length,
-        rangeString
-      });
 
       // Check if a summary already exists for this exact range
-      console.log('🔍 Checking for existing summary...');
       const { data: existingSummary } = await supabase
         .from('character_memories')
         .select('id, message_count, created_at, name')
@@ -451,12 +308,6 @@ export async function triggerMessageBasedSummary(
         .maybeSingle();
       
       if (existingSummary) {
-        console.log('⚠️ Auto-summary already exists for this range, skipping', {
-          existingSummaryId: existingSummary.id,
-          existingTitle: existingSummary.name,
-          messageCount: existingSummary.message_count,
-          createdAt: existingSummary.created_at
-        });
         return { 
           success: true, 
           summaryId: existingSummary.id, 
@@ -474,7 +325,6 @@ export async function triggerMessageBasedSummary(
       });
 
       // Generate summary
-      console.log('🤖 Generating new summary...');
       const summaryData = await generateMessageBasedSummary(
         sortedMessages,
         character,
@@ -487,14 +337,6 @@ export async function triggerMessageBasedSummary(
 
       // Save auto-summary with correct range
       const fullTitle = `Conversation Summary - ${new Date().toLocaleDateString()} (AI: ${rangeString})`;
-      
-      console.log('💾 Saving summary with FIXED data:', {
-        title: fullTitle,
-        keywordCount: summaryData.keywords.length,
-        keywords: summaryData.keywords,
-        messageCount: aiSequenceEnd,
-        range: rangeString
-      });
       
       // CRITICAL FIX: Handle unique constraint violation by updating existing summary
       let data, saveError;
@@ -520,22 +362,12 @@ export async function triggerMessageBasedSummary(
         data = insertResult.data;
         saveError = insertResult.error;
 
-        if (!saveError) {
-          console.log('✅ New auto-summary created successfully:', {
-            summaryId: data.id,
-            title: fullTitle,
-            messageRange: rangeString,
-            savedKeywords: data.trigger_keywords
-          });
-        }
-
       } catch (error) {
         saveError = error;
       }
 
       // If we get a unique constraint error (23505), update the existing summary
       if (saveError && saveError.code === '23505') {
-        console.log('⚠️ Unique constraint hit, updating existing auto-summary...');
         
         const { data: existingMemory } = await supabase
           .from('character_memories')
@@ -563,15 +395,6 @@ export async function triggerMessageBasedSummary(
           if (!updateResult.error) {
             data = updateResult.data;
             saveError = null;
-            
-            console.log('✅ Existing auto-summary updated successfully:', {
-              summaryId: data.id,
-              previousTitle: existingMemory.name,
-              newTitle: fullTitle,
-              previousMessageCount: existingMemory.message_count,
-              newMessageCount: aiSequenceEnd,
-              messageRange: rangeString
-            });
           } else {
             saveError = updateResult.error;
           }
@@ -594,11 +417,10 @@ export async function triggerMessageBasedSummary(
       };
       
     } catch (error) {
-      console.error(`❌ Message-based auto-summary failed (attempt ${retryCount + 1}):`, error);
+      console.error(`Auto-summary failed (attempt ${retryCount + 1}):`, error);
       
       // Retry logic
       if (retryCount < MAX_RETRIES) {
-        console.log(`🔄 Retrying message-based auto-summary in 2 seconds...`);
         await new Promise(resolve => setTimeout(resolve, 2000));
         // Remove the lock before retrying
         summaryLocks.delete(lockKey);
@@ -622,7 +444,6 @@ export async function triggerMessageBasedSummary(
   summaryPromise.finally(() => {
     setTimeout(() => {
       summaryLocks.delete(lockKey);
-      console.log(`🔓 Released summary lock for ${lockKey} [${requestId}]`);
     }, 2000); // 2 second delay to handle rapid successive calls
   });
   

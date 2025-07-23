@@ -102,3 +102,13 @@ export interface Tag {
   id: number;
   name: string;
 }
+
+export interface UserCharacterSettings {
+  id: string;
+  user_id: string;
+  character_id: string;
+  chat_mode: 'storytelling' | 'companion';
+  time_awareness_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}

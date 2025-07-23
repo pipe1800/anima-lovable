@@ -778,6 +778,51 @@ export type Database = {
         }
         Relationships: []
       }
+      user_character_settings: {
+        Row: {
+          character_id: string
+          chat_mode: string
+          created_at: string
+          id: string
+          time_awareness_enabled: boolean | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          character_id: string
+          chat_mode?: string
+          created_at?: string
+          id?: string
+          time_awareness_enabled?: boolean | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          character_id?: string
+          chat_mode?: string
+          created_at?: string
+          id?: string
+          time_awareness_enabled?: boolean | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_character_settings_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_character_settings_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_character_world_info_settings: {
         Row: {
           character_id: string

@@ -123,7 +123,7 @@ export async function checkSummaryTrigger(
   messageHistory: MessageHistoryItem[],
   supabase: any
 ): Promise<SummaryTriggerInfo> {
-  const SUMMARY_INTERVAL = 5; // Every 5 AI responses (changed for testing)
+  const SUMMARY_INTERVAL = 15; // Every 15 AI responses
   const lockKey = `summary_${chatId}`;
   
   // CRITICAL FIX: Check if summary is already being processed for this chat
@@ -168,20 +168,8 @@ export async function checkSummaryTrigger(
   const nextSummaryAt = lastSummaryEndMessage + SUMMARY_INTERVAL;
   
   // CRITICAL FIX: Only trigger on EXACT interval count, not >= 
-  // This prevents triggering on messages 6, 7, 8, etc.
+  // This prevents triggering on messages 16, 17, 18, etc.
   const shouldTriggerSummary = totalAiSequence === nextSummaryAt;
-  
-  console.log(`📊 Summary Trigger Check (FIXED):`, {
-    chatId,
-    lastSummaryEndMessage,
-    totalAiSequence,
-    currentAiCount,
-    nextSummaryAt,
-    shouldTriggerSummary,
-    hasLock: globalThis.summaryLocks?.has(lockKey) || false,
-    triggerCondition: `${totalAiSequence} === ${nextSummaryAt}`,
-    decision: shouldTriggerSummary ? '🚨 TRIGGER AUTO-SUMMARY' : '✅ No summary needed'
-  });
   
   // If triggering summary, get messages to summarize
   let messagesToSummarize: MessageHistoryItem[] = [];
@@ -217,17 +205,6 @@ export async function checkSummaryTrigger(
             msg.aiSequenceNumber = aiSequenceStart + aiIndex;
           }
         }
-      });
-      
-      console.log('🎯 FIXED Summary Range Calculation:', {
-        targetAiMessages: SUMMARY_INTERVAL,
-        actualAiMessages: targetAiMessages.length,
-        messageOrderRange: `${firstAiMessageOrder}-${lastAiMessageOrder}`,
-        aiSequenceRange: `${aiSequenceStart}-${aiSequenceEnd}`,
-        lastSummaryEndMessage: lastSummaryEndMessage,
-        totalMessagesInRange: messagesToSummarize.length,
-        messageOrdersInRange: messagesToSummarize.map(m => m.message_order).sort((a, b) => a - b),
-        aiSequenceNumbers: targetAiMessages.map((msg, i) => aiSequenceStart + i)
       });
     }
   }

@@ -8,6 +8,7 @@ import { ImageCropper } from '@/components/ui/image-cropper';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { CharacterChatModeToggle } from './CharacterChatModeToggle';
 
 interface FoundationStepProps {
   data: any;
@@ -22,7 +23,8 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
     name: data.name || '',
     avatar: data.avatar || '',
     title: data.title || '',
-    description: data.description || ''
+    description: data.description || '',
+    chatMode: (data.chatMode as 'storytelling' | 'companion') || 'storytelling'
   });
 
   // Update form data when character data is loaded
@@ -32,7 +34,8 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
         name: data.name || '',
         avatar: data.avatar || '',
         title: data.title || '',
-        description: data.description || ''
+        description: data.description || '',
+        chatMode: (data.chatMode as 'storytelling' | 'companion') || 'storytelling'
       });
     }
   }, [data]);
@@ -305,12 +308,43 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
                 rows={3}
                 className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-400 rounded-lg resize-none text-sm md:text-base"
               />
-              <p className="text-xs text-gray-500">
+                            <p className="text-xs text-gray-500">
                 This is what other users will see at a glance in the discovery page.
               </p>
             </div>
+
+            {/* Chat Mode Toggle */}
+            <div className="space-y-2">
+              <CharacterChatModeToggle
+                chatMode={formData.chatMode}
+                onChange={(mode) => handleInputChange('chatMode', mode)}
+                showWarning={true}
+              />
+            </div>
           </div>
         </div>
+
+        {/* Greeting Preview Section */}
+        {data.greeting && (
+          <div className="mt-6 p-4 rounded-lg bg-gray-800/30 border border-gray-700/50">
+            <div className="flex justify-between items-center mb-3">
+              <Label className="text-white font-medium">Greeting Preview ({formData.chatMode} mode)</Label>
+              {formData.chatMode === 'companion' && data.greeting.includes('*') && (
+                <span className="text-xs text-orange-400 bg-orange-400/10 px-2 py-1 rounded">
+                  ⚠️ Contains narrative elements
+                </span>
+              )}
+            </div>
+            <div className="p-3 rounded bg-gray-900/50 border border-gray-600/30">
+              <p className="text-gray-300 text-sm whitespace-pre-wrap">{data.greeting}</p>
+            </div>
+            {formData.chatMode === 'companion' && data.greeting.includes('*') && (
+              <p className="text-xs text-orange-400 mt-2">
+                Your greeting contains narrative elements (*actions*) that may appear in companion mode responses
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Navigation - Responsive positioning */}
         <div className="flex justify-end mt-6 md:mt-8 pt-4 md:pt-6 border-t border-gray-700/50">

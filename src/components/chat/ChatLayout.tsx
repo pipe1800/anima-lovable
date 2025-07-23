@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getUserChats, getCharacterDetails } from '@/lib/supabase-queries';
 import { getUserPersonas, createPersona, deletePersona, type Persona } from '@/lib/persona-operations';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { getUserCharacterSettings, upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,7 @@ import { ChatConfigurationTab } from './ChatConfigurationTab';
 import { MemoriesDialog } from './MemoriesDialog';
 import { useCharacterMemories } from '@/hooks/useCharacterMemories';
 import { calculateMemoryCreditCost, getMemoryCostExplanation } from '@/lib/memory-cost-calculator';
+import { CharacterChatModeToggle } from '@/components/character-creator/CharacterChatModeToggle';
 import type { TrackedContext, Character } from '@/types/chat';
 import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
 import { getBestPersonaForNewChat } from '@/lib/user-preferences';
@@ -78,6 +80,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     character.id,
     currentUser?.id
   );
+  
+  // Chat mode state
+  const [chatMode, setChatMode] = useState<'storytelling' | 'companion'>('storytelling');
+  const [chatModeLoading, setChatModeLoading] = useState(false);
   
   // Debug Enhanced Memory detection
   useEffect(() => {
@@ -204,6 +210,18 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
             }
           } catch (error) {
             console.error('❌ ChatLayout: Error loading user world info selection:', error);
+          }
+        }
+        
+        // Load user character settings (chat mode)
+        if (user) {
+          try {
+            const settings = await getUserCharacterSettings(user.id, character.id);
+            if (settings) {
+              setChatMode(settings.chat_mode);
+            }
+          } catch (error) {
+            console.error('Error loading user character settings:', error);
           }
         }
       } catch (error) {
@@ -447,6 +465,33 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       setFilteredChatHistory(filtered);
     }
   }, [searchQuery, chatHistory]);
+
+  // Handle chat mode changes
+  const handleChatModeChange = async (mode: 'storytelling' | 'companion') => {
+    if (!currentUser || chatModeLoading) return;
+    
+    setChatModeLoading(true);
+    setChatMode(mode);
+    
+    try {
+      await upsertUserCharacterSettings(currentUser.id, character.id, {
+        chat_mode: mode
+      });
+      
+      toast.success(`Chat mode updated to ${mode}`, {
+        description: mode === 'companion' 
+          ? 'Responses will focus on dialogue only'
+          : 'Responses will include rich descriptions and narrative'
+      });
+    } catch (error) {
+      console.error('Error updating chat mode:', error);
+      toast.error('Failed to update chat mode');
+      // Revert the state on error
+      setChatMode(mode === 'companion' ? 'storytelling' : 'companion');
+    } finally {
+      setChatModeLoading(false);
+    }
+  };
 
   // Start new chat function
   const handleStartNewChat = async () => {
@@ -910,6 +955,19 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                           </div>
                         </div>
                       </div>
+                      
+                      {/* Chat Mode Settings - Only show if user is logged in */}
+                      {currentUser && (
+                        <div>
+                          <h3 className="text-white font-semibold mb-3">Chat Settings</h3>
+                          <CharacterChatModeToggle
+                            chatMode={chatMode}
+                            onChange={handleChatModeChange}
+                            showWarning={true}
+                            disabled={chatModeLoading}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

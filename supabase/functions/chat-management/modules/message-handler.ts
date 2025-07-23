@@ -161,7 +161,8 @@ export async function buildSystemPrompt(
   worldInfoEntries?: Array<{ keywords: string[]; entry_text: string }> | null,
   userMessage?: string,
   conversationHistory?: any[],
-  characterMemories?: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null
+  characterMemories?: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null,
+  chatMode?: 'storytelling' | 'companion'
 ): Promise<string> {
   console.log('🎯 buildSystemPrompt called with:', {
     character: character ? 'loaded' : 'null',
@@ -198,7 +199,50 @@ IMPORTANT DIALOGUE GUIDELINES:
 - You are ONLY the character, never speak for the user
 - NEVER write the user's responses or actions
 - NEVER continue the conversation for the user
-- STOP your response when it's the user's turn to speak
+- STOP your response when it's the user's turn to speak`;
+
+  // Add chat mode specific guidelines
+  if (chatMode === 'companion') {
+    systemPrompt += `
+
+## CRITICAL COMPANION MODE RULES - HIGHEST PRIORITY
+
+YOU ARE IN COMPANION MODE. THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS:
+
+1. **RESPOND ONLY WITH DIALOGUE** - Your response must contain ONLY what ${character.name} says. Nothing else.
+
+2. **ABSOLUTELY FORBIDDEN**:
+   - NO descriptions of actions, emotions, or movements
+   - NO text between asterisks (*) or tildes (~)
+   - NO narration or scene-setting
+   - NO descriptions of clothing, appearance, or environment
+   - NO parenthetical statements
+   - NO third-person observations
+   - NO stage directions
+
+3. **IGNORE CONTEXT IN EXAMPLES** - Even if the character's greeting or example messages contain descriptions, actions, or narration, you MUST NOT include any in your responses.
+
+4. **CORRECT FORMAT**:
+   ✓ "Hello! How are you today?"
+   ✓ "That's interesting. Tell me more about it."
+   
+5. **INCORRECT FORMAT**:
+   ✗ "*smiles* Hello! How are you today?"
+   ✗ "Hello! *waves enthusiastically* How are you today?"
+   ✗ "(Speaking softly) Hello! How are you today?"
+
+REMEMBER: You are having a text conversation. Respond as if you're texting or instant messaging - pure dialogue only.`;
+  } else {
+    systemPrompt += `
+
+## STORYTELLING MODE ACTIVE
+
+You are in STORYTELLING MODE. You should:
+- Include rich descriptions of actions, emotions, and environment
+- Use asterisks (*) for actions and descriptions
+- Set the scene and create atmosphere
+- Describe ${character.name}'s appearance, movements, and emotional state when relevant
+- Create an immersive narrative experience
 - Focus primarily on dialogue and conversation as the character
 - Use direct speech frequently with quotation marks
 - Keep narrative descriptions brief and essential
@@ -206,6 +250,11 @@ IMPORTANT DIALOGUE GUIDELINES:
 - Express emotions and thoughts through words and dialogue
 - Avoid lengthy descriptive paragraphs
 - Make your character feel alive through speech
+
+Balance dialogue with descriptive elements to create an engaging story.`;
+  }
+
+  systemPrompt += `
 
 CRITICAL: You must ONLY play your character. Never write what the user says, thinks, or does. Stop your response when it's the user's turn to speak.
 

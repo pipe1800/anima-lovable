@@ -21,6 +21,7 @@ import {
   fetchConversationHistory,
   fetchUserProfile,
   fetchUserGlobalSettings,
+  fetchUserCharacterSettings,
   fetchUserSelectedWorldInfo,
   fetchSelectedPersona,
   fetchChatSelectedPersona,
@@ -92,6 +93,7 @@ export async function handleSendMessage(
       messageHistory,
       userProfile,
       globalSettings,
+      userCharacterSettings,
       chatSelectedPersona,
       planAndModel,
       nextUserMessageOrder,
@@ -102,6 +104,7 @@ export async function handleSendMessage(
       fetchConversationHistory(chatId, supabase),
       fetchUserProfile(user.id, supabase),
       fetchUserGlobalSettings(user.id, supabaseAdmin),
+      fetchUserCharacterSettings(user.id, characterId, supabaseAdmin),
       fetchChatSelectedPersona(chatId, user.id, supabase),
       getUserPlanAndModel(user.id, supabaseAdmin),
       getNextMessageOrder(chatId, supabase),
@@ -174,7 +177,8 @@ export async function handleSendMessage(
       worldInfoEntries,
       message,
       messageHistory,
-      characterMemories
+      characterMemories,
+      userCharacterSettings?.chat_mode || 'storytelling'
     );
 
     // Use new message-based budget management
@@ -187,7 +191,7 @@ export async function handleSendMessage(
       supabase
     );
 
-    const conversationMessages = conversationResult.messages;
+    let conversationMessages = conversationResult.messages;
 
     // Check if we should warn about context ceiling
     let shouldWarnContextCeiling = false;
@@ -227,7 +231,7 @@ export async function handleSendMessage(
 
     // Check if we need to trigger a background summary
     if (conversationResult.needsSummarization) {
-      console.log('🚨 AUTO-SUMMARY TRIGGERED! 5 AI responses reached, triggering background summarization...');
+      console.log('🚨 AUTO-SUMMARY TRIGGERED! 15 AI responses reached, triggering synchronous summarization...');
       console.log('📊 Summary trigger details:', {
         currentAiMessageCount: conversationResult.currentAiMessageCount,
         nextSummaryAt: conversationResult.nextSummaryAt,
@@ -236,24 +240,46 @@ export async function handleSendMessage(
         messagesToSummarizeCount: conversationResult.messagesToSummarize.length
       });
       
-      // Non-blocking call to the message-based summarization function
-      triggerMessageBasedSummary(
-        chatId,
-        user.id,
-        characterId,
-        conversationResult.messagesToSummarize,
-        character,
-        openRouterKey,
-        supabaseAdmin
-      ).then(summaryResult => {
+      // CRITICAL FIX: Wait for summary to complete before continuing with AI response
+      try {
+        console.log('⏳ Waiting for summary completion before generating AI response...');
+        const summaryResult = await triggerMessageBasedSummary(
+          chatId,
+          user.id,
+          characterId,
+          conversationResult.messagesToSummarize,
+          character,
+          openRouterKey,
+          supabaseAdmin
+        );
+        
         if (summaryResult.success) {
-          console.log(`✅ Message-based summary completed successfully: ${summaryResult.summaryId} (${summaryResult.messageRange})`);
+          console.log(`✅ Summary completed successfully: ${summaryResult.summaryId} (${summaryResult.messageRange})`);
+          console.log('🔄 Rebuilding conversation context with new summary...');
+          
+          // IMPORTANT: Rebuild the conversation context after summary is saved
+          // This ensures the next AI response uses the summary instead of raw messages
+          const updatedConversationResult = await buildConversationMessagesWithMessageBudget(
+            systemPrompt,
+            messageHistory,
+            message,
+            planAndModel.maxContextTokens,
+            chatId,
+            supabaseAdmin
+          );
+          
+          // Update the conversation messages to use the new context with summary
+          conversationMessages = updatedConversationResult.messages;
+          console.log('✅ Context rebuilt with summary, new message count:', conversationMessages.length);
+          console.log('📊 Updated token usage:', updatedConversationResult.totalTokens);
         } else {
-          console.error(`❌ Message-based summary failed: ${summaryResult.error}`);
+          console.error(`❌ Summary failed: ${summaryResult.error}. Continuing with current context.`);
+          // Continue with existing context if summary fails
         }
-      }).catch(error => {
-        console.error('❌ Summary promise caught error:', error);
-      });
+      } catch (error) {
+        console.error('⚠️ Summary generation failed, continuing with current context:', error);
+        // Continue with existing context if summary fails
+      }
     } else {
       console.log('📝 No auto-summary needed:', {
         currentAiMessageCount: conversationResult.currentAiMessageCount,

@@ -106,6 +106,27 @@ export async function fetchUserGlobalSettings(
   return settings;
 }
 
+export async function fetchUserCharacterSettings(
+  userId: string,
+  characterId: string,
+  supabaseAdmin: SupabaseClient
+): Promise<{ chat_mode: 'storytelling' | 'companion'; time_awareness_enabled: boolean } | null> {
+  const { data: settings, error } = await supabaseAdmin
+    .from('user_character_settings')
+    .select('chat_mode, time_awareness_enabled')
+    .eq('user_id', userId)
+    .eq('character_id', characterId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') { // Not found error
+    console.error('User character settings error:', error);
+    return null;
+  }
+
+  // Return default values if no settings found
+  return settings || { chat_mode: 'storytelling', time_awareness_enabled: false };
+}
+
 export async function fetchUserSelectedWorldInfo(
   userId: string,
   characterId: string,
