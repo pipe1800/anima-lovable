@@ -1,48 +1,30 @@
-import React, { useState, useEffect, Suspense, lazy, useCallback } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCharacterCreation } from '@/hooks/useCharacterCreation';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { getUserCredits } from '@/lib/supabase-queries';
 import { useToast } from '@/hooks/use-toast';
-import { parseCharacterCard, parseExampleDialogue } from '@/lib/utils/characterCard';
+import { parseCharacterCard } from '@/lib/utils/characterCard';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { 
-  Loader2, Save, ArrowLeft, ArrowRight, Check, 
-  User, Brain, MessageCircle, Rocket 
-} from 'lucide-react';
+import { Loader2, Save, ArrowLeft, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Tables } from '@/integrations/supabase/types';
 
-// Lazy load heavy components for better performance
+// Lazy load heavy components
 const FoundationStep = lazy(() => import('@/components/character-creator/FoundationStep'));
 const PersonalityStep = lazy(() => import('@/components/character-creator/PersonalityStep'));
 const DialogueStep = lazy(() => import('@/components/character-creator/DialogueStep'));
 const FinalizeStep = lazy(() => import('@/components/character-creator/FinalizeStep'));
 
-type Tag = Tables<'tags'>;
-
 const STEPS = [
-  { id: 1, title: 'Foundation', description: 'Basic details', icon: 'user' },
-  { id: 2, title: 'Personality', description: 'Character traits', icon: 'brain' },
-  { id: 3, title: 'Dialogue', description: 'Speech patterns', icon: 'message-circle' },
-  { id: 4, title: 'Finalize', description: 'Review & launch', icon: 'rocket' }
+  { id: 1, title: 'Foundation', description: 'Basic details' },
+  { id: 2, title: 'Personality', description: 'Character traits' },
+  { id: 3, title: 'Dialogue', description: 'Speech patterns' },
+  { id: 4, title: 'Finalize', description: 'Review & launch' }
 ];
 
-// Add icon component
-const StepIcon = ({ icon, className }: { icon: string; className?: string }) => {
-  const icons: Record<string, JSX.Element> = {
-    'user': <User className={className} />,
-    'brain': <Brain className={className} />,
-    'message-circle': <MessageCircle className={className} />,
-    'rocket': <Rocket className={className} />
-  };
-  return icons[icon] || null;
-};
-
-const CharacterCreator = () => {
+export default function CharacterCreator() {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { toast } = useToast();
@@ -56,15 +38,14 @@ const CharacterCreator = () => {
     isCreating,
     isEditing,
     isDirty,
-    saveCharacter,
-    validateStep
+    saveCharacter
   } = useCharacterCreation();
 
   const [userCredits, setUserCredits] = useState(0);
   const [isParsingCard, setIsParsingCard] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
 
-  // Fetch user credits for mobile nav
+  // Fetch user credits
   useEffect(() => {
     const fetchCredits = async () => {
       if (!user) return;
@@ -80,7 +61,7 @@ const CharacterCreator = () => {
     fetchCredits();
   }, [user]);
 
-  // Handle unsaved changes warning
+  // Handle unsaved changes
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (isDirty) {
@@ -92,19 +73,6 @@ const CharacterCreator = () => {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
-
-  // Helper function to extract avatar from PNG
-  const extractAvatarFromPNG = async (file: File): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        resolve(dataUrl);
-      };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
-  };
 
   const handleFileChange = async (file: File) => {
     if (!file || file.type !== 'image/png') {
@@ -130,27 +98,20 @@ const CharacterCreator = () => {
         return;
       }
 
-      // Extract avatar from the PNG file
-      const avatarUrl = await extractAvatarFromPNG(file);
-
-      // Map card data to form structure with corrected field mapping
-      const exampleDialogues = cardData.example_dialogues || 
-        (cardData.mes_example ? parseExampleDialogue(cardData.mes_example) : []);
-
+      // Map card data to form structure
       updateCharacterData({
         name: cardData.name || '',
-        avatar: avatarUrl || '', // Set the avatar from the PNG
-        title: cardData.description || '', // Short description goes to title
-        description: cardData.personality || '', // Main personality goes to description  
+        title: cardData.tagline || '',
+        description: cardData.description || '',
         personality: {
           core_personality: cardData.personality || '',
           tags: cardData.tags || [],
-          knowledge_base: cardData.creator_notes || '',
+          knowledge_base: '',
           scenario_definition: cardData.scenario || ''
         },
         dialogue: {
           greeting: cardData.greeting || cardData.first_mes || '',
-          example_dialogues: exampleDialogues
+          example_dialogues: cardData.example_dialogues || []
         }
       });
 
@@ -170,25 +131,15 @@ const CharacterCreator = () => {
     }
   };
 
-  const handleStepChange = useCallback((step: number) => {
-    // Validate current step before moving
-    if (step > currentStep && !validateStep(currentStep)) {
-      toast({
-        title: "Incomplete Step",
-        description: "Please complete all required fields before proceeding.",
-        variant: "destructive",
-      });
-      return;
-    }
-    
+  const handleStepChange = (step: number) => {
     if (step >= 1 && step <= STEPS.length) {
       setCurrentStep(step);
     }
-  }, [currentStep, validateStep, toast, setCurrentStep]);
+  };
 
   const handleNext = () => {
     if (currentStep < STEPS.length) {
-      handleStepChange(currentStep + 1);
+      setCurrentStep(currentStep + 1);
     }
   };
 
@@ -249,51 +200,63 @@ const CharacterCreator = () => {
     }
   };
 
-  const progress = (currentStep / STEPS.length) * 100;
-
   return (
     <div className="min-h-screen bg-[#121212] flex flex-col">
-      {/* Header - Responsive */}
-      <header className="bg-[#1a1a2e] border-b border-gray-700/50 sticky top-0 z-30">
-        <div className="container mx-auto px-4">
-          {/* Mobile Header */}
-          <div className="md:hidden py-4">
-            <div className="flex items-center justify-between mb-4">
-              <MobileNavMenu 
-                userCredits={userCredits} 
-                username={profile?.username || 'User'} 
-                pageTitle={isEditing ? 'Edit Character' : 'Create Character'}
-              />
-              
-              {isDirty && isEditing && (
-                <Button
-                  onClick={saveCharacter}
-                  disabled={isCreating}
-                  size="sm"
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {isCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                </Button>
-              )}
-            </div>
+      {/* Mobile Header */}
+      <div className="md:hidden bg-[#1a1a2e] border-b border-gray-700/50 sticky top-0 z-50">
+        <div className="flex items-center justify-between p-4">
+          <MobileNavMenu 
+            userCredits={userCredits} 
+            username={profile?.username || 'User'} 
+            pageTitle={isEditing ? 'Edit Character' : 'Create Character'}
+          />
+          
+          {isDirty && (
+            <Button
+              onClick={saveCharacter}
+              disabled={isCreating}
+              size="sm"
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {isCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            </Button>
+          )}
+        </div>
 
-            {/* Mobile Progress */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">
-                  Step {currentStep} of {STEPS.length}
-                </span>
-                <span className="text-[#FF7A00] font-medium">
-                  {Math.round(progress)}%
-                </span>
-              </div>
-              <Progress value={progress} className="h-2 bg-gray-700" />
-            </div>
+        {/* Mobile Progress Bar */}
+        <div className="px-4 pb-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-gray-400">
+              Step {currentStep} of {STEPS.length}
+            </span>
+            <span className="text-xs text-[#FF7A00] font-medium">
+              {Math.round((currentStep / STEPS.length) * 100)}%
+            </span>
           </div>
+          <div className="w-full bg-gray-700 rounded-full h-2">
+            <div 
+              className="bg-gradient-to-r from-[#FF7A00] to-[#FF7A00]/70 h-2 rounded-full transition-all duration-500"
+              style={{ width: `${(currentStep / STEPS.length) * 100}%` }}
+            />
+          </div>
+        </div>
+      </div>
 
-          {/* Desktop Header */}
-          <div className="hidden md:block py-6">
-            <div className="flex items-center justify-between mb-6">
+      {/* Desktop Header */}
+      <div className="hidden md:block bg-[#1a1a2e] border-b border-gray-700/50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <Button
+                onClick={handleExit}
+                variant="ghost"
+                size="sm"
+                className="text-gray-400 hover:text-white"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Dashboard
+              </Button>
+              
               <div>
                 <h1 className="text-2xl font-bold text-white">
                   {isEditing ? 'Edit Character' : 'Create Character'}
@@ -302,93 +265,82 @@ const CharacterCreator = () => {
                   {STEPS[currentStep - 1].description}
                 </p>
               </div>
-
-              {isDirty && isEditing && (
-                <Button
-                  onClick={saveCharacter}
-                  disabled={isCreating}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4 mr-2" />
-                      Save Changes
-                    </>
-                  )}
-                </Button>
-              )}
             </div>
 
-            {/* Desktop Progress Steps */}
-            <div className="flex items-center justify-center space-x-2">
-              {STEPS.map((step, index) => {
-                const isActive = step.id === currentStep;
-                const isCompleted = step.id < currentStep;
+            {isDirty && (
+              <Button
+                onClick={saveCharacter}
+                disabled={isCreating}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                {isCreating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
 
-                return (
-                  <React.Fragment key={step.id}>
-                    <button
-                      onClick={() => handleStepChange(step.id)}
-                      className={cn(
-                        "flex items-center space-x-3 px-4 py-2 rounded-lg transition-all",
-                        "hover:bg-gray-800/50",
-                        isActive && "bg-[#FF7A00]/20 text-[#FF7A00]",
-                        isCompleted && "text-green-400",
-                        !isActive && !isCompleted && "text-gray-400"
-                      )}
-                    >
-                      <div className={cn(
-                        "w-10 h-10 rounded-full flex items-center justify-center",
-                        "transition-all duration-300",
-                        isActive && "bg-[#FF7A00] text-white animate-pulse",
-                        isCompleted && "bg-green-500 text-white",
-                        !isActive && !isCompleted && "bg-gray-700"
-                      )}>
-                        {isCompleted ? (
-                          <Check className="w-5 h-5" />
-                        ) : (
-                          <StepIcon icon={step.icon} className="w-5 h-5" />
-                        )}
-                      </div>
-                      <div className="text-left">
-                        <div className="font-medium">{step.title}</div>
-                        <div className="text-xs opacity-70">{step.description}</div>
-                      </div>
-                    </button>
-                    
-                    {index < STEPS.length - 1 && (
-                      <div className={cn(
-                        "w-16 h-0.5 transition-all duration-300",
-                        isCompleted ? "bg-green-500" : "bg-gray-700"
-                      )} />
+          {/* Desktop Progress Steps */}
+          <div className="flex items-center justify-center mt-6 space-x-2">
+            {STEPS.map((step, index) => {
+              const isActive = step.id === currentStep;
+              const isCompleted = step.id < currentStep;
+
+              return (
+                <React.Fragment key={step.id}>
+                  <button
+                    onClick={() => handleStepChange(step.id)}
+                    className={cn(
+                      "flex items-center space-x-2 px-4 py-2 rounded-lg transition-all",
+                      isActive && "bg-[#FF7A00]/20 text-[#FF7A00]",
+                      isCompleted && "text-green-400 hover:bg-green-400/10",
+                      !isActive && !isCompleted && "text-gray-400 hover:bg-gray-700/50"
                     )}
-                  </React.Fragment>
-                );
-              })}
-            </div>
+                  >
+                    <div className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium",
+                      isActive && "bg-[#FF7A00] text-white",
+                      isCompleted && "bg-green-500 text-white",
+                      !isActive && !isCompleted && "bg-gray-700 text-gray-400"
+                    )}>
+                      {isCompleted ? '✓' : step.id}
+                    </div>
+                    <span className="hidden lg:inline font-medium">{step.title}</span>
+                  </button>
+                  
+                  {index < STEPS.length - 1 && (
+                    <div className={cn(
+                      "w-8 h-0.5",
+                      isCompleted ? "bg-green-500" : "bg-gray-700"
+                    )} />
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
         </div>
-      </header>
+      </div>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="container mx-auto px-4 py-6 md:py-8 max-w-5xl">
-          <Suspense fallback={
-            <div className="flex items-center justify-center h-[60vh]">
-              <Loader2 className="w-8 h-8 animate-spin text-[#FF7A00]" />
-            </div>
-          }>
-            {renderStep()}
-          </Suspense>
-        </div>
-      </main>
+      <div className="flex-1 overflow-auto">
+        <Suspense fallback={
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="w-8 h-8 animate-spin text-[#FF7A00]" />
+          </div>
+        }>
+          {renderStep()}
+        </Suspense>
+      </div>
 
-      {/* Mobile Bottom Navigation */}
+      {/* Mobile Navigation */}
       <div className="md:hidden bg-[#1a1a2e] border-t border-gray-700/50 p-4 sticky bottom-0">
         <div className="flex items-center justify-between">
           <Button
@@ -404,9 +356,8 @@ const CharacterCreator = () => {
 
           <div className="flex space-x-1">
             {STEPS.map((step) => (
-              <button
+              <div
                 key={step.id}
-                onClick={() => handleStepChange(step.id)}
                 className={cn(
                   "w-2 h-2 rounded-full transition-all",
                   step.id === currentStep ? "bg-[#FF7A00] w-6" : 
@@ -475,21 +426,14 @@ const CharacterCreator = () => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3 text-white">
               <Loader2 className="h-5 w-5 animate-spin text-[#FF7A00]" />
-              Importing Character
+              Importing Character Card
             </DialogTitle>
           </DialogHeader>
-          <div className="py-6 text-center">
-            <p className="text-gray-300 mb-2">
-              Reading character data from PNG file...
-            </p>
-            <p className="text-sm text-gray-500">
-              This may take a moment
-            </p>
-          </div>
+          <p className="text-gray-300">
+            Reading character data from PNG file...
+          </p>
         </DialogContent>
       </Dialog>
     </div>
   );
-};
-
-export default CharacterCreator;
+}
