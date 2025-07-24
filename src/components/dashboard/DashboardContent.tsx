@@ -56,13 +56,24 @@ export function DashboardContent() {
   const navigate = useNavigate();
   const { startChat, isCreating } = useChatCreation();
   const queryClient = useQueryClient();
-  const [currentPage, setCurrentPage] = useState(1);
+  
+  // IMPORTANT: Initialize currentPage from sessionStorage to persist across renders
+  const [currentPage, setCurrentPage] = useState(() => {
+    const savedPage = sessionStorage.getItem('dashboard-current-page');
+    return savedPage ? parseInt(savedPage, 10) : 1;
+  });
+  
   const [selectedChats, setSelectedChats] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const chatsPerPage = 10;
+
+  // Save current page to sessionStorage whenever it changes
+  useEffect(() => {
+    sessionStorage.setItem('dashboard-current-page', currentPage.toString());
+  }, [currentPage]);
 
   // Enable real-time updates
   useRealtimeUpdates(user?.id);
@@ -80,7 +91,8 @@ export function DashboardContent() {
     data: chatsData,
     isLoading: chatsLoading,
     error: chatsError,
-    refetch: refetchChats
+    refetch: refetchChats,
+    isPreviousData
   } = useUserChatsPaginated(currentPage, chatsPerPage);
 
   // Memoize extracted data with fallbacks
@@ -196,12 +208,19 @@ export function DashboardContent() {
     }
   }, [totalChats]);
 
-  // Update current page if it's invalid (this can happen after deletions)
-  useEffect(() => {
-    if (currentPage > totalPages && totalPages > 0) {
-      setCurrentPage(totalPages);
+  // Fixed pagination handler
+  const handlePageChange = useCallback((newPage: number) => {
+    if (newPage < 1 || newPage > totalPages || isPreviousData) return;
+    
+    console.log('Changing page from', currentPage, 'to', newPage);
+    setCurrentPage(newPage);
+    
+    // Scroll to top of chat list
+    const chatSection = document.querySelector('[data-chat-section]');
+    if (chatSection) {
+      chatSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [currentPage, totalPages]);
+  }, [currentPage, totalPages, isPreviousData]);
 
   // Memoized callback functions for better performance
   const handleContinueChat = useCallback((chat: any) => {
@@ -627,13 +646,13 @@ export function DashboardContent() {
                         
                         {/* Pagination Controls */}
                         {totalPages > 1 && (
-                          <div className="flex justify-center items-center space-x-2 mt-4">
+                          <div data-chat-section className="flex justify-center items-center space-x-2 mt-4">
                             <Button
-                              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                              disabled={currentPage === 1}
+                              onClick={() => handlePageChange(currentPage - 1)}
+                              disabled={currentPage === 1 || isPreviousData}
                               variant="outline"
                               size="sm"
-                              className="border-gray-700 text-gray-400 hover:text-white"
+                              className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"
                             >
                               Previous
                             </Button>
@@ -641,11 +660,11 @@ export function DashboardContent() {
                               Page {currentPage} of {totalPages}
                             </span>
                             <Button
-                              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                              disabled={currentPage === totalPages}
+                              onClick={() => handlePageChange(currentPage + 1)}
+                              disabled={currentPage === totalPages || isPreviousData}
                               variant="outline"
                               size="sm"
-                              className="border-gray-700 text-gray-400 hover:text-white"
+                              className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"
                             >
                               Next
                             </Button>
