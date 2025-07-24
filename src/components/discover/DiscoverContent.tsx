@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { DiscoverControlBar } from './DiscoverControlBar';
 import { CharacterGrid } from './CharacterGrid';
@@ -6,13 +6,16 @@ import { Badge } from '@/components/ui/badge';
 import { X } from 'lucide-react';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDashboardData } from '@/hooks/useDashboard';
+import { useDashboardData, preloadDashboardData } from '@/hooks/useDashboard';
+import { useQueryClient } from '@tanstack/react-query';
+import { NSFWToggle } from '@/components/NSFWToggle';
 
 export function DiscoverContent() {
   const { user, profile } = useAuth();
   const { data: dashboardData } = useDashboardData();
   const userCredits = dashboardData?.credits || 0;
   const username = profile?.username || user?.email?.split('@')[0] || 'User';
+  const queryClient = useQueryClient();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('popular');
@@ -103,6 +106,19 @@ export function DiscoverContent() {
       gender: 'any'
     });
   };
+
+  // Preload dashboard data after discover loads
+  useEffect(() => {
+    if (user?.id) {
+      // Small delay to ensure discovery renders first
+      const timer = setTimeout(() => {
+        preloadDashboardData(user.id, queryClient);
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [user?.id, queryClient]);
+
   return (
     <div className="min-h-screen bg-[#121212] w-full">
       {/* Header */}
@@ -115,6 +131,9 @@ export function DiscoverContent() {
               <span className="sm:hidden">Characters</span>
             </h1>
             <p className="text-gray-400 text-xs sm:text-sm hidden sm:block">Explore and discover characters</p>
+          </div>
+          <div className="flex items-center">
+            <NSFWToggle />
           </div>
         </div>
       </header>

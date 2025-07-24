@@ -6,6 +6,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
 import { Eye, EyeOff, Check, X } from 'lucide-react';
+import { preloadDashboardData } from '@/hooks/useDashboard';
+import { useQueryClient } from '@tanstack/react-query';
 const Auth = () => {
   const [searchParams] = useSearchParams();
   const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'signup');
@@ -22,6 +24,7 @@ const Auth = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successUsername, setSuccessUsername] = useState('');
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Password validation state
   const [passwordValidation, setPasswordValidation] = useState({
@@ -53,6 +56,12 @@ const Auth = () => {
         if (isOnboardingCompleted) {
           // User already completed onboarding, go to discover
           navigate('/discover');
+          // Preload dashboard data in background
+          if (session.user?.id) {
+            setTimeout(() => {
+              preloadDashboardData(session.user.id, queryClient);
+            }, 1000);
+          }
         } else {
           // New user or incomplete onboarding, go to onboarding
           navigate('/onboarding');
@@ -71,6 +80,12 @@ const Auth = () => {
         const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
         if (isOnboardingCompleted) {
           navigate('/discover');
+          // Preload dashboard data in background
+          if (session.user?.id) {
+            setTimeout(() => {
+              preloadDashboardData(session.user.id, queryClient);
+            }, 1000);
+          }
         } else {
           navigate('/onboarding');
         }

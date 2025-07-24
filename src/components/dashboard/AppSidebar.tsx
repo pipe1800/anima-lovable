@@ -254,7 +254,7 @@ const AppSidebar = () => {
                 </p>
                 <div className="flex items-center space-x-1">
                   <Zap className="w-3 h-3 text-[#FF7A00]" />
-                  <span className="text-xs text-[#FF7A00]">{userCredits}</span>
+                  <span className="text-xs text-[#FF7A00]">{userCredits.toLocaleString()}</span>
                 </div>
               </div>
             </div>

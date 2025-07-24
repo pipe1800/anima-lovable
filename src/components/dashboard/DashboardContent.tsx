@@ -84,7 +84,8 @@ export function DashboardContent() {
     data: dashboardData, 
     isLoading: dataLoading, 
     error: dashboardError,
-    refetch
+    refetch,
+    isPlaceholderData // Add this to detect if using cached data
   } = useDashboardData();
 
   // Use separate hook for paginated chats
@@ -92,8 +93,7 @@ export function DashboardContent() {
     data: chatsData,
     isLoading: chatsLoading,
     error: chatsError,
-    refetch: refetchChats,
-    isPreviousData
+    refetch: refetchChats
   } = useUserChatsPaginated(currentPage, chatsPerPage);
 
   // Memoize extracted data with fallbacks
@@ -211,7 +211,7 @@ export function DashboardContent() {
 
   // Fixed pagination handler
   const handlePageChange = useCallback((newPage: number) => {
-    if (newPage < 1 || newPage > totalPages || isPreviousData) return;
+    if (newPage < 1 || newPage > totalPages) return;
     
     console.log('Changing page from', currentPage, 'to', newPage);
     setCurrentPage(newPage);
@@ -221,7 +221,7 @@ export function DashboardContent() {
     if (chatSection) {
       chatSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [currentPage, totalPages, isPreviousData]);
+  }, [currentPage, totalPages]);
 
   // Memoized callback functions for better performance
   const handleContinueChat = useCallback((chat: any) => {
@@ -639,7 +639,7 @@ export function DashboardContent() {
                           <div data-chat-section className="flex justify-center items-center space-x-2 mt-4">
                             <Button
                               onClick={() => handlePageChange(currentPage - 1)}
-                              disabled={currentPage === 1 || isPreviousData}
+                              disabled={currentPage === 1}
                               variant="outline"
                               size="sm"
                               className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"
@@ -651,7 +651,7 @@ export function DashboardContent() {
                             </span>
                             <Button
                               onClick={() => handlePageChange(currentPage + 1)}
-                              disabled={currentPage === totalPages || isPreviousData}
+                              disabled={currentPage === totalPages}
                               variant="outline"
                               size="sm"
                               className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"

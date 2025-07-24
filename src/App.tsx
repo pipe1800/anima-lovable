@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { NSFWProvider } from "@/contexts/NSFWContext";
 import OnboardingGuard from "@/components/auth/OnboardingGuard";
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
 import Index from "./pages/Index";
@@ -43,10 +44,11 @@ import DialogueTestPage from "./pages/DialogueTestPage";
 
 const App = () => (
   <AuthProvider>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
+    <NSFWProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/characters" element={<PublicDiscover />} />
@@ -202,6 +204,7 @@ const App = () => (
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
+    </NSFWProvider>
   </AuthProvider>
 );
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   getUserChats,
@@ -42,7 +42,7 @@ export const useDashboardData = () => {
       };
     },
     enabled: !!userId,
-    staleTime: 30 * 1000, // 30 seconds - shorter for more responsive updates
+    staleTime: 5 * 60 * 1000, // 5 minutes - keep data fresh longer
     gcTime: 5 * 60 * 1000, // 5 minutes
   });
 };
@@ -241,4 +241,37 @@ export const useDashboardMutations = () => {
     invalidateCredits,
     invalidateCreditsUsage,
   };
+};
+
+// Preload function for dashboard data
+export const preloadDashboardData = async (userId: string, queryClient: QueryClient) => {
+  if (!userId) return;
+  
+  // Prefetch all dashboard data in the background
+  return queryClient.prefetchQuery({
+    queryKey: ['dashboard', 'overview', userId],
+    queryFn: async () => {
+      const [charactersResult, favoritesResult, creditsResult, creditsUsageResult] = await Promise.all([
+        getUserCharacters(userId),
+        getUserFavorites(userId),
+        getUserCredits(userId),
+        getMonthlyCreditsUsage(userId)
+      ]);
+
+      return {
+        characters: charactersResult.data || [],
+        favorites: favoritesResult.data || [],
+        credits: creditsResult.data?.balance || 0,
+        subscription: null, // Will use from AuthContext
+        creditsUsed: creditsUsageResult.data?.used || 0,
+        errors: {
+          characters: charactersResult.error,
+          favorites: favoritesResult.error,
+          credits: creditsResult.error,
+          creditsUsage: creditsUsageResult.error
+        }
+      };
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 };
