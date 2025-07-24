@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import AppSidebar from '@/components/dashboard/AppSidebar';
 import { MobileHeader } from './MobileHeader';
@@ -14,9 +14,34 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const { user, profile } = useAuth();
   const { data: dashboardData } = useDashboardData();
   const location = useLocation();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   const userCredits = dashboardData?.credits || 0;
   const username = profile?.username || user?.email?.split('@')[0] || 'User';
+
+  // Listen for sidebar state changes
+  useEffect(() => {
+    const updateSidebarState = () => {
+      const savedState = localStorage.getItem('sidebarCollapsed');
+      if (savedState) {
+        setSidebarCollapsed(JSON.parse(savedState));
+      }
+    };
+
+    // Initial load
+    updateSidebarState();
+
+    // Listen for storage changes (when sidebar is toggled)
+    window.addEventListener('storage', updateSidebarState);
+    
+    // Custom event for same-page sidebar toggles
+    window.addEventListener('sidebarToggled', updateSidebarState);
+
+    return () => {
+      window.removeEventListener('storage', updateSidebarState);
+      window.removeEventListener('sidebarToggled', updateSidebarState);
+    };
+  }, []);
   
   // Get page title based on current route
   const getPageTitle = (pathname: string) => {
@@ -50,12 +75,16 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
         
         <div className="flex flex-1">
           {/* Desktop Sidebar */}
-          <div className="hidden md:block">
+          <div className="hidden md:block fixed left-0 top-0 h-full z-40">
             <AppSidebar />
           </div>
           
           {/* Main Content */}
-          <main className="flex-1 overflow-auto md:ml-64">
+          <main 
+            className={`flex-1 overflow-auto transition-all duration-300 ${
+              sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'
+            }`}
+          >
             {children}
           </main>
         </div>

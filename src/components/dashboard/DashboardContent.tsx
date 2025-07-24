@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -22,10 +22,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardData, useUserChatsPaginated } from '@/hooks/useDashboard';
 import { useChatCreation } from '@/hooks/useChatCreation';
+import { useRealtimeUpdates } from '@/hooks/useRealtimeUpdates';
 import { supabase } from '@/integrations/supabase/client';
 import { deleteChat, deleteMultipleChats, deleteAllUserChats } from '@/lib/supabase-queries';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
+import { StatsCard } from '@/components/ui/stats-card';
+import { ChatCard } from '@/components/ui/chat-card';
+import { DashboardErrorBoundary } from '@/components/ui/dashboard-error-boundary';
 import { 
   MessageCircle, 
   Trophy, 
@@ -48,7 +52,7 @@ import {
 } from 'lucide-react';
 
 export function DashboardContent() {
-  const { user, profile, loading: authLoading } = useAuth();
+  const { user, profile, loading: authLoading, subscription: authSubscription } = useAuth();
   const navigate = useNavigate();
   const { startChat, isCreating } = useChatCreation();
   const queryClient = useQueryClient();
@@ -59,6 +63,9 @@ export function DashboardContent() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const chatsPerPage = 10;
+
+  // Enable real-time updates
+  useRealtimeUpdates(user?.id);
   
   // Use React Query hook for dashboard data
   const { 
@@ -76,16 +83,97 @@ export function DashboardContent() {
     refetch: refetchChats
   } = useUserChatsPaginated(currentPage, chatsPerPage);
 
-  // Extract data with fallbacks
-  const recentChats = chatsData?.data || [];
-  const totalChats = chatsData?.totalCount || 0;
-  const totalPages = chatsData?.totalPages || 1;
-  const myCharacters = dashboardData?.characters || [];
-  const favoriteCharacters = dashboardData?.favorites || [];
-  const userCredits = dashboardData?.credits || 0;
-  const subscription = dashboardData?.subscription;
-  const creditsUsed = dashboardData?.creditsUsed || 0;
-  const monthlyAllowance = subscription?.plan?.monthly_credits_allowance || 1000;
+  // Memoize extracted data with fallbacks
+  const recentChats = useMemo(() => chatsData?.data || [], [chatsData?.data]);
+  const totalChats = useMemo(() => chatsData?.totalCount || 0, [chatsData?.totalCount]);
+  const totalPages = useMemo(() => chatsData?.totalPages || 1, [chatsData?.totalPages]);
+  const myCharacters = useMemo(() => dashboardData?.characters || [], [dashboardData?.characters]);
+  const favoriteCharacters = useMemo(() => dashboardData?.favorites || [], [dashboardData?.favorites]);
+  const userCredits = useMemo(() => dashboardData?.credits || 0, [dashboardData?.credits]);
+  
+  // Use subscription from AuthContext first, fallback to dashboard data
+  const subscription = useMemo(() => authSubscription || dashboardData?.subscription, [authSubscription, dashboardData?.subscription]);
+  
+  const creditsUsed = useMemo(() => dashboardData?.creditsUsed || 0, [dashboardData?.creditsUsed]);
+  const monthlyAllowance = useMemo(() => subscription?.plan?.monthly_credits_allowance || 1000, [subscription?.plan?.monthly_credits_allowance]);
+
+  // Get crown icon styling based on plan - MOVED BEFORE CONDITIONAL RETURNS
+  const getCrownIconStyle = useMemo(() => {
+    if (!subscription || subscription.status !== 'active') {
+      return 'text-gray-400';
+    }
+    
+    const planName = subscription.plan?.name?.toLowerCase();
+    if (planName?.includes('whale')) {
+      return 'text-yellow-500 fill-yellow-500'; // Gold filled crown for Whale
+    } else if (planName?.includes('true fan')) {
+      return 'text-gray-300 fill-gray-300'; // Silver filled crown for True Fan
+    }
+    
+    return 'text-gray-400'; // Default for other plans
+  }, [subscription]);
+
+  // Get the correct subscription tier
+  const userTier = useMemo(() => {
+    if (!subscription || subscription.status !== 'active') {
+      return "Guest Pass";
+    }
+    return subscription.plan?.name || "Guest Pass";
+  }, [subscription]);
+
+  const isGuestPass = userTier === "Guest Pass";
+  const username = profile?.username || user?.email?.split('@')[0] || 'User';
+
+  // Memoize formatted data for performance
+  const formattedRecentChats = useMemo(() => 
+    recentChats.map((chat: any) => ({
+      id: chat.id,
+      character: {
+        id: chat.character?.id,
+        name: chat.character?.name || 'Unknown',
+        avatar: chat.character?.avatar_url,
+        image: chat.character?.avatar_url, // For backwards compatibility
+      },
+      title: chat.title || `Chat with ${chat.character?.name || 'Unknown'}`,
+      message_count: chat.message_count || 0,
+      last_message_at: chat.last_message_at || chat.created_at,
+      created_at: chat.created_at,
+      chat_mode: chat.userSettings?.chat_mode || 'storytelling',
+      time_awareness_enabled: chat.userSettings?.time_awareness_enabled || false,
+      last_message: chat.messages?.[0]?.content || null,
+    })), [recentChats]
+  );
+
+  const formattedMyCharacters = useMemo(() => 
+    myCharacters.map((character: any) => ({
+      id: character.id,
+      name: character.name,
+      description: character.description,
+      avatar: character.name?.charAt(0) || 'C',
+      image: character.avatar_url || "/placeholder.svg",
+      isPublic: character.is_public,
+      chatCount: character.chat_count || 0,
+      likeCount: character.like_count || 0,
+      tagline: character.tagline || character.short_description || '',
+      totalChats: character.chat_count || 0,
+      likesCount: character.like_count || 0,
+      originalCharacter: character
+    })), [myCharacters]
+  );
+
+  const formattedFavoriteCharacters = useMemo(() =>
+    favoriteCharacters.map((character: any) => ({
+      id: character.id,
+      name: character.name,
+      tagline: character.tagline || '',
+      avatar: character.name.charAt(0),
+      image: character.avatar_url || "/placeholder.svg",
+      totalChats: character.actual_chat_count || character.interaction_count || 0,
+      likesCount: character.likes_count || 0,
+      creatorUsername: character.creator?.username || 'Unknown',
+      originalCharacter: character
+    })), [favoriteCharacters]
+  );
 
   // Refresh data on mount and when user changes
   useEffect(() => {
@@ -115,35 +203,42 @@ export function DashboardContent() {
     }
   }, [currentPage, totalPages]);
 
-  const handleContinueChat = (chat: any) => {
+  // Memoized callback functions for better performance
+  const handleContinueChat = useCallback((chat: any) => {
     navigate('/chat', { 
       state: { 
         selectedCharacter: chat.character, 
         existingChatId: chat.id 
       } 
     });
-  };
+  }, [navigate]);
 
-  const handleEditCharacter = (character: any) => {
+  const handleEditCharacter = useCallback((character: any) => {
     navigate('/character-creator', { 
       state: { 
         editingCharacter: character,
         isEditing: true 
       } 
     });
-  };
+  }, [navigate]);
 
-  const handleChatSelection = (chatId: string) => {
-    const newSelection = new Set(selectedChats);
-    if (newSelection.has(chatId)) {
-      newSelection.delete(chatId);
-    } else {
-      newSelection.add(chatId);
-    }
-    setSelectedChats(newSelection);
-  };
+  const handleChatSelection = useCallback((chatId: string) => {
+    setSelectedChats(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(chatId)) {
+        newSelection.delete(chatId);
+      } else {
+        newSelection.add(chatId);
+      }
+      return newSelection;
+    });
+  }, []);
 
-  const handleDeleteSelectedChats = async () => {
+  const handleStartNewChat = useCallback((character: any) => {
+    navigate('/chat', { state: { selectedCharacter: character } });
+  }, [navigate]);
+
+  const handleDeleteSelectedChats = useCallback(async () => {
     if (selectedChats.size === 0) return;
     
     setIsDeleting(true);
@@ -217,9 +312,9 @@ export function DashboardContent() {
       setIsDeleting(false);
       setShowDeleteDialog(false);
     }
-  };
+  }, [selectedChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
 
-  const handleDeleteSingleChat = async (chatId: string, e: React.MouseEvent) => {
+  const handleDeleteSingleChat = useCallback(async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
     try {
@@ -271,9 +366,9 @@ export function DashboardContent() {
       // Revert optimistic updates by refetching
       refetchChats();
     }
-  };
+  }, [queryClient, user.id, currentPage, chatsPerPage, refetchChats]);
 
-  const handleDeleteAllChats = async () => {
+  const handleDeleteAllChats = useCallback(async () => {
     if (totalChats === 0) {
       toast.info('No chats to delete');
       return;
@@ -335,7 +430,7 @@ export function DashboardContent() {
       setIsDeletingAll(false);
       setShowDeleteAllDialog(false);
     }
-  };
+  }, [totalChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
 
   if (authLoading || dataLoading || chatsLoading) {
     return (
@@ -364,51 +459,6 @@ export function DashboardContent() {
     );
   }
 
-  const userTier = subscription?.plan?.name || "Guest Pass";
-  const isGuestPass = userTier === "Guest Pass";
-  const username = profile?.username || user.email?.split('@')[0] || 'User';
-
-  // Format chats data (already paginated from API)
-  const formattedRecentChats = recentChats.map((chat: any) => ({
-    id: chat.id,
-    character: {
-      id: chat.character?.id,
-      name: chat.character?.name || 'Unknown',
-      avatar: chat.character?.name?.charAt(0) || 'U',
-      image: chat.character?.avatar_url || "/placeholder.svg",
-      tagline: chat.character?.tagline || ''
-    },
-    lastMessage: chat.lastMessage || "No messages yet",
-    lastMessageIsAI: chat.lastMessageIsAI || false,
-    timestamp: new Date(chat.last_message_at || chat.created_at).toLocaleDateString(),
-    chatMode: chat.userSettings?.chat_mode || 'storytelling',
-    timeAwareness: chat.userSettings?.time_awareness_enabled || false,
-    originalChat: chat
-  }));
-
-  const formattedMyCharacters = myCharacters.map((character: any) => ({
-    id: character.id,
-    name: character.name,
-    tagline: character.tagline || '',
-    avatar: character.name.charAt(0),
-    image: character.avatar_url || "/placeholder.svg",
-    totalChats: character.actual_chat_count || character.interaction_count || 0,
-    likesCount: character.likes_count || 0,
-    originalCharacter: character
-  }));
-
-  const formattedFavoriteCharacters = favoriteCharacters.map((character: any) => ({
-    id: character.id,
-    name: character.name,
-    tagline: character.tagline || '',
-    avatar: character.name.charAt(0),
-    image: character.avatar_url || "/placeholder.svg",
-    totalChats: character.actual_chat_count || character.interaction_count || 0,
-    likesCount: character.likes_count || 0,
-    creatorUsername: character.creator?.username || 'Unknown',
-    originalCharacter: character
-  }));
-
   return (
     <div className="min-h-screen bg-[#121212]">
       {/* Header - Desktop Only */}
@@ -425,12 +475,6 @@ export function DashboardContent() {
           
           {/* User Info - responsive */}
           <div className="flex items-center space-x-2 sm:space-x-4">
-            {/* Credits - always visible */}
-            <div className="flex items-center space-x-1 sm:space-x-2">
-              <Zap className="w-3 h-3 sm:w-4 sm:h-4 text-[#FF7A00]" />
-              <span className="text-[#FF7A00] text-xs sm:text-sm font-bold">{userCredits.toLocaleString()}</span>
-            </div>
-            
             {/* User Avatar - hidden on small screens */}
             <div className="hidden sm:flex items-center space-x-4">
               <Button
@@ -464,53 +508,35 @@ export function DashboardContent() {
       <div className="p-3 sm:p-6 md:p-6 space-y-4 sm:space-y-6">
         {/* Stats cards above Daily Message Limit */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
-          <Card className="bg-[#1a1a2e] border-gray-700/50 hover:border-[#FF7A00]/50 transition-colors">
-            <CardContent className="p-3 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-400 text-xs sm:text-sm">Active Chats</p>
-                  <p className="text-white text-lg sm:text-2xl font-bold">{totalChats}</p>
-                </div>
-                <MessageCircle className="w-6 h-6 sm:w-8 sm:h-8 text-[#FF7A00]" />
-              </div>
-            </CardContent>
-          </Card>
+          <StatsCard
+            title="Active Chats"
+            value={totalChats}
+            icon={MessageCircle}
+            onClick={() => navigate('/chat')}
+          />
 
-          <Card className="bg-[#1a1a2e] border-gray-700/50 hover:border-[#FF7A00]/50 transition-colors">
-            <CardContent className="p-3 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-400 text-xs sm:text-sm">Characters</p>
-                  <p className="text-white text-lg sm:text-2xl font-bold">{myCharacters.length}</p>
-                </div>
-                <Users className="w-6 h-6 sm:w-8 sm:h-8 text-[#FF7A00]" />
-              </div>
-            </CardContent>
-          </Card>
+          <StatsCard
+            title="Characters"
+            value={myCharacters.length}
+            icon={Users}
+            onClick={() => navigate('/character-creator')}
+          />
 
-          <Card className="bg-[#1a1a2e] border-gray-700/50 hover:border-[#FF7A00]/50 transition-colors">
-            <CardContent className="p-3 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-400 text-xs sm:text-sm">Credits</p>
-                  <p className="text-white text-lg sm:text-2xl font-bold">{userCredits.toLocaleString()}</p>
-                </div>
-                <Sparkles className="w-6 h-6 sm:w-8 sm:h-8 text-[#FF7A00]" />
-              </div>
-            </CardContent>
-          </Card>
+          <StatsCard
+            title="Credits"
+            value={userCredits.toLocaleString()}
+            icon={Zap}
+            onClick={() => navigate('/subscription')}
+            largeValue={true}
+          />
 
-          <Card className="bg-[#1a1a2e] border-gray-700/50 hover:border-[#FF7A00]/50 transition-colors">
-            <CardContent className="p-3 sm:p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-gray-400 text-xs sm:text-sm">Plan</p>
-                  <p className="text-white text-sm sm:text-lg font-bold">{userTier}</p>
-                </div>
-                <Crown className="w-6 h-6 sm:w-8 sm:h-8 text-[#FF7A00]" />
-              </div>
-            </CardContent>
-          </Card>
+          <StatsCard
+            title="Plan"
+            value={userTier}
+            icon={Crown}
+            iconColor={getCrownIconStyle}
+            onClick={() => navigate('/subscription')}
+          />
         </div>
 
 
@@ -589,102 +615,14 @@ export function DashboardContent() {
                     {formattedRecentChats.length > 0 ? (
                       <>
                         {formattedRecentChats.map((chat) => (
-                          <Card
+                          <ChatCard
                             key={chat.id}
-                            className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20"
-                          >
-                            <CardContent className="p-3 sm:p-4">
-                              <div className="flex items-start space-x-3 sm:space-x-4">
-                                {/* Checkbox for selection */}
-                                <Checkbox
-                                  checked={selectedChats.has(chat.id)}
-                                  onCheckedChange={() => handleChatSelection(chat.id)}
-                                  className="mt-4 border-gray-600 data-[state=checked]:bg-[#FF7A00] data-[state=checked]:border-[#FF7A00]"
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                                
-                                <Avatar className="w-12 h-12 sm:w-14 sm:h-14 ring-2 ring-[#FF7A00]/50 flex-shrink-0">
-                                  <AvatarImage 
-                                    src={chat.character.image} 
-                                    alt={chat.character.name}
-                                    className="object-cover"
-                                  />
-                                  <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-sm">
-                                    {chat.character.avatar}
-                                  </AvatarFallback>
-                                </Avatar>
-                                
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between mb-2">
-                                    <div>
-                                      <h3 className="text-white font-bold text-base sm:text-lg truncate">
-                                        {chat.character.name}
-                                      </h3>
-                                      {chat.character.tagline && (
-                                        <p className="text-gray-400 text-xs sm:text-sm truncate mb-2">
-                                          {chat.character.tagline}
-                                        </p>
-                                      )}
-                                      {/* Chat Settings Badges */}
-                                      <div className="flex gap-1 sm:gap-2 mb-2">
-                                        <Badge 
-                                          variant="outline" 
-                                          className="text-xs bg-[#FF7A00]/10 border-[#FF7A00]/30 text-[#FF7A00]"
-                                        >
-                                          {chat.chatMode === 'companion' ? 'Companion' : 'Storytelling'}
-                                        </Badge>
-                                        <Badge 
-                                          variant="outline" 
-                                          className={`text-xs ${
-                                            chat.timeAwareness 
-                                              ? 'bg-green-500/10 border-green-500/30 text-green-400' 
-                                              : 'bg-gray-500/10 border-gray-500/30 text-gray-400'
-                                          }`}
-                                        >
-                                          Time Awareness: {chat.timeAwareness ? 'ON' : 'OFF'}
-                                        </Badge>
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                      <p className="text-gray-500 text-xs sm:text-sm flex-shrink-0">
-                                        {chat.timestamp}
-                                      </p>
-                                      {/* Single Delete Button */}
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 w-8 p-0 text-gray-400 hover:text-red-400 hover:bg-red-400/10"
-                                        onClick={(e) => handleDeleteSingleChat(chat.id, e)}
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </Button>
-                                    </div>
-                                  </div>
-                                  
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                    {chat.lastMessage !== "No messages yet" ? (
-                                      <p className="text-gray-300 text-xs sm:text-sm leading-relaxed line-clamp-2 flex-1">
-                                        <span className={chat.lastMessageIsAI ? "text-[#FF7A00]" : "text-blue-400"}>
-                                          {chat.lastMessageIsAI ? chat.character.name : 'You'}:
-                                        </span>
-                                        {' '}{chat.lastMessage}
-                                      </p>
-                                    ) : (
-                                      <p className="text-gray-400 text-xs sm:text-sm flex-1">No messages yet</p>
-                                    )}
-                                    <Button
-                                      onClick={() => handleContinueChat(chat.originalChat)}
-                                      size="sm"
-                                      className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white flex-shrink-0 text-xs sm:text-sm"
-                                    >
-                                      <span className="hidden sm:inline">Continue Chat</span>
-                                      <span className="sm:hidden">Continue</span>
-                                    </Button>
-                                  </div>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
+                            chat={chat}
+                            isSelected={selectedChats.has(chat.id)}
+                            onSelect={handleChatSelection}
+                            onContinue={handleContinueChat}
+                            showSelection={true}
+                          />
                         ))}
                         
                         {/* Pagination Controls */}
@@ -974,4 +912,14 @@ export function DashboardContent() {
   );
 }
 
-export default DashboardContent;
+// Memoized version for performance
+const MemoizedDashboardContent = React.memo(DashboardContent);
+
+// Wrapped with error boundary
+export default function DashboardContentWithErrorBoundary() {
+  return (
+    <DashboardErrorBoundary>
+      <MemoizedDashboardContent />
+    </DashboardErrorBoundary>
+  );
+}

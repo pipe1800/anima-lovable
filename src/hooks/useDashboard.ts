@@ -11,7 +11,7 @@ import {
 } from '@/lib/supabase-queries';
 
 export const useDashboardData = () => {
-  const { user } = useAuth();
+  const { user, subscription: authSubscription } = useAuth();
   const userId = user?.id;
 
   return useQuery({
@@ -19,11 +19,10 @@ export const useDashboardData = () => {
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
 
-      const [charactersResult, favoritesResult, creditsResult, subscriptionResult, creditsUsageResult] = await Promise.all([
+      const [charactersResult, favoritesResult, creditsResult, creditsUsageResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId),
         getUserCredits(userId),
-        getUserSubscription(userId),
         getMonthlyCreditsUsage(userId)
       ]);
 
@@ -31,13 +30,12 @@ export const useDashboardData = () => {
         characters: charactersResult.data || [],
         favorites: favoritesResult.data || [],
         credits: creditsResult.data?.balance || 0,
-        subscription: subscriptionResult.data,
+        subscription: authSubscription, // Use subscription from AuthContext
         creditsUsed: creditsUsageResult.data?.used || 0,
         errors: {
           characters: charactersResult.error,
           favorites: favoritesResult.error,
           credits: creditsResult.error,
-          subscription: subscriptionResult.error,
           creditsUsage: creditsUsageResult.error
         }
       };

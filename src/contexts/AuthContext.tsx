@@ -75,7 +75,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       console.log(`🔄 Fetching subscription for user ${user.id} (attempt ${retryCount + 1})`);
-      const { data, error } = await getUserActiveSubscription(user.id);
+      
+      // Use the more general getUserSubscription instead of getUserActiveSubscription
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .select(`
+          *,
+          plan:plans(*)
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
       
       if (error) {
         console.error('❌ Subscription fetch failed:', error);
@@ -94,6 +105,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
       
+      console.log('✅ Subscription fetched successfully:', data);
       setSubscription(data || null);
     } catch (error) {
       console.error('❌ Subscription fetch exception:', error);
