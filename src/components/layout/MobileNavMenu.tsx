@@ -32,8 +32,8 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
 
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: Home },
-    { title: "Discover", url: "/discover", icon: Compass },
     { title: "Create Character", url: "/character-creator", icon: Plus },
+    { title: "Discover", url: "/discover", icon: Compass },
     { title: "World Info", url: "/world-info", icon: Users },
     { title: "Profile", url: "/profile", icon: User },
     { title: "Subscription", url: "/subscription", icon: Crown },

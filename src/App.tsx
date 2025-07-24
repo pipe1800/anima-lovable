@@ -2,7 +2,7 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import OnboardingGuard from "@/components/auth/OnboardingGuard";
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
@@ -19,6 +19,10 @@ import CharacterCreator from "./pages/CharacterCreator";
 import TestTags from "./pages/TestTags";
 import WorldInfo from "./pages/WorldInfo";
 import WorldInfoEditor from "./pages/WorldInfoEditor";
+import ImprovedWorldInfoList from "./components/world-info/ImprovedWorldInfoList";
+import { EnhancedWorldInfoList } from "./components/world-info/EnhancedWorldInfoList";
+import UnifiedWorldInfoEditor from "./components/world-info/UnifiedWorldInfoEditor";
+import UnifiedWorldInfoEditorWrapper from "./components/world-info/UnifiedWorldInfoEditorWrapper";
 import UserProfile from "./pages/UserProfile";
 import Subscription from "./pages/Subscription";
 import Settings from "./pages/Settings";
@@ -64,9 +68,7 @@ const App = () => (
           } />
           <Route path="/dashboard" element={
             <OnboardingGuard requireOnboardingComplete={true}>
-              <AuthenticatedLayout>
-                <Dashboard />
-              </AuthenticatedLayout>
+              <Navigate to="/discover" replace />
             </OnboardingGuard>
           } />
           <Route path="/discover" element={
@@ -103,7 +105,21 @@ const App = () => (
           <Route path="/world-info" element={
             <OnboardingGuard requireOnboardingComplete={true}>
               <AuthenticatedLayout>
-                <WorldInfo />
+                <EnhancedWorldInfoList />
+              </AuthenticatedLayout>
+            </OnboardingGuard>
+          } />
+          <Route path="/world-info/create" element={
+            <OnboardingGuard requireOnboardingComplete={true}>
+              <AuthenticatedLayout>
+                <UnifiedWorldInfoEditor mode="create" />
+              </AuthenticatedLayout>
+            </OnboardingGuard>
+          } />
+          <Route path="/world-info/:id/edit" element={
+            <OnboardingGuard requireOnboardingComplete={true}>
+              <AuthenticatedLayout>
+                <UnifiedWorldInfoEditorWrapper />
               </AuthenticatedLayout>
             </OnboardingGuard>
           } />

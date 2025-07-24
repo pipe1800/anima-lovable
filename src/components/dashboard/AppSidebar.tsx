@@ -31,8 +31,8 @@ logoImage.src = LOGO_URL;
 const baseMainItems = [
   { title: "Dashboard", url: "/dashboard", icon: Home },
   { title: "Create Character", url: "/character-creator", icon: Plus },
-  { title: "World Infos", url: "/world-info", icon: BookOpen, tutorialAttr: "world-info-nav" },
   { title: "Discover", url: "/discover", icon: Compass, tutorialAttr: "discover-nav" },
+  { title: "World Infos", url: "/world-info", icon: BookOpen, tutorialAttr: "world-info-nav" },
   { title: "Profile", url: "/profile", icon: User },
 ];
 

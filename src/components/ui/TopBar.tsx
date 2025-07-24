@@ -31,61 +31,36 @@ export function TopBar({
       className
     )}>
       <div className="container mx-auto px-4">
-        {/* Mobile Header */}
-        <div className="md:hidden py-4">
-          <div className="flex items-center justify-between mb-4">
-            {leftContent}
-            
-            <div className="flex-1 text-center mx-4">
-              <h1 className="text-xl font-bold text-white truncate">{title}</h1>
-              {subtitle && (
-                <p className="text-xs text-gray-400 truncate">{subtitle}</p>
-              )}
-            </div>
-
-            {rightContent && (
-              <div className="flex items-center space-x-2">
-                {rightContent}
-              </div>
-            )}
-          </div>
-
-          {/* Mobile custom content */}
-          {children && (
-            <div>
-              {children}
-            </div>
-          )}
-        </div>
-
-        {/* Desktop Header */}
-        <div className="hidden md:block py-6">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-4">
+        {/* Unified responsive header */}
+        <div className="py-4 md:py-6">
+          <div className="flex items-center justify-between gap-4">
+            {/* Left section with optional left content and title */}
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               {leftContent}
               
-              <div>
-                <h1 className="text-2xl font-bold text-white">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-lg md:text-2xl font-bold text-white truncate">
                   {title}
                 </h1>
                 {subtitle && (
-                  <p className="text-sm text-gray-400">
+                  <p className="text-xs md:text-sm text-gray-400 truncate">
                     {subtitle}
                   </p>
                 )}
               </div>
             </div>
 
+            {/* Right content */}
             {rightContent && (
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 {rightContent}
               </div>
             )}
           </div>
 
-          {/* Desktop custom content */}
+          {/* Custom content below header */}
           {children && (
-            <div>
+            <div className="mt-4">
               {children}
             </div>
           )}

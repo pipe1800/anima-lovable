@@ -1,23 +1,9 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { 
-  MoreVertical, 
-  Edit, 
-  Trash2, 
-  Copy, 
-  Download, 
-  Share2,
-  BookOpen,
-  Lock,
-  Users,
-  Globe,
-  Heart,
-  Eye
-} from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,26 +11,39 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { 
+  BookOpen, 
+  Heart, 
+  MoreVertical, 
+  Edit2, 
+  Trash2, 
+  Share2,
+  Download,
+  Copy,
+  Eye,
+  Lock,
+  Globe,
+  Loader2
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Tables } from '@/integrations/supabase/types';
-
-type WorldInfo = Tables<'world_infos'> & {
-  profiles?: { username: string | null; avatar_url: string | null } | null;
-  entry_count?: number;
-  like_count?: number;
-  view_count?: number;
-  is_liked?: boolean;
-};
+import { useToast } from '@/hooks/use-toast';
+import { deleteWorldInfo } from '@/lib/world-info-operations';
+import { useQueryClient } from '@tanstack/react-query';
+import type { WorldInfoWithDetails } from '@/hooks/useWorldInfos';
 
 interface WorldInfoCardProps {
-  worldInfo: WorldInfo;
+  worldInfo: WorldInfoWithDetails;
   onEdit?: (id: string) => void;
-  onDelete?: (id: string) => void;
-  onDuplicate?: (id: string) => void;
-  onShare?: (id: string) => void;
-  onExport?: (id: string) => void;
-  onLike?: (id: string) => void;
-  showActions?: boolean;
   isOwner?: boolean;
   className?: string;
 }

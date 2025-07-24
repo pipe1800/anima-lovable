@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { SidebarTrigger } from '@/components/ui/sidebar';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DiscoverControlBar } from './DiscoverControlBar';
 import { CharacterGrid } from './CharacterGrid';
-import { WorldInfoGrid } from './WorldInfoGrid';
 import { Badge } from '@/components/ui/badge';
 import { X } from 'lucide-react';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDashboardData } from '@/hooks/useDashboard';
+
 export function DiscoverContent() {
   const { user, profile } = useAuth();
   const { data: dashboardData } = useDashboardData();
@@ -30,9 +29,6 @@ export function DiscoverContent() {
     type: string;
   }>>([]);
   
-  // Check URL params for default tab
-  const urlParams = new URLSearchParams(window.location.search);
-  const defaultTab = urlParams.get('tab') === 'world-infos' ? 'world-infos' : 'characters';
   const handleAdvancedFiltersApplied = (filters: {
     tags: string[];
     creator: string;
@@ -115,97 +111,64 @@ export function DiscoverContent() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-white text-xl sm:text-2xl font-bold">
-              <span className="hidden sm:inline">Discovery Hub</span>
-              <span className="sm:hidden">Discover</span>
+              <span className="hidden sm:inline">Character Discovery</span>
+              <span className="sm:hidden">Characters</span>
             </h1>
-            <p className="text-gray-400 text-xs sm:text-sm hidden sm:block">Explore characters and world infos</p>
+            <p className="text-gray-400 text-xs sm:text-sm hidden sm:block">Explore and discover characters</p>
           </div>
         </div>
       </header>
 
-      {/* Tabs */}
-      <Tabs defaultValue={defaultTab} className="w-full">
-        <div className="border-b border-gray-700/50 bg-[#1a1a2e]">
-          <div className="px-3 sm:px-6 py-2">
-            <TabsList className="bg-[#121212] border border-gray-700/50 w-full sm:w-auto">
-              <TabsTrigger 
-                value="characters" 
-                className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 flex-1 sm:flex-none text-sm"
+      {/* Control Bar */}
+      <DiscoverControlBar 
+        searchQuery={searchQuery} 
+        setSearchQuery={setSearchQuery} 
+        sortBy={sortBy} 
+        setSortBy={setSortBy} 
+        filterBy={filterBy} 
+        setFilterBy={setFilterBy} 
+        onAdvancedFiltersApplied={handleAdvancedFiltersApplied}
+      />
+
+      {/* Active Filter Pills */}
+      {activeFilters.length > 0 && (
+        <div className="px-3 sm:px-6 pb-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white text-sm font-medium">Active Filters:</h3>
+            <button 
+              onClick={clearAllFilters} 
+              className="text-gray-400 hover:text-[#FF7A00] text-sm font-medium transition-colors"
+            >
+              Clear All
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {activeFilters.map(filter => (
+              <Badge 
+                key={filter.id} 
+                variant="outline" 
+                className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-3 py-1 flex items-center space-x-2"
               >
-                Characters
-              </TabsTrigger>
-              <TabsTrigger 
-                value="world-infos" 
-                className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 flex-1 sm:flex-none text-sm"
-              >
-                <span className="hidden sm:inline">World Infos</span>
-                <span className="sm:hidden">Worlds</span>
-              </TabsTrigger>
-            </TabsList>
+                <span>{filter.label}</span>
+                <button 
+                  onClick={() => removeFilter(filter.id)} 
+                  className="hover:text-white transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </Badge>
+            ))}
           </div>
         </div>
+      )}
 
-        {/* Control Bar */}
-        <DiscoverControlBar 
-          searchQuery={searchQuery} 
-          setSearchQuery={setSearchQuery} 
-          sortBy={sortBy} 
-          setSortBy={setSortBy} 
-          filterBy={filterBy} 
-          setFilterBy={setFilterBy} 
-          onAdvancedFiltersApplied={handleAdvancedFiltersApplied}
-        />
-
-        {/* Active Filter Pills */}
-        {activeFilters.length > 0 && (
-          <div className="px-3 sm:px-6 pb-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white text-sm font-medium">Active Filters:</h3>
-              <button 
-                onClick={clearAllFilters} 
-                className="text-gray-400 hover:text-[#FF7A00] text-sm font-medium transition-colors"
-              >
-                Clear All
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {activeFilters.map(filter => (
-                <Badge 
-                  key={filter.id} 
-                  variant="outline" 
-                  className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-3 py-1 flex items-center space-x-2"
-                >
-                  <span>{filter.label}</span>
-                  <button 
-                    onClick={() => removeFilter(filter.id)} 
-                    className="hover:text-white transition-colors"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tab Content */}
-        <TabsContent value="characters" className="mt-0">
-          <CharacterGrid 
-            searchQuery={searchQuery} 
-            sortBy={sortBy} 
-            filterBy={filterBy} 
-            advancedFilters={advancedFilters}
-          />
-        </TabsContent>
-
-        <TabsContent value="world-infos" className="mt-0">
-          <WorldInfoGrid 
-            searchQuery={searchQuery} 
-            sortBy={sortBy} 
-            filterBy={filterBy} 
-          />
-        </TabsContent>
-      </Tabs>
+      {/* Character Grid */}
+      <CharacterGrid 
+        searchQuery={searchQuery} 
+        sortBy={sortBy} 
+        filterBy={filterBy} 
+        advancedFilters={advancedFilters}
+      />
     </div>
   );
 }
