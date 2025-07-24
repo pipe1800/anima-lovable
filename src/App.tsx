@@ -2,7 +2,7 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import OnboardingGuard from "@/components/auth/OnboardingGuard";
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
@@ -21,6 +21,7 @@ import WorldInfo from "./pages/WorldInfo";
 import WorldInfoEditor from "./pages/WorldInfoEditor";
 import ImprovedWorldInfoList from "./components/world-info/ImprovedWorldInfoList";
 import { EnhancedWorldInfoList } from "./components/world-info/EnhancedWorldInfoList";
+import ImprovedWorldInfoPage from "./components/world-info/ImprovedWorldInfoPage";
 import UnifiedWorldInfoEditor from "./components/world-info/UnifiedWorldInfoEditor";
 import UnifiedWorldInfoEditorWrapper from "./components/world-info/UnifiedWorldInfoEditorWrapper";
 import UserProfile from "./pages/UserProfile";
@@ -68,7 +69,9 @@ const App = () => (
           } />
           <Route path="/dashboard" element={
             <OnboardingGuard requireOnboardingComplete={true}>
-              <Navigate to="/discover" replace />
+              <AuthenticatedLayout>
+                <Dashboard />
+              </AuthenticatedLayout>
             </OnboardingGuard>
           } />
           <Route path="/discover" element={
@@ -105,7 +108,7 @@ const App = () => (
           <Route path="/world-info" element={
             <OnboardingGuard requireOnboardingComplete={true}>
               <AuthenticatedLayout>
-                <EnhancedWorldInfoList />
+                <ImprovedWorldInfoPage />
               </AuthenticatedLayout>
             </OnboardingGuard>
           } />

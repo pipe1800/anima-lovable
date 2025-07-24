@@ -51,8 +51,8 @@ const Auth = () => {
         // Check if user has completed onboarding
         const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
         if (isOnboardingCompleted) {
-          // User already completed onboarding, go to dashboard
-          navigate('/dashboard');
+          // User already completed onboarding, go to discover
+          navigate('/discover');
         } else {
           // New user or incomplete onboarding, go to onboarding
           navigate('/onboarding');
@@ -70,7 +70,7 @@ const Auth = () => {
       if (session?.user && !showSuccess) {
         const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
         if (isOnboardingCompleted) {
-          navigate('/dashboard');
+          navigate('/discover');
         } else {
           navigate('/onboarding');
         }

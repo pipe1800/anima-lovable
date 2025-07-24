@@ -30,9 +30,9 @@ const Onboarding = () => {
         console.log('Onboarding completed status:', isCompleted);
         
         if (isCompleted) {
-          // User already completed onboarding, redirect to dashboard
+          // User already completed onboarding, redirect to discover
           setOnboardingCompleted(true);
-          navigate('/dashboard');
+          navigate('/discover');
         } else {
           // New user, go directly to first onboarding step
           setCurrentStep(0);
@@ -54,7 +54,7 @@ const Onboarding = () => {
           // Check onboarding status for new sessions
           const isCompleted = session.user.user_metadata?.onboarding_completed;
           if (isCompleted && !onboardingCompleted) {
-            navigate('/dashboard');
+            navigate('/discover');
           }
         } else if (!loading && event !== 'INITIAL_SESSION') {
           navigate('/auth');
@@ -112,8 +112,8 @@ const Onboarding = () => {
   const handleSkipCharacter = async () => {
     console.log('Skipping character selection');
     await completeOnboarding();
-    // Navigate to dashboard and replace history to prevent back navigation
-    navigate('/dashboard', { replace: true });
+    // Navigate to discover and replace history to prevent back navigation
+    navigate('/discover', { replace: true });
   };
 
   const completeOnboarding = async () => {

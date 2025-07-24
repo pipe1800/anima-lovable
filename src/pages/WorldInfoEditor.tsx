@@ -441,16 +441,6 @@ export default function WorldInfoEditor() {
           {/* Standardized TopBar */}
           <TopBar
             title={id ? 'Edit World Info' : 'Create New World Info'}
-            leftContent={
-              <Button
-                onClick={handleBackToList}
-                variant="ghost"
-                size="sm"
-                className="text-gray-400 hover:text-white"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </Button>
-            }
             rightContent={
               <Button
                 onClick={handleCreateOrUpdateWorldInfo}
@@ -467,6 +457,15 @@ export default function WorldInfoEditor() {
           {/* Content */}
           <div className="flex-1 overflow-auto p-6">
             <div className="max-w-4xl mx-auto space-y-6">
+              {/* Back button under TopBar */}
+              <Button
+                variant="ghost"
+                onClick={handleBackToList}
+                className="text-gray-400 hover:text-white mb-4"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to World Info
+              </Button>
               {/* World Info Details Card */}
               <Card className="bg-gray-800/50 border-gray-700">
                 <CardHeader>
