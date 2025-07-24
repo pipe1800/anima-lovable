@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
+import { TopBar } from '@/components/ui/TopBar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardData, useUserChatsPaginated } from '@/hooks/useDashboard';
@@ -480,49 +481,38 @@ export function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      {/* Header - Desktop Only */}
-      <header className="bg-[#1a1a2e] border-b border-gray-700/50 p-3 sm:p-6 sticky top-0 z-10 hidden md:block">
-        <div className="flex items-center justify-between">
-          {/* Title */}
-          <div>
-            <h1 className="text-white text-xl sm:text-2xl md:text-3xl font-bold">
-              <span className="hidden sm:inline">Welcome back to ANIMA, {username}</span>
-              <span className="sm:hidden">ANIMA Dashboard</span>
-            </h1>
-            <p className="text-gray-400 text-xs sm:text-sm mt-1 hidden sm:block">Ready to continue your digital adventures?</p>
-          </div>
-          
-          {/* User Info - responsive */}
-          <div className="flex items-center space-x-2 sm:space-x-4">
-            {/* User Avatar - hidden on small screens */}
-            <div className="hidden sm:flex items-center space-x-4">
-              <Button
-                onClick={() => navigate(`/profile/${username}`)}
-                variant="ghost"
-                size="sm"
-                className="p-0 hover:ring-2 hover:ring-[#FF7A00]/50 rounded-full transition-all"
-              >
-                <Avatar className="w-8 h-8 sm:w-12 sm:h-12 ring-2 ring-[#FF7A00]/50 cursor-pointer">
-                  <AvatarImage 
-                    src={profile?.avatar_url || "https://images.unsplash.com/photo-1649972904349-6e44c42644a7?w=150&h=150&fit=crop&crop=face"} 
-                    alt={profile?.username || "User"} 
-                  />
-                  <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-xs sm:text-base">
-                    {profile?.username?.substring(0, 2).toUpperCase() || user.email?.substring(0, 2).toUpperCase() || 'U'}
-                  </AvatarFallback>
-                </Avatar>
-              </Button>
-              
-              {/* Username */}
-              <div className="text-right hidden md:block">
-                <p className="text-white text-sm sm:text-lg font-bold">
-                  {username}
-                </p>
-              </div>
+      {/* Standardized TopBar */}
+      <TopBar
+        title={`Welcome back to ANIMA, ${username}`}
+        subtitle="Ready to continue your digital adventures?"
+        rightContent={
+          <div className="flex items-center space-x-4">
+            <Button
+              onClick={() => navigate(`/profile/${username}`)}
+              variant="ghost"
+              size="sm"
+              className="p-0 hover:ring-2 hover:ring-[#FF7A00]/50 rounded-full transition-all"
+            >
+              <Avatar className="w-8 h-8 sm:w-12 sm:h-12 ring-2 ring-[#FF7A00]/50 cursor-pointer">
+                <AvatarImage 
+                  src={profile?.avatar_url || "https://images.unsplash.com/photo-1649972904349-6e44c42644a7?w=150&h=150&fit=crop&crop=face"} 
+                  alt={profile?.username || "User"} 
+                />
+                <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-xs sm:text-base">
+                  {profile?.username?.substring(0, 2).toUpperCase() || user.email?.substring(0, 2).toUpperCase() || 'U'}
+                </AvatarFallback>
+              </Avatar>
+            </Button>
+            
+            {/* Username */}
+            <div className="text-right hidden md:block">
+              <p className="text-white text-sm sm:text-lg font-bold">
+                {username}
+              </p>
             </div>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <div className="p-3 sm:p-6 md:p-6 space-y-4 sm:space-y-6">
         {/* Stats cards above Daily Message Limit */}

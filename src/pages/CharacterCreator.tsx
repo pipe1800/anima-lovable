@@ -9,6 +9,7 @@ import { parseCharacterCard, parseExampleDialogue } from '@/lib/utils/characterC
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { TopBar } from '@/components/ui/TopBar';
 import { 
   Loader2, Save, ArrowLeft, ArrowRight, Check, 
   User, Brain, MessageCircle, Rocket 
@@ -253,127 +254,101 @@ const CharacterCreator = () => {
 
   return (
     <div className="min-h-screen bg-[#121212] flex flex-col">
-      {/* Header - Responsive */}
-      <header className="bg-[#1a1a2e] border-b border-gray-700/50 sticky top-0 z-30">
-        <div className="container mx-auto px-4">
-          {/* Mobile Header */}
-          <div className="md:hidden py-4">
-            <div className="flex items-center justify-between mb-4">
-              <MobileNavMenu 
-                userCredits={userCredits} 
-                username={profile?.username || 'User'} 
-                pageTitle={isEditing ? 'Edit Character' : 'Create Character'}
-              />
-              
-              {isDirty && isEditing && (
-                <Button
-                  onClick={saveCharacter}
-                  disabled={isCreating}
-                  size="sm"
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {isCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                </Button>
+      {/* Header using standardized TopBar */}
+      <TopBar
+        title={isEditing ? 'Edit Character' : 'Create Character'}
+        subtitle={STEPS[currentStep - 1].description}
+        leftContent={
+          <MobileNavMenu 
+            userCredits={userCredits} 
+            username={profile?.username || 'User'} 
+            pageTitle=""
+          />
+        }
+        rightContent={
+          isDirty && isEditing ? (
+            <Button
+              onClick={saveCharacter}
+              disabled={isCreating}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <span className="hidden sm:inline">Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  <span className="hidden sm:inline">Save Changes</span>
+                  <span className="sm:hidden">Save</span>
+                </>
               )}
-            </div>
-
-            {/* Mobile Progress */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-400">
-                  Step {currentStep} of {STEPS.length}
-                </span>
-                <span className="text-[#FF7A00] font-medium">
-                  {Math.round(progress)}%
-                </span>
-              </div>
-              <Progress value={progress} className="h-2 bg-gray-700" />
-            </div>
+            </Button>
+          ) : null
+        }
+      >
+        {/* Mobile Progress */}
+        <div className="md:hidden space-y-2">
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-400">
+              Step {currentStep} of {STEPS.length}
+            </span>
+            <span className="text-[#FF7A00] font-medium">
+              {Math.round(progress)}%
+            </span>
           </div>
-
-          {/* Desktop Header */}
-          <div className="hidden md:block py-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h1 className="text-2xl font-bold text-white">
-                  {isEditing ? 'Edit Character' : 'Create Character'}
-                </h1>
-                <p className="text-gray-400 text-sm">
-                  {STEPS[currentStep - 1].description}
-                </p>
-              </div>
-
-              {isDirty && isEditing && (
-                <Button
-                  onClick={saveCharacter}
-                  disabled={isCreating}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4 mr-2" />
-                      Save Changes
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-
-            {/* Desktop Progress Steps */}
-            <div className="flex items-center justify-center space-x-2">
-              {STEPS.map((step, index) => {
-                const isActive = step.id === currentStep;
-                const isCompleted = step.id < currentStep;
-
-                return (
-                  <React.Fragment key={step.id}>
-                    <button
-                      onClick={() => handleStepChange(step.id)}
-                      className={cn(
-                        "flex items-center space-x-3 px-4 py-2 rounded-lg transition-all",
-                        "hover:bg-gray-800/50",
-                        isActive && "bg-[#FF7A00]/20 text-[#FF7A00]",
-                        isCompleted && "text-green-400",
-                        !isActive && !isCompleted && "text-gray-400"
-                      )}
-                    >
-                      <div className={cn(
-                        "w-10 h-10 rounded-full flex items-center justify-center",
-                        "transition-all duration-300",
-                        isActive && "bg-[#FF7A00] text-white animate-pulse",
-                        isCompleted && "bg-green-500 text-white",
-                        !isActive && !isCompleted && "bg-gray-700"
-                      )}>
-                        {isCompleted ? (
-                          <Check className="w-5 h-5" />
-                        ) : (
-                          <StepIcon icon={step.icon} className="w-5 h-5" />
-                        )}
-                      </div>
-                      <div className="text-left">
-                        <div className="font-medium">{step.title}</div>
-                        <div className="text-xs opacity-70">{step.description}</div>
-                      </div>
-                    </button>
-                    
-                    {index < STEPS.length - 1 && (
-                      <div className={cn(
-                        "w-16 h-0.5 transition-all duration-300",
-                        isCompleted ? "bg-green-500" : "bg-gray-700"
-                      )} />
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-          </div>
+          <Progress value={progress} className="h-2 bg-gray-700" />
         </div>
-      </header>
+
+        {/* Desktop Progress Steps */}
+        <div className="hidden md:flex items-center justify-center space-x-2">
+          {STEPS.map((step, index) => {
+            const isActive = step.id === currentStep;
+            const isCompleted = step.id < currentStep;
+
+            return (
+              <React.Fragment key={step.id}>
+                <button
+                  onClick={() => handleStepChange(step.id)}
+                  className={cn(
+                    "flex items-center space-x-3 px-4 py-2 rounded-lg transition-all",
+                    "hover:bg-gray-800/50",
+                    isActive && "bg-[#FF7A00]/20 text-[#FF7A00]",
+                    isCompleted && "text-green-400",
+                    !isActive && !isCompleted && "text-gray-400"
+                  )}
+                >
+                  <div className={cn(
+                    "w-10 h-10 rounded-full flex items-center justify-center",
+                    "transition-all duration-300",
+                    isActive && "bg-[#FF7A00] text-white animate-pulse",
+                    isCompleted && "bg-green-500 text-white",
+                    !isActive && !isCompleted && "bg-gray-700"
+                  )}>
+                    {isCompleted ? (
+                      <Check className="w-5 h-5" />
+                    ) : (
+                      <StepIcon icon={step.icon} className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="text-left">
+                    <div className="font-medium">{step.title}</div>
+                    <div className="text-xs opacity-70">{step.description}</div>
+                  </div>
+                </button>
+                
+                {index < STEPS.length - 1 && (
+                  <div className={cn(
+                    "w-16 h-0.5 transition-all duration-300",
+                    isCompleted ? "bg-green-500" : "bg-gray-700"
+                  )} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </TopBar>
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
