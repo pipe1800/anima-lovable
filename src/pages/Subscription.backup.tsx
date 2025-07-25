@@ -1,18 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Crown, CreditCard, Check, X, TrendingUp } from 'lucide-react';
+import { Crown, CreditCard, Check, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { MobileHeader } from '@/components/layout/MobileHeader';
 import {
   Accordion,
@@ -69,7 +68,132 @@ const useSubscriptionData = () => {
   });
 };
 
+// Helper function for PayPal
+const openPayPalWindow = (url: string): Window | null => {
+  const features = [
+    'width=500',
+    'height=600',
+    'left=' + (window.screen.width / 2 - 250),
+    'top=' + (window.screen.height / 2 - 300),
+    'toolbar=no',
+    'location=no',
+    'directories=no',
+    'status=no',
+    'menubar=no',
+    'scrollbars=yes',
+    'resizable=yes',
+    'copyhistory=no'
+  ].join(',');
+
+  return window.open(url, 'paypal_payment', features);
+};
+
 // Components
+const FeatureComparisonTable: React.FC<{ plans: Plan[] }> = ({ plans }) => {
+  const features = [
+    { 
+      name: 'Monthly Credits', 
+      getValue: (plan: Plan) => `${plan.monthly_credits_allowance?.toLocaleString()} credits`
+    },
+    {
+      name: 'Character Creation',
+      getValue: (plan: Plan) => plan.features?.character_creation ? '✓' : '✗'
+    },
+    {
+      name: 'NSFW Content',
+      getValue: (plan: Plan) => plan.features?.nsfw_access ? '✓' : '✗'
+    },
+    {
+      name: 'Image Generation',
+      getValue: (plan: Plan) => plan.features?.image_generation ? '✓' : '✗'
+    },
+    {
+      name: 'Voice Messages',
+      getValue: (plan: Plan) => plan.features?.voice_messages ? '✓' : '✗'
+    },
+    {
+      name: 'Priority Support',
+      getValue: (plan: Plan) => plan.features?.priority_support ? '✓' : '✗'
+    }
+  ];
+
+  const displayPlans = plans.filter(plan => 
+    plan.name !== 'Free' && 
+    plan.name !== 'Whale' &&
+    plan.name !== 'True Fan'
+  );
+
+  return (
+    <div className="overflow-x-auto mb-8">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <th className="text-left p-3 border-b border-white/10">Features</th>
+            {displayPlans.map(plan => (
+              <th key={plan.id} className="text-center p-3 border-b border-white/10">
+                {plan.name}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {features.map((feature, index) => (
+            <tr key={index} className="border-b border-white/5">
+              <td className="p-3 font-medium">{feature.name}</td>
+              {displayPlans.map(plan => (
+                <td key={plan.id} className="text-center p-3">
+                  {feature.getValue(plan)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const FAQSection: React.FC = () => {
+  const faqs = [
+    {
+      question: "How do credits work?",
+      answer: "Credits are consumed when you send messages to AI characters. Different AI models consume different amounts of credits. You can see your current balance and usage in your dashboard."
+    },
+    {
+      question: "Can I change my plan anytime?",
+      answer: "Yes, you can upgrade or downgrade your plan at any time. Changes will be reflected in your next billing cycle."
+    },
+    {
+      question: "What happens if I run out of credits?",
+      answer: "If you run out of credits, you can purchase additional credit packs or upgrade to a higher tier plan. Free users can wait for their monthly credit refresh."
+    },
+    {
+      question: "Is there a free trial?",
+      answer: "New users automatically start with our Free plan which includes 1,000 credits per month. You can upgrade anytime to access more features and credits."
+    },
+    {
+      question: "How does billing work?",
+      answer: "Plans are billed monthly. Credit packs are one-time purchases. All payments are processed securely through PayPal."
+    }
+  ];
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h2 className="text-2xl font-bold text-center mb-6">Frequently Asked Questions</h2>
+      <Accordion type="single" collapsible className="w-full">
+        {faqs.map((faq, index) => (
+          <AccordionItem key={index} value={`item-${index}`}>
+            <AccordionTrigger className="text-left">{faq.question}</AccordionTrigger>
+            <AccordionContent className="text-gray-300">
+              {faq.answer}
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+    </div>
+  );
+};
+
 const PlanFeature = ({ feature, included }: { feature: string; included: boolean }) => (
   <div className="flex items-center gap-2">
     {included ? (
@@ -83,108 +207,139 @@ const PlanFeature = ({ feature, included }: { feature: string; included: boolean
   </div>
 );
 
-const PlanCard = ({ 
-  plan, 
-  currentPlan, 
-  isPopular, 
-  onSelect,
-  disabled 
-}: { 
-  plan: Plan; 
-  currentPlan: Plan | null;
+const PlanCard: React.FC<{
+  plan: Plan;
   isPopular?: boolean;
-  onSelect: () => void;
-  disabled?: boolean;
-}) => {
-  const isCurrentPlan = currentPlan?.id === plan.id;
-  const canUpgrade = currentPlan && !isCurrentPlan && plan.price_monthly > currentPlan.price_monthly;
-  
-  // Extract features from plan
-  const getFeatures = () => {
-    if (!plan.features) return [];
-    
-    // Handle different feature formats
-    if (Array.isArray(plan.features)) {
-      return plan.features;
-    } else if (typeof plan.features === 'object' && plan.features.features) {
-      return plan.features.features;
-    } else if (typeof plan.features === 'object') {
-      // Convert feature flags to readable strings
-      const featureList = [];
-      if (plan.features.character_creation) featureList.push('Character Creation');
-      if (plan.features.nsfw_access) featureList.push('NSFW Content Access');
-      if (plan.features.image_generation) featureList.push('Image Generation');
-      if (plan.features.voice_messages) featureList.push('Voice Messages');
-      if (plan.features.priority_support) featureList.push('Priority Support');
-      return featureList;
+  onSubscribe: (plan: Plan) => void;
+  loading?: boolean;
+}> = ({ plan, isPopular = false, onSubscribe, loading = false }) => {
+  const getCrownIcon = () => {
+    if (plan.name === 'True Fan') {
+      return <Crown className="w-5 h-5 text-gray-400 fill-gray-400" />;
+    } else if (plan.name === 'The Whale') {
+      return <Crown className="w-5 h-5 text-yellow-500 fill-yellow-500" />;
     }
-    return [];
+    return null;
   };
-  
+
+  const getFeatureList = () => {
+    const features = [];
+    
+    if (plan.monthly_credits_allowance) {
+      features.push(`${plan.monthly_credits_allowance.toLocaleString()} credits/month`);
+    }
+    
+    if (plan.features?.character_creation) features.push('Character Creation');
+    if (plan.features?.nsfw_access) features.push('NSFW Content');
+    if (plan.features?.image_generation) features.push('Image Generation');
+    if (plan.features?.voice_messages) features.push('Voice Messages');
+    if (plan.features?.priority_support) features.push('Priority Support');
+    
+    return features;
+  };
+
   return (
     <motion.div
-      whileHover={{ y: -4 }}
-      transition={{ duration: 0.2 }}
-      className="relative h-full"
+      whileHover={{ scale: 1.02 }}
+      className={`relative ${isPopular ? 'order-first md:order-none' : ''}`}
     >
       {isPopular && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
-          <Badge className="bg-[#FF7A00] text-white px-3 py-1">
-            Most Popular
-          </Badge>
-        </div>
+        <Badge className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-[#FF7A00] text-white">
+          Most Popular
+        </Badge>
       )}
       
-      <Card className={`h-full flex flex-col ${isPopular ? 'border-[#FF7A00] shadow-lg shadow-[#FF7A00]/20' : 'border-gray-700'} 
-        ${isCurrentPlan ? 'bg-[#1a1a2e]/80' : 'bg-[#1a1a2e]'} hover:border-gray-600 transition-all`}>
-        <CardHeader className="pb-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <CardTitle className="text-2xl text-white flex items-center gap-2">
-                {plan.name}
-                {plan.name === 'True Fan' && <Crown className="w-5 h-5 fill-gray-300 text-gray-300" />}
-                {plan.name === 'The Whale' && <Crown className="w-5 h-5 fill-yellow-500 text-yellow-500" />}
-              </CardTitle>
-              {plan.description && (
-                <CardDescription className="mt-2">{plan.description}</CardDescription>
-              )}
-            </div>
-            {isCurrentPlan && (
-              <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/50">
-                Current Plan
-              </Badge>
-            )}
+      <Card className={`bg-gray-800/50 border-gray-700 h-full flex flex-col ${
+        isPopular ? 'border-[#FF7A00] shadow-lg shadow-[#FF7A00]/20' : ''
+      }`}>
+        <CardHeader className="text-center">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <CardTitle className="text-xl">{plan.name}</CardTitle>
+            {getCrownIcon()}
           </div>
           
-          <div className="mt-4">
-            <div className="flex items-baseline gap-1">
-              <span className="text-4xl font-bold text-white">
-                ${plan.price_monthly}
-              </span>
-              <span className="text-gray-400">/month</span>
-            </div>
-            <p className="text-sm text-gray-400 mt-1">
-              {plan.monthly_credits_allowance.toLocaleString()} credits/month
-            </p>
+          <div className="text-3xl font-bold">
+            ${plan.price_monthly}
+            <span className="text-lg font-normal text-gray-400">/month</span>
           </div>
+          
+          {plan.description && (
+            <p className="text-sm text-gray-400 mt-2">{plan.description}</p>
+          )}
         </CardHeader>
         
         <CardContent className="flex-1 flex flex-col">
           <div className="space-y-3 flex-1">
-            {getFeatures().map((feature: string, idx: number) => (
-              <PlanFeature key={idx} feature={feature} included={true} />
+            {getFeatureList().map((feature, index) => (
+              <PlanFeature key={index} feature={feature} included={true} />
             ))}
           </div>
           
           <Button
+            onClick={() => onSubscribe(plan)}
+            disabled={loading}
+            className={`w-full mt-6 ${
+              isPopular 
+                ? 'bg-[#FF7A00] hover:bg-[#FF7A00]/80' 
+                : 'bg-gray-600 hover:bg-gray-500'
+            }`}
+          >
+            {loading ? 'Processing...' : 'Subscribe'}
+          </Button>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+};
+  if (!stats || !currentPlan) return null;
+
+  const usagePercentage = currentPlan.monthly_credits_allowance > 0 
+    ? (stats.creditsUsed / currentPlan.monthly_credits_allowance) * 100 
+    : 0;
+
+  return (
+    <Card className="bg-gray-800/50 border-gray-700">
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <TrendingUp className="w-5 h-5 text-[#FF7A00]" />
+          Your Usage This Month
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <div className="flex justify-between text-sm mb-2">
+            <span>Credits Used</span>
+            <span>{stats.creditsUsed.toLocaleString()} / {currentPlan.monthly_credits_allowance.toLocaleString()}</span>
+          </div>
+          <Progress value={usagePercentage} className="h-2" />
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4 pt-2">
+          <div>
+            <p className="text-2xl font-bold text-white">{stats.totalChats}</p>
+            <p className="text-sm text-gray-400">Total Chats</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-white">{credits?.balance?.toLocaleString() || 0}</p>
+            <p className="text-sm text-gray-400">Credits Balance</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+const CreditPackCard = ({ pack, onPurchase, loading }: { pack: CreditPack; onPurchase: () => void; loading?: boolean }) => (
+          
+          <Button
             onClick={onSelect}
             disabled={disabled || isCurrentPlan}
-            className={`w-full mt-6 ${
+            className={`w-full ${
               isCurrentPlan 
-                ? 'bg-gray-700 text-gray-400' 
+                ? 'bg-gray-600 text-gray-400' 
                 : canUpgrade 
                   ? 'bg-[#FF7A00] hover:bg-[#FF7A00]/90' 
-                  : 'bg-[#FF7A00] hover:bg-[#FF7A00]/90'
+                  : 'bg-primary hover:bg-primary/90'
             }`}
           >
             {isCurrentPlan ? 'Current Plan' : canUpgrade ? 'Upgrade' : 'Subscribe'}
@@ -195,109 +350,12 @@ const PlanCard = ({
   );
 };
 
-const FeatureComparisonTable = ({ plans }: { plans: Plan[] }) => {
-  if (!plans || plans.length === 0) return null;
-
-  const features = [
-    { label: 'Monthly Price', key: 'price' },
-    { label: 'Monthly Credits', key: 'credits' },
-    { label: 'Messages per Day', key: 'messages' },
-    { label: 'Character Creation', key: 'characters' },
-    { label: 'Premium AI Models', key: 'premium_models' },
-    { label: 'No Queue/Priority', key: 'priority' },
-    { label: 'Enhanced Memory', key: 'memory' },
-    { label: 'NSFW Content', key: 'nsfw' },
-    { label: 'Add-ons Available', key: 'addons' },
-    { label: 'Credit Booster Packs', key: 'boosters' },
-  ];
-
-  const getFeatureValue = (plan: Plan, featureKey: string) => {
-    switch (featureKey) {
-      case 'price':
-        return plan.price_monthly === 0 ? 'Free' : `$${plan.price_monthly}/mo`;
-      case 'credits':
-        return plan.monthly_credits_allowance.toLocaleString();
-      case 'messages':
-        return plan.name === 'Guest Pass' ? '75/day' : 'Unlimited';
-      case 'characters':
-        return plan.name === 'Guest Pass' ? '1' : plan.name === 'True Fan' ? 'Up to 50' : 'Unlimited';
-      case 'premium_models':
-        return plan.name !== 'Guest Pass';
-      case 'priority':
-        return plan.name !== 'Guest Pass';
-      case 'memory':
-        return plan.name === 'Guest Pass' ? 'Standard' : plan.name === 'True Fan' ? '8K Context' : '16K+ Context';
-      case 'nsfw':
-        return plan.name !== 'Guest Pass';
-      case 'addons':
-        return plan.name !== 'Guest Pass';
-      case 'boosters':
-        return plan.name !== 'Guest Pass';
-      default:
-        return false;
-    }
-  };
-
-  return (
-    <div className="mt-16 mb-16">
-      <h2 className="text-3xl font-bold text-white text-center mb-8">
-        Compare Plans
-      </h2>
-      <Card className="bg-[#1a1a2e] border-gray-700 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-700">
-                <th className="text-left py-4 px-6 text-gray-300 font-medium min-w-[200px]">
-                  Features
-                </th>
-                {plans.map((plan) => (
-                  <th key={plan.id} className="text-center py-4 px-6 min-w-[140px]">
-                    <div className="text-lg font-bold text-white">{plan.name}</div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {features.map((feature, idx) => (
-                <tr key={feature.key} className={`border-b border-gray-700/30 ${
-                  idx % 2 === 0 ? 'bg-[#1a1a2e]/20' : 'bg-transparent'
-                }`}>
-                  <td className="py-4 px-6 text-gray-300 font-medium">
-                    {feature.label}
-                  </td>
-                  {plans.map((plan) => {
-                    const value = getFeatureValue(plan, feature.key);
-                    return (
-                      <td key={plan.id} className="py-4 px-6 text-center">
-                        {typeof value === 'boolean' ? (
-                          value ? (
-                            <Check className="w-5 h-5 text-green-500 mx-auto" />
-                          ) : (
-                            <X className="w-5 h-5 text-gray-500 mx-auto" />
-                          )
-                        ) : (
-                          <span className="text-white">{value}</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </div>
-  );
-};
-
 const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPurchase: () => void; disabled: boolean }) => {
   const bonusPercentage = pack.credits_granted > 10000 ? Math.round(((pack.credits_granted - 10000) / 10000) * 100) : 0;
   
   return (
     <motion.div whileHover={{ scale: 1.02 }} transition={{ duration: 0.2 }}>
-      <Card className="bg-[#1a1a2e] border-gray-700 hover:border-[#FF7A00]/50 transition-all h-full">
+      <Card className="bg-gray-800/50 border-gray-700 hover:border-[#FF7A00]/50 transition-all h-full">
         <CardHeader>
           <div className="flex items-start justify-between">
             <div>
@@ -322,7 +380,7 @@ const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPu
           <Button 
             onClick={onPurchase} 
             disabled={disabled}
-            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/90"
+            className="w-full bg-primary hover:bg-primary/90"
           >
             <CreditCard className="w-4 h-4 mr-2" />
             Buy Now
@@ -332,7 +390,6 @@ const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPu
     </motion.div>
   );
 };
-
 // Main Component
 export default function Subscription() {
   const { user, subscription: userSubscription } = useAuth();
@@ -346,21 +403,7 @@ export default function Subscription() {
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
 
   const currentPlan = userSubscription?.plan || null;
-
-  // Filter plans based on current subscription
-  const getVisiblePlans = (allPlans: Plan[]) => {
-    if (!currentPlan || currentPlan.name === 'Guest Pass') {
-      // Show all plans for guest users
-      return allPlans;
-    } else if (currentPlan.name === 'True Fan') {
-      // Show only True Fan and The Whale for True Fan users
-      return allPlans.filter(plan => plan.name === 'True Fan' || plan.name === 'The Whale');
-    } else if (currentPlan.name === 'The Whale') {
-      // Show only The Whale for Whale users
-      return allPlans.filter(plan => plan.name === 'The Whale');
-    }
-    return allPlans;
-  };
+  const isGuestUser = !user || currentPlan?.name === 'Guest Pass';
 
   // Add retry mechanism
   const retryWithDelay = async (fn: () => Promise<any>, retries = 3, delay = 1000) => {
@@ -560,13 +603,14 @@ export default function Subscription() {
   const openPayPalWindow = (url: string) => {
     console.log('🪟 Opening PayPal window:', url);
     
-    const width = 500;
-    const height = 700;
+    const width = 500;  // Smaller width for compact PayPal UI
+    const height = 700; // Optimal height for PayPal flow
     const left = (window.screen.width / 2) - (width / 2);
     const top = (window.screen.height / 2) - (height / 2);
     
     setShowPaymentModal(true);
     
+    // Important: Remove spaces in the features string and ensure all features are set
     const windowFeatures = `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,location=no,status=no,resizable=yes,scrollbars=yes`;
     
     const popup = window.open(
@@ -586,6 +630,7 @@ export default function Subscription() {
       return;
     }
 
+    // Focus the popup window to bring it to the front
     popup.focus();
 
     const handleMessage = (event: MessageEvent) => {
@@ -600,6 +645,7 @@ export default function Subscription() {
           description: "Your payment was processed successfully.",
         });
         
+        // Use a slight delay before reload to ensure toast is visible
         setTimeout(() => {
           window.location.reload();
         }, 1000);
@@ -622,7 +668,7 @@ export default function Subscription() {
     return (
       <>
         <MobileHeader title="Subscription" />
-        <div className="min-h-screen bg-[#121212] pt-24 pb-12">
+        <div className="min-h-screen bg-gray-900 pt-24 pb-12">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="space-y-8">
               <Skeleton className="h-12 w-64 mx-auto" />
@@ -639,31 +685,18 @@ export default function Subscription() {
   }
 
   const { plans = [], creditPacks = [], credits = null } = data || {};
-  const visiblePlans = getVisiblePlans(plans);
 
-  const faqs = [
-    {
-      question: "Can I cancel anytime?",
-      answer: "Yes! You can cancel your subscription at any time from your account settings. You'll continue to have access until the end of your billing period."
-    },
-    {
-      question: "What happens to unused credits?",
-      answer: "Monthly credits don't roll over, but purchased credit packs never expire. We recommend choosing a plan that matches your usage."
-    },
-    {
-      question: "Can I upgrade my plan?",
-      answer: "Absolutely! You can upgrade your plan at any time. When you upgrade, you'll be charged the prorated difference for the remainder of your billing cycle, and your new benefits will take effect immediately."
-    },
-    {
-      question: "What payment methods do you accept?",
-      answer: "We accept all major credit cards and PayPal. All payments are processed securely through PayPal's payment gateway, even if you choose to pay with a credit card."
-    }
-  ];
+  // Filter plans to exclude specific ones and get display plans
+  const displayPlans = plans.filter(plan => 
+    plan.name !== 'Free' && 
+    plan.name !== 'Whale' &&
+    plan.name !== 'True Fan'
+  );
 
   return (
     <>
       <MobileHeader title="Subscription" />
-      <div className="min-h-screen bg-[#121212] pt-24 pb-12">
+      <div className="min-h-screen bg-gray-900 pt-24 pb-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Header */}
           <div className="text-center mb-12">
@@ -675,28 +708,21 @@ export default function Subscription() {
             </p>
           </div>
 
-          {/* Plans */}
-          <div className={`grid gap-6 lg:gap-8 mb-16 ${
-            visiblePlans.length === 1 
-              ? 'md:grid-cols-1 max-w-md mx-auto' 
-              : visiblePlans.length === 2 
-                ? 'md:grid-cols-2 max-w-4xl mx-auto' 
-                : 'md:grid-cols-3'
-          }`}>
-            {visiblePlans.map((plan, idx) => (
+          {/* Feature Comparison Table */}
+          <FeatureComparisonTable plans={displayPlans} />
+
+          {/* Plans Grid - Only Monthly, No Tabs */}
+          <div className="grid md:grid-cols-3 gap-6 lg:gap-8 mb-16">
+            {displayPlans.map((plan, idx) => (
               <PlanCard
                 key={plan.id}
                 plan={plan}
-                currentPlan={currentPlan}
-                isPopular={plan.name === 'True Fan' && visiblePlans.length > 2}
-                onSelect={() => handlePlanAction(plan)}
-                disabled={!!processingAction}
+                isPopular={plan.name === 'Pro'} // Make Pro the popular one
+                onSubscribe={handlePlanAction}
+                loading={!!processingAction}
               />
             ))}
           </div>
-
-          {/* Feature Comparison Table */}
-          <FeatureComparisonTable plans={plans} />
 
           {/* Credit Packs - Only for paid users */}
           {currentPlan && currentPlan.price_monthly > 0 && creditPacks.length > 0 && (
@@ -712,35 +738,33 @@ export default function Subscription() {
               
               <div className="grid md:grid-cols-3 gap-6">
                 {creditPacks.map(pack => (
-                  <CreditPackCard
-                    key={pack.id}
-                    pack={pack}
-                    onPurchase={() => handleCreditPurchase(pack)}
-                    disabled={!!processingAction}
-                  />
+                  <Card key={pack.id} className="bg-gray-800/50 border-gray-700">
+                    <CardHeader>
+                      <CardTitle className="text-xl text-white">{pack.name}</CardTitle>
+                      <div className="text-2xl font-bold text-white">
+                        ${pack.price}
+                        <span className="text-sm font-normal text-gray-400 ml-2">
+                          {pack.credits_granted.toLocaleString()} credits
+                        </span>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <Button
+                        onClick={() => handleCreditPurchase(pack)}
+                        disabled={!!processingAction}
+                        className="w-full bg-gray-600 hover:bg-gray-500"
+                      >
+                        {processingAction ? 'Processing...' : 'Purchase'}
+                      </Button>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </div>
           )}
 
-          {/* FAQ Section */}
-          <div className="mt-16">
-            <h2 className="text-2xl font-bold text-white text-center mb-8">
-              Frequently Asked Questions
-            </h2>
-            <Accordion type="single" collapsible className="w-full space-y-4">
-              {faqs.map((faq, index) => (
-                <AccordionItem key={index} value={`item-${index}`} className="bg-[#1a1a2e]/50 border border-gray-700 rounded-lg px-6">
-                  <AccordionTrigger className="text-left hover:no-underline py-6">
-                    <span className="text-lg text-white">{faq.question}</span>
-                  </AccordionTrigger>
-                  <AccordionContent className="text-gray-400 pb-6">
-                    {faq.answer}
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          </div>
+          {/* FAQ Section with Accordion */}
+          <FAQSection />
         </div>
       </div>
 
@@ -756,7 +780,7 @@ export default function Subscription() {
           
           {selectedPlan && currentPlan && (
             <div className="space-y-3 mb-4">
-              <div className="bg-[#1a1a2e]/50 rounded-lg p-4 space-y-2">
+              <div className="bg-gray-800/50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between">
                   <span>New monthly price:</span>
                   <span className="font-semibold">${selectedPlan.price_monthly}/month</span>
@@ -775,7 +799,7 @@ export default function Subscription() {
           )}
           
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-gray-600 text-white hover:bg-[#1a1a2e]">
+            <AlertDialogCancel className="border-gray-600 text-white hover:bg-gray-800">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction 
