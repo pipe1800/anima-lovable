@@ -70,7 +70,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [isCreatingPersona, setIsCreatingPersona] = useState(false);
   
   // Tutorial state
-  const { handleStepAction, worldInfoDropdownVisible, disableInteractions } = useTutorial();
+  const { handleStepAction, worldInfoDropdownVisible, disableInteractions, startTutorial } = useTutorial();
   const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
   
   // Enhanced Memory state
@@ -693,7 +693,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         {/* Chat Header */}
         <header className="bg-[#1a1a2e] border-b border-gray-700/50 p-4 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <SidebarTrigger className="text-gray-400 hover:text-white" />
+            <SidebarTrigger 
+              className="text-gray-400 hover:text-white" 
+              data-tutorial="sidebar-trigger"
+            />
             <Avatar className="w-10 h-10 ring-2 ring-[#FF7A00]/50">
               <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
               <AvatarFallback className="bg-[#FF7A00] text-white font-bold">
@@ -709,11 +712,44 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           <div className="flex items-center space-x-3">
             {/* Credits Balance */}
             {creditsBalance !== undefined && (
-              <div className="flex items-center space-x-2 px-3 py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg">
+              <div 
+                className="flex items-center space-x-2 px-3 py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg"
+                data-tutorial="credits-display"
+              >
                 <Zap className="w-3 h-3 text-[#FF7A00]" />
                 <span className="text-sm font-medium text-white">{creditsBalance.toLocaleString()}</span>
                 <span className="text-xs text-gray-400">credits</span>
               </div>
+            )}
+            
+            {/* DEV: Test Tutorial Button */}
+            {process.env.NODE_ENV === 'development' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  console.log('🎯 Manual tutorial trigger - forcing start');
+                  
+                  // Reset the tutorial completion in profiles table
+                  if (currentUser?.id) {
+                    const { error } = await supabase
+                      .from('profiles')
+                      .update({ onboarding_completed: false })
+                      .eq('id', currentUser.id);
+                    
+                    if (!error) {
+                      console.log('🎯 Tutorial completion reset in profiles');
+                    }
+                  }
+                  
+                  // Start the tutorial
+                  startTutorial();
+                }}
+                className="bg-[#0f0f0f] border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 hover:border-blue-400 transition-all duration-200"
+                title="Start tutorial (dev only)"
+              >
+                📚 Tutorial
+              </Button>
             )}
             
             {/* Create Memory Button */}
@@ -726,6 +762,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                     disabled={isCreatingMemory}
                     className="bg-[#0f0f0f] border-purple-500/50 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 hover:border-purple-400 transition-all duration-200"
                     title="Create memory from this conversation"
+                    data-tutorial="create-memory"
                   >
                     {isCreatingMemory ? (
                       <>
@@ -832,7 +869,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               </div>
 
               {/* Tabs */}
-              <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg">
+              <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg" data-tutorial="panel-tabs">
                 <button
                   onClick={() => setActiveTab('history')}
                   className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -856,12 +893,16 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                   <span>Details</span>
                 </button>
                 <button
-                  onClick={() => setActiveTab('config')}
+                  onClick={() => {
+                    setActiveTab('config');
+                    handleStepAction('config-tab-clicked');
+                  }}
                   className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     activeTab === 'config'
                       ? 'bg-[#FF7A00] text-white'
                       : 'text-gray-400 hover:text-white'
                   }`}
+                  data-tutorial="config-tab"
                 >
                   <Settings className="w-4 h-4" />
                   <span>Config</span>

@@ -370,6 +370,7 @@ export const ChatConfigurationTab = ({
               <Button 
                 variant="ghost" 
                 className="flex-1 justify-between text-gray-400 hover:text-white hover:bg-gray-800 px-3 border border-gray-600/50"
+                data-tutorial="persona-dropdown"
               >
                 <div className="flex items-center space-x-2">
                   <Avatar className="w-6 h-6">
@@ -484,7 +485,11 @@ export const ChatConfigurationTab = ({
 
         <div className="space-y-4">
           {Object.entries(addonCategories).map(([categoryName, addons]) => (
-            <div key={categoryName} className="space-y-3">
+            <div 
+              key={categoryName} 
+              className="space-y-3"
+              data-tutorial={categoryName === 'Core Enhancements' ? 'core-enhancements' : categoryName === 'Character Tracking' ? 'character-tracking' : undefined}
+            >
               <h4 className="text-gray-300 font-medium text-sm border-b border-gray-700/30 pb-1">
                 {categoryName}
               </h4>
