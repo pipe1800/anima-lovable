@@ -1647,3 +1647,20 @@ export const deleteAllUserChats = async (userId: string) => {
     return { success: false, error: err, deletedCount: 0 };
   }
 }
+
+// =============================================================================
+// PERSONA QUERIES
+// =============================================================================
+
+/**
+ * Get user's personas (only for own profile)
+ */
+export const getUserPersonasForProfile = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('personas')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  return { data: data || [], error }
+}

@@ -8,6 +8,7 @@ const UserProfile = () => {
   return (
     <Routes>
       <Route path="/" element={<ProfileView />} />
+      <Route path="/:userId" element={<ProfileView />} />
       <Route path="/settings" element={<ProfileSettingsView />} />
     </Routes>
   );
