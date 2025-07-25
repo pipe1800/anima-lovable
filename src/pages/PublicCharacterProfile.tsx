@@ -18,6 +18,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
 
 interface CharacterData {
   id: string;
@@ -37,6 +38,7 @@ interface CharacterData {
     username: string;
     avatar_url: string | null;
   };
+  tags?: Array<{ id: number; name: string }>;
   actual_chat_count?: number;
   likes_count?: number;
 }
@@ -59,12 +61,13 @@ export default function PublicCharacterProfile() {
       try {
         setLoading(true);
 
-        // Fetch character with definitions
+        // Fetch character with definitions and tags
         const { data: characterData, error: characterError } = await supabase
           .from('characters')
           .select(`
             *,
-            character_definitions(*)
+            character_definitions(*),
+            character_tags(tag:tags(id, name))
           `)
           .eq('id', characterId)
           .eq('visibility', 'public')
@@ -99,6 +102,7 @@ export default function PublicCharacterProfile() {
         setCharacter({
           ...characterData,
           creator: creatorProfile || { username: 'Unknown', avatar_url: null },
+          tags: characterData.character_tags?.map((t: any) => t.tag).filter(Boolean) || [],
           actual_chat_count: chatCount || 0,
           likes_count: likesCount || 0
         });
@@ -385,6 +389,18 @@ export default function PublicCharacterProfile() {
             </Card>
           </div>
         </div>
+
+        {/* Related Characters Carousel */}
+        {character.tags && character.tags.length > 0 && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold text-white">Recommended Characters</h2>
+            <p className="text-gray-300">Characters with similar interests</p>
+            <RelatedCharactersCarousel 
+              currentCharacterId={character.id} 
+              tags={character.tags}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
