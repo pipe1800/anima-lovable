@@ -4,12 +4,14 @@ export interface Profile {
   id: string;
   username: string;
   avatar_url?: string;
+  banner_url?: string;
   bio?: string;
   onboarding_completed: boolean;
   onboarding_survey_data?: any;
   timezone?: string | null;
   created_at: string;
   updated_at: string;
+  banner_updated_at?: string;
 }
 
 export interface Character {

@@ -651,6 +651,8 @@ export type Database = {
       profiles: {
         Row: {
           avatar_url: string | null
+          banner_url: string | null
+          banner_updated_at: string | null
           bio: string | null
           created_at: string
           default_persona_id: string | null
@@ -663,6 +665,8 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
+          banner_url?: string | null
+          banner_updated_at?: string | null
           bio?: string | null
           created_at?: string
           default_persona_id?: string | null
@@ -675,6 +679,8 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
+          banner_url?: string | null
+          banner_updated_at?: string | null
           bio?: string | null
           created_at?: string
           default_persona_id?: string | null

@@ -101,7 +101,7 @@ export const getUserActiveSubscription = async (userId: string) => {
 export const getPublicProfile = async (userId: string) => {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, username, avatar_url, bio, created_at')
+    .select('id, username, avatar_url, banner_url, bio, created_at, timezone')
     .eq('id', userId)
     .maybeSingle()
 
@@ -129,7 +129,7 @@ export const updateProfile = async (userId: string, updates: Partial<Profile>) =
     .from('profiles')
     .update(updates)
     .eq('id', userId)
-    .select('id, username, avatar_url, bio, created_at')
+    .select('id, username, avatar_url, banner_url, bio, created_at, timezone')
     .maybeSingle()
 
   return { data, error }
