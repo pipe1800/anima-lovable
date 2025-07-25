@@ -77,6 +77,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const { data: globalSettings } = useUserGlobalChatSettings();
   const [isCreatingMemory, setIsCreatingMemory] = useState(false);
   const [currentChatMessageCount, setCurrentChatMessageCount] = useState(0);
+  const [isCreatingNewChat, setIsCreatingNewChat] = useState(false);
   
   // Memories Dialog state
   const [showMemoriesDialog, setShowMemoriesDialog] = useState(false);
@@ -610,9 +611,13 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   // Start new chat function
   const handleStartNewChat = async () => {
-    if (!currentUser) return;
+    if (!currentUser || isCreatingNewChat) return;
+    
+    setIsCreatingNewChat(true);
     
     try {
+      console.log('🎯 ChatLayout: Creating new chat for character:', character.id);
+      
       const response = await supabase.functions.invoke('chat-management', {
         body: { 
           operation: 'create-with-greeting',
@@ -628,10 +633,13 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       if (response.error) throw response.error;
       
       const { chat_id } = response.data;
+      console.log('✅ ChatLayout: Chat created successfully:', chat_id);
       navigate(`/chat/${character.id}/${chat_id}`);
     } catch (error) {
       console.error('Error creating new chat:', error);
       toast.error('Failed to start new chat');
+    } finally {
+      setIsCreatingNewChat(false);
     }
   };
 
@@ -1019,10 +1027,11 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                         <div className="space-y-3">
                           <Button
                             onClick={handleStartNewChat}
-                            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white"
+                            disabled={isCreatingNewChat}
+                            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50"
                           >
                             <MessageCircle className="w-4 h-4 mr-2" />
-                            Start New Chat
+                            {isCreatingNewChat ? 'Creating...' : 'Start New Chat'}
                           </Button>
                           {isCharacterOwner && (
                             <Button

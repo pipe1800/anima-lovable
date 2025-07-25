@@ -63,6 +63,7 @@ const ChatInterface = ({
   const [currentChatId, setCurrentChatId] = useState<string | null>(existingChatId || null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(propSelectedPersonaId || null);
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -89,9 +90,13 @@ const ChatInterface = ({
 
   // Create chat if needed
   useEffect(() => {
-    if (!currentChatId && user && character) {
+    if (!currentChatId && user && character && !isCreatingChat) {
+      setIsCreatingChat(true);
+      
       const initializeChat = async () => {
         try {
+          console.log('🎯 ChatInterface: Creating new chat for character:', character.id);
+          
           const { data, error } = await supabase.functions.invoke('chat-management', {
             body: {
               operation: 'create-basic',
@@ -106,6 +111,7 @@ const ChatInterface = ({
           if (error) throw error;
           
           if (data?.success && data?.chat_id) {
+            console.log('✅ ChatInterface: Chat created successfully:', data.chat_id);
             setCurrentChatId(data.chat_id);
             // Notify parent component about the new chat ID
             onChatCreated?.(data.chat_id);
@@ -123,12 +129,14 @@ const ChatInterface = ({
             description: "Failed to create chat session",
             variant: "destructive"
           });
+        } finally {
+          setIsCreatingChat(false);
         }
       };
       
       initializeChat();
     }
-  }, [currentChatId, user, character, toast]);
+  }, [currentChatId, user, character, propSelectedPersonaId, onChatCreated, isCreatingChat]);
 
   // Use new orchestrator hook
   const {
