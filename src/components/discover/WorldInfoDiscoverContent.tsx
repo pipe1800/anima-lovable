@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { CharacterGrid } from './CharacterGrid';
+import { WorldInfoGrid } from './WorldInfoGrid';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDashboardData, preloadDashboardData } from '@/hooks/useDashboard';
 import { useQueryClient } from '@tanstack/react-query';
 import { NSFWToggle } from '@/components/NSFWToggle';
 import { useNSFW } from '@/contexts/NSFWContext';
-import { useChatCreation } from '@/hooks/useChatCreation';
-import { usePublicCharacters, useSearchPublicCharacters } from '@/hooks/useCharacters';
+import { usePublicWorldInfos, useSearchPublicWorldInfos } from '@/hooks/useWorldInfos';
 import { SearchParams } from '@/lib/supabase-queries';
 import { Search, Sparkles, Filter, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -26,14 +25,13 @@ import {
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 
-export function DiscoverContent() {
+export function WorldInfoDiscoverContent() {
   const { user, profile } = useAuth();
   const { nsfwEnabled } = useNSFW();
   const { data: dashboardData } = useDashboardData();
   const userCredits = dashboardData?.credits || 0;
   const username = profile?.username || user?.email?.split('@')[0] || 'User';
   const queryClient = useQueryClient();
-  const { startChat, isCreating } = useChatCreation();
   
   const [searchInput, setSearchInput] = useState('');
   const [sortBy, setSortBy] = useState('popular');
@@ -56,10 +54,10 @@ export function DiscoverContent() {
   };
 
   // Use search hook with manual refetch
-  const { data: searchResults, refetch: executeSearch, isLoading: isSearching } = useSearchPublicCharacters(searchParams);
+  const { data: searchResults, refetch: executeSearch, isLoading: isSearching } = useSearchPublicWorldInfos(searchParams);
   
-  // Fallback to initial load of popular characters
-  const { data: initialCharacters = [] } = usePublicCharacters(20, 0);
+  // Fallback to initial load of popular world infos
+  const { data: initialWorldInfos = [] } = usePublicWorldInfos();
 
   // Available filter tags
   const availableTags = [
@@ -112,17 +110,18 @@ export function DiscoverContent() {
     setHasSearched(false);
   };
 
-  // Handle surprise me - open chat with random character
+  // Handle surprise me - navigate to random world info
   const handleSurpriseMe = async () => {
-    const charactersToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialCharacters;
+    const worldInfosToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialWorldInfos;
     
-    if (!charactersToChooseFrom || charactersToChooseFrom.length === 0) return;
+    if (!worldInfosToChooseFrom || worldInfosToChooseFrom.length === 0) return;
     
-    const randomIndex = Math.floor(Math.random() * charactersToChooseFrom.length);
-    const randomCharacter = charactersToChooseFrom[randomIndex];
+    const randomIndex = Math.floor(Math.random() * worldInfosToChooseFrom.length);
+    const randomWorldInfo = worldInfosToChooseFrom[randomIndex];
     
-    if (randomCharacter) {
-      await startChat(randomCharacter);
+    if (randomWorldInfo) {
+      // Navigate to world info details page
+      window.location.href = `/world-info/${randomWorldInfo.id}`;
     }
   };
 
@@ -138,8 +137,8 @@ export function DiscoverContent() {
     }
   }, [user?.id, queryClient]);
 
-  // Characters to display and active filters
-  const displayCharacters = hasSearched && searchResults?.data ? searchResults.data : initialCharacters;
+  // World infos to display and active filters
+  const displayWorldInfos = hasSearched && searchResults?.data ? searchResults.data : initialWorldInfos;
   const activeFilters = selectedTags.length > 0 || searchInput.length > 0;
 
   return (
@@ -149,9 +148,9 @@ export function DiscoverContent() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-white text-xl sm:text-2xl font-bold">
-              Character Discovery
+              World Info Discovery
             </h1>
-            <p className="text-gray-400 text-xs sm:text-sm">Explore and discover characters</p>
+            <p className="text-gray-400 text-xs sm:text-sm">Explore and discover world information</p>
           </div>
           <div className="flex items-center">
             <NSFWToggle />
@@ -167,7 +166,7 @@ export function DiscoverContent() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
               type="text"
-              placeholder="Search characters by name or description... (Press Enter to search)"
+              placeholder="Search world info by name or description... (Press Enter to search)"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={handleSearchKeyDown}
@@ -228,7 +227,7 @@ export function DiscoverContent() {
             <SelectContent className="bg-[#1a1a2e] border-gray-700">
               <SelectItem value="popular" className="text-white hover:bg-gray-700">Most Popular</SelectItem>
               <SelectItem value="newest" className="text-white hover:bg-gray-700">Newest First</SelectItem>
-              <SelectItem value="conversations" className="text-white hover:bg-gray-700">Most Conversations</SelectItem>
+              <SelectItem value="conversations" className="text-white hover:bg-gray-700">Most Used</SelectItem>
               <SelectItem value="relevance" className="text-white hover:bg-gray-700">Relevance</SelectItem>
             </SelectContent>
           </Select>
@@ -246,7 +245,7 @@ export function DiscoverContent() {
           {/* Surprise Me Button */}
           <Button
             onClick={handleSurpriseMe}
-            disabled={isCreating || (hasSearched ? searchResults?.data?.length === 0 : initialCharacters.length === 0)}
+            disabled={hasSearched ? searchResults?.data?.length === 0 : initialWorldInfos.length === 0}
             className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium"
           >
             <Sparkles className="w-4 h-4 mr-2" />
@@ -289,9 +288,9 @@ export function DiscoverContent() {
         </div>
       )}
 
-      {/* Character Grid */}
-      <CharacterGrid 
-        characters={displayCharacters}
+      {/* World Info Grid */}
+      <WorldInfoGrid 
+        worldInfos={displayWorldInfos}
         isLoading={isSearching}
         hasSearched={hasSearched}
         totalCount={searchResults?.total || 0}

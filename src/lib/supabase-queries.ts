@@ -2,6 +2,30 @@
 import type { Profile, Character, Plan, Subscription, Credits, Chat, Message, OnboardingChecklistItem, UserOnboardingProgress } from '@/types/database'
 
 // =============================================================================
+// SEARCH INTERFACES
+// =============================================================================
+
+export interface SearchParams {
+  searchQuery?: string;
+  sortBy: string;
+  filters: {
+    tags?: string[];
+    creator?: string;
+    nsfw?: boolean;
+    gender?: string;
+  };
+  limit: number;
+  offset: number;
+}
+
+export interface SearchResult<T> {
+  data: T[];
+  total: number;
+  hasMore: boolean;
+  error?: any;
+}
+
+// =============================================================================
 // MONETIZATION QUERIES - Plans, Models, Credit Packs
 // =============================================================================
 
@@ -118,7 +142,7 @@ export const updateProfile = async (userId: string, updates: Partial<Profile>) =
 /**
  * Get public characters (for discovery page) with enhanced data
  */
-export const getPublicCharacters = async (limit = 20, offset = 0) => {
+export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = true) => {
   const { data, error } = await supabase
     .from('characters')
     .select(`
@@ -138,9 +162,25 @@ export const getPublicCharacters = async (limit = 20, offset = 0) => {
     return { data: [], error }
   }
 
+  let filteredData = data;
+
+  // Apply NSFW filtering based on tags
+  if (nsfwEnabled === false) {
+    // User has NSFW disabled - exclude characters with NSFW tag
+    const { data: nsfwCharacters } = await supabase
+      .from('character_tags')
+      .select('character_id')
+      .eq('tag_id', 24); // NSFW tag ID
+
+    if (nsfwCharacters && nsfwCharacters.length > 0) {
+      const nsfwCharacterIds = new Set(nsfwCharacters.map(c => c.character_id));
+      filteredData = filteredData.filter(char => !nsfwCharacterIds.has(char.id));
+    }
+  }
+
   // Fetch creator profiles, counts, and tags separately for each character
   const charactersWithCreators = await Promise.all(
-    data.map(async (character) => {
+    filteredData.map(async (character) => {
       // Get creator profile
       const { data: creatorData } = await supabase
         .from('profiles')
@@ -186,6 +226,172 @@ export const getPublicCharacters = async (limit = 20, offset = 0) => {
   )
 
   return { data: charactersWithCreators, error: null }
+}
+
+/**
+ * Enhanced character search with server-side filtering and pagination
+ */
+export const searchPublicCharacters = async (params: SearchParams): Promise<SearchResult<any>> => {
+  const { searchQuery, sortBy, filters, limit, offset } = params;
+
+  // Build the base query
+  let query = supabase
+    .from('characters')
+    .select(`
+      id,
+      name,
+      short_description,
+      avatar_url,
+      interaction_count,
+      created_at,
+      creator_id
+    `, { count: 'exact' })
+    .eq('visibility', 'public');
+
+  // Apply text search if provided
+  if (searchQuery && searchQuery.trim()) {
+    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
+  }
+
+  // Don't apply NSFW filter in the query - we'll handle it after fetching
+
+  // Apply creator filter if specified
+  if (filters.creator && filters.creator.trim()) {
+    // First get creator IDs that match the username
+    const { data: creators } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('username', `%${filters.creator}%`);
+    
+    if (creators && creators.length > 0) {
+      const creatorIds = creators.map(c => c.id);
+      query = query.in('creator_id', creatorIds);
+    } else {
+      // No matching creators found, return empty result
+      return { data: [], total: 0, hasMore: false };
+    }
+  }
+
+  // Apply sorting
+  switch (sortBy) {
+    case 'newest':
+      query = query.order('created_at', { ascending: false });
+      break;
+    case 'conversations':
+    case 'popular':
+    default:
+      query = query.order('interaction_count', { ascending: false });
+      break;
+  }
+
+  // Apply pagination
+  query = query.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return { data: [], total: 0, hasMore: false, error };
+  }
+
+  let filteredData = data;
+
+  // Apply NSFW filtering based on tags
+  if (filters.nsfw === false) {
+    // User has NSFW disabled - exclude characters with NSFW tag
+    // First get all character IDs that have the NSFW tag
+    const { data: nsfwCharacters } = await supabase
+      .from('character_tags')
+      .select('character_id')
+      .eq('tag_id', 24); // NSFW tag ID
+
+    if (nsfwCharacters && nsfwCharacters.length > 0) {
+      const nsfwCharacterIds = new Set(nsfwCharacters.map(c => c.character_id));
+      filteredData = filteredData.filter(char => !nsfwCharacterIds.has(char.id));
+    }
+  }
+  // If NSFW is true, show all content (no filtering needed)
+
+  // If we have tag filters, we need to filter by tags
+  if (filters.tags && filters.tags.length > 0) {
+    // Get characters that have at least one of the specified tags
+    const { data: characterTags } = await supabase
+      .from('character_tags')
+      .select(`
+        character_id,
+        tag:tags(name)
+      `)
+      .in('character_id', filteredData.map(c => c.id));
+
+    const charactersWithTags = new Set<string>();
+    characterTags?.forEach(ct => {
+      if (ct.tag && filters.tags!.includes(ct.tag.name)) {
+        charactersWithTags.add(ct.character_id);
+      }
+    });
+
+    filteredData = filteredData.filter(c => charactersWithTags.has(c.id));
+  }
+
+  // Fetch additional data for filtered characters
+  const charactersWithDetails = await Promise.all(
+    filteredData.map(async (character) => {
+      // Get creator profile
+      const { data: creatorData } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .eq('id', character.creator_id)
+        .maybeSingle();
+
+      // Get actual chat count
+      const { count: chatCount } = await supabase
+        .from('chats')
+        .select('id', { count: 'exact' })
+        .eq('character_id', character.id);
+
+      // Get likes count
+      const { count: likesCount } = await supabase
+        .from('character_likes')
+        .select('id', { count: 'exact' })
+        .eq('character_id', character.id);
+
+      // Get favorites count
+      const { count: favoritesCount } = await supabase
+        .from('character_favorites')
+        .select('id', { count: 'exact' })
+        .eq('character_id', character.id);
+
+      // Get character tags
+      const { data: tagsData } = await supabase
+        .from('character_tags')
+        .select(`
+          tag:tags(id, name)
+        `)
+        .eq('character_id', character.id);
+
+      return {
+        ...character,
+        creator: creatorData,
+        actual_chat_count: chatCount || 0,
+        likes_count: likesCount || 0,
+        favorites_count: favoritesCount || 0,
+        tags: tagsData?.map(t => t.tag).filter(Boolean) || []
+      };
+    })
+  );
+
+  // Apply conversations sorting if specified (now that we have chat counts)
+  if (sortBy === 'conversations') {
+    charactersWithDetails.sort((a, b) => b.actual_chat_count - a.actual_chat_count);
+  }
+
+  const total = count || 0;
+  const hasMore = offset + limit < total;
+
+  return {
+    data: charactersWithDetails,
+    total,
+    hasMore
+  };
 }
 
 /**
@@ -874,6 +1080,168 @@ export const getPublicWorldInfos = async (limit = 20, offset = 0) => {
   )
 
   return { data: worldInfosWithCreators, error: null }
+}
+
+/**
+ * Enhanced world info search with server-side filtering and pagination
+ */
+export const searchPublicWorldInfos = async (params: SearchParams): Promise<SearchResult<any>> => {
+  const { searchQuery, sortBy, filters, limit, offset } = params;
+
+  // Build the base query
+  let query = supabase
+    .from('world_infos')
+    .select(`
+      id,
+      name,
+      short_description,
+      interaction_count,
+      created_at,
+      creator_id
+    `, { count: 'exact' })
+    .eq('visibility', 'public');
+
+  // Apply text search if provided
+  if (searchQuery && searchQuery.trim()) {
+    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
+  }
+
+  // Apply creator filter if specified
+  if (filters.creator && filters.creator.trim()) {
+    // First get creator IDs that match the username
+    const { data: creators } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('username', `%${filters.creator}%`);
+    
+    if (creators && creators.length > 0) {
+      const creatorIds = creators.map(c => c.id);
+      query = query.in('creator_id', creatorIds);
+    } else {
+      // No matching creators found, return empty result
+      return { data: [], total: 0, hasMore: false };
+    }
+  }
+
+  // Apply sorting
+  switch (sortBy) {
+    case 'newest':
+      query = query.order('created_at', { ascending: false });
+      break;
+    case 'conversations':
+    case 'popular':
+    default:
+      query = query.order('interaction_count', { ascending: false });
+      break;
+  }
+
+  // Apply pagination
+  query = query.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return { data: [], total: 0, hasMore: false, error };
+  }
+
+  let filteredData = data;
+
+  // Apply NSFW filtering based on tags
+  if (filters.nsfw === false) {
+    // User has NSFW disabled - exclude world infos with NSFW tag
+    const { data: nsfwWorldInfos } = await supabase
+      .from('world_info_tags')
+      .select('world_info_id')
+      .eq('tag_id', 24); // NSFW tag ID
+
+    if (nsfwWorldInfos && nsfwWorldInfos.length > 0) {
+      const nsfwWorldInfoIds = new Set(nsfwWorldInfos.map(w => w.world_info_id));
+      filteredData = filteredData.filter(worldInfo => !nsfwWorldInfoIds.has(worldInfo.id));
+    }
+  }
+  // If NSFW is true, show all content (no filtering needed)
+
+  // If we have tag filters, we need to filter by tags
+  if (filters.tags && filters.tags.length > 0) {
+    // Get world infos that have at least one of the specified tags
+    const { data: worldInfoTags } = await supabase
+      .from('world_info_tags')
+      .select(`
+        world_info_id,
+        tag:tags(name)
+      `)
+      .in('world_info_id', filteredData.map(w => w.id));
+
+    const worldInfosWithTags = new Set<string>();
+    worldInfoTags?.forEach(wt => {
+      if (wt.tag && filters.tags!.includes(wt.tag.name)) {
+        worldInfosWithTags.add(wt.world_info_id);
+      }
+    });
+
+    filteredData = filteredData.filter(w => worldInfosWithTags.has(w.id));
+  }
+
+  // Fetch additional data for filtered world infos
+  const worldInfosWithDetails = await Promise.all(
+    filteredData.map(async (worldInfo) => {
+      // Get creator profile
+      const { data: creatorData } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .eq('id', worldInfo.creator_id)
+        .maybeSingle();
+
+      // Get likes count
+      const { count: likesCount } = await supabase
+        .from('world_info_likes')
+        .select('id', { count: 'exact' })
+        .eq('world_info_id', worldInfo.id);
+
+      // Get favorites count
+      const { count: favoritesCount } = await supabase
+        .from('world_info_favorites')
+        .select('id', { count: 'exact' })
+        .eq('world_info_id', worldInfo.id);
+
+      // Get usage count (how many users are using this world info)
+      const { count: usageCount } = await supabase
+        .from('world_info_users')
+        .select('id', { count: 'exact' })
+        .eq('world_info_id', worldInfo.id);
+
+      // Get world info tags
+      const { data: tagsData } = await supabase
+        .from('world_info_tags')
+        .select(`
+          tag:tags(id, name)
+        `)
+        .eq('world_info_id', worldInfo.id);
+
+      return {
+        ...worldInfo,
+        creator: creatorData,
+        likes_count: likesCount || 0,
+        favorites_count: favoritesCount || 0,
+        usage_count: usageCount || 0,
+        tags: tagsData?.map(t => t.tag).filter(Boolean) || []
+      };
+    })
+  );
+
+  // Apply conversations/usage sorting if specified (now that we have usage counts)
+  if (sortBy === 'conversations') {
+    worldInfosWithDetails.sort((a, b) => b.usage_count - a.usage_count);
+  }
+
+  const total = count || 0;
+  const hasMore = offset + limit < total;
+
+  return {
+    data: worldInfosWithDetails,
+    total,
+    hasMore
+  };
 }
 
 // =============================================================================

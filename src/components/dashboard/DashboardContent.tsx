@@ -21,8 +21,15 @@ import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { TopBar } from '@/components/ui/TopBar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { useDashboardData, useUserChatsPaginated } from '@/hooks/useDashboard';
+import { useUserChatsPaginated } from '@/hooks/useDashboard';
+import { useDashboardStats, useDashboardCharacters } from '@/hooks/useDashboardProgressive';
 import { useChatCreation } from '@/hooks/useChatCreation';
+import { 
+  StatsCardSkeleton, 
+  ChatCardSkeleton, 
+  CharacterCardSkeleton, 
+  FavoriteCharacterSkeleton 
+} from '@/components/dashboard/DashboardSkeletons';
 import { useRealtimeUpdates } from '@/hooks/useRealtimeUpdates';
 import { supabase } from '@/integrations/supabase/client';
 import { deleteChat, deleteMultipleChats, deleteAllUserChats } from '@/lib/supabase-queries';
@@ -79,14 +86,20 @@ export function DashboardContent() {
   // Enable real-time updates
   useRealtimeUpdates(user?.id);
   
-  // Use React Query hook for dashboard data
+  // Use progressive loading hooks for better UX
   const { 
-    data: dashboardData, 
-    isLoading: dataLoading, 
-    error: dashboardError,
-    refetch,
-    isPlaceholderData // Add this to detect if using cached data
-  } = useDashboardData();
+    data: statsData, 
+    isLoading: statsLoading, 
+    error: statsError,
+    refetch: refetchStats
+  } = useDashboardStats();
+
+  const { 
+    data: charactersData, 
+    isLoading: charactersLoading, 
+    error: charactersError,
+    refetch: refetchCharacters
+  } = useDashboardCharacters();
 
   // Use separate hook for paginated chats
   const {
@@ -100,14 +113,14 @@ export function DashboardContent() {
   const recentChats = useMemo(() => chatsData?.data || [], [chatsData?.data]);
   const totalChats = useMemo(() => chatsData?.totalCount || 0, [chatsData?.totalCount]);
   const totalPages = useMemo(() => chatsData?.totalPages || 1, [chatsData?.totalPages]);
-  const myCharacters = useMemo(() => dashboardData?.characters || [], [dashboardData?.characters]);
-  const favoriteCharacters = useMemo(() => dashboardData?.favorites || [], [dashboardData?.favorites]);
-  const userCredits = useMemo(() => dashboardData?.credits || 0, [dashboardData?.credits]);
+  const myCharacters = useMemo(() => charactersData?.characters || [], [charactersData?.characters]);
+  const favoriteCharacters = useMemo(() => charactersData?.favorites || [], [charactersData?.favorites]);
+  const userCredits = useMemo(() => statsData?.credits || 0, [statsData?.credits]);
   
-  // Use subscription from AuthContext first, fallback to dashboard data
-  const subscription = useMemo(() => authSubscription || dashboardData?.subscription, [authSubscription, dashboardData?.subscription]);
+  // Use subscription from AuthContext first, fallback to stats data
+  const subscription = useMemo(() => authSubscription || statsData?.subscription, [authSubscription, statsData?.subscription]);
   
-  const creditsUsed = useMemo(() => dashboardData?.creditsUsed || 0, [dashboardData?.creditsUsed]);
+  const creditsUsed = useMemo(() => statsData?.creditsUsed || 0, [statsData?.creditsUsed]);
   const monthlyAllowance = useMemo(() => subscription?.plan?.monthly_credits_allowance || 1000, [subscription?.plan?.monthly_credits_allowance]);
 
   // Get crown icon styling based on plan - MOVED BEFORE CONDITIONAL RETURNS
@@ -191,10 +204,11 @@ export function DashboardContent() {
   // Refresh data on mount and when user changes
   useEffect(() => {
     if (user) {
-      refetch();
+      refetchStats();
+      refetchCharacters();
       refetchChats();
     }
-  }, [user, refetch, refetchChats]);
+  }, [user, refetchStats, refetchCharacters, refetchChats]);
 
   // Clear selections when page changes
   useEffect(() => {
@@ -452,7 +466,7 @@ export function DashboardContent() {
     }
   }, [totalChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
 
-  if (authLoading || dataLoading || chatsLoading) {
+  if (authLoading || statsLoading) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-white">Loading your dashboard...</div>
@@ -468,7 +482,7 @@ export function DashboardContent() {
     );
   }
 
-  if (dashboardError || chatsError) {
+  if (statsError || charactersError || chatsError) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-center">
@@ -517,35 +531,46 @@ export function DashboardContent() {
       <div className="p-3 sm:p-6 md:p-6 space-y-4 sm:space-y-6">
         {/* Stats cards above Daily Message Limit */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
-          <StatsCard
-            title="Active Chats"
-            value={totalChats}
-            icon={MessageCircle}
-            onClick={() => navigate('/chat')}
-          />
+          {statsLoading ? (
+            // Show skeleton loading for stats
+            <>
+              {Array.from({ length: 4 }).map((_, index) => (
+                <StatsCardSkeleton key={index} />
+              ))}
+            </>
+          ) : (
+            <>
+              <StatsCard
+                title="Active Chats"
+                value={totalChats}
+                icon={MessageCircle}
+                onClick={() => navigate('/chat')}
+              />
 
-          <StatsCard
-            title="Characters"
-            value={myCharacters.length}
-            icon={Users}
-            onClick={() => navigate('/character-creator')}
-          />
+              <StatsCard
+                title="Characters"
+                value={myCharacters.length}
+                icon={Users}
+                onClick={() => navigate('/character-creator')}
+              />
 
-          <StatsCard
-            title="Credits"
-            value={userCredits.toLocaleString()}
-            icon={Zap}
-            onClick={() => navigate('/subscription')}
-            largeValue={true}
-          />
+              <StatsCard
+                title="Credits"
+                value={userCredits.toLocaleString()}
+                icon={Zap}
+                onClick={() => navigate('/subscription')}
+                largeValue={true}
+              />
 
-          <StatsCard
-            title="Plan"
-            value={userTier}
-            icon={Crown}
-            iconColor={getCrownIconStyle}
-            onClick={() => navigate('/subscription')}
-          />
+              <StatsCard
+                title="Plan"
+                value={userTier}
+                icon={Crown}
+                iconColor={getCrownIconStyle}
+                onClick={() => navigate('/subscription')}
+              />
+            </>
+          )}
         </div>
 
 
@@ -621,7 +646,14 @@ export function DashboardContent() {
 
                 <TabsContent value="recent-chats" className="mt-3 sm:mt-6">
                   <div className="space-y-2 sm:space-y-3">
-                    {formattedRecentChats.length > 0 ? (
+                    {chatsLoading ? (
+                      // Show skeleton loading for chats
+                      <>
+                        {Array.from({ length: 5 }).map((_, index) => (
+                          <ChatCardSkeleton key={index} />
+                        ))}
+                      </>
+                    ) : formattedRecentChats.length > 0 ? (
                       <>
                         {formattedRecentChats.map((chat) => (
                           <ChatCard
@@ -672,7 +704,14 @@ export function DashboardContent() {
 
                 <TabsContent value="my-characters" className="mt-3 sm:mt-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {formattedMyCharacters.length > 0 ? (
+                    {charactersLoading ? (
+                      // Show skeleton loading for characters
+                      <>
+                        {Array.from({ length: 6 }).map((_, index) => (
+                          <CharacterCardSkeleton key={index} />
+                        ))}
+                      </>
+                    ) : formattedMyCharacters.length > 0 ? (
                       formattedMyCharacters.map((character) => (
                         <Card
                           key={character.id}
@@ -762,7 +801,14 @@ export function DashboardContent() {
 
                 <TabsContent value="favorites" className="mt-3 sm:mt-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {formattedFavoriteCharacters.length > 0 ? (
+                    {charactersLoading ? (
+                      // Show skeleton loading for favorite characters
+                      <>
+                        {Array.from({ length: 6 }).map((_, index) => (
+                          <FavoriteCharacterSkeleton key={index} />
+                        ))}
+                      </>
+                    ) : formattedFavoriteCharacters.length > 0 ? (
                       formattedFavoriteCharacters.map((character) => (
                         <Card
                           key={character.id}

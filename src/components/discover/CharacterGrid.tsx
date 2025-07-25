@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { 
   MessageCircle, 
@@ -9,21 +8,21 @@ import {
   Star,
   TrendingUp,
   Loader2,
-  Eye
+  Eye,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { usePublicCharacters } from '@/hooks/useCharacters';
 import { useChatCreation } from '@/hooks/useChatCreation';
+import { CharacterCardSkeleton } from './CharacterCardSkeleton';
 
 interface CharacterGridProps {
-  searchQuery: string;
-  sortBy: string;
-  filterBy: string;
-  advancedFilters?: {
-    tags: string[];
-    creator: string;
-    nsfw: boolean;
-    gender: string;
-  };
+  characters: PublicCharacter[];
+  isLoading: boolean;
+  hasSearched: boolean;
+  totalCount?: number;
+  currentPage?: number;
+  onPageChange?: (page: number) => void;
 }
 
 type PublicCharacter = {
@@ -40,109 +39,137 @@ type PublicCharacter = {
   tags: { id: number; name: string }[];
 };
 
-export function CharacterGrid({ searchQuery, sortBy, filterBy, advancedFilters }: CharacterGridProps) {
-  const navigate = useNavigate();
-  
-  // Use React Query hook for public characters
-  const { 
-    data: characters = [], 
-    isLoading: loading, 
-    error 
-  } = usePublicCharacters(50, 0);
+const ITEMS_PER_PAGE = 20;
 
+const PaginationControls = ({ 
+  currentPage, 
+  totalPages, 
+  onPageChange 
+}: { 
+  currentPage: number; 
+  totalPages: number; 
+  onPageChange: (page: number) => void; 
+}) => {
+  if (totalPages <= 1) return null;
+
+  const getVisiblePages = () => {
+    const pages = [];
+    const maxVisible = 5;
+    
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        pages.push(1, 2, 3, 4, '...', totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        pages.push(1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+      } else {
+        pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
+      }
+    }
+    
+    return pages;
+  };
+
+  return (
+    <div className="flex justify-center items-center space-x-2 mt-8">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onPageChange(currentPage - 1)}
+        disabled={currentPage === 1}
+        className="border-gray-600 text-gray-300 hover:text-white hover:border-[#FF7A00]/50"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </Button>
+      
+      {getVisiblePages().map((page, index) => (
+        page === '...' ? (
+          <span key={index} className="px-3 py-2 text-gray-500">
+            ...
+          </span>
+        ) : (
+          <Button
+            key={page}
+            variant={currentPage === page ? "default" : "outline"}
+            size="sm"
+            onClick={() => typeof page === 'number' && onPageChange(page)}
+            className={
+              currentPage === page
+                ? "bg-[#FF7A00] text-white hover:bg-[#FF7A00]/80"
+                : "border-gray-600 text-gray-300 hover:text-white hover:border-[#FF7A00]/50"
+            }
+          >
+            {page}
+          </Button>
+        )
+      ))}
+      
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onPageChange(currentPage + 1)}
+        disabled={currentPage === totalPages}
+        className="border-gray-600 text-gray-300 hover:text-white hover:border-[#FF7A00]/50"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </Button>
+    </div>
+  );
+};
+
+export function CharacterGrid({ 
+  characters, 
+  isLoading, 
+  hasSearched, 
+  totalCount = 0,
+  currentPage = 1,
+  onPageChange
+}: CharacterGridProps) {
+  const navigate = useNavigate();
   const { startChat, isCreating } = useChatCreation();
+
+  // Use initial characters if no search has been performed
+  const { 
+    data: initialCharacters = [], 
+    isLoading: initialLoading
+  } = usePublicCharacters(ITEMS_PER_PAGE, 0);
+
+  // Determine which data to display
+  const displayCharacters = hasSearched ? characters : initialCharacters;
+  const loading = hasSearched ? isLoading : initialLoading;
+  const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
+
+  // Loading state with skeleton cards
+  if (loading) {
+    return (
+      <div className="px-3 sm:px-6 py-4 sm:py-8">
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6 lg:gap-8">
+          {Array.from({ length: ITEMS_PER_PAGE }).map((_, index) => (
+            <CharacterCardSkeleton key={index} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state for search results
+  if (hasSearched && characters.length === 0) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="text-gray-400 text-lg mb-2">No characters found</div>
+          <div className="text-gray-500 text-sm">Try adjusting your search criteria or filters</div>
+        </div>
+      </div>
+    );
+  }
 
   const handleViewCharacter = (character: PublicCharacter) => {
     navigate(`/character/${character.id}`);
   };
-
-  // Filter and sort characters based on props
-  const filteredCharacters = characters.filter(character => {
-    // Search in name, description, and tags
-    const searchTerm = searchQuery.toLowerCase();
-    const matchesSearch = character.name.toLowerCase().includes(searchTerm) ||
-                         character.short_description?.toLowerCase().includes(searchTerm) ||
-                         character.tags?.some(tag => tag.name.toLowerCase().includes(searchTerm)) ||
-                         character.creator?.username?.toLowerCase().includes(searchTerm);
-    
-    // Filter by category/tag
-    const matchesFilter = filterBy === 'all' || 
-                         character.tags?.some(tag => tag.name.toLowerCase() === filterBy.toLowerCase()) ||
-                         character.name.toLowerCase().includes(filterBy.toLowerCase());
-    
-    // Advanced filters
-    let matchesAdvanced = true;
-    if (advancedFilters) {
-      // Filter by selected tags
-      if (advancedFilters.tags.length > 0) {
-        matchesAdvanced = matchesAdvanced && advancedFilters.tags.some(selectedTag =>
-          character.tags?.some(tag => tag.name.toLowerCase() === selectedTag.toLowerCase())
-        );
-      }
-      
-      // Filter by creator
-      if (advancedFilters.creator) {
-        matchesAdvanced = matchesAdvanced && 
-          character.creator?.username?.toLowerCase().includes(advancedFilters.creator.toLowerCase());
-      }
-      
-      // NSFW filter (assuming we have NSFW tag)
-      if (!advancedFilters.nsfw) {
-        matchesAdvanced = matchesAdvanced && 
-          !character.tags?.some(tag => tag.name.toLowerCase() === 'nsfw');
-      }
-      
-      // Gender filter (assuming we have gender tags)
-      if (advancedFilters.gender !== 'any') {
-        matchesAdvanced = matchesAdvanced && 
-          character.tags?.some(tag => tag.name.toLowerCase() === advancedFilters.gender.toLowerCase());
-      }
-    }
-    
-    return matchesSearch && matchesFilter && matchesAdvanced;
-  });
-
-  const sortedCharacters = [...filteredCharacters].sort((a, b) => {
-    switch (sortBy) {
-      case 'newest':
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      case 'popularity':
-        // Weighted popularity score combining likes, favorites, and chat count
-        const scoreA = (a.likes_count * 2) + (a.favorites_count * 3) + (a.actual_chat_count * 1);
-        const scoreB = (b.likes_count * 2) + (b.favorites_count * 3) + (b.actual_chat_count * 1);
-        return scoreB - scoreA;
-      case 'relevance':
-        if (searchQuery) {
-          // Relevance based on exact matches and popularity
-          const aExactMatch = a.name.toLowerCase().includes(searchQuery.toLowerCase()) ? 100 : 0;
-          const bExactMatch = b.name.toLowerCase().includes(searchQuery.toLowerCase()) ? 100 : 0;
-          const aPopularity = (a.likes_count * 2) + (a.favorites_count * 3) + (a.actual_chat_count * 1);
-          const bPopularity = (b.likes_count * 2) + (b.favorites_count * 3) + (b.actual_chat_count * 1);
-          return (bExactMatch + bPopularity) - (aExactMatch + aPopularity);
-        }
-        return b.actual_chat_count - a.actual_chat_count;
-      default:
-        return b.actual_chat_count - a.actual_chat_count;
-    }
-  });
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-[#FF7A00]" />
-        <span className="ml-2 text-white">Loading characters...</span>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="text-center py-16">
-        <div className="text-red-400 text-lg mb-2">Failed to load characters</div>
-        <div className="text-gray-500 text-sm">Please try again later</div>
-      </div>
-    );
-  }
 
   return (
     <div className="px-3 sm:px-6 py-4 sm:py-8">
@@ -150,7 +177,20 @@ export function CharacterGrid({ searchQuery, sortBy, filterBy, advancedFilters }
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-8 space-y-2 sm:space-y-0">
         <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0">
           <h2 className="text-white text-lg sm:text-xl font-semibold">
-            {sortedCharacters.length} <span className="hidden sm:inline">Characters</span> Found
+            {hasSearched ? (
+              <>
+                {totalCount} <span className="hidden sm:inline">Characters</span> Found
+                {totalCount > ITEMS_PER_PAGE && (
+                  <span className="text-gray-400 text-sm sm:text-base font-normal ml-2">
+                    (Page {currentPage} of {totalPages})
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                {displayCharacters.length} <span className="hidden sm:inline">Characters</span> Found
+              </>
+            )}
           </h2>
           <div className="flex items-center space-x-2 text-gray-400 text-xs sm:text-sm">
             <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -162,11 +202,8 @@ export function CharacterGrid({ searchQuery, sortBy, filterBy, advancedFilters }
       {/* Character Grid - 2 columns on mobile, responsive thereafter */}
       <div 
         className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6 lg:gap-8 transition-all duration-500 ease-in-out"
-        style={{
-          animation: 'fade-in 0.6s ease-out'
-        }}
       >
-        {sortedCharacters.map((character, index) => (
+        {displayCharacters.map((character, index) => (
           <Card
             key={character.id}
             className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group cursor-pointer"
@@ -255,15 +292,24 @@ export function CharacterGrid({ searchQuery, sortBy, filterBy, advancedFilters }
       </div>
 
       {/* Empty State */}
-      {sortedCharacters.length === 0 && (
+      {displayCharacters.length === 0 && !loading && (
         <div className="text-center py-12 sm:py-16">
           <div className="text-gray-400 text-base sm:text-lg mb-2">No characters found</div>
           <div className="text-gray-500 text-sm">Try adjusting your search or filters</div>
         </div>
       )}
 
-      {/* Load More */}
-      {sortedCharacters.length > 0 && (
+      {/* Pagination Controls */}
+      {hasSearched && totalCount > ITEMS_PER_PAGE && onPageChange && (
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={onPageChange}
+        />
+      )}
+
+      {/* Load More for initial characters (non-search) */}
+      {!hasSearched && displayCharacters.length > 0 && (
         <div className="flex justify-center mt-8 sm:mt-16">
           <Button
             variant="outline"

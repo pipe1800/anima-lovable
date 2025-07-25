@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { searchPublicWorldInfos, SearchParams } from '@/lib/supabase-queries';
 import { supabase } from '@/integrations/supabase/client';
 
 export interface WorldInfoWithDetails {
@@ -214,6 +215,20 @@ export const usePublicWorldInfos = () => {
     },
     staleTime: 1000 * 60 * 5, // 5 minutes
     gcTime: 1000 * 60 * 10, // 10 minutes
+  });
+};
+
+export const useSearchPublicWorldInfos = (searchParams: SearchParams) => {
+  return useQuery({
+    queryKey: ['world-infos', 'search', searchParams],
+    queryFn: async () => {
+      const result = await searchPublicWorldInfos(searchParams);
+      if (result.error) throw result.error;
+      return result;
+    },
+    enabled: false, // Only run when manually triggered
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 15 * 60 * 1000, // 15 minutes
   });
 };
 

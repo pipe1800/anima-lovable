@@ -85,9 +85,9 @@ CREATE TABLE public.chat_context (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT chat_context_pkey PRIMARY KEY (id),
-  CONSTRAINT chat_context_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT chat_context_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT chat_context_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
+  CONSTRAINT chat_context_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT chat_context_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT chat_context_last_updated_by_message_id_fkey FOREIGN KEY (last_updated_by_message_id) REFERENCES public.messages(id)
 );
 CREATE TABLE public.chats (

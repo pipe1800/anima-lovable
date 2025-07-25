@@ -10,6 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
 import { TopBar } from '@/components/ui/TopBar';
 import { 
   Plus, 
@@ -20,7 +26,8 @@ import {
   Globe,
   Upload,
   Loader2,
-  X
+  X,
+  Sparkles
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
@@ -215,95 +222,143 @@ export default function ImprovedWorldInfoPage() {
             </TabsList>
 
             {/* Search and Filters */}
-            <div className="mt-6 space-y-4">
-              <div className="flex flex-col sm:flex-row gap-3">
+            <div className="bg-[#1a1a2e]/50 backdrop-blur-sm border-b border-gray-700/50 px-3 sm:px-6 py-3 sm:py-4">
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                {/* Search Input */}
                 <div className="relative flex-1">
-                  <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <Input
-                    placeholder="Search world info..."
+                    type="text"
+                    placeholder="Search world info by name or description... (Press Enter to search)"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 bg-gray-800/50 border-gray-600 text-white"
+                    className="pl-9 bg-[#121212] border-gray-700 text-white placeholder-gray-400 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20"
                   />
                 </div>
-                
+
+                {/* Filter Dropdown */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full sm:w-auto bg-[#121212] border-gray-700 text-white hover:bg-gray-700">
+                      <Filter className="w-4 h-4 mr-2" />
+                      Categories
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 bg-[#1a1a2e] border-gray-700 p-4">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-white">Filter by Tags</h4>
+                        {selectedTags.length > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedTags([])}
+                            className="text-gray-400 hover:text-white"
+                          >
+                            Clear
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {allTags.map((tag) => (
+                          <div key={tag.id} className="flex items-center space-x-2">
+                            <Checkbox
+                              id={tag.name}
+                              checked={selectedTags.includes(tag.name)}
+                              onCheckedChange={() => toggleTag(tag.name)}
+                              className="border-gray-600 data-[state=checked]:bg-[#FF7A00] data-[state=checked]:border-[#FF7A00]"
+                            />
+                            <label
+                              htmlFor={tag.name}
+                              className="text-sm text-white cursor-pointer"
+                            >
+                              {tag.name}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Sort Dropdown */}
                 <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="w-full sm:w-48 bg-gray-800/50 border-gray-600 text-white">
-                    <SelectValue />
+                  <SelectTrigger className="w-full sm:w-[180px] bg-[#121212] border-gray-700 text-white">
+                    <SelectValue placeholder="Sort by" />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="most-used">Most Used</SelectItem>
-                    <SelectItem value="most-liked">Most Liked</SelectItem>
-                    <SelectItem value="recently-created">Recently Created</SelectItem>
-                    <SelectItem value="recently-updated">Recently Updated</SelectItem>
-                    <SelectItem value="a-z">A-Z</SelectItem>
-                    <SelectItem value="z-a">Z-A</SelectItem>
+                  <SelectContent className="bg-[#1a1a2e] border-gray-700">
+                    <SelectItem value="most-used" className="text-white hover:bg-gray-700">Most Used</SelectItem>
+                    <SelectItem value="most-liked" className="text-white hover:bg-gray-700">Most Liked</SelectItem>
+                    <SelectItem value="recently-created" className="text-white hover:bg-gray-700">Recently Created</SelectItem>
+                    <SelectItem value="recently-updated" className="text-white hover:bg-gray-700">Recently Updated</SelectItem>
+                    <SelectItem value="a-z" className="text-white hover:bg-gray-700">A-Z</SelectItem>
+                    <SelectItem value="z-a" className="text-white hover:bg-gray-700">Z-A</SelectItem>
                   </SelectContent>
                 </Select>
 
+                {/* Search Button */}
                 <Button
-                  variant="outline"
-                  onClick={() => setShowMobileFilters(!showMobileFilters)}
-                  className="sm:hidden border-gray-600 text-white"
+                  onClick={() => {}} // No explicit search action needed as filtering is reactive
+                  className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium"
                 >
-                  <Filter className="w-4 h-4 mr-2" />
-                  Tags
+                  <Search className="w-4 h-4 mr-2" />
+                  Search
                 </Button>
+
+                {/* Surprise Me Button - only for discover tab */}
+                {activeTab === 'discover' && (
+                  <Button
+                    onClick={() => {
+                      const availableWorldInfos = filteredAndSortedWorldInfos;
+                      if (availableWorldInfos.length > 0) {
+                        const randomIndex = Math.floor(Math.random() * availableWorldInfos.length);
+                        const randomWorldInfo = availableWorldInfos[randomIndex];
+                        navigate(`/world-info-view/${randomWorldInfo.id}`);
+                      }
+                    }}
+                    disabled={filteredAndSortedWorldInfos.length === 0}
+                    className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium"
+                  >
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Surprise Me!
+                  </Button>
+                )}
               </div>
-
-              {/* Tag filters */}
-              {(showMobileFilters || isDesktop) && allTags.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-gray-400">Filter by Tags</h3>
-                    {hasActiveFilters && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={clearFilters}
-                        className="text-[#FF7A00] hover:text-[#FF7A00]/80"
-                      >
-                        Clear all
-                      </Button>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {allTags.map((tag: any) => (
-                      <Badge
-                        key={tag.id}
-                        variant={selectedTags.includes(tag.name) ? "default" : "outline"}
-                        className={cn(
-                          "cursor-pointer transition-all",
-                          selectedTags.includes(tag.name) 
-                            ? "bg-[#FF7A00] text-white border-[#FF7A00]" 
-                            : "border-gray-600 text-gray-300 hover:border-[#FF7A00] hover:text-[#FF7A00]"
-                        )}
-                        onClick={() => toggleTag(tag.name)}
-                      >
-                        {tag.name}
-                        {selectedTags.includes(tag.name) && (
-                          <X className="w-3 h-3 ml-1" />
-                        )}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Active filters display */}
-              {selectedTags.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <span>Active filters:</span>
-                  <div className="flex items-center gap-1">
-                    {selectedTags.map(tag => (
-                      <Badge key={tag} variant="secondary" className="text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
+
+            {/* Active Filter Pills */}
+            {selectedTags.length > 0 && (
+              <div className="px-3 sm:px-6 py-3 border-b border-gray-700/50">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-white text-sm font-medium">Active Filters:</h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearFilters}
+                    className="text-gray-400 hover:text-[#FF7A00] text-sm"
+                  >
+                    Clear All
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedTags.map(tag => (
+                    <Badge 
+                      key={tag} 
+                      variant="outline" 
+                      className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-3 py-1 flex items-center gap-2"
+                    >
+                      <span>{tag}</span>
+                      <button 
+                        onClick={() => toggleTag(tag)} 
+                        className="hover:text-white transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Tab Contents */}
             <TabsContent value="discover" className="mt-6">

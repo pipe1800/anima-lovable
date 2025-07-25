@@ -1,18 +1,30 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { getPublicCharacters } from '@/lib/supabase-queries';
+import { useNSFW } from '@/contexts/NSFWContext';
+import { getPublicCharacters, searchPublicCharacters, SearchParams } from '@/lib/supabase-queries';
 import { supabase } from '@/integrations/supabase/client';
 
 export const usePublicCharacters = (limit = 50, offset = 0) => {
+  const { nsfwEnabled } = useNSFW();
+  
   return useQuery({
-    queryKey: ['characters', 'public', { limit, offset }],
+    queryKey: ['characters', 'public', { limit, offset, nsfwEnabled }],
     queryFn: async () => {
-      const result = await getPublicCharacters(limit, offset);
+      const result = await getPublicCharacters(limit, offset, nsfwEnabled);
       if (result.error) throw result.error;
       return result.data || [];
     },
     staleTime: 10 * 60 * 1000, // 10 minutes - public characters don't change frequently
     gcTime: 30 * 60 * 1000, // 30 minutes
+  });
+};
+
+export const useSearchPublicCharacters = (params: SearchParams) => {
+  return useQuery({
+    queryKey: ['public-characters-search', params],
+    queryFn: () => searchPublicCharacters(params),
+    enabled: false, // Manual execution only
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 };
 
