@@ -1,102 +1,148 @@
 import React, { useEffect, useState } from 'react';
 import { useTutorial } from '@/contexts/TutorialContext';
-import { TutorialTooltip } from './TutorialTooltip';
-import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 
-export const TutorialOverlay = () => {
-  const { isActive, highlightedElement, currentStepData, disableInteractions } = useTutorial();
+export const TutorialOverlay: React.FC = () => {
+  const { 
+    isActive, 
+    currentStepData, 
+    highlightedElement,
+    currentStep,
+    tutorialSteps,
+    nextStep,
+    previousStep,
+    skipTutorial,
+    completeTutorial
+  } = useTutorial();
+  
   const [highlightedRect, setHighlightedRect] = useState<DOMRect | null>(null);
 
-  useEffect(() => {
-    if (!isActive || !highlightedElement) {
-      setHighlightedRect(null);
-      return;
-    }
+  console.log('🎓 TutorialOverlay: Rendering', {
+    isActive,
+    currentStepData,
+    highlightedElement
+  });
 
-    const updateHighlight = () => {
+  useEffect(() => {
+    if (highlightedElement) {
       const element = document.querySelector(highlightedElement);
       if (element) {
         const rect = element.getBoundingClientRect();
         setHighlightedRect(rect);
+      } else {
+        console.warn('🎓 TutorialOverlay: Element not found:', highlightedElement);
+        setHighlightedRect(null);
       }
-    };
-
-    updateHighlight();
-    const resizeObserver = new ResizeObserver(updateHighlight);
-    const element = document.querySelector(highlightedElement);
-    
-    if (element) {
-      resizeObserver.observe(element);
+    } else {
+      setHighlightedRect(null);
     }
+  }, [highlightedElement]);
 
-    window.addEventListener('resize', updateHighlight);
-    window.addEventListener('scroll', updateHighlight);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', updateHighlight);
-      window.removeEventListener('scroll', updateHighlight);
-    };
-  }, [isActive, highlightedElement]);
-
-  if (!isActive || !highlightedRect || !currentStepData) {
+  if (!isActive || !currentStepData) {
+    console.log('🎓 TutorialOverlay: Not rendering - inactive or no step data');
     return null;
   }
 
-  const clipPath = `polygon(
-    0% 0%, 
-    0% 100%, 
-    ${highlightedRect.left}px 100%, 
-    ${highlightedRect.left}px ${highlightedRect.top}px, 
-    ${highlightedRect.right}px ${highlightedRect.top}px, 
-    ${highlightedRect.right}px ${highlightedRect.bottom}px, 
-    ${highlightedRect.left}px ${highlightedRect.bottom}px, 
-    ${highlightedRect.left}px 100%, 
-    100% 100%, 
-    100% 0%
-  )`;
+  const isLastStep = currentStep === tutorialSteps.length - 1;
 
   return (
     <>
-      {/* Dark overlay with cutout */}
-      <div
-        className={cn(
-          "fixed inset-0 bg-black/70 pointer-events-none z-[9998]",
-          "transition-opacity duration-300"
-        )}
-        style={{
-          clipPath,
-        }}
+      {/* Dark overlay */}
+      <div 
+        className="fixed inset-0 bg-black/80 z-[9998]"
+        onClick={(e) => e.stopPropagation()}
       />
       
-      {/* Highlight ring */}
-      <div
-        className={cn(
-          "fixed pointer-events-none z-[9999] rounded-lg transition-all duration-300",
-          currentStepData?.requiredInteraction ? "cursor-pointer" : ""
-        )}
-        style={{
-          left: highlightedRect.left - 4,
-          top: highlightedRect.top - 4,
-          width: highlightedRect.width + 8,
-          height: highlightedRect.height + 8,
-          boxShadow: currentStepData?.requiredInteraction 
-            ? '0 0 0 3px #22c55e, 0 0 20px rgba(34, 197, 94, 0.5)' // Green for interactive
-            : '0 0 0 3px #FF7A00, 0 0 20px rgba(255, 122, 0, 0.5)', // Orange for info
-          animation: currentStepData?.requiredInteraction ? 'pulse 1.5s infinite' : 'pulse 2s infinite',
-        }}
-      />
-
-      {/* Tooltip */}
-      <TutorialTooltip
-        targetRect={highlightedRect}
-        step={currentStepData}
-      />
-
-      {/* Interaction blocker - only blocks when interactions should be disabled */}
-      {disableInteractions && (
-        <div className="fixed inset-0 z-[9997] pointer-events-auto cursor-not-allowed bg-transparent" />
+      {/* Highlight box around element */}
+      {highlightedRect && (
+        <div
+          className="fixed z-[9999] pointer-events-none border-2 border-[#FF7A00] rounded-lg"
+          style={{
+            top: highlightedRect.top - 4,
+            left: highlightedRect.left - 4,
+            width: highlightedRect.width + 8,
+            height: highlightedRect.height + 8,
+            boxShadow: '0 0 0 4px rgba(255, 122, 0, 0.3), 0 0 20px rgba(255, 122, 0, 0.5)'
+          }}
+        />
       )}
+      
+      {/* Tutorial tooltip */}
+      <div 
+        className="fixed z-[10000] bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-6 max-w-md"
+        style={{
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          minWidth: '400px'
+        }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-white font-bold text-lg">{currentStepData.title}</h3>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={skipTutorial}
+            className="text-gray-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+
+        {/* Content */}
+        <p className="text-gray-300 mb-6">{currentStepData.description}</p>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            Step {currentStep + 1} of {tutorialSteps.length}
+          </div>
+          
+          <div className="flex space-x-2">
+            {currentStep > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={previousStep}
+                className="text-gray-300 border-gray-600 hover:bg-gray-800"
+              >
+                <ChevronLeft className="w-4 h-4 mr-1" />
+                Back
+              </Button>
+            )}
+            
+            {!isLastStep ? (
+              <Button
+                size="sm"
+                onClick={nextStep}
+                className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
+                disabled={currentStepData.requiredInteraction}
+              >
+                {currentStepData.requiredInteraction ? 'Complete Action First' : 'Next'}
+                <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={completeTutorial}
+                className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
+              >
+                Finish Tour
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="mt-4 h-1 bg-gray-700 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-[#FF7A00] transition-all duration-300"
+            style={{ width: `${((currentStep + 1) / tutorialSteps.length) * 100}%` }}
+          />
+        </div>
+      </div>
     </>
   );
 };
