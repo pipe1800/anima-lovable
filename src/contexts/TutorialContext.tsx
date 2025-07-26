@@ -222,22 +222,9 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
       const nextIndex = currentStep + 1;
       const nextStepData = tutorialSteps[nextIndex];
       
-      // Clear current highlight immediately
-      setHighlightedElement(null);
-      
-      // For steps that require elements to be rendered first, wait
-      if (nextStepData?.target) {
-        // Give time for animations and rendering
-        setTimeout(() => {
-          setCurrentStep(nextIndex);
-          // Wait a bit more for element to be in DOM
-          setTimeout(() => {
-            setHighlightedElement(nextStepData.target);
-          }, 300); // Wait for panel animation to complete
-        }, 100);
-      } else {
-        setCurrentStep(nextIndex);
-      }
+      // Update step and highlight together
+      setCurrentStep(nextIndex);
+      setHighlightedElement(nextStepData?.target || null);
     } else {
       completeTutorial();
     }
@@ -248,17 +235,9 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
       const prevIndex = currentStep - 1;
       const prevStepData = tutorialSteps[prevIndex];
       
-      // Clear current highlight immediately
-      setHighlightedElement(null);
-      
-      setTimeout(() => {
-        setCurrentStep(prevIndex);
-        if (prevStepData?.target) {
-          setTimeout(() => {
-            setHighlightedElement(prevStepData.target);
-          }, 300);
-        }
-      }, 100);
+      // Update step and highlight together
+      setCurrentStep(prevIndex);
+      setHighlightedElement(prevStepData?.target || null);
     }
   }, [currentStep]);
 

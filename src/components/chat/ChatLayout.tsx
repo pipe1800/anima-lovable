@@ -70,7 +70,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [isCreatingPersona, setIsCreatingPersona] = useState(false);
   
   // Tutorial state
-  const { handleStepAction, worldInfoDropdownVisible, disableInteractions, startTutorial } = useTutorial();
+  const { handleStepAction, worldInfoDropdownVisible, disableInteractions, startTutorial, isActive } = useTutorial();
   const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
   
   // Enhanced Memory state
@@ -831,6 +831,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               onClick={handleRightPanelToggle}
               className="text-gray-400 hover:text-white hover:bg-gray-800"
               data-tutorial="right-panel-toggle"
+              style={{ position: 'relative', zIndex: isActive ? 1000002 : 'auto' }}
             >
               <Settings className="w-7 h-7" />
             </Button>
@@ -849,14 +850,14 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           {/* Backdrop */}
           <div 
             className="fixed inset-0 bg-black/50"
-            style={{ zIndex: 29 }}
+            style={{ zIndex: 40 }}
             onClick={() => setRightPanelOpen(false)}
           />
           
-          {/* Panel - with explicit low z-index */}
+          {/* Panel - Low z-index to stay under tutorial */}
           <div 
             className="fixed right-0 top-0 h-full w-[544px] bg-[#0f0f0f] border-l border-gray-700/50 flex flex-col animate-slide-in-right"
-            style={{ zIndex: 30 }}
+            style={{ zIndex: 41 }}
             data-tutorial="right-panel"
           >
             {/* Panel Header */}

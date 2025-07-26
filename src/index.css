@@ -291,31 +291,36 @@ All colors MUST be HSL.
     animation: shimmer 3s ease-in-out infinite;
   }
 
-  /* Tutorial system z-index hierarchy */
-  .tutorial-overlay {
-    z-index: 999998 !important;
+  /* Tutorial system - FINAL z-index hierarchy */
+  body.tutorial-active {
+    overflow: hidden;
   }
-  
-  .tutorial-highlight {
-    z-index: 999999 !important;
+
+  /* Dark overlay background */
+  .tutorial-overlay > div:first-child {
+    z-index: 50000 !important;
   }
-  
+
+  /* Highlighted element cutout and border */
+  .tutorial-overlay .tutorial-highlight {
+    z-index: 50001 !important;
+  }
+
+  /* Tutorial tooltip */
   .tutorial-tooltip {
-    z-index: 1000002 !important;
+    z-index: 50002 !important;
   }
-  
-  /* Ensure right panel and other UI elements stay below tutorial */
+
+  /* Right panel specifically */
   .animate-slide-in-right {
     z-index: 30 !important;
   }
-  
-  /* Fix for right panel specifically */
-  [data-tutorial="right-panel"] {
-    z-index: 30 !important;
-  }
-  
-  /* Tutorial active state */
-  body.tutorial-active {
-    overflow: hidden;
+
+  /* Tutorial gear button must be clickable */
+  body.tutorial-active [data-tutorial="right-panel-toggle"] {
+    position: relative !important;
+    z-index: 1000002 !important; /* Above the click area */
+    pointer-events: auto !important;
+    cursor: pointer !important;
   }
 }
