@@ -128,7 +128,12 @@ export function useCharacterCreation() {
       };
 
       setCharacterData(formData);
-      setSelectedTags(character.tags || []);
+      // Set selectedTags with the proper tag objects from the character's tags
+      if (character.tags && Array.isArray(character.tags)) {
+        setSelectedTags(character.tags);
+      } else {
+        setSelectedTags([]);
+      }
     } catch (error) {
       console.error('Error loading character:', error);
       toast({

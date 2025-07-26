@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { NSFWProvider } from "@/contexts/NSFWContext";
+import { TutorialProvider } from "@/contexts/TutorialContext";
 import OnboardingGuard from "@/components/auth/OnboardingGuard";
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
 import Index from "./pages/Index";
@@ -45,9 +46,10 @@ import DialogueTestPage from "./pages/DialogueTestPage";
 const App = () => (
   <AuthProvider>
     <NSFWProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
+      <TutorialProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
         <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
@@ -205,6 +207,7 @@ const App = () => (
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
+    </TutorialProvider>
     </NSFWProvider>
   </AuthProvider>
 );

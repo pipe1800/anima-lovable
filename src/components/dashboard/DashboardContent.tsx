@@ -38,6 +38,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { StatsCard } from '@/components/ui/stats-card';
 import { ChatCard } from '@/components/ui/chat-card';
 import { DashboardErrorBoundary } from '@/components/ui/dashboard-error-boundary';
+import { formatNumberWithK } from '@/lib/utils/formatting';
 import { 
   MessageCircle, 
   Trophy, 
@@ -177,12 +178,12 @@ export function DashboardContent() {
       description: character.description,
       avatar: character.name?.charAt(0) || 'C',
       image: character.avatar_url || "/placeholder.svg",
-      isPublic: character.is_public,
-      chatCount: character.chat_count || 0,
-      likeCount: character.like_count || 0,
+      isPublic: character.visibility === 'public',
+      chatCount: character.actual_chat_count || 0,  // Use actual_chat_count
+      likeCount: character.likes_count || 0,        // Use likes_count
       tagline: character.tagline || character.short_description || '',
-      totalChats: character.chat_count || 0,
-      likesCount: character.like_count || 0,
+      totalChats: character.actual_chat_count || 0, // Use actual_chat_count
+      likesCount: character.likes_count || 0,       // Use likes_count
       originalCharacter: character
     })), [myCharacters]
   );
@@ -542,14 +543,14 @@ export function DashboardContent() {
             <>
               <StatsCard
                 title="Active Chats"
-                value={totalChats}
+                value={formatNumberWithK(totalChats)}
                 icon={MessageCircle}
                 onClick={() => navigate('/chat')}
               />
 
               <StatsCard
                 title="Characters"
-                value={myCharacters.length}
+                value={formatNumberWithK(myCharacters.length)}
                 icon={Users}
                 onClick={() => navigate('/character-creator')}
               />
@@ -772,11 +773,11 @@ export function DashboardContent() {
                               <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-xs sm:text-sm">
                                 <div className="flex items-center space-x-1 text-gray-300">
                                   <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{character.totalChats}</span>
+                                  <span>{formatNumberWithK(character.totalChats)}</span>
                                 </div>
                                 <div className="flex items-center space-x-1 text-gray-300">
                                   <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{character.likesCount}</span>
+                                  <span>{formatNumberWithK(character.likesCount)}</span>
                                 </div>
                               </div>
                             </div>
@@ -864,11 +865,11 @@ export function DashboardContent() {
                               <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-xs sm:text-sm">
                                 <div className="flex items-center space-x-1 text-gray-300">
                                   <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{character.totalChats}</span>
+                                  <span>{formatNumberWithK(character.totalChats)}</span>
                                 </div>
                                 <div className="flex items-center space-x-1 text-gray-300">
                                   <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{character.likesCount}</span>
+                                  <span>{formatNumberWithK(character.likesCount)}</span>
                                 </div>
                               </div>
                             </div>

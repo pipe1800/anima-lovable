@@ -24,7 +24,6 @@ import {
 import { ProfileHeader } from './NewProfileHeader';
 import { StatsBar } from './StatsBar';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
-import { NotificationSettings } from '@/components/settings/categories/NotificationSettings';
 import { BillingSettings } from '@/components/settings/categories/BillingSettings';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -233,16 +232,14 @@ export const NewProfileView = () => {
           <Card>
             <CardContent className="p-6">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="account">
                     Account & Security
                   </TabsTrigger>
                   <TabsTrigger value="billing">
                     Subscription & Billing
                   </TabsTrigger>
-                  <TabsTrigger value="notifications">
-                    Notifications
-                  </TabsTrigger>
+                  {/* Removed Notifications tab */}
                 </TabsList>
 
                 <TabsContent value="account" className="space-y-6">
@@ -253,9 +250,7 @@ export const NewProfileView = () => {
                   <BillingSettings />
                 </TabsContent>
 
-                <TabsContent value="notifications" className="space-y-6">
-                  <NotificationSettings />
-                </TabsContent>
+                {/* Removed Notifications TabsContent */}
               </Tabs>
             </CardContent>
           </Card>

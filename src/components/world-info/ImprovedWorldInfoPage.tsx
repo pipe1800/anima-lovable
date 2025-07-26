@@ -304,25 +304,6 @@ export default function ImprovedWorldInfoPage() {
                   <Search className="w-4 h-4 mr-2" />
                   Search
                 </Button>
-
-                {/* Surprise Me Button - only for discover tab */}
-                {activeTab === 'discover' && (
-                  <Button
-                    onClick={() => {
-                      const availableWorldInfos = filteredAndSortedWorldInfos;
-                      if (availableWorldInfos.length > 0) {
-                        const randomIndex = Math.floor(Math.random() * availableWorldInfos.length);
-                        const randomWorldInfo = availableWorldInfos[randomIndex];
-                        navigate(`/world-info-view/${randomWorldInfo.id}`);
-                      }
-                    }}
-                    disabled={filteredAndSortedWorldInfos.length === 0}
-                    className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium"
-                  >
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    Surprise Me!
-                  </Button>
-                )}
               </div>
             </div>
 

@@ -38,6 +38,14 @@ const Chat = () => {
   const existingChatId = chatId || location.state?.existingChatId;
   const fromOnboarding = location.state?.fromOnboarding;
 
+  // Set localStorage flag for tutorial trigger when coming from onboarding
+  useEffect(() => {
+    if (fromOnboarding && user) {
+      console.log('🎓 Chat: Setting fromOnboarding flag for tutorial');
+      localStorage.setItem('fromOnboarding', 'true');
+    }
+  }, [fromOnboarding, user]);
+
   // Load context from database and sync with local state
   const { context: loadedContext, reloadContext, isLoading: contextLoading } = useContextManagement(
     currentChatId, 

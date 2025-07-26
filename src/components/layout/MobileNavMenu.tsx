@@ -7,8 +7,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { NSFWToggle } from '@/components/NSFWToggle';
 
-const LOGO_URL = 'https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM';
-
+const LOGO_URL = '/assets/logo.png';
 // Preload the logo image
 const logoImg = new Image();
 logoImg.src = LOGO_URL;
@@ -18,9 +17,10 @@ interface MobileNavMenuProps {
   username?: string;
   pageTitle?: string;
   showFavoriteIcon?: boolean;
+  onNavigate?: (destination: string) => void;
 }
 
-export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, showFavoriteIcon = true }: MobileNavMenuProps) => {
+export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, showFavoriteIcon = true, onNavigate }: MobileNavMenuProps) => {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = React.useState(false);
@@ -40,7 +40,11 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
     { title: "Subscription", url: "/subscription", icon: Crown },
   ];
 
-  const handleNavClick = () => {
+  const handleNavClick = (event?: React.MouseEvent, url?: string) => {
+    if (onNavigate && url) {
+      event?.preventDefault();
+      onNavigate(url);
+    }
     setOpen(false);
   };
 
@@ -48,7 +52,12 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
     <div className="flex items-center space-x-3">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="md:hidden text-white hover:bg-gray-700 p-2">
+          <Button 
+            data-tutorial="sidebar-trigger" 
+            variant="ghost" 
+            size="icon" 
+            className="md:hidden text-white hover:bg-gray-700 p-2"
+          >
             <Menu className="h-7 w-7" />
           </Button>
         </SheetTrigger>
@@ -94,7 +103,7 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
                   <NavLink
                     key={item.title}
                     to={item.url}
-                    onClick={handleNavClick}
+                    onClick={(e) => handleNavClick(e, item.url)}
                     className={({ isActive }) =>
                       `flex items-center space-x-3 w-full px-4 py-3 rounded-lg text-left transition-colors ${
                         isActive

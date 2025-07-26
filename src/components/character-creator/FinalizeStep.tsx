@@ -75,7 +75,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
       setVisibility(data.visibility || 'public');
       
       // Check if NSFW tag exists in selected tags to determine initial NSFW state
-      const hasNSFWTag = selectedTags.some(tag => tag.name.toLowerCase() === 'nsfw');
+      const hasNSFWTag = selectedTags.some(tag => tag?.name?.toLowerCase() === 'nsfw');
       setEnableNSFW(data.nsfw_enabled || hasNSFWTag);
     }
   }, [data, selectedTags]);
@@ -107,7 +107,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
     if (!nsfwTag) return; // No NSFW tag found in database
 
-    const nsfwTagIndex = selectedTags.findIndex(tag => tag.name.toLowerCase() === 'nsfw');
+    const nsfwTagIndex = selectedTags.findIndex(tag => tag?.name?.toLowerCase() === 'nsfw');
     
     if (checked && nsfwTagIndex === -1) {
       // Add NSFW tag if switch is turned on and tag doesn't exist
@@ -168,15 +168,25 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
             </div>
             
             <div className="space-y-3 md:space-y-4">
-              {data.personality?.tags?.length > 0 && (
+              {/* Tags Display */}
+              {(selectedTags.length > 0 || data.personality?.tags?.length > 0) && (
                 <div>
                   <Label className="text-gray-400 text-xs md:text-sm mb-2 block">Personality Tags</Label>
                   <div className="flex flex-wrap gap-1.5 md:gap-2">
-                    {data.personality.tags.map((tag: string) => (
-                      <Badge key={tag} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
+                    {/* Display selectedTags if available (tag objects), otherwise display data.personality.tags (strings) */}
+                    {selectedTags.length > 0 ? (
+                      selectedTags.map((tag) => (
+                        <Badge key={`finalize-tag-${tag.id}`} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
+                          {tag.name}
+                        </Badge>
+                      ))
+                    ) : (
+                      data.personality?.tags?.map((tag: string, index: number) => (
+                        <Badge key={`personality-tag-${index}`} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
+                          {tag}
+                        </Badge>
+                      ))
+                    )}
                   </div>
                 </div>
               )}

@@ -356,7 +356,7 @@ export const ChatConfigurationTab = ({
   return (
     <div className="p-4 space-y-6">
       {/* Persona Selection */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+      <Card data-tutorial="persona-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-medium text-sm">Persona</h3>
           <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
@@ -370,6 +370,7 @@ export const ChatConfigurationTab = ({
               <Button 
                 variant="ghost" 
                 className="flex-1 justify-between text-gray-400 hover:text-white hover:bg-gray-800 px-3 border border-gray-600/50"
+                data-tutorial="persona-dropdown"
               >
                 <div className="flex items-center space-x-2">
                   <Avatar className="w-6 h-6">
@@ -457,7 +458,7 @@ export const ChatConfigurationTab = ({
       </Card>
 
       {/* World Info Selection */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+      <Card data-tutorial="world-info-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-medium text-sm">World Info</h3>
           <Badge variant="outline" className="border-[#FF7A00] text-[#FF7A00] text-xs">
@@ -474,7 +475,7 @@ export const ChatConfigurationTab = ({
       </Card>
 
       {/* Global Addon Settings */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+      <Card data-tutorial="global-addons-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-white font-medium text-sm">Global Addon Settings</h3>
           <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
@@ -484,7 +485,11 @@ export const ChatConfigurationTab = ({
 
         <div className="space-y-4">
           {Object.entries(addonCategories).map(([categoryName, addons]) => (
-            <div key={categoryName} className="space-y-3">
+            <div 
+              key={categoryName} 
+              className="space-y-3"
+              data-tutorial={categoryName === 'Core Enhancements' ? 'core-enhancements' : categoryName === 'Character Tracking' ? 'character-tracking' : undefined}
+            >
               <h4 className="text-gray-300 font-medium text-sm border-b border-gray-700/30 pb-1">
                 {categoryName}
               </h4>

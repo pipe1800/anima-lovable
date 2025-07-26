@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ChevronRight, Settings, Search, Heart, Star, MessageCircle, Info, Edit, User, Plus, Upload, X, ChevronDown, Trash2, Zap, Brain, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -70,7 +70,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [isCreatingPersona, setIsCreatingPersona] = useState(false);
   
   // Tutorial state
-  const { handleStepAction, worldInfoDropdownVisible, disableInteractions } = useTutorial();
+  const { handleStepAction, worldInfoDropdownVisible, disableInteractions, startTutorial, isActive, currentStep } = useTutorial();
   const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
   
   // Enhanced Memory state
@@ -108,6 +108,28 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       shouldShowButton: globalSettings?.enhanced_memory && currentChatId
     });
   }, [globalSettings, currentChatId]);
+
+  // Debug Tutorial - Memories Button
+  useEffect(() => {
+    console.log('🧠 Tutorial Debug - Memories Button:', {
+      isActive,
+      currentStep,
+      globalSettings,
+      enhancedMemory: globalSettings?.enhanced_memory,
+      shouldShowButton: (globalSettings?.enhanced_memory || (isActive && currentStep === 4))
+    });
+  }, [isActive, currentStep, globalSettings]);
+
+  // Auto-close right panel when tutorial completes
+  const prevIsActive = useRef(isActive);
+  useEffect(() => {
+    // Only close if tutorial just became inactive (was active, now it's not)
+    if (prevIsActive.current && !isActive && rightPanelOpen) {
+      console.log('🎓 Tutorial just completed, closing right panel');
+      setRightPanelOpen(false);
+    }
+    prevIsActive.current = isActive;
+  }, [isActive, rightPanelOpen]);
   
   const navigate = useNavigate();
 
@@ -363,10 +385,19 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
-  const handleRightPanelToggle = () => {
-    setRightPanelOpen(!rightPanelOpen);
-    handleStepAction('right-panel-toggled');
-  };
+  const handleRightPanelToggle = useCallback(() => {
+    console.log('🔧 Right panel toggle clicked:', { isActive, currentStep, rightPanelOpen });
+    
+    setRightPanelOpen(prev => {
+      const newState = !prev;
+      // Only notify tutorial if tutorial is active
+      if (newState && currentStep === 1 && isActive) {
+        console.log('🔧 Notifying tutorial of right panel toggle');
+        handleStepAction('right-panel-toggled');
+      }
+      return newState;
+    });
+  }, [currentStep, isActive, handleStepAction]);
 
     const handleWorldInfoSelect = async (worldInfo: { id: string; name: string } | null) => {
     console.log('🌍 ChatLayout: World info selection changed:', worldInfo);
@@ -693,7 +724,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         {/* Chat Header */}
         <header className="bg-[#1a1a2e] border-b border-gray-700/50 p-4 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <SidebarTrigger className="text-gray-400 hover:text-white" />
+            <SidebarTrigger 
+              className="text-gray-400 hover:text-white" 
+              data-tutorial="sidebar-trigger"
+            />
             <Avatar className="w-10 h-10 ring-2 ring-[#FF7A00]/50">
               <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
               <AvatarFallback className="bg-[#FF7A00] text-white font-bold">
@@ -709,15 +743,48 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           <div className="flex items-center space-x-3">
             {/* Credits Balance */}
             {creditsBalance !== undefined && (
-              <div className="flex items-center space-x-2 px-3 py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg">
+              <div 
+                className="flex items-center space-x-2 px-3 py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg"
+                data-tutorial="credits-display"
+              >
                 <Zap className="w-3 h-3 text-[#FF7A00]" />
                 <span className="text-sm font-medium text-white">{creditsBalance.toLocaleString()}</span>
                 <span className="text-xs text-gray-400">credits</span>
               </div>
             )}
             
+            {/* DEV: Test Tutorial Button */}
+            {process.env.NODE_ENV === 'development' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  console.log('🎯 Manual tutorial trigger - forcing start');
+                  
+                  // Reset the tutorial completion in profiles table
+                  if (currentUser?.id) {
+                    const { error } = await supabase
+                      .from('profiles')
+                      .update({ onboarding_completed: false })
+                      .eq('id', currentUser.id);
+                    
+                    if (!error) {
+                      console.log('🎯 Tutorial completion reset in profiles');
+                    }
+                  }
+                  
+                  // Start the tutorial
+                  startTutorial();
+                }}
+                className="bg-[#0f0f0f] border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 hover:border-blue-400 transition-all duration-200"
+                title="Start tutorial (dev only)"
+              >
+                📚 Tutorial
+              </Button>
+            )}
+            
             {/* Create Memory Button */}
-            {globalSettings?.enhanced_memory && currentChatId && (
+            {currentChatId && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -726,6 +793,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                     disabled={isCreatingMemory}
                     className="bg-[#0f0f0f] border-purple-500/50 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 hover:border-purple-400 transition-all duration-200"
                     title="Create memory from this conversation"
+                    data-tutorial="create-memory"
                   >
                     {isCreatingMemory ? (
                       <>
@@ -794,6 +862,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               onClick={handleRightPanelToggle}
               className="text-gray-400 hover:text-white hover:bg-gray-800"
               data-tutorial="right-panel-toggle"
+              style={{ position: 'relative', zIndex: isActive ? 1000002 : 'auto' }}
             >
               <Settings className="w-7 h-7" />
             </Button>
@@ -809,14 +878,14 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       {/* Right Panel - Slide in from right */}
       {rightPanelOpen && (
         <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/50 z-40"
-            onClick={() => setRightPanelOpen(false)}
-          />
+          {/* Backdrop removed to prevent dimming overlay confusion with tutorial */}
           
-          {/* Panel */}
-          <div className="fixed right-0 top-0 h-full w-[544px] bg-[#0f0f0f] border-l border-gray-700/50 z-50 flex flex-col animate-slide-in-right">
+          {/* Panel - Low z-index to stay under tutorial */}
+          <div 
+            className="fixed right-0 top-0 h-full w-[544px] bg-[#0f0f0f] border-l border-gray-700/50 flex flex-col animate-slide-in-right"
+            style={{ zIndex: 41 }}
+            data-tutorial="right-panel"
+          >
             {/* Panel Header */}
             <div className="p-4 border-b border-gray-700/50">
               <div className="flex items-center justify-between mb-4">
@@ -832,7 +901,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               </div>
 
               {/* Tabs */}
-              <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg">
+              <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg" data-tutorial="right-panel-tabs">
                 <button
                   onClick={() => setActiveTab('history')}
                   className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -856,7 +925,11 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                   <span>Details</span>
                 </button>
                 <button
-                  onClick={() => setActiveTab('config')}
+                  onClick={() => {
+                    setActiveTab('config');
+                    handleStepAction('config-tab-clicked');
+                  }}
+                  data-tutorial="config-tab"
                   className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     activeTab === 'config'
                       ? 'bg-[#FF7A00] text-white'
@@ -1043,9 +1116,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                               Edit Character
                             </Button>
                           )}
-                          {/* View Memories Button - Only show if Enhanced Memory is enabled */}
-                          {globalSettings?.enhanced_memory && (
+                          {/* View Memories Button - Show if Enhanced Memory is enabled OR tutorial is active on step 5 */}
+                          {(globalSettings?.enhanced_memory || (isActive && currentStep === 4)) && (
                             <Button
+                              data-tutorial="memories-button"
                               onClick={() => setShowMemoriesDialog(true)}
                               variant="outline"
                               className="w-full bg-transparent border-[#FF7A00]/50 hover:bg-[#FF7A00]/10 hover:text-[#FF7A00] text-[#FF7A00] border-[#FF7A00]/30"
