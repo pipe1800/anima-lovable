@@ -64,6 +64,7 @@ const CharacterCreator = () => {
   const [userCredits, setUserCredits] = useState(0);
   const [isParsingCard, setIsParsingCard] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
+  const [exitDestination, setExitDestination] = useState<string>('/dashboard');
 
   // Fetch user credits for mobile nav
   useEffect(() => {
@@ -199,13 +200,14 @@ const CharacterCreator = () => {
     }
   };
 
-  const handleExit = () => {
+  const handleExit = useCallback((destination: string = '/dashboard') => {
     if (isDirty) {
+      setExitDestination(destination);
       setShowExitDialog(true);
     } else {
-      navigate('/dashboard');
+      navigate(destination);
     }
-  };
+  }, [isDirty, navigate]);
 
   const renderStep = () => {
     const stepProps = {
@@ -263,14 +265,15 @@ const CharacterCreator = () => {
             userCredits={userCredits} 
             username={profile?.username || 'User'} 
             pageTitle=""
+            onNavigate={handleExit}
           />
         }
         rightContent={
-          isDirty && isEditing ? (
+          isEditing ? (
             <Button
               onClick={saveCharacter}
-              disabled={isCreating}
-              className="bg-green-600 hover:bg-green-700 text-white"
+              disabled={!isDirty || isCreating}
+              className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isCreating ? (
                 <>
@@ -424,7 +427,7 @@ const CharacterCreator = () => {
             <DialogTitle className="text-white">Unsaved Changes</DialogTitle>
           </DialogHeader>
           <p className="text-gray-300">
-            You have unsaved changes. Are you sure you want to leave?
+            You have unsaved changes. What would you like to do?
           </p>
           <div className="flex justify-end space-x-3 mt-4">
             <Button
@@ -435,10 +438,24 @@ const CharacterCreator = () => {
               Cancel
             </Button>
             <Button
-              onClick={() => navigate('/dashboard')}
+              onClick={() => {
+                setShowExitDialog(false);
+                navigate(exitDestination);
+              }}
               className="bg-red-600 hover:bg-red-700"
             >
-              Leave without saving
+              Discard Changes
+            </Button>
+            <Button
+              onClick={() => {
+                saveCharacter().then(() => {
+                  setShowExitDialog(false);
+                  navigate(exitDestination);
+                });
+              }}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              Save & Exit
             </Button>
           </div>
         </DialogContent>

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TopBar } from '@/components/ui/TopBar';
 import { PublicNavigation } from '@/components/ui/PublicNavigation';
+import { formatNumberWithK } from '@/lib/utils/formatting';
 import { 
   MessageCircle, 
   Heart,
@@ -225,12 +226,12 @@ export default function PublicCharacterProfile() {
                   <div className="flex flex-wrap justify-center lg:justify-start gap-6 mb-6">
                     <div className="flex items-center space-x-2 text-gray-300">
                       <MessageCircle className="w-5 h-5 text-[#FF7A00]" />
-                      <span className="font-semibold">{character.actual_chat_count?.toLocaleString() || 0}</span>
+                      <span className="font-semibold">{formatNumberWithK(character.actual_chat_count || 0)}</span>
                       <span className="text-sm">conversations</span>
                     </div>
                     <div className="flex items-center space-x-2 text-gray-300">
                       <Heart className="w-5 h-5 text-[#FF7A00]" />
-                      <span className="font-semibold">{character.likes_count?.toLocaleString() || 0}</span>
+                      <span className="font-semibold">{formatNumberWithK(character.likes_count || 0)}</span>
                       <span className="text-sm">likes</span>
                     </div>
                     <div className="flex items-center space-x-2 text-gray-300">
@@ -348,13 +349,13 @@ export default function PublicCharacterProfile() {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">Conversations</span>
                   <Badge variant="secondary" className="bg-[#FF7A00]/20 text-[#FF7A00]">
-                    {character.actual_chat_count?.toLocaleString() || 0}
+                    {formatNumberWithK(character.actual_chat_count || 0)}
                   </Badge>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">Likes</span>
                   <Badge variant="secondary" className="bg-[#FF7A00]/20 text-[#FF7A00]">
-                    {character.likes_count?.toLocaleString() || 0}
+                    {formatNumberWithK(character.likes_count || 0)}
                   </Badge>
                 </div>
                 <div className="flex justify-between items-center">

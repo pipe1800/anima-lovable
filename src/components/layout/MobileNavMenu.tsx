@@ -17,9 +17,10 @@ interface MobileNavMenuProps {
   username?: string;
   pageTitle?: string;
   showFavoriteIcon?: boolean;
+  onNavigate?: (destination: string) => void;
 }
 
-export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, showFavoriteIcon = true }: MobileNavMenuProps) => {
+export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, showFavoriteIcon = true, onNavigate }: MobileNavMenuProps) => {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = React.useState(false);
@@ -39,7 +40,11 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
     { title: "Subscription", url: "/subscription", icon: Crown },
   ];
 
-  const handleNavClick = () => {
+  const handleNavClick = (event?: React.MouseEvent, url?: string) => {
+    if (onNavigate && url) {
+      event?.preventDefault();
+      onNavigate(url);
+    }
     setOpen(false);
   };
 
@@ -98,7 +103,7 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
                   <NavLink
                     key={item.title}
                     to={item.url}
-                    onClick={handleNavClick}
+                    onClick={(e) => handleNavClick(e, item.url)}
                     className={({ isActive }) =>
                       `flex items-center space-x-3 w-full px-4 py-3 rounded-lg text-left transition-colors ${
                         isActive

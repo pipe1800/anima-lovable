@@ -515,7 +515,7 @@ export const getCharacterDetails = async (characterId: string) => {
     creator: creatorData,
     character_definitions: definitionData,
     definition: definitionData ? [definitionData] : [],
-    tags: tagsData || []
+    tags: tagsData?.map(t => t.tag).filter(Boolean) || []
   }
 
 
@@ -716,6 +716,12 @@ export const getUserChatsPaginated = async (
   // Fetch last message and user character settings for each chat
   const chatsWithLastMessage = await Promise.all(
     data.map(async (chat) => {
+      // Fetch message count for this chat
+      const { count: messageCount } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('chat_id', chat.id);
+
       const { data: messages } = await supabase
         .from('messages')
         .select('content, is_ai_message')
@@ -735,6 +741,7 @@ export const getUserChatsPaginated = async (
 
       return {
         ...chat,
+        message_count: messageCount || 0, // Add message count here
         character: {
           ...chat.character,
           tagline: (() => {

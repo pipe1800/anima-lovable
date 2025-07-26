@@ -215,10 +215,10 @@ const PersonalityStep = ({ data, onUpdate, onNext, onPrevious, selectedTags, set
                 <div className="flex flex-wrap gap-2 mt-4">
                   {selectedTags.map((tag) => (
                     <Badge 
-                      key={tag.id} 
+                      key={`selected-tag-${tag.id}`} 
                       className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 px-2 md:px-3 py-1 md:py-2 text-xs md:text-sm font-medium hover:bg-[#FF7A00]/30 transition-colors"
                     >
-                      {tag.name}
+                      {tag.name || 'Unknown Tag'}
                       <button
                         onClick={() => handleRemoveTag(tag.id)}
                         className="ml-1.5 md:ml-2 hover:bg-[#FF7A00]/20 rounded-full p-0.5 transition-colors"

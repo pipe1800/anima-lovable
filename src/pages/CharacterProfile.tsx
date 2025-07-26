@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
+import { formatNumberWithK } from '@/lib/utils/formatting';
 import { 
   MessageCircle, 
   Heart,
@@ -585,25 +586,25 @@ export default function CharacterProfile() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-primary/5 rounded-lg p-3 text-center hover:bg-primary/10 transition-colors">
                   <MessageCircle className="w-6 h-6 mx-auto mb-1 text-primary" />
-                  <div className="text-lg font-bold">{character.stats.total_chats.toLocaleString()}</div>
+                  <div className="text-lg font-bold">{formatNumberWithK(character.stats.total_chats)}</div>
                   <div className="text-xs text-muted-foreground">Chats</div>
                 </div>
 
                 <div className="bg-primary/5 rounded-lg p-3 text-center hover:bg-primary/10 transition-colors">
                   <Users className="w-6 h-6 mx-auto mb-1 text-primary" />
-                  <div className="text-lg font-bold">{character.stats.unique_users.toLocaleString()}</div>
+                  <div className="text-lg font-bold">{formatNumberWithK(character.stats.unique_users)}</div>
                   <div className="text-xs text-muted-foreground">Users</div>
                 </div>
 
                 <div className="bg-primary/5 rounded-lg p-3 text-center hover:bg-primary/10 transition-colors">
                   <Heart className="w-6 h-6 mx-auto mb-1 text-primary" />
-                  <div className="text-lg font-bold">{character.stats.total_likes.toLocaleString()}</div>
+                  <div className="text-lg font-bold">{formatNumberWithK(character.stats.total_likes)}</div>
                   <div className="text-xs text-muted-foreground">Likes</div>
                 </div>
 
                 <div className="bg-primary/5 rounded-lg p-3 text-center hover:bg-primary/10 transition-colors">
                   <Star className="w-6 h-6 mx-auto mb-1 text-primary" />
-                  <div className="text-lg font-bold">{character.stats.total_favorites.toLocaleString()}</div>
+                  <div className="text-lg font-bold">{formatNumberWithK(character.stats.total_favorites)}</div>
                   <div className="text-xs text-muted-foreground">Favs</div>
                 </div>
               </div>
