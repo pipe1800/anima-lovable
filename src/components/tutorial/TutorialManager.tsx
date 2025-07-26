@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { TutorialWelcomeModal } from './TutorialWelcomeModal';
-import { TutorialOverlay } from './TutorialOverlay';
+import { RobustTutorialOverlay } from './RobustTutorialOverlay';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface TutorialManagerProps {
@@ -55,13 +55,8 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
         onSkip={handleSkipTutorial}
       />
       
-      {/* Render the overlay when tutorial is active */}
-      {isActive && (
-        <>
-          {console.log('🎓 TutorialManager: Rendering TutorialOverlay')}
-          <TutorialOverlay />
-        </>
-      )}
+      {/* Use the new robust overlay */}
+      {isActive && <RobustTutorialOverlay />}
     </>
   );
 };

@@ -48,7 +48,12 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
     <div className="flex items-center space-x-3">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="md:hidden text-white hover:bg-gray-700 p-2">
+          <Button 
+            data-tutorial="sidebar-trigger" 
+            variant="ghost" 
+            size="icon" 
+            className="md:hidden text-white hover:bg-gray-700 p-2"
+          >
             <Menu className="h-7 w-7" />
           </Button>
         </SheetTrigger>

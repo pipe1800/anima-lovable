@@ -356,7 +356,7 @@ export const ChatConfigurationTab = ({
   return (
     <div className="p-4 space-y-6">
       {/* Persona Selection */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+      <Card data-tutorial="persona-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-medium text-sm">Persona</h3>
           <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
@@ -458,7 +458,7 @@ export const ChatConfigurationTab = ({
       </Card>
 
       {/* World Info Selection */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+      <Card data-tutorial="world-info-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-medium text-sm">World Info</h3>
           <Badge variant="outline" className="border-[#FF7A00] text-[#FF7A00] text-xs">

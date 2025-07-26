@@ -848,12 +848,17 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         <>
           {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black/50 z-40"
+            className="fixed inset-0 bg-black/50"
+            style={{ zIndex: 29 }}
             onClick={() => setRightPanelOpen(false)}
           />
           
-          {/* Panel */}
-          <div className="fixed right-0 top-0 h-full w-[544px] bg-[#0f0f0f] border-l border-gray-700/50 z-50 flex flex-col animate-slide-in-right">
+          {/* Panel - with explicit low z-index */}
+          <div 
+            className="fixed right-0 top-0 h-full w-[544px] bg-[#0f0f0f] border-l border-gray-700/50 flex flex-col animate-slide-in-right"
+            style={{ zIndex: 30 }}
+            data-tutorial="right-panel"
+          >
             {/* Panel Header */}
             <div className="p-4 border-b border-gray-700/50">
               <div className="flex items-center justify-between mb-4">
@@ -897,12 +902,12 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                     setActiveTab('config');
                     handleStepAction('config-tab-clicked');
                   }}
+                  data-tutorial="config-tab"
                   className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     activeTab === 'config'
                       ? 'bg-[#FF7A00] text-white'
                       : 'text-gray-400 hover:text-white'
                   }`}
-                  data-tutorial="config-tab"
                 >
                   <Settings className="w-4 h-4" />
                   <span>Config</span>

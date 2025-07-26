@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -85,7 +85,7 @@ const tutorialSteps: TutorialStep[] = [
     id: 6,
     title: 'Personas - Your Character',
     description: 'Personas define who YOU are in the conversation. Create different personas to roleplay as different characters or aspects of yourself.',
-    target: '[data-tutorial="persona-section"]',
+    target: '[data-tutorial="persona-section"] > .flex.items-center.justify-between',
     action: 'none',
     position: 'left',
     requiredInteraction: false
@@ -94,7 +94,7 @@ const tutorialSteps: TutorialStep[] = [
     id: 7,
     title: 'World Info & Addons',
     description: 'Enhance conversations with world information and addons. Click here to explore available options.',
-    target: '[data-tutorial="world-info-section"]',
+    target: '[data-tutorial="world-info-section"] > .flex.items-center.justify-between',
     action: 'click',
     position: 'left',
     requiredInteraction: true,
@@ -156,15 +156,28 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
   const { user } = useAuth();
   const [isActive, setIsActive] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
-  const [highlightedElement, setHighlightedElement] = useState<string | null>(null);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
   const [addonDropdownOpen, setAddonDropdownOpen] = useState(false);
   const [worldInfoDropdownVisible, setWorldInfoDropdownVisible] = useState(false);
+  const [highlightedElement, setHighlightedElement] = useState<string | null>(null);
 
   const currentStepData = tutorialSteps[currentStep] || null;
   const disableInteractions = isActive && currentStepData?.requiredInteraction === true;
 
-  // Update tutorial completion status in profiles table using onboarding_completed field
+  // Add body class when tutorial is active
+  useEffect(() => {
+    if (isActive) {
+      document.body.classList.add('tutorial-active');
+    } else {
+      document.body.classList.remove('tutorial-active');
+    }
+    
+    return () => {
+      document.body.classList.remove('tutorial-active');
+    };
+  }, [isActive]);
+
+  // Update tutorial completion status
   const updateTutorialStatus = useCallback(async (userId: string, completed: boolean) => {
     try {
       const { error } = await supabase
@@ -179,38 +192,73 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     }
   }, []);
 
-  const startTutorial = useCallback(async () => {
+  const startTutorial = useCallback(() => {
     console.log('🎓 Starting tutorial');
     setIsActive(true);
     setCurrentStep(0);
-    setHighlightedElement(tutorialSteps[0]?.target || null);
     setCompletedSteps(new Set());
     setAddonDropdownOpen(false);
     setWorldInfoDropdownVisible(false);
-    
-    console.log('🎓 Tutorial started with first step:', tutorialSteps[0]);
+    // Set initial highlight if first step has a target
+    setHighlightedElement(tutorialSteps[0]?.target || null);
   }, []);
+
+  const completeTutorial = useCallback(async () => {
+    console.log('🎓 Completing tutorial');
+    if (user?.id) {
+      await updateTutorialStatus(user.id, true);
+    }
+    
+    setIsActive(false);
+    setCurrentStep(0);
+    setCompletedSteps(new Set());
+    setAddonDropdownOpen(false);
+    setWorldInfoDropdownVisible(false);
+    setHighlightedElement(null);
+  }, [user, updateTutorialStatus]);
 
   const nextStep = useCallback(() => {
     if (currentStep < tutorialSteps.length - 1) {
-      const nextStepIndex = currentStep + 1;
-      const nextStepData = tutorialSteps[nextStepIndex];
-      setCurrentStep(nextStepIndex);
-      setHighlightedElement(nextStepData?.target || null);
-      console.log('🎓 Moving to step:', nextStepIndex + 1, nextStepData);
+      const nextIndex = currentStep + 1;
+      const nextStepData = tutorialSteps[nextIndex];
+      
+      // Clear current highlight immediately
+      setHighlightedElement(null);
+      
+      // For steps that require elements to be rendered first, wait
+      if (nextStepData?.target) {
+        // Give time for animations and rendering
+        setTimeout(() => {
+          setCurrentStep(nextIndex);
+          // Wait a bit more for element to be in DOM
+          setTimeout(() => {
+            setHighlightedElement(nextStepData.target);
+          }, 300); // Wait for panel animation to complete
+        }, 100);
+      } else {
+        setCurrentStep(nextIndex);
+      }
     } else {
-      // Tutorial is complete
       completeTutorial();
     }
-  }, [currentStep]);
+  }, [currentStep, completeTutorial]);
 
   const previousStep = useCallback(() => {
     if (currentStep > 0) {
-      const prevStepIndex = currentStep - 1;
-      const prevStepData = tutorialSteps[prevStepIndex];
-      setCurrentStep(prevStepIndex);
-      setHighlightedElement(prevStepData?.target || null);
-      console.log('🎓 Moving back to step:', prevStepIndex + 1, prevStepData);
+      const prevIndex = currentStep - 1;
+      const prevStepData = tutorialSteps[prevIndex];
+      
+      // Clear current highlight immediately
+      setHighlightedElement(null);
+      
+      setTimeout(() => {
+        setCurrentStep(prevIndex);
+        if (prevStepData?.target) {
+          setTimeout(() => {
+            setHighlightedElement(prevStepData.target);
+          }, 300);
+        }
+      }, 100);
     }
   }, [currentStep]);
 
@@ -222,79 +270,38 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     
     setIsActive(false);
     setCurrentStep(0);
-    setHighlightedElement(null);
     setCompletedSteps(new Set());
     setAddonDropdownOpen(false);
     setWorldInfoDropdownVisible(false);
-  }, [user, updateTutorialStatus]);
-
-  const completeTutorial = useCallback(async () => {
-    console.log('🎓 Completing tutorial');
-    if (user?.id) {
-      await updateTutorialStatus(user.id, true);
-    }
-    
-    setIsActive(false);
-    setCurrentStep(0);
     setHighlightedElement(null);
-    setCompletedSteps(new Set());
-    setAddonDropdownOpen(false);
-    setWorldInfoDropdownVisible(false);
   }, [user, updateTutorialStatus]);
 
-  const setHighlight = useCallback((element: string | null) => {
-    setHighlightedElement(element);
+  const markStepCompleted = useCallback((stepId: number) => {
+    setCompletedSteps(prev => new Set(prev).add(stepId));
   }, []);
-
-  const handleStepAction = useCallback((action: string) => {
-    console.log('🎯 Tutorial action received:', action, 'Current step:', currentStep + 1);
-    
-    const currentStepData = tutorialSteps[currentStep];
-    if (!currentStepData) return;
-
-    // Handle specific step actions
-    switch (action) {
-      case 'right-panel-toggled':
-        if (currentStep === 1) { // Step 2: Character Settings Panel
-          markStepCompleted(currentStepData.id);
-          nextStep();
-        }
-        break;
-      
-      case 'config-tab-clicked':
-        if (currentStep === 4) { // Step 5: Configuration Tab
-          markStepCompleted(currentStepData.id);
-          nextStep();
-        }
-        break;
-      
-      case 'world-info-dropdown-opened':
-        if (currentStep === 6) { // Step 7: World Info & Addons
-          setWorldInfoDropdownVisible(true);
-          markStepCompleted(currentStepData.id);
-          nextStep();
-        }
-        break;
-      
-      case 'sidebar-opened':
-        if (currentStep === 8) { // Step 9: Navigation Menu
-          markStepCompleted(currentStepData.id);
-          nextStep();
-        }
-        break;
-      
-      default:
-        console.log('🎯 Unhandled tutorial action:', action);
-    }
-  }, [currentStep, nextStep]);
 
   const isStepCompleted = useCallback((stepId: number) => {
     return completedSteps.has(stepId);
   }, [completedSteps]);
 
-  const markStepCompleted = useCallback((stepId: number) => {
-    setCompletedSteps(prev => new Set(prev).add(stepId));
-    console.log('✅ Step completed:', stepId);
+  const handleStepAction = useCallback((action: string) => {
+    console.log('🎯 Tutorial action received:', action);
+    
+    // Simple action handling - just advance to next step when actions complete
+    if (action === 'right-panel-toggled' && currentStep === 1) {
+      nextStep();
+    } else if (action === 'config-tab-clicked' && currentStep === 4) {
+      nextStep();
+    } else if (action === 'world-info-dropdown-opened' && currentStep === 6) {
+      setWorldInfoDropdownVisible(true);
+      nextStep();
+    } else if (action === 'sidebar-opened' && currentStep === 8) {
+      nextStep();
+    }
+  }, [currentStep, nextStep]);
+
+  const setHighlight = useCallback((element: string | null) => {
+    setHighlightedElement(element);
   }, []);
 
   const value: TutorialContextType = {
