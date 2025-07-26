@@ -291,36 +291,30 @@ All colors MUST be HSL.
     animation: shimmer 3s ease-in-out infinite;
   }
 
-  /* Tutorial system - FINAL z-index hierarchy */
-  body.tutorial-active {
-    overflow: hidden;
+  /* Tutorial system - ensure highlighted elements are ALWAYS visible */
+  body.tutorial-active [data-tutorial] {
+    position: relative !important;
+    z-index: 50003 !important; /* Above overlay (50000), border (50001), and tooltip (50002) */
+    pointer-events: auto !important;
   }
 
-  /* Dark overlay background */
-  .tutorial-overlay > div:first-child {
-    z-index: 50000 !important;
+  /* Ensure interactive elements inside highlighted areas work */
+  body.tutorial-active [data-tutorial] * {
+    pointer-events: auto !important;
   }
 
-  /* Highlighted element cutout and border */
-  .tutorial-overlay .tutorial-highlight {
-    z-index: 50001 !important;
-  }
-
-  /* Tutorial tooltip */
-  .tutorial-tooltip {
-    z-index: 50002 !important;
-  }
-
-  /* Right panel specifically */
-  .animate-slide-in-right {
+  /* Right panel should stay below tutorial but be interactable when highlighted */
+  body.tutorial-active .animate-slide-in-right {
     z-index: 30 !important;
   }
 
-  /* Tutorial gear button must be clickable */
-  body.tutorial-active [data-tutorial="right-panel-toggle"] {
-    position: relative !important;
-    z-index: 1000002 !important; /* Above the click area */
-    pointer-events: auto !important;
-    cursor: pointer !important;
+  /* When right panel is the highlighted element, bring it forward */
+  body.tutorial-active [data-tutorial="right-panel"] {
+    z-index: 50003 !important;
+  }
+
+  /* Tutorial active state */
+  body.tutorial-active {
+    overflow: hidden;
   }
 }

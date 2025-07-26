@@ -26,6 +26,16 @@ export const TutorialOverlay: React.FC = () => {
     highlightedElement
   });
 
+  // Add this after the console.log at line 27
+  useEffect(() => {
+    console.log('🎓 ALL TUTORIAL STEPS:', tutorialSteps.map((step, idx) => ({
+      step: idx,
+      title: step.title,
+      target: step.target,
+      requiredInteraction: step.requiredInteraction
+    })));
+  }, [tutorialSteps]);
+
     // FIX 1: PROPERLY clear highlight when step has no target
   useEffect(() => {
     if (currentStepData) {
@@ -101,21 +111,28 @@ export const TutorialOverlay: React.FC = () => {
     if (!isActive) return;
 
     const handleGlobalClick = (e: MouseEvent) => {
-      // Check if click is on highlighted element
+      // Check if click is on highlighted element or its children
       if (highlightedElement) {
         const targetElement = document.querySelector(highlightedElement);
-        if (targetElement && targetElement.contains(e.target as Node)) {
-          console.log('🎓 Tutorial: Highlighted element clicked, allowing interaction');
-          // Don't prevent default - let the click go through
-          
-          // If this step requires interaction, advance after a delay
-          if (currentStepData?.requiredInteraction) {
-            setTimeout(() => {
-              console.log('🎓 Tutorial: Advancing to next step after interaction');
-              nextStep();
-            }, 500); // Give time for UI to update
+        if (targetElement) {
+          // Check if the clicked element is the target or any of its descendants
+          let clickedElement = e.target as Node;
+          while (clickedElement) {
+            if (clickedElement === targetElement) {
+              console.log('🎓 Tutorial: Click on highlighted element - allowing through');
+              // Don't prevent default - let the click go through
+              
+              // If this step requires interaction, advance after a delay
+              if (currentStepData?.requiredInteraction) {
+                setTimeout(() => {
+                  console.log('🎓 Tutorial: Advancing to next step after interaction');
+                  nextStep();
+                }, 500); // Give time for UI to update
+              }
+              return; // Let the click proceed naturally
+            }
+            clickedElement = clickedElement.parentNode as Node;
           }
-          return;
         }
       }
 
@@ -169,15 +186,33 @@ export const TutorialOverlay: React.FC = () => {
         // Store original values
         const originalZIndex = element.style.zIndex;
         const originalPosition = element.style.position;
+        const originalPointerEvents = element.style.pointerEvents;
         
-        // Ensure element is above overlay
+        // Ensure element is above overlay and clickable
         element.style.position = 'relative';
-        element.style.zIndex = '50001'; // Higher z-index to be above overlay
+        element.style.zIndex = '50003'; // Well above everything
+        element.style.pointerEvents = 'auto'; // Ensure it can receive clicks
+        
+        // Also ensure any child elements are clickable
+        const children = element.querySelectorAll('*');
+        children.forEach((child: Element) => {
+          const childEl = child as HTMLElement;
+          childEl.style.pointerEvents = 'auto';
+        });
+        
+        console.log('🎓 Applied high z-index to highlighted element:', highlightedElement);
         
         return () => {
           // Restore original values
           element.style.zIndex = originalZIndex;
           element.style.position = originalPosition;
+          element.style.pointerEvents = originalPointerEvents;
+          
+          // Restore children
+          children.forEach((child: Element) => {
+            const childEl = child as HTMLElement;
+            childEl.style.pointerEvents = '';
+          });
         };
       }
     }
@@ -259,30 +294,35 @@ export const TutorialOverlay: React.FC = () => {
 
   return (
     <div className="tutorial-overlay" ref={overlayRef}>
-      {/* Dark overlay with cutout using CSS */}
+      {/* Dark overlay with proper cutout */}
       <div 
-        className="fixed inset-0 z-[50000]" // FIX 2: Increased z-index to be above everything
+        className="fixed inset-0" 
         style={{
           backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          pointerEvents: 'none', // Let clicks pass through the overlay itself
+          clipPath: highlightedRect 
+            ? `polygon(
+                0% 0%, 
+                0% 100%, 
+                ${highlightedRect.left - 8}px 100%,
+                ${highlightedRect.left - 8}px ${highlightedRect.top - 8}px,
+                ${highlightedRect.right + 8}px ${highlightedRect.top - 8}px,
+                ${highlightedRect.right + 8}px ${highlightedRect.bottom + 8}px,
+                ${highlightedRect.left - 8}px ${highlightedRect.bottom + 8}px,
+                ${highlightedRect.left - 8}px 100%,
+                100% 100%,
+                100% 0%
+              )`
+            : 'none',
+          pointerEvents: 'auto',
+          zIndex: 50000,
         }}
-      >
-        {/* Create a "hole" for the highlighted element */}
-        {highlightedRect && (
-          <div
-            style={{
-              position: 'fixed',
-              top: highlightedRect.top - 4,
-              left: highlightedRect.left - 4,
-              width: highlightedRect.width + 8,
-              height: highlightedRect.height + 8,
-              boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.8)',
-              borderRadius: '8px',
-              pointerEvents: 'none',
-            }}
-          />
-        )}
-      </div>
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      />
+
+      {/* DELETE the "Highlighted area cutout" div - REMOVED */}
       
       {/* Highlight box with glow effect */}
       {highlightedRect && (
