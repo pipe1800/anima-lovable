@@ -13,7 +13,11 @@ const HeroSection = () => {
         <div className="flex items-center justify-between h-16 pl-4 pr-4 sm:pr-6 lg:pr-8">
           {/* Logo */}
           <div className="flex-shrink-0">
-            <img src="https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM" alt="Anima AI Chat" className="h-12 sm:h-16 w-auto" />
+            <img 
+              src="/assets/logo.png" 
+              alt="Anima AI Chat" 
+              className="h-10 w-auto"
+            />
           </div>
 
           {/* Desktop Navigation Links */}

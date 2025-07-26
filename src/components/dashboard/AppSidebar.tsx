@@ -24,7 +24,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getUserCredits } from '@/lib/supabase-queries';
 
 // Preload the logo image to prevent reloading
-const LOGO_URL = 'https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM';
+const LOGO_URL = '/assets/logo.png';
 const logoImage = new Image();
 logoImage.src = LOGO_URL;
 
@@ -169,7 +169,7 @@ const AppSidebar = () => {
             {isCollapsed ? (
               // Show favicon when collapsed
               <img 
-                src="/favicon.ico" 
+                src="/assets/logo_emblem.png" 
                 alt="A" 
                 className="h-8 w-8"
               />
