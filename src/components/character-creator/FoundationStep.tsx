@@ -3,11 +3,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Upload, User, Sparkles, Loader2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Upload, User, Loader2, Clock, Info, MessageSquare, Image as ImageIcon } from 'lucide-react';
 import { ImageCropper } from '@/components/ui/image-cropper';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 interface FoundationStepProps {
   data: any;
@@ -22,7 +26,9 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
     name: data.name || '',
     avatar: data.avatar || '',
     title: data.title || '',
-    description: data.description || ''
+    description: data.description || '',
+    chatMode: (data.chatMode as 'storytelling' | 'companion') || 'storytelling',
+    timeAwarenessEnabled: data.timeAwarenessEnabled || false
   });
 
   // Update form data when character data is loaded
@@ -32,7 +38,9 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
         name: data.name || '',
         avatar: data.avatar || '',
         title: data.title || '',
-        description: data.description || ''
+        description: data.description || '',
+        chatMode: (data.chatMode as 'storytelling' | 'companion') || 'storytelling',
+        timeAwarenessEnabled: data.timeAwarenessEnabled || false
       });
     }
   }, [data]);
@@ -40,10 +48,11 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
   const [showCropper, setShowCropper] = useState(false);
   const [tempImageUrl, setTempImageUrl] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pngInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: string, value: string | boolean) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
@@ -78,6 +87,21 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
     const imageUrl = URL.createObjectURL(file);
     setTempImageUrl(imageUrl);
     setShowCropper(true);
+  };
+
+  const handlePNGUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // If it's a PNG character card, handle it differently
+    if (file.type === 'image/png' && onFileChange) {
+      onFileChange(file);
+      
+      // Also set it as avatar and show cropper
+      const imageUrl = URL.createObjectURL(file);
+      setTempImageUrl(imageUrl);
+      setShowCropper(true);
+    }
   };
 
   const handleCropComplete = async (croppedImageUrl: string) => {
@@ -134,6 +158,9 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+    if (pngInputRef.current) {
+      pngInputRef.current.value = '';
+    }
   };
 
   const handleNext = () => {
@@ -141,7 +168,7 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
     onNext();
   };
 
-  const isValid = formData.name.trim() && formData.description.trim();
+  const isValid = formData.name.trim(); // Short description is no longer required
 
   return (
     <div className="flex-1 overflow-auto bg-[#121212]">
@@ -150,30 +177,48 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
         <div className="flex flex-col lg:grid lg:grid-cols-2 gap-6 lg:gap-12 min-h-[calc(100vh-200px)]">
           
           {/* Avatar Upload Section */}
-          <div className="flex flex-col items-center justify-center space-y-4 md:space-y-6 order-1 lg:order-none">
-            <div className="text-center mb-4 md:mb-8">
+          <div className="flex flex-col items-center space-y-4 md:space-y-6 order-1 lg:order-none">
+            <div className="text-center mb-4 md:mb-6">
               <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Avatar</h2>
               <p className="text-gray-400 text-sm md:text-base">Give your character a face</p>
             </div>
 
-            {/* Avatar Display - Smaller on mobile */}
+            {/* Avatar Display - Matching character card dimensions (4:5 aspect ratio) */}
             <div className="relative group">
-              <div className="w-32 h-32 md:w-48 md:h-48 lg:w-56 lg:h-56 rounded-full border-4 border-[#FF7A00]/30 bg-gradient-to-br from-[#FF7A00]/20 to-transparent backdrop-blur-sm flex items-center justify-center overflow-hidden">
+              <div className={cn(
+                "relative overflow-hidden rounded-2xl border-4 border-[#FF7A00]/30",
+                "bg-gradient-to-br from-[#FF7A00]/20 to-transparent backdrop-blur-sm",
+                "w-48 h-60 md:w-64 md:h-80", // 4:5 aspect ratio matching character cards
+                "flex items-center justify-center"
+              )}>
                 {formData.avatar ? (
                   <img 
                     src={formData.avatar} 
                     alt="Character Avatar" 
-                    className="w-full h-full object-cover rounded-full"
+                    className="w-full h-full object-cover"
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center text-[#FF7A00]/60">
-                    <User className="w-12 h-12 md:w-16 md:h-16 mb-2" />
+                    <User className="w-20 h-20 mb-2" />
+                    <span className="text-sm text-gray-400">No avatar</span>
                   </div>
                 )}
+                
+                {/* Upload overlay */}
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-2xl">
+                  <Button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    variant="outline"
+                    className="border-[#FF7A00]/50 text-white hover:bg-[#FF7A00]/20"
+                  >
+                    Change Avatar
+                  </Button>
+                </div>
               </div>
             </div>
 
-            {/* File input (hidden) */}
+            {/* File input */}
             <input
               ref={fileInputRef}
               type="file"
@@ -182,69 +227,56 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
               className="hidden"
             />
 
-            {/* Upload Buttons - Responsive width */}
+            {/* Upload Buttons */}
             <div className="flex flex-col space-y-3 w-full max-w-xs">
-              <Button 
-                className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-semibold py-2.5 md:py-3 px-4 md:px-6 rounded-xl shadow-lg text-sm md:text-base"
+              <Button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
+                variant="outline"
+                className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10"
               >
                 {isUploading ? (
-                  <Loader2 className="w-4 h-4 md:w-5 md:h-5 mr-2 animate-spin" />
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
                 ) : (
-                  <Upload className="w-4 h-4 md:w-5 md:h-5 mr-2" />
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload Avatar
+                  </>
                 )}
-                <span className="hidden sm:inline">{isUploading ? 'Processing...' : 'Upload & Crop Image'}</span>
-                <span className="sm:hidden">{isUploading ? 'Processing...' : 'Upload Image'}</span>
               </Button>
               
               {/* PNG Character Card Upload */}
-              <div className="space-y-2 md:space-y-3">
-                <Label className="text-gray-300 text-xs md:text-sm font-medium">
-                  Upload PNG Character Card
-                </Label>
-                
-                {/* Hidden file input */}
-                <input
-                  type="file"
-                  accept=".png"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file && onFileChange) {
-                      onFileChange(file);
-                    }
-                  }}
-                  disabled={isParsingCard}
-                  className="hidden"
-                  ref={(input) => {
-                    if (input) {
-                      (window as any).characterCardInput = input;
-                    }
-                  }}
-                />
-                
-                {/* Styled button */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const input = (window as any).characterCardInput;
-                    if (input) input.click();
-                  }}
-                  disabled={isParsingCard}
-                  className="border-primary/50 text-primary hover:bg-primary/10 w-full text-xs md:text-sm py-2"
-                >
-                  <Upload className="w-3 h-3 md:w-4 md:h-4 mr-2" />
-                  Choose PNG File
-                </Button>
-                
-                {isParsingCard && (
-                  <p className="text-xs text-gray-400 mt-1 flex items-center">
-                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+              <input
+                ref={pngInputRef}
+                type="file"
+                accept=".png"
+                onChange={handlePNGUpload}
+                disabled={isParsingCard}
+                className="hidden"
+              />
+              
+              <Button
+                onClick={() => pngInputRef.current?.click()}
+                disabled={isParsingCard}
+                variant="outline"
+                size="sm"
+                className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10"
+              >
+                {isParsingCard ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Parsing character card...
-                  </p>
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="w-4 h-4 mr-2" />
+                    Import PNG Character Card
+                  </>
                 )}
-              </div>
+              </Button>
             </div>
           </div>
 
@@ -287,7 +319,7 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
             <div className="space-y-2">
               <div className="flex justify-between items-center">
                 <Label htmlFor="character-description" className="text-white font-medium text-sm md:text-base">
-                  Short Description *
+                  Short Description
                 </Label>
                 <span className="text-xs text-gray-400">
                   {formData.description.length}/150
@@ -305,12 +337,98 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
                 rows={3}
                 className="bg-gray-800/50 border-gray-600 text-white placeholder-gray-400 rounded-lg resize-none text-sm md:text-base"
               />
-              <p className="text-xs text-gray-500">
+                            <p className="text-xs text-gray-500">
                 This is what other users will see at a glance in the discovery page.
               </p>
             </div>
+
+            {/* Time Awareness Toggle - Unified Design */}
+            <div className="space-y-4 bg-gray-800/30 rounded-lg p-4 border border-gray-700/50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Clock className="w-5 h-5 text-[#FF7A00]" />
+                  <Label htmlFor="time-awareness" className="text-base text-white cursor-pointer">
+                    Time Awareness
+                  </Label>
+                </div>
+                <Switch
+                  id="time-awareness"
+                  checked={formData.timeAwarenessEnabled}
+                  onCheckedChange={(checked) => handleInputChange('timeAwarenessEnabled', checked)}
+                  className="data-[state=checked]:bg-[#FF7A00]"
+                />
+              </div>
+              
+              {formData.timeAwarenessEnabled && (
+                <Alert className="bg-blue-500/10 border-blue-500/30">
+                  <Info className="h-4 w-4" />
+                  <AlertDescription className="text-sm">
+                    Time awareness works best in <strong>Companion Mode</strong>. The character will react to how long you take to respond based on their personality.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+
+            {/* Chat Style Toggle - Unified Design */}
+            <div className="space-y-4 bg-gray-800/30 rounded-lg p-4 border border-gray-700/50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <MessageSquare className="w-5 h-5 text-[#FF7A00]" />
+                  <Label htmlFor="chat-mode" className="text-base text-white cursor-pointer">
+                    Chat Style
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className={cn(
+                    "text-sm transition-colors",
+                    formData.chatMode === 'storytelling' ? 'text-[#FF7A00] font-medium' : 'text-gray-400'
+                  )}>
+                    Storytelling
+                  </span>
+                  <Switch
+                    id="chat-mode"
+                    checked={formData.chatMode === 'companion'}
+                    onCheckedChange={(checked) => handleInputChange('chatMode', checked ? 'companion' : 'storytelling')}
+                    className="data-[state=checked]:bg-[#FF7A00]"
+                  />
+                  <span className={cn(
+                    "text-sm transition-colors",
+                    formData.chatMode === 'companion' ? 'text-[#FF7A00] font-medium' : 'text-gray-400'
+                  )}>
+                    Companion
+                  </span>
+                </div>
+              </div>
+              
+              <div className="text-sm text-gray-400 space-y-1">
+                <p><strong>Storytelling:</strong> Rich descriptions, actions, and narrative elements</p>
+                <p><strong>Companion:</strong> Pure dialogue-focused conversations, like texting</p>
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* Greeting Preview Section */}
+        {data.greeting && (
+          <div className="mt-6 p-4 rounded-lg bg-gray-800/30 border border-gray-700/50">
+            <div className="flex justify-between items-center mb-3">
+              <Label className="text-white font-medium">Greeting Preview ({formData.chatMode} mode)</Label>
+              {formData.chatMode === 'companion' && data.greeting.includes('*') && (
+                <span className="text-xs text-orange-400 bg-orange-400/10 px-2 py-1 rounded">
+                  ⚠️ Contains narrative elements
+                </span>
+              )}
+            </div>
+            <div className="p-3 rounded bg-gray-900/50 border border-gray-600/30">
+              <p className="text-gray-300 text-sm whitespace-pre-wrap">{data.greeting}</p>
+            </div>
+            {formData.chatMode === 'companion' && data.greeting.includes('*') && (
+              <p className="text-xs text-orange-400 mt-2">
+                Your greeting contains narrative elements (*actions*) that may appear in companion mode responses
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Navigation - Responsive positioning */}
         <div className="flex justify-end mt-6 md:mt-8 pt-4 md:pt-6 border-t border-gray-700/50">
@@ -325,13 +443,14 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
         </div>
       </div>
 
-      {/* Image Cropper Modal */}
+      {/* Image Cropper Modal - Character card aspect ratio */}
       {showCropper && (
         <ImageCropper
           imageUrl={tempImageUrl}
           isOpen={showCropper}
           onClose={handleCropCancel}
           onCrop={handleCropComplete}
+          aspectRatio={0.8} // 4:5 aspect ratio for character cards (width:height = 256:320)
         />
       )}
     </div>

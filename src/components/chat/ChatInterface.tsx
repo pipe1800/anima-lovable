@@ -43,6 +43,7 @@ interface ChatInterfaceProps {
   selectedWorldInfoId?: string | null;
   onChatCreated?: (chatId: string) => void; // New callback for when chat is created
   onCreditsUpdate?: (balance: number) => void; // New callback for credits balance updates
+  onMessageSent?: () => Promise<void>; // New callback for when message is sent
 }
 
 const ChatInterface = ({
@@ -54,24 +55,48 @@ const ChatInterface = ({
   selectedPersonaId: propSelectedPersonaId,
   selectedWorldInfoId,
   onChatCreated,
-  onCreditsUpdate
+  onCreditsUpdate,
+  onMessageSent
 }: ChatInterfaceProps) => {
   const [inputValue, setInputValue] = useState('');
   const [isFirstMessage, setIsFirstMessage] = useState(true);
   const [currentChatId, setCurrentChatId] = useState<string | null>(existingChatId || null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(propSelectedPersonaId || null);
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  // Listen for auto-summary success events and show notification
+  useEffect(() => {
+    const handleAutoSummary = (event: CustomEvent) => {
+      console.log('✅ Auto-summary notification received:', event.detail);
+      toast({
+        title: "🧠 New Memory Added",
+        description: "Conversation automatically summarized to maintain performance.",
+        duration: 5000,
+      });
+    };
+
+    window.addEventListener('autoSummarySuccess', handleAutoSummary as EventListener);
+    
+    return () => {
+      window.removeEventListener('autoSummarySuccess', handleAutoSummary as EventListener);
+    };
+  }, [toast]);
+
   // Create chat if needed
   useEffect(() => {
-    if (!currentChatId && user && character) {
+    if (!currentChatId && user && character && !isCreatingChat) {
+      setIsCreatingChat(true);
+      
       const initializeChat = async () => {
         try {
+          console.log('🎯 ChatInterface: Creating new chat for character:', character.id);
+          
           const { data, error } = await supabase.functions.invoke('chat-management', {
             body: {
               operation: 'create-basic',
@@ -86,6 +111,7 @@ const ChatInterface = ({
           if (error) throw error;
           
           if (data?.success && data?.chat_id) {
+            console.log('✅ ChatInterface: Chat created successfully:', data.chat_id);
             setCurrentChatId(data.chat_id);
             // Notify parent component about the new chat ID
             onChatCreated?.(data.chat_id);
@@ -103,18 +129,20 @@ const ChatInterface = ({
             description: "Failed to create chat session",
             variant: "destructive"
           });
+        } finally {
+          setIsCreatingChat(false);
         }
       };
       
       initializeChat();
     }
-  }, [currentChatId, user, character, toast]);
+  }, [currentChatId, user, character, propSelectedPersonaId, onChatCreated, isCreatingChat]);
 
   // Use new orchestrator hook
   const {
     messages,
     isTyping,
-    trackedContext,
+    trackedContext: unifiedTrackedContext,
     sendMessage,
     creditsBalance,
     isLoadingMessages,
@@ -126,6 +154,15 @@ const ChatInterface = ({
     isStreaming,
     streamingMessage
   } = useChatUnified(currentChatId, character.id); // ✅ PHASE 2: Single unified hook
+
+  // Use the prop context (from useContextManagement) as the primary source
+  // Fall back to unified hook context if prop context is not available
+  const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
+  
+  // Debug log to show which context is being used
+  useEffect(() => {
+    // Context selection debug information is available here if needed
+  }, [parentTrackedContext, unifiedTrackedContext, effectiveTrackedContext]);
 
   // ✅ FIX: Safety cleanup for stuck streaming states
   useEffect(() => {
@@ -170,27 +207,41 @@ const ChatInterface = ({
     fewShotExamples: false,
   };
 
-  // Sync tracked context with parent
+  // Sync tracked context with parent - only sync when there are meaningful differences
   useEffect(() => {
-    if (trackedContext && onContextUpdate) {
-      const isContextDifferent = (
-        parentTrackedContext.moodTracking !== trackedContext.moodTracking ||
-        parentTrackedContext.clothingInventory !== trackedContext.clothingInventory ||
-        parentTrackedContext.locationTracking !== trackedContext.locationTracking ||
-        parentTrackedContext.timeAndWeather !== trackedContext.timeAndWeather ||
-        parentTrackedContext.relationshipStatus !== trackedContext.relationshipStatus ||
-        parentTrackedContext.characterPosition !== trackedContext.characterPosition
-      );
-
-      if (isContextDifferent) {
-        console.log('🔄 Syncing context from orchestrator to parent:', {
+    if (effectiveTrackedContext && onContextUpdate) {
+      // Check if contexts have meaningful differences (ignore "No context" values)
+      const hasValidParentContext = Object.values(parentTrackedContext).some(value => value !== 'No context');
+      const hasValidEffectiveContext = Object.values(effectiveTrackedContext).some(value => value !== 'No context');
+      
+      // Only sync if the effective context has valid content and parent doesn't, 
+      // or if there are actual differences in valid content
+      if (!hasValidParentContext && hasValidEffectiveContext) {
+        console.log('🔄 Syncing context from orchestrator to parent (parent has no valid context):', {
           from: parentTrackedContext,
-          to: trackedContext
+          to: effectiveTrackedContext
         });
-        onContextUpdate(trackedContext);
+        onContextUpdate(effectiveTrackedContext);
+      } else if (hasValidParentContext && hasValidEffectiveContext) {
+        const isContextDifferent = (
+          parentTrackedContext.moodTracking !== effectiveTrackedContext.moodTracking ||
+          parentTrackedContext.clothingInventory !== effectiveTrackedContext.clothingInventory ||
+          parentTrackedContext.locationTracking !== effectiveTrackedContext.locationTracking ||
+          parentTrackedContext.timeAndWeather !== effectiveTrackedContext.timeAndWeather ||
+          parentTrackedContext.relationshipStatus !== effectiveTrackedContext.relationshipStatus ||
+          parentTrackedContext.characterPosition !== effectiveTrackedContext.characterPosition
+        );
+
+        if (isContextDifferent) {
+          console.log('🔄 Syncing context from orchestrator to parent (contexts differ):', {
+            from: parentTrackedContext,
+            to: effectiveTrackedContext
+          });
+          onContextUpdate(effectiveTrackedContext);
+        }
       }
     }
-  }, [trackedContext, parentTrackedContext, onContextUpdate]);
+  }, [effectiveTrackedContext, parentTrackedContext, onContextUpdate]);
 
   // Update parent with credits balance whenever it changes
   useEffect(() => {
@@ -263,8 +314,14 @@ const ChatInterface = ({
         messageContent,
         currentAddonSettings,
         selectedPersonaId,
-        selectedWorldInfoId
+        selectedWorldInfoId,
+        effectiveTrackedContext // Pass the database context
       );
+
+      // Call the parent's callback to reload context
+      if (onMessageSent) {
+        await onMessageSent();
+      }
 
       // Update metrics
       const endTime = Date.now();
@@ -320,7 +377,7 @@ const ChatInterface = ({
         });
       }
     }
-  }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, isFirstMessage, onFirstMessage, toast, updateMetrics]);
+  }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, isFirstMessage, onFirstMessage, toast, updateMetrics, onMessageSent]);
 
   const handleUpgrade = () => {
     // Navigate to upgrade page or show upgrade modal
@@ -347,7 +404,7 @@ const ChatInterface = ({
     <div className="flex flex-col h-full">
       {/* Debug Panel - Lazy loaded for performance */}
       <Suspense fallback={<LoadingSpinner />}>
-        <AddonDebugPanel characterId={character.id} userId={user?.id} />
+        <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
       </Suspense>
       
       {/* Insufficient Credits Modal */}
@@ -362,7 +419,7 @@ const ChatInterface = ({
       <ChatMessages 
         chatId={currentChatId}
         character={character}
-        trackedContext={trackedContext}
+        trackedContext={effectiveTrackedContext}
         streamingMessage="" 
         isStreaming={isStreaming}
         messages={messages}

@@ -1,774 +1,809 @@
-import React, { useState, useEffect } from 'react';
-
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-
-import { 
-  getActivePlans, 
-  getActiveModels, 
-  getActiveCreditPacks,
-  getUserActiveSubscription 
-} from '@/lib/supabase-queries';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Crown, Zap, CreditCard } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { FeatureComparisonTable } from '@/components/subscription/FeatureComparisonTable';
+import { Crown, CreditCard, Check, X, TrendingUp } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
+import { MobileHeader } from '@/components/layout/MobileHeader';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
+// Types
 interface Plan {
   id: string;
   name: string;
+  description?: string | null;
   price_monthly: number;
-  monthly_credits_allowance: number;
+  price_yearly?: number | null;
   features: any;
   is_active: boolean;
-}
-
-interface Model {
-  id: string;
-  tier_name: string;
-  credit_multiplier: number;
-  is_nsfw_compatible: boolean;
-  description: string;
-  min_plan: {
-    name: string;
-    price_monthly: number;
-  } | null;
+  monthly_credits_allowance: number;
+  paypal_subscription_id: string | null;
 }
 
 interface CreditPack {
   id: string;
   name: string;
-  price: number;
   credits_granted: number;
-  description: string;
+  price: number;
+  paypal_plan_id?: string | null;
+  is_active: boolean;
+  description?: string;
+  created_at?: string;
 }
 
-interface UserSubscription {
-  id: string;
-  status: string;
-  plan: Plan;
-  paypal_subscription_id: string | null;
-}
-
-const Subscription = () => {
+// Hooks
+const useSubscriptionData = () => {
   const { user } = useAuth();
-  const { toast } = useToast();
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [models, setModels] = useState<Model[]>([]);
-  const [creditPacks, setCreditPacks] = useState<CreditPack[]>([]);
-  const [userSubscription, setUserSubscription] = useState<UserSubscription | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isUpgrading, setIsUpgrading] = useState(false);
-  const [isPurchasingCredits, setIsPurchasingCredits] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showUpgradeConfirmation, setShowUpgradeConfirmation] = useState(false);
-  const [planToUpgradeTo, setPlanToUpgradeTo] = useState<Plan | null>(null);
+  
+  return useQuery({
+    queryKey: ['subscription-data', user?.id],
+    queryFn: async () => {
+      const [plansRes, packsRes, creditsRes] = await Promise.allSettled([
+        supabase.from('plans').select('*').eq('is_active', true).order('price_monthly'),
+        supabase.from('credit_packs').select('*').eq('is_active', true).order('price'),
+        user ? supabase.from('credits').select('balance').eq('user_id', user.id).single() : Promise.resolve({ data: null })
+      ]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [plansRes, modelsRes, creditPacksRes] = await Promise.all([
-          getActivePlans(),
-          getActiveModels(),
-          getActiveCreditPacks()
-        ]);
+      return {
+        plans: plansRes.status === 'fulfilled' ? plansRes.value.data || [] : [],
+        creditPacks: packsRes.status === 'fulfilled' ? packsRes.value.data || [] : [],
+        credits: creditsRes.status === 'fulfilled' ? creditsRes.value.data : null
+      };
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
+    enabled: true
+  });
+};
 
-        if (plansRes.error) throw plansRes.error;
-        if (modelsRes.error) throw modelsRes.error;
-        if (creditPacksRes.error) throw creditPacksRes.error;
+// Components
+const PlanFeature = ({ feature, included }: { feature: string; included: boolean }) => (
+  <div className="flex items-center gap-2">
+    {included ? (
+      <Check className="w-4 h-4 text-green-500 flex-shrink-0" />
+    ) : (
+      <X className="w-4 h-4 text-gray-500 flex-shrink-0" />
+    )}
+    <span className={`text-sm ${included ? 'text-gray-200' : 'text-gray-500'}`}>
+      {feature}
+    </span>
+  </div>
+);
 
-
-        setPlans(plansRes.data || []);
-        setModels(modelsRes.data || []);
-        setCreditPacks(creditPacksRes.data || []);
-
-        // Fetch user subscription if authenticated
-        if (user) {
-          const subRes = await getUserActiveSubscription(user.id);
-          if (subRes.error) {
-            console.error('Error fetching subscription:', subRes.error);
-          } else {
-            setUserSubscription(subRes.data);
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        toast({
-          title: "Error",
-          description: "Failed to load subscription data",
-          variant: "destructive"
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [user, toast]);
-
-  const handleSubscriptionAction = (targetPlan: Plan) => {
-    console.log('🎯 handleSubscriptionAction called with plan:', targetPlan);
-    console.log('👤 User subscription:', userSubscription);
+const PlanCard = ({ 
+  plan, 
+  currentPlan, 
+  isPopular, 
+  onSelect,
+  disabled 
+}: { 
+  plan: Plan; 
+  currentPlan: Plan | null;
+  isPopular?: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+}) => {
+  const isCurrentPlan = currentPlan?.id === plan.id;
+  const canUpgrade = currentPlan && !isCurrentPlan && plan.price_monthly > currentPlan.price_monthly;
+  
+  // Extract features from plan
+  const getFeatures = () => {
+    if (!plan.features) return [];
     
-    // Check if this is an upgrade case that needs confirmation
-    if (userSubscription && userSubscription.plan.name === 'True Fan' && targetPlan.name === 'The Whale') {
-      console.log('🔄 Showing upgrade confirmation for True Fan → The Whale');
-      // Show confirmation dialog for True Fan → The Whale upgrade
-      setPlanToUpgradeTo(targetPlan);
-      setShowUpgradeConfirmation(true);
-    } else {
-      console.log('📝 Proceeding directly with subscription action');
-      // For other cases (new subscriptions from guest users), proceed directly
-      processSubscriptionAction(targetPlan);
+    // Handle different feature formats
+    if (Array.isArray(plan.features)) {
+      return plan.features;
+    } else if (typeof plan.features === 'object' && plan.features.features) {
+      return plan.features.features;
+    } else if (typeof plan.features === 'object') {
+      // Convert feature flags to readable strings
+      const featureList = [];
+      if (plan.features.character_creation) featureList.push('Character Creation');
+      if (plan.features.nsfw_access) featureList.push('NSFW Content Access');
+      if (plan.features.image_generation) featureList.push('Image Generation');
+      if (plan.features.voice_messages) featureList.push('Voice Messages');
+      if (plan.features.priority_support) featureList.push('Priority Support');
+      return featureList;
     }
+    return [];
   };
-
-  const processSubscriptionAction = async (targetPlan: Plan) => {
-    console.log('🚀 processSubscriptionAction started with plan:', targetPlan);
-    
-    try {
-      setIsUpgrading(true);
-      setShowUpgradeConfirmation(false);
-
-      let response;
-      console.log('🔍 Checking subscription conditions...');
-      console.log('  - userSubscription:', userSubscription);
-      console.log('  - targetPlan:', targetPlan);
-      
-      // Check if user has an active subscription and if it's the specific upgrade case
-      if (userSubscription && userSubscription.plan.name === 'True Fan' && targetPlan.name === 'The Whale') {
-        console.log('📈 True Fan upgrading to The Whale - using upgrade subscription flow');
-        
-        if (!userSubscription.paypal_subscription_id) {
-          throw new Error('No PayPal subscription ID found for existing subscription');
-        }
-        
-        // True Fan upgrading to The Whale - use upgrade subscription flow
-        response = await supabase.functions.invoke('paypal-management', {
-          body: {
-            operation: 'create-subscription',
-            planId: targetPlan.id, // We'll map this to the upgrade PayPal plan in the backend
-            upgradeFromSubscriptionId: userSubscription.paypal_subscription_id // Pass the current subscription to upgrade from
-          }
-        });
-      } else if (!userSubscription || userSubscription.plan.name === 'Guest Pass') {
-        console.log('👋 Guest user or Guest Pass - creating new subscription');
-        console.log('   - Calling paypal-management with operation: create-subscription');
-        console.log('   - planId:', targetPlan.id);
-        
-        // Guest user or Guest Pass user - create new subscription using consolidated function
-        response = await supabase.functions.invoke('paypal-management', {
-          body: { 
-            operation: 'create-subscription',
-            planId: targetPlan.id 
-          }
-        });
-      } else {
-        console.log('❌ Invalid subscription action');
-        // Invalid action
-        toast({
-          title: "Error",
-          description: "Invalid subscription action",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      console.log('📥 Function response received:', response);
-      const { data, error } = response;
-
-      if (error) {
-        console.error('❌ Subscription action error:', error);
-        toast({
-          title: "Error",
-          description: "Failed to process subscription action",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      console.log('✅ Response data:', data);
-
-      // Handle both old and new response formats
-      let approvalUrl = null;
-      
-      // New consolidated function format: {success: true, data: {approve_url: ...}}
-      if (data?.success && data?.data?.approve_url) {
-        approvalUrl = data.data.approve_url;
-        console.log('🔗 Found approval URL in new format:', approvalUrl);
-      }
-      // Legacy format: {success: true, data: {approvalUrl: ...}}
-      else if (data?.success && data?.data?.approvalUrl) {
-        approvalUrl = data.data.approvalUrl;
-        console.log('🔗 Found approval URL in legacy format:', approvalUrl);
-      }
-      // Old format: {approvalUrl: ...}
-      else if (data?.approvalUrl) {
-        approvalUrl = data.approvalUrl;
-        console.log('🔗 Found approval URL in old format:', approvalUrl);
-      }
-      // Handle direct response data
-      else if (data?.data && !data?.success && data.data.approvalUrl) {
-        approvalUrl = data.data.approvalUrl;
-        console.log('🔗 Found approval URL in direct data format:', approvalUrl);
-      }
-      
-      if (approvalUrl) {
-        console.log('🔗 Opening PayPal popup with URL:', approvalUrl);
-        
-        const width = 600;
-        const height = 800;
-        const left = (window.screen.width / 2) - (width / 2);
-        const top = (window.screen.height / 2) - (height / 2);
-        
-        setShowPaymentModal(true);
-        
-        const popup = window.open(
-          approvalUrl,
-          'paypal-payment',
-          `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-        );
-        
-        // Set up message listener for popup communication
-        const handleMessage = (event: MessageEvent) => {
-          if (event.data?.paypal_status === 'success') {
-            // Payment successful, clean up and redirect
-            window.removeEventListener('message', handleMessage);
-            setShowPaymentModal(false);
-            setIsUpgrading(false);
-            // Always redirect back to subscription page
-            window.location.href = '/subscription';
-          }
-        };
-        
-        window.addEventListener('message', handleMessage);
-        
-        // Monitor popup closure as fallback
-        const checkClosed = setInterval(() => {
-          if (popup?.closed) {
-            clearInterval(checkClosed);
-            window.removeEventListener('message', handleMessage);
-            setShowPaymentModal(false);
-            setIsUpgrading(false);
-            // Refresh the page to update subscription status
-            window.location.reload();
-          }
-        }, 1000);
-      } else {
-        console.log('❌ No approval URL found in response');
-        console.log('   - data?.success:', data?.success);
-        console.log('   - data?.data?.approve_url:', data?.data?.approve_url);
-        console.log('   - data?.data?.approvalUrl:', data?.data?.approvalUrl);
-        console.log('   - Full data structure:', JSON.stringify(data, null, 2));
-        
-        toast({
-          title: "Error",
-          description: "No PayPal approval URL received. Please try again.",
-          variant: "destructive"
-        });
-        setIsUpgrading(false);
-      }
-    } catch (error) {
-      console.error('Subscription action error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to process subscription action",
-        variant: "destructive"
-      });
-      setIsUpgrading(false);
-    }
-  };
-
-  const handleCreditPackPurchase = async (packId: string) => {
-    try {
-      setIsPurchasingCredits(true);
-
-      const response = await supabase.functions.invoke('paypal-management', {
-        body: { 
-          operation: 'create-order',
-          creditPackId: packId 
-        }
-      });
-
-      const { data, error } = response;
-
-      if (error) {
-        console.error('Credit pack purchase error:', error);
-        toast({
-          title: "Error",
-          description: "Failed to process credit pack purchase",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      console.log('PayPal management response:', { data, error });
-
-      // Open PayPal in a centered popup window
-      if (data?.data?.approvalUrl) {
-        const approvalUrl = data.data.approvalUrl;
-        const width = 600;
-        const height = 800;
-        const left = (window.screen.width / 2) - (width / 2);
-        const top = (window.screen.height / 2) - (height / 2);
-        
-        setShowPaymentModal(true);
-        
-        const popup = window.open(
-          approvalUrl,
-          'paypal-credit-purchase',
-          `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-        );
-        
-        // Set up message listener for popup communication
-        const handleMessage = (event: MessageEvent) => {
-          if (event.data?.paypal_status === 'success') {
-            // Payment successful, clean up and redirect
-            window.removeEventListener('message', handleMessage);
-            setShowPaymentModal(false);
-            setIsPurchasingCredits(false);
-            toast({
-              title: "Success!",
-              description: "Credit pack purchased successfully! Credits will be added to your account shortly.",
-              variant: "default"
-            });
-            // Refresh the page to update any credit displays
-            window.location.reload();
-          }
-        };
-        
-        window.addEventListener('message', handleMessage);
-        
-        // Monitor popup closure as fallback
-        const checkClosed = setInterval(() => {
-          if (popup?.closed) {
-            clearInterval(checkClosed);
-            window.removeEventListener('message', handleMessage);
-            setShowPaymentModal(false);
-            setIsPurchasingCredits(false);
-          }
-        }, 1000);
-      } else {
-        console.error('No approval URL found in response:', data);
-        toast({
-          title: "Error",
-          description: "PayPal approval URL not found. Please try again.",
-          variant: "destructive"
-        });
-        setIsPurchasingCredits(false);
-      }
-    } catch (error) {
-      console.error('Credit pack purchase error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to process credit pack purchase",
-        variant: "destructive"
-      });
-      setIsPurchasingCredits(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-[#FF7A00]"></div>
-      </div>
-    );
-  }
-
+  
   return (
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        
-        {/* Hero Section */}
-        <div className="text-center mb-16">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            Unlock Your AI's True Potential
-          </h1>
-          <p className="text-xl text-gray-400 max-w-3xl mx-auto">
-            Choose a plan to get a massive pool of credits, access to superior AI models, and powerful features.
-          </p>
+    <motion.div
+      whileHover={{ y: -4 }}
+      transition={{ duration: 0.2 }}
+      className="relative h-full"
+    >
+      {isPopular && (
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
+          <Badge className="bg-[#FF7A00] text-white px-3 py-1">
+            Most Popular
+          </Badge>
         </div>
-
-        {/* Subscription Tier Cards */}
-        {(() => {
-          // Fixed logic: Guest Pass users are those with Guest Pass plan
-          const isGuestUser = userSubscription?.plan?.name === 'Guest Pass' || !userSubscription;
-          const currentPlan = userSubscription?.plan?.name;
-          let plansToShow = [];
-
-          if (isGuestUser) {
-            // Guest Pass users - show all paid plans
-            plansToShow = plans.filter(plan => plan.price_monthly > 0);
-          } else if (currentPlan === 'True Fan') {
-            // True Fan - show current plan and The Whale upgrade option
-            plansToShow = plans.filter(plan => plan.name === 'True Fan' || plan.name === 'The Whale');
-          } else if (currentPlan === 'The Whale') {
-            // The Whale - show only current plan
-            plansToShow = plans.filter(plan => plan.name === 'The Whale');
-          } else {
-            // Fallback - show all plans
-            plansToShow = plans;
-          }
-
-          // Dynamic container classes based on number of plans
-          const getContainerClasses = () => {
-            return "flex flex-wrap justify-center gap-8";
-          };
-
-          // Dynamic card classes based on number of plans
-          const getCardClasses = () => {
-            if (plansToShow.length === 1) return "w-full max-w-md";
-            if (plansToShow.length === 2) return "w-full max-w-md";
-            if (plansToShow.length === 3) return "w-full max-w-sm";
-            return "w-full max-w-md";
-          };
-
-          return (
-            <div className={getContainerClasses()}>
-              {plans.length === 0 ? (
-                <div className="col-span-3 text-center text-white">
-                  <p>No subscription plans available at the moment.</p>
-                </div>
-              ) : (
-                plansToShow.map((plan) => {
-                  const isPopular = plan.name === 'True Fan';
-                  const isPremium = plan.name === 'The Whale';
-                  const isCurrentPlan = userSubscription?.plan?.name === plan.name;
-                  const canUpgrade = currentPlan === 'True Fan' && plan.name === 'The Whale';
-                  
-                  return (
-                     <Card 
-                       key={plan.id} 
-                       className={`${getCardClasses()} bg-[#1a1a2e] border-gray-700/50 relative overflow-hidden min-h-[600px] flex flex-col ${
-                         isPopular ? 'ring-2 ring-[#FF7A00]' : ''
-                       } ${isCurrentPlan ? 'ring-2 ring-green-500' : ''}`}
-                   >
-                    {isPopular && !isCurrentPlan && (
-                      <div className="absolute top-4 right-4">
-                        <div className="bg-[#FF7A00] text-white px-2 py-1 rounded text-xs font-medium flex items-center gap-1">
-                          <Crown className="w-3 h-3" />
-                          Popular
-                        </div>
-                      </div>
-                    )}
-                    
-                    {isCurrentPlan && (
-                      <div className="absolute top-4 right-4">
-                        <div className="bg-green-600 text-white px-2 py-1 rounded text-xs font-medium">
-                          Current Plan
-                        </div>
-                      </div>
-                    )}
-                    
-                    <CardHeader className="pb-4">
-                      <CardTitle className="text-2xl text-white flex items-center gap-2">
-                        {isPremium ? <Crown className="w-6 h-6 text-[#FF7A00]" /> : <Zap className="w-6 h-6 text-[#FF7A00]" />}
-                        {plan.name}
-                      </CardTitle>
-                      <div className="space-y-2">
-                        <div className="text-3xl font-bold text-[#FF7A00]">
-                          ${plan.price_monthly}
-                          <span className="text-lg text-gray-400 font-normal">/month</span>
-                        </div>
-                        <div className="text-lg text-gray-300">
-                          {plan.monthly_credits_allowance.toLocaleString()} Credits
-                        </div>
-                      </div>
-                    </CardHeader>
-                    
-                    <CardContent className="flex-1 flex flex-col">
-                      {/* Features List */}
-                      <div className="flex-1">
-                        {plan.features?.features && Array.isArray(plan.features.features) && (
-                          <div className="space-y-2">
-                            {plan.features.features.map((feature: string, idx: number) => (
-                              <div key={idx} className="flex items-center gap-2">
-                                <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                                <span className="text-gray-300 text-sm">{feature}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      
-                      <div className="mt-6">
-                        {isCurrentPlan ? (
-                          // Current plan - show disabled button
-                          <Button 
-                            className="w-full py-3 bg-gray-600 text-gray-400 cursor-not-allowed hover:bg-gray-600"
-                            disabled={true}
-                          >
-                            Current Plan
-                          </Button>
-                        ) : canUpgrade ? (
-                          // User can upgrade to this plan (True Fan → The Whale)
-                          <Button 
-                            onClick={() => handleSubscriptionAction(plan)}
-                            className="w-full py-3 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-                            disabled={isUpgrading}
-                          >
-                            {isUpgrading ? 'Processing...' : 'Upgrade Plan'}
-                          </Button>
-                        ) : isGuestUser ? (
-                          // Guest user - show subscribe button for all paid plans
-                          <Button 
-                            onClick={() => handleSubscriptionAction(plan)}
-                            className="w-full py-3 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-                            disabled={isUpgrading}
-                          >
-                            {isUpgrading ? 'Processing...' : 'Subscribe'}
-                          </Button>
-                        ) : (
-                          // Fallback disabled button for invalid states
-                          <Button 
-                            className="w-full py-3 bg-gray-600 text-gray-400 cursor-not-allowed hover:bg-gray-600"
-                            disabled={true}
-                          >
-                            Subscribe
-                          </Button>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
+      )}
+      
+      <Card className={`h-full flex flex-col ${isPopular ? 'border-[#FF7A00] shadow-lg shadow-[#FF7A00]/20' : 'border-gray-700'} 
+        ${isCurrentPlan ? 'bg-[#1a1a2e]/80' : 'bg-[#1a1a2e]'} hover:border-gray-600 transition-all`}>
+        <CardHeader className="pb-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle className="text-2xl text-white flex items-center gap-2">
+                {plan.name}
+                {plan.name === 'True Fan' && <Crown className="w-5 h-5 fill-gray-300 text-gray-300" />}
+                {plan.name === 'The Whale' && <Crown className="w-5 h-5 fill-yellow-500 text-yellow-500" />}
+              </CardTitle>
+              {plan.description && (
+                <CardDescription className="mt-2">{plan.description}</CardDescription>
               )}
             </div>
-          );
-        })()}
-        
-        {/* Credit Boosters Section - Only visible to paid subscribers */}
-        {userSubscription && userSubscription.plan?.price_monthly > 0 && (
-          <div className="mt-20">
-            <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-                Credit Booster Packs
-              </h2>
-              <p className="text-lg text-gray-400 max-w-2xl mx-auto">
-                Need more credits? Get instant credit boosts with our convenient one-time purchase packs.
-              </p>
-            </div>
-
-            <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-              {/* 5,000 Credits Pack */}
-              <Card className="bg-[#1a1a2e] border-gray-700/50 relative overflow-hidden h-full flex flex-col">
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-xl text-white flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-[#FF7A00]" />
-                    5,000 Credits Pack
-                  </CardTitle>
-                  <div className="space-y-2">
-                    <div className="text-2xl font-bold text-[#FF7A00]">
-                      $5.00
-                      <span className="text-sm text-gray-400 font-normal ml-2">one-time</span>
-                    </div>
-                    <div className="text-lg text-gray-300">
-                      5,000 Credits Added Instantly
-                    </div>
-                  </div>
-                </CardHeader>
-                
-                <CardContent className="flex-1 flex flex-col">
-                  <div className="flex-1">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Perfect for casual users</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Credits never expire</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Added to your account instantly</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-6">
-                    <Button 
-                      onClick={() => handleCreditPackPurchase('pack_5k')}
-                      className="w-full py-3 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-                      disabled={isPurchasingCredits}
-                    >
-                      {isPurchasingCredits ? 'Processing...' : 'Buy Now'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* 12,000 Credits Pack */}
-              <Card className="bg-[#1a1a2e] border-gray-700/50 relative overflow-hidden h-full flex flex-col">
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-xl text-white flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-[#FF7A00]" />
-                    12,000 Credits Pack
-                  </CardTitle>
-                  <div className="space-y-2">
-                    <div className="text-2xl font-bold text-[#FF7A00]">
-                      $10.00
-                      <span className="text-sm text-gray-400 font-normal ml-2">one-time</span>
-                    </div>
-                    <div className="text-lg text-gray-300">
-                      12,000 Credits Added Instantly
-                    </div>
-                  </div>
-                </CardHeader>
-                
-                <CardContent className="flex-1 flex flex-col">
-                  <div className="flex-1">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Perfect for extended conversations</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Credits never expire</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Added to your account instantly</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-6">
-                    <Button 
-                      onClick={() => handleCreditPackPurchase('pack_12k')}
-                      className="w-full py-3 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-                      disabled={isPurchasingCredits}
-                    >
-                      {isPurchasingCredits ? 'Processing...' : 'Buy Now'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* 25,000 Credits Pack */}
-              <Card className="bg-[#1a1a2e] border-gray-700/50 relative overflow-hidden h-full flex flex-col ring-2 ring-[#FF7A00]">
-                <div className="absolute top-4 right-4">
-                  <div className="bg-[#FF7A00] text-white px-2 py-1 rounded text-xs font-medium">
-                    Best Value
-                  </div>
-                </div>
-                
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-xl text-white flex items-center gap-2">
-                    <CreditCard className="w-5 h-5 text-[#FF7A00]" />
-                    25,000 Credits Pack
-                  </CardTitle>
-                  <div className="space-y-2">
-                    <div className="text-2xl font-bold text-[#FF7A00]">
-                      $20.00
-                      <span className="text-sm text-gray-400 font-normal ml-2">one-time</span>
-                    </div>
-                    <div className="text-lg text-gray-300">
-                      25,000 Credits Added Instantly
-                    </div>
-                    <div className="text-sm text-green-400">
-                      Best value per credit
-                    </div>
-                  </div>
-                </CardHeader>
-                
-                <CardContent className="flex-1 flex flex-col">
-                  <div className="flex-1">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Maximum value for power users</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Credits never expire</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-[#FF7A00] rounded-full flex-shrink-0"></div>
-                        <span className="text-gray-300 text-sm">Added to your account instantly</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-6">
-                    <Button 
-                      onClick={() => handleCreditPackPurchase('pack_25k')}
-                      className="w-full py-3 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-                      disabled={isPurchasingCredits}
-                    >
-                      {isPurchasingCredits ? 'Processing...' : 'Buy Now'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            {isCurrentPlan && (
+              <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/50">
+                Current Plan
+              </Badge>
+            )}
           </div>
-        )}
-        
-        {/* Plan Comparison Section */}
-        <div className="mt-16">
-          <h2 className="text-3xl font-bold text-center text-white mb-8">
-            Compare Our Plans
-          </h2>
-          <FeatureComparisonTable plans={plans} />
-        </div>
-        
-        {/* Upgrade Confirmation Dialog */}
-        <AlertDialog open={showUpgradeConfirmation} onOpenChange={setShowUpgradeConfirmation}>
-          <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
-            <AlertDialogHeader>
-              <AlertDialogTitle className="text-white">Confirm Your Plan Upgrade</AlertDialogTitle>
-              <AlertDialogDescription className="text-gray-300">
-                You are upgrading from <strong>True Fan</strong> to <strong>The Whale</strong> plan.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="space-y-3 mb-4">
-              <div className="bg-gray-800/50 rounded-lg p-4 space-y-2">
-                <div>• <strong>One-time charge:</strong> $10.00 (charged now)</div>
-                <div>• <strong>Credits bonus:</strong> 17,000 credits added immediately</div>
-                <div>• <strong>Next billing:</strong> $24.95/month starting next cycle</div>
-              </div>
-              <div className="text-sm text-gray-400">
-                Your subscription will continue with the new plan benefits and pricing.
-              </div>
+          
+          <div className="mt-4">
+            <div className="flex items-baseline gap-1">
+              <span className="text-4xl font-bold text-white">
+                ${plan.price_monthly}
+              </span>
+              <span className="text-gray-400">/month</span>
             </div>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="border-gray-600 text-white hover:bg-gray-800">
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction 
-                onClick={() => planToUpgradeTo && processSubscriptionAction(planToUpgradeTo)}
-                className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-                disabled={isUpgrading}
-              >
-                {isUpgrading ? 'Processing...' : 'Proceed to Upgrade'}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        {/* Payment Modal Overlay */}
-        <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
-          <DialogContent className="bg-[#1a1a2e] border-gray-700">
-            <DialogHeader>
-              <DialogTitle className="text-white">Complete Your Payment</DialogTitle>
-            </DialogHeader>
-            <div className="py-6">
-              <p className="text-gray-300 text-center">
-                Please complete your transaction in the popup window. This dialog will close automatically when the payment is complete.
-              </p>
-              <div className="flex justify-center mt-4">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF7A00]"></div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+            <p className="text-sm text-gray-400 mt-1">
+              {plan.monthly_credits_allowance.toLocaleString()} credits/month
+            </p>
+          </div>
+        </CardHeader>
+        
+        <CardContent className="flex-1 flex flex-col">
+          <div className="space-y-3 flex-1">
+            {getFeatures().map((feature: string, idx: number) => (
+              <PlanFeature key={idx} feature={feature} included={true} />
+            ))}
+          </div>
+          
+          <Button
+            onClick={onSelect}
+            disabled={disabled || isCurrentPlan}
+            className={`w-full mt-6 ${
+              isCurrentPlan 
+                ? 'bg-gray-700 text-gray-400' 
+                : canUpgrade 
+                  ? 'bg-[#FF7A00] hover:bg-[#FF7A00]/90' 
+                  : 'bg-[#FF7A00] hover:bg-[#FF7A00]/90'
+            }`}
+          >
+            {isCurrentPlan ? 'Current Plan' : canUpgrade ? 'Upgrade' : 'Subscribe'}
+          </Button>
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 };
 
-export default Subscription;
+const FeatureComparisonTable = ({ plans }: { plans: Plan[] }) => {
+  if (!plans || plans.length === 0) return null;
+
+  const features = [
+    { label: 'Monthly Price', key: 'price' },
+    { label: 'Monthly Credits', key: 'credits' },
+    { label: 'Messages per Day', key: 'messages' },
+    { label: 'Character Creation', key: 'characters' },
+    { label: 'Premium AI Models', key: 'premium_models' },
+    { label: 'No Queue/Priority', key: 'priority' },
+    { label: 'Enhanced Memory', key: 'memory' },
+    { label: 'NSFW Content', key: 'nsfw' },
+    { label: 'Add-ons Available', key: 'addons' },
+    { label: 'Credit Booster Packs', key: 'boosters' },
+  ];
+
+  const getFeatureValue = (plan: Plan, featureKey: string) => {
+    switch (featureKey) {
+      case 'price':
+        return plan.price_monthly === 0 ? 'Free' : `$${plan.price_monthly}/mo`;
+      case 'credits':
+        return plan.monthly_credits_allowance.toLocaleString();
+      case 'messages':
+        return plan.name === 'Guest Pass' ? '75/day' : 'Unlimited';
+      case 'characters':
+        return plan.name === 'Guest Pass' ? '1' : plan.name === 'True Fan' ? 'Up to 50' : 'Unlimited';
+      case 'premium_models':
+        return plan.name !== 'Guest Pass';
+      case 'priority':
+        return plan.name !== 'Guest Pass';
+      case 'memory':
+        return plan.name === 'Guest Pass' ? 'Standard' : plan.name === 'True Fan' ? '8K Context' : '16K+ Context';
+      case 'nsfw':
+        return plan.name !== 'Guest Pass';
+      case 'addons':
+        return plan.name !== 'Guest Pass';
+      case 'boosters':
+        return plan.name !== 'Guest Pass';
+      default:
+        return false;
+    }
+  };
+
+  return (
+    <div className="mt-16 mb-16">
+      <h2 className="text-3xl font-bold text-white text-center mb-8">
+        Compare Plans
+      </h2>
+      <Card className="bg-[#1a1a2e] border-gray-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-700">
+                <th className="text-left py-4 px-6 text-gray-300 font-medium min-w-[200px]">
+                  Features
+                </th>
+                {plans.map((plan) => (
+                  <th key={plan.id} className="text-center py-4 px-6 min-w-[140px]">
+                    <div className="text-lg font-bold text-white">{plan.name}</div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {features.map((feature, idx) => (
+                <tr key={feature.key} className={`border-b border-gray-700/30 ${
+                  idx % 2 === 0 ? 'bg-[#1a1a2e]/20' : 'bg-transparent'
+                }`}>
+                  <td className="py-4 px-6 text-gray-300 font-medium">
+                    {feature.label}
+                  </td>
+                  {plans.map((plan) => {
+                    const value = getFeatureValue(plan, feature.key);
+                    return (
+                      <td key={plan.id} className="py-4 px-6 text-center">
+                        {typeof value === 'boolean' ? (
+                          value ? (
+                            <Check className="w-5 h-5 text-green-500 mx-auto" />
+                          ) : (
+                            <X className="w-5 h-5 text-gray-500 mx-auto" />
+                          )
+                        ) : (
+                          <span className="text-white">{value}</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPurchase: () => void; disabled: boolean }) => {
+  const bonusPercentage = pack.credits_granted > 10000 ? Math.round(((pack.credits_granted - 10000) / 10000) * 100) : 0;
+  
+  return (
+    <motion.div whileHover={{ scale: 1.02 }} transition={{ duration: 0.2 }}>
+      <Card className="bg-[#1a1a2e] border-gray-700 hover:border-[#FF7A00]/50 transition-all h-full">
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle className="text-xl text-white">{pack.name}</CardTitle>
+              <p className="text-3xl font-bold text-[#FF7A00] mt-2">
+                {pack.credits_granted.toLocaleString()}
+              </p>
+              <p className="text-sm text-gray-400">credits</p>
+            </div>
+            {bonusPercentage > 0 && (
+              <Badge className="bg-green-500/20 text-green-400 border-green-500/50">
+                +{bonusPercentage}% bonus
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-2xl font-bold text-white">${pack.price}</span>
+            <span className="text-sm text-gray-400">${(pack.price / pack.credits_granted * 1000).toFixed(2)}/1k</span>
+          </div>
+          <Button 
+            onClick={onPurchase} 
+            disabled={disabled}
+            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/90"
+          >
+            <CreditCard className="w-4 h-4 mr-2" />
+            Buy Now
+          </Button>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+};
+
+// Main Component
+export default function Subscription() {
+  const { user, subscription: userSubscription } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const { data, isLoading } = useSubscriptionData();
+  
+  const [processingAction, setProcessingAction] = useState<string | null>(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+
+  const currentPlan = userSubscription?.plan || null;
+
+  // Filter plans based on current subscription
+  const getVisiblePlans = (allPlans: Plan[]) => {
+    if (!currentPlan || currentPlan.name === 'Guest Pass') {
+      // Show all plans for guest users
+      return allPlans;
+    } else if (currentPlan.name === 'True Fan') {
+      // Show only True Fan and The Whale for True Fan users
+      return allPlans.filter(plan => plan.name === 'True Fan' || plan.name === 'The Whale');
+    } else if (currentPlan.name === 'The Whale') {
+      // Show only The Whale for Whale users
+      return allPlans.filter(plan => plan.name === 'The Whale');
+    }
+    return allPlans;
+  };
+
+  // Add retry mechanism
+  const retryWithDelay = async (fn: () => Promise<any>, retries = 3, delay = 1000) => {
+    try {
+      return await fn();
+    } catch (error) {
+      if (retries > 0) {
+        console.log(`⏳ Retrying... (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return retryWithDelay(fn, retries - 1, delay * 1.5);
+      }
+      throw error;
+    }
+  };
+
+  const handlePlanAction = async (plan: Plan) => {
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
+
+    // Show upgrade confirmation for paid users
+    if (currentPlan && currentPlan.price_monthly > 0 && plan.price_monthly > currentPlan.price_monthly) {
+      setSelectedPlan(plan);
+      setShowUpgradeDialog(true);
+      return;
+    }
+
+    await processPlanAction(plan);
+  };
+
+  const processPlanAction = async (plan: Plan) => {
+    console.log('🔄 Processing plan action:', { 
+      planId: plan.id, 
+      planName: plan.name,
+      hasUpgradeFrom: !!userSubscription?.paypal_subscription_id 
+    });
+    
+    try {
+      setProcessingAction(plan.id);
+      setShowUpgradeDialog(false);
+
+      const requestBody = {
+        operation: 'create-subscription',
+        planId: plan.id,
+        upgradeFromSubscriptionId: userSubscription?.paypal_subscription_id
+      };
+      
+      console.log('📤 Sending request to paypal-management:', requestBody);
+
+      // Add retry logic for network issues
+      const response = await retryWithDelay(async () => {
+        return await supabase.functions.invoke('paypal-management', {
+          body: requestBody
+        });
+      });
+
+      const { data, error } = response;
+
+      console.log('📥 Response received:', { data, error });
+
+      if (error) {
+        console.error('❌ Edge function error:', error);
+        throw error;
+      }
+
+      // Fix: Check for correct response structure with detailed logging
+      if (data?.success && data?.data?.approvalUrl) {
+        console.log('✅ Opening PayPal window with URL:', data.data.approvalUrl);
+        openPayPalWindow(data.data.approvalUrl);
+      } else {
+        console.error('❌ Invalid response structure:', {
+          hasSuccess: !!data?.success,
+          hasData: !!data?.data,
+          hasApprovalUrl: !!data?.data?.approvalUrl,
+          fullResponse: data
+        });
+        
+        // Provide more specific error message based on response
+        if (!data) {
+          throw new Error('No response received from payment service');
+        } else if (!data.success) {
+          throw new Error(data.error || 'Payment service returned an error');
+        } else {
+          throw new Error('Invalid response format from payment service');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Plan action error:', error);
+      
+      // Provide user-friendly error messages
+      let errorMessage = "Failed to process subscription. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes('network')) {
+          errorMessage = "Network error. Please check your connection and try again.";
+        } else if (error.message.includes('timeout')) {
+          errorMessage = "Request timed out. Please try again.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      toast({
+        title: "Subscription Error",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const handleCreditPurchase = async (pack: CreditPack) => {
+    console.log('🔄 Processing credit purchase:', { 
+      packId: pack.id, 
+      packName: pack.name,
+      credits: pack.credits_granted 
+    });
+    
+    try {
+      setProcessingAction(pack.id);
+
+      const requestBody = {
+        operation: 'create-order',
+        creditPackId: pack.id
+      };
+      
+      console.log('📤 Sending credit purchase request to paypal-management:', requestBody);
+
+      // Add retry logic for network issues
+      const response = await retryWithDelay(async () => {
+        return await supabase.functions.invoke('paypal-management', {
+          body: requestBody
+        });
+      });
+
+      const { data, error } = response;
+
+      console.log('📥 Credit purchase response received:', { data, error });
+
+      if (error) {
+        console.error('❌ Edge function error:', error);
+        throw error;
+      }
+
+      // Fix: Check for correct response structure with multiple fallbacks
+      if (data?.success && data?.data?.approvalUrl) {
+        console.log('✅ Opening PayPal window for credit purchase:', data.data.approvalUrl);
+        openPayPalWindow(data.data.approvalUrl);
+      } else if (data?.data?.approvalUrl) {  // Fallback for direct data structure
+        console.log('✅ Opening PayPal window (fallback):', data.data.approvalUrl);
+        openPayPalWindow(data.data.approvalUrl);
+      } else {
+        console.error('❌ Invalid credit purchase response structure:', {
+          hasSuccess: !!data?.success,
+          hasData: !!data?.data,
+          hasApprovalUrl: !!data?.data?.approvalUrl,
+          fullResponse: data
+        });
+        
+        // Provide more specific error message based on response
+        if (!data) {
+          throw new Error('No response received from payment service');
+        } else if (!data.success) {
+          throw new Error(data.error || 'Payment service returned an error');
+        } else {
+          throw new Error('Invalid response format from payment service');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Credit purchase error:', error);
+      
+      // Provide user-friendly error messages
+      let errorMessage = "Failed to process credit purchase. Please try again.";
+      
+      if (error instanceof Error) {
+        if (error.message.includes('network')) {
+          errorMessage = "Network error. Please check your connection and try again.";
+        } else if (error.message.includes('timeout')) {
+          errorMessage = "Request timed out. Please try again.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      toast({
+        title: "Credit Purchase Error",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const openPayPalWindow = (url: string) => {
+    console.log('🪟 Opening PayPal window:', url);
+    
+    const width = 500;
+    const height = 700;
+    const left = (window.screen.width / 2) - (width / 2);
+    const top = (window.screen.height / 2) - (height / 2);
+    
+    setShowPaymentModal(true);
+    
+    const windowFeatures = `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no,location=no,status=no,resizable=yes,scrollbars=yes`;
+    
+    const popup = window.open(
+      url,
+      'paypal-window',
+      windowFeatures
+    );
+
+    if (!popup) {
+      console.error('❌ Failed to open PayPal window - popup blocked?');
+      toast({
+        title: "Popup Blocked",
+        description: "Please allow popups for this site to complete payment.",
+        variant: "destructive"
+      });
+      setShowPaymentModal(false);
+      return;
+    }
+
+    popup.focus();
+
+    const handleMessage = (event: MessageEvent) => {
+      console.log('📨 Received message:', event.data);
+      
+      if (event.data?.paypal_status === 'success') {
+        console.log('✅ Payment successful!');
+        window.removeEventListener('message', handleMessage);
+        setShowPaymentModal(false);
+        toast({
+          title: "Success!",
+          description: "Your payment was processed successfully.",
+        });
+        
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    const checkClosed = setInterval(() => {
+      if (popup?.closed) {
+        console.log('🪟 PayPal window closed');
+        clearInterval(checkClosed);
+        window.removeEventListener('message', handleMessage);
+        setShowPaymentModal(false);
+      }
+    }, 1000);
+  };
+
+  if (isLoading) {
+    return (
+      <>
+        <MobileHeader title="Subscription" />
+        <div className="min-h-screen bg-[#121212] pt-24 pb-12">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="space-y-8">
+              <Skeleton className="h-12 w-64 mx-auto" />
+              <div className="grid md:grid-cols-3 gap-6">
+                {[1, 2, 3].map(i => (
+                  <Skeleton key={i} className="h-96" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  const { plans = [], creditPacks = [], credits = null } = data || {};
+  const visiblePlans = getVisiblePlans(plans);
+
+  const faqs = [
+    {
+      question: "Can I cancel anytime?",
+      answer: "Yes! You can cancel your subscription at any time from your account settings. You'll continue to have access until the end of your billing period."
+    },
+    {
+      question: "What happens to unused credits?",
+      answer: "Monthly credits don't roll over, but purchased credit packs never expire. We recommend choosing a plan that matches your usage."
+    },
+    {
+      question: "Can I upgrade my plan?",
+      answer: "Absolutely! You can upgrade your plan at any time. When you upgrade, you'll be charged the prorated difference for the remainder of your billing cycle, and your new benefits will take effect immediately."
+    },
+    {
+      question: "What payment methods do you accept?",
+      answer: "We accept all major credit cards and PayPal. All payments are processed securely through PayPal's payment gateway, even if you choose to pay with a credit card."
+    }
+  ];
+
+  return (
+    <>
+      <MobileHeader title="Subscription" />
+      <div className="min-h-screen bg-[#121212] pt-24 pb-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Header */}
+          <div className="text-center mb-12">
+            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+              Choose Your Plan
+            </h1>
+            <p className="text-xl text-gray-400 max-w-2xl mx-auto">
+              Unlock the full potential of AI conversations with our flexible subscription plans
+            </p>
+          </div>
+
+          {/* Plans */}
+          <div className={`grid gap-6 lg:gap-8 mb-16 ${
+            visiblePlans.length === 1 
+              ? 'md:grid-cols-1 max-w-md mx-auto' 
+              : visiblePlans.length === 2 
+                ? 'md:grid-cols-2 max-w-4xl mx-auto' 
+                : 'md:grid-cols-3'
+          }`}>
+            {visiblePlans.map((plan, idx) => (
+              <PlanCard
+                key={plan.id}
+                plan={plan}
+                currentPlan={currentPlan}
+                isPopular={plan.name === 'True Fan' && visiblePlans.length > 2}
+                onSelect={() => handlePlanAction(plan)}
+                disabled={!!processingAction}
+              />
+            ))}
+          </div>
+
+          {/* Feature Comparison Table */}
+          <FeatureComparisonTable plans={plans} />
+
+          {/* Credit Packs - Only for paid users */}
+          {currentPlan && currentPlan.price_monthly > 0 && creditPacks.length > 0 && (
+            <div className="mb-16">
+              <div className="text-center mb-8">
+                <h2 className="text-3xl font-bold text-white mb-3">
+                  Need More Credits?
+                </h2>
+                <p className="text-gray-400">
+                  Boost your conversations with one-time credit purchases
+                </p>
+              </div>
+              
+              <div className="grid md:grid-cols-3 gap-6">
+                {creditPacks.map(pack => (
+                  <CreditPackCard
+                    key={pack.id}
+                    pack={pack}
+                    onPurchase={() => handleCreditPurchase(pack)}
+                    disabled={!!processingAction}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* FAQ Section */}
+          <div className="mt-16">
+            <h2 className="text-2xl font-bold text-white text-center mb-8">
+              Frequently Asked Questions
+            </h2>
+            <Accordion type="single" collapsible className="w-full space-y-4">
+              {faqs.map((faq, index) => (
+                <AccordionItem key={index} value={`item-${index}`} className="bg-[#1a1a2e]/50 border border-gray-700 rounded-lg px-6">
+                  <AccordionTrigger className="text-left hover:no-underline py-6">
+                    <span className="text-lg text-white">{faq.question}</span>
+                  </AccordionTrigger>
+                  <AccordionContent className="text-gray-400 pb-6">
+                    {faq.answer}
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </div>
+        </div>
+      </div>
+
+      {/* Upgrade Confirmation Dialog */}
+      <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
+        <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Confirm Plan Upgrade</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-300">
+              You are upgrading from <strong>{currentPlan?.name}</strong> to <strong>{selectedPlan?.name}</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          {selectedPlan && currentPlan && (
+            <div className="space-y-3 mb-4">
+              <div className="bg-[#1a1a2e]/50 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between">
+                  <span>New monthly price:</span>
+                  <span className="font-semibold">${selectedPlan.price_monthly}/month</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Additional credits:</span>
+                  <span className="font-semibold">
+                    +{(selectedPlan.monthly_credits_allowance - currentPlan.monthly_credits_allowance).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-400">
+                Your new plan will take effect immediately and you'll be charged the prorated difference.
+              </p>
+            </div>
+          )}
+          
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-gray-600 text-white hover:bg-[#1a1a2e]">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => selectedPlan && processPlanAction(selectedPlan)}
+              className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
+            >
+              {processingAction ? 'Processing...' : 'Confirm Upgrade'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Payment Modal */}
+      <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
+        <DialogContent className="bg-[#1a1a2e] border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="text-white">Complete Your Payment</DialogTitle>
+          </DialogHeader>
+          <div className="py-6">
+            <p className="text-gray-300 text-center mb-4">
+              Please complete your payment in the PayPal window.
+            </p>
+            <div className="flex justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#FF7A00]"></div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

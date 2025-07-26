@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Heart, MessageCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { formatNumberWithK } from '@/lib/utils/formatting';
 
 interface RelatedCharactersCarouselProps {
   currentCharacterId: string;
@@ -182,19 +183,11 @@ export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedC
                   <div className="flex items-center space-x-2">
                     <div className="flex items-center space-x-1">
                       <MessageCircle className="w-3 h-3" />
-                      <span>
-                        {(character.actual_chat_count || 0) >= 1000 
-                          ? `${((character.actual_chat_count || 0) / 1000).toFixed(1)}K` 
-                          : character.actual_chat_count || 0}
-                      </span>
+                      <span>{formatNumberWithK(character.actual_chat_count || 0)}</span>
                     </div>
                     <div className="flex items-center space-x-1">
                       <Heart className="w-3 h-3" />
-                      <span>
-                        {(character.likes_count || 0) >= 1000 
-                          ? `${((character.likes_count || 0) / 1000).toFixed(1)}K` 
-                          : character.likes_count || 0}
-                      </span>
+                      <span>{formatNumberWithK(character.likes_count || 0)}</span>
                     </div>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { DashboardContent } from '@/components/dashboard/DashboardContent';
+import DashboardContent from '@/components/dashboard/DashboardContent';
 
 const Dashboard = () => {
   return <DashboardContent />;

@@ -107,6 +107,11 @@ export const MemoriesDialog: React.FC<MemoriesDialogProps> = ({
                   {/* Memory Header */}
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-2 text-sm text-gray-400">
+                      {memory.is_auto_summary && (
+                        <Badge variant="outline" className="border-blue-400 text-blue-400 text-xs">
+                          Auto-Summary
+                        </Badge>
+                      )}
                       <Calendar className="w-4 h-4" />
                       <span>{formatDate(memory.created_at)}</span>
                       <span className="text-gray-600">•</span>
@@ -114,13 +119,15 @@ export const MemoriesDialog: React.FC<MemoriesDialogProps> = ({
                       <span>{memory.message_count} messages</span>
                       <span className="text-gray-600">•</span>
                       <Coins className="w-4 h-4" />
-                      <span>{memory.input_token_cost} credits</span>
+                      <span>{memory.is_auto_summary ? 'Free' : `${memory.input_token_cost} credits`}</span>
                     </div>
                   </div>
 
+                  {/* Memory Title */}
+                  <h3 className="text-lg font-semibold text-white mb-2">{memory.name}</h3>
+                  
                   {/* Memory Summary */}
                   <div className="mb-3">
-                    <h4 className="text-white font-medium mb-2">Summary</h4>
                     <p className="text-gray-300 text-sm leading-relaxed">
                       {memory.summary_content}
                     </p>

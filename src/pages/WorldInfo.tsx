@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Plus, Upload, Trash2, BookOpen, Heart, FileText, Loader2 } from 'lucide-react';
+import { Plus, Upload, Trash2, BookOpen, Heart, FileText, Loader2, ArrowLeft } from 'lucide-react';
+import { TopBar } from '@/components/ui/TopBar';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -152,10 +153,10 @@ export default function WorldInfo() {
     <div className="min-h-screen bg-[#121212]">
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
-          {/* Header */}
-          <div className="p-6 border-b border-gray-700/50">
-            <div className="flex items-center justify-between mb-4">
-              <h1 className="text-2xl font-bold text-white">World Infos</h1>
+          {/* Standardized TopBar */}
+          <TopBar
+            title="World Infos"
+            rightContent={
               <div className="flex space-x-2">
                 <Button
                   onClick={handleStartCreate}
@@ -173,8 +174,8 @@ export default function WorldInfo() {
                   Import
                 </Button>
               </div>
-            </div>
-          </div>
+            }
+          />
 
           {/* World Info List */}
           <div className="flex-1 overflow-auto p-6">

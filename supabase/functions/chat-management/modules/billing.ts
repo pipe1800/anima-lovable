@@ -1,29 +1,35 @@
 import type { AddonSettings, CreditInfo, PlanInfo, SupabaseClient } from '../types/streaming-interfaces.ts';
 
 /**
- * Credit calculation and billing utilities
- * Handles subscription-based model selection and credit consumption
+ * Credit calculation and billing utilities - Updated for Universal 12k Context System
+ * Fixed costs per tier, no addon multipliers, all addons are free
  */
 
 export const PLAN_MODEL_COSTS = {
   'Guest Pass': {
     model: 'openai/gpt-4o-mini',
-    cost: 10
+    cost: 8, // Fixed cost - no multipliers
+    maxContextTokens: 12000,
+    modelIdentifier: 'openai/gpt-4o-mini'
   },
   'True Fan': {
-    model: 'gryphe/mythomax-l2-13b',
-    cost: 4
+    model: 'microsoft/wizardlm-2-8x22b',
+    cost: 23, // Fixed cost - no multipliers
+    maxContextTokens: 12000,
+    modelIdentifier: 'microsoft/wizardlm-2-8x22b'
   },
   'The Whale': {
     model: 'nousresearch/nous-hermes-2-mixtral-8x7b-dpo',
-    cost: 7
+    cost: 23, // Fixed cost - no multipliers
+    maxContextTokens: 12000,
+    modelIdentifier: 'nousresearch/nous-hermes-2-mixtral-8x7b-dpo'
   }
 } as const;
 
 export async function getUserPlanAndModel(
   userId: string,
   supabaseAdmin: SupabaseClient
-): Promise<{ plan: string; model: string }> {
+): Promise<{ plan: string; model: string; maxContextTokens: number; modelIdentifier: string }> {
   // Check for active subscription
   const { data: userSubscription } = await supabaseAdmin
     .from('subscriptions')
@@ -48,16 +54,21 @@ export async function getUserPlanAndModel(
       if (planConfig) {
         return {
           plan: planName,
-          model: planConfig.model
+          model: planConfig.model,
+          maxContextTokens: planConfig.maxContextTokens,
+          modelIdentifier: planConfig.modelIdentifier
         };
       }
     }
   }
 
   // Default to Guest Pass
+  const guestConfig = PLAN_MODEL_COSTS['Guest Pass'];
   return {
     plan: 'Guest Pass',
-    model: PLAN_MODEL_COSTS['Guest Pass'].model
+    model: guestConfig.model,
+    maxContextTokens: guestConfig.maxContextTokens,
+    modelIdentifier: guestConfig.modelIdentifier
   };
 }
 
@@ -68,33 +79,24 @@ export function calculateCreditCost(
   const planConfig = PLAN_MODEL_COSTS[planName as keyof typeof PLAN_MODEL_COSTS];
   
   if (!planConfig) {
-    throw new Error('Invalid plan configuration');
+    console.warn(`Unknown plan: ${planName}, defaulting to Guest Pass`);
+    const guestCost = PLAN_MODEL_COSTS['Guest Pass'].cost;
+    return {
+      baseCost: guestCost,
+      addonPercentage: 0, // No addon costs in new system
+      totalCost: guestCost
+    };
   }
 
+  // Fixed cost per plan - all addons are now FREE
   const baseCost = planConfig.cost;
   
-  // Calculate addon percentage increase
-  let addonPercentage = 0;
-  if (addonSettings) {
-    if (addonSettings.dynamicWorldInfo) addonPercentage += 10;
-    // Enhanced Memory removed - will be variable cost based on chat length (future implementation)
-    if (addonSettings.moodTracking) addonPercentage += 5;
-    if (addonSettings.clothingInventory) addonPercentage += 5;
-    if (addonSettings.locationTracking) addonPercentage += 5;
-    if (addonSettings.timeAndWeather) addonPercentage += 5;
-    if (addonSettings.relationshipStatus) addonPercentage += 5;
-    if (addonSettings.characterPosition) addonPercentage += 5;
-    // Chain of Thought and Few Shot Examples temporarily disabled - coming soon
-    // if (addonSettings.chainOfThought) addonPercentage += 30;
-    // if (addonSettings.fewShotExamples) addonPercentage += 7;
-  }
-
-  const totalCost = Math.ceil(baseCost * (1 + addonPercentage / 100));
-
+  console.log(`💰 New billing system: ${planName} = ${baseCost} credits (addons included for free)`);
+  
   return {
     baseCost,
-    addonPercentage,
-    totalCost
+    addonPercentage: 0, // All addons are free
+    totalCost: baseCost // No addon multipliers
   };
 }
 
@@ -126,5 +128,5 @@ export async function consumeCredits(
 }
 
 export function createInsufficientCreditsError(creditInfo: CreditInfo): string {
-  return `Insufficient credits. Required: ${creditInfo.totalCost} credits (${creditInfo.baseCost} base + ${creditInfo.addonPercentage}% addon increase)`;
+  return `Insufficient credits. Required: ${creditInfo.totalCost} credits (fixed cost - addons included)`;
 }

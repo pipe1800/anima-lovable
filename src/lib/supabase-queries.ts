@@ -1,5 +1,29 @@
-import { supabase } from '@/integrations/supabase/client'
+                                    import { supabase } from '@/integrations/supabase/client'
 import type { Profile, Character, Plan, Subscription, Credits, Chat, Message, OnboardingChecklistItem, UserOnboardingProgress } from '@/types/database'
+
+// =============================================================================
+// SEARCH INTERFACES
+// =============================================================================
+
+export interface SearchParams {
+  searchQuery?: string;
+  sortBy: string;
+  filters: {
+    tags?: string[];
+    creator?: string;
+    nsfw?: boolean;
+    gender?: string;
+  };
+  limit: number;
+  offset: number;
+}
+
+export interface SearchResult<T> {
+  data: T[];
+  total: number;
+  hasMore: boolean;
+  error?: any;
+}
 
 // =============================================================================
 // MONETIZATION QUERIES - Plans, Models, Credit Packs
@@ -77,7 +101,7 @@ export const getUserActiveSubscription = async (userId: string) => {
 export const getPublicProfile = async (userId: string) => {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, username, avatar_url, bio, created_at')
+    .select('id, username, avatar_url, banner_url, bio, created_at, timezone')
     .eq('id', userId)
     .maybeSingle()
 
@@ -105,7 +129,7 @@ export const updateProfile = async (userId: string, updates: Partial<Profile>) =
     .from('profiles')
     .update(updates)
     .eq('id', userId)
-    .select('id, username, avatar_url, bio, created_at')
+    .select('id, username, avatar_url, banner_url, bio, created_at, timezone')
     .maybeSingle()
 
   return { data, error }
@@ -118,7 +142,7 @@ export const updateProfile = async (userId: string, updates: Partial<Profile>) =
 /**
  * Get public characters (for discovery page) with enhanced data
  */
-export const getPublicCharacters = async (limit = 20, offset = 0) => {
+export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = true) => {
   const { data, error } = await supabase
     .from('characters')
     .select(`
@@ -138,9 +162,25 @@ export const getPublicCharacters = async (limit = 20, offset = 0) => {
     return { data: [], error }
   }
 
+  let filteredData = data;
+
+  // Apply NSFW filtering based on tags
+  if (nsfwEnabled === false) {
+    // User has NSFW disabled - exclude characters with NSFW tag
+    const { data: nsfwCharacters } = await supabase
+      .from('character_tags')
+      .select('character_id')
+      .eq('tag_id', 24); // NSFW tag ID
+
+    if (nsfwCharacters && nsfwCharacters.length > 0) {
+      const nsfwCharacterIds = new Set(nsfwCharacters.map(c => c.character_id));
+      filteredData = filteredData.filter(char => !nsfwCharacterIds.has(char.id));
+    }
+  }
+
   // Fetch creator profiles, counts, and tags separately for each character
   const charactersWithCreators = await Promise.all(
-    data.map(async (character) => {
+    filteredData.map(async (character) => {
       // Get creator profile
       const { data: creatorData } = await supabase
         .from('profiles')
@@ -189,6 +229,172 @@ export const getPublicCharacters = async (limit = 20, offset = 0) => {
 }
 
 /**
+ * Enhanced character search with server-side filtering and pagination
+ */
+export const searchPublicCharacters = async (params: SearchParams): Promise<SearchResult<any>> => {
+  const { searchQuery, sortBy, filters, limit, offset } = params;
+
+  // Build the base query
+  let query = supabase
+    .from('characters')
+    .select(`
+      id,
+      name,
+      short_description,
+      avatar_url,
+      interaction_count,
+      created_at,
+      creator_id
+    `, { count: 'exact' })
+    .eq('visibility', 'public');
+
+  // Apply text search if provided
+  if (searchQuery && searchQuery.trim()) {
+    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
+  }
+
+  // Don't apply NSFW filter in the query - we'll handle it after fetching
+
+  // Apply creator filter if specified
+  if (filters.creator && filters.creator.trim()) {
+    // First get creator IDs that match the username
+    const { data: creators } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('username', `%${filters.creator}%`);
+    
+    if (creators && creators.length > 0) {
+      const creatorIds = creators.map(c => c.id);
+      query = query.in('creator_id', creatorIds);
+    } else {
+      // No matching creators found, return empty result
+      return { data: [], total: 0, hasMore: false };
+    }
+  }
+
+  // Apply sorting
+  switch (sortBy) {
+    case 'newest':
+      query = query.order('created_at', { ascending: false });
+      break;
+    case 'conversations':
+    case 'popular':
+    default:
+      query = query.order('interaction_count', { ascending: false });
+      break;
+  }
+
+  // Apply pagination
+  query = query.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return { data: [], total: 0, hasMore: false, error };
+  }
+
+  let filteredData = data;
+
+  // Apply NSFW filtering based on tags
+  if (filters.nsfw === false) {
+    // User has NSFW disabled - exclude characters with NSFW tag
+    // First get all character IDs that have the NSFW tag
+    const { data: nsfwCharacters } = await supabase
+      .from('character_tags')
+      .select('character_id')
+      .eq('tag_id', 24); // NSFW tag ID
+
+    if (nsfwCharacters && nsfwCharacters.length > 0) {
+      const nsfwCharacterIds = new Set(nsfwCharacters.map(c => c.character_id));
+      filteredData = filteredData.filter(char => !nsfwCharacterIds.has(char.id));
+    }
+  }
+  // If NSFW is true, show all content (no filtering needed)
+
+  // If we have tag filters, we need to filter by tags
+  if (filters.tags && filters.tags.length > 0) {
+    // Get characters that have at least one of the specified tags
+    const { data: characterTags } = await supabase
+      .from('character_tags')
+      .select(`
+        character_id,
+        tag:tags(name)
+      `)
+      .in('character_id', filteredData.map(c => c.id));
+
+    const charactersWithTags = new Set<string>();
+    characterTags?.forEach(ct => {
+      if (ct.tag && filters.tags!.includes(ct.tag.name)) {
+        charactersWithTags.add(ct.character_id);
+      }
+    });
+
+    filteredData = filteredData.filter(c => charactersWithTags.has(c.id));
+  }
+
+  // Fetch additional data for filtered characters
+  const charactersWithDetails = await Promise.all(
+    filteredData.map(async (character) => {
+      // Get creator profile
+      const { data: creatorData } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .eq('id', character.creator_id)
+        .maybeSingle();
+
+      // Get actual chat count
+      const { count: chatCount } = await supabase
+        .from('chats')
+        .select('id', { count: 'exact' })
+        .eq('character_id', character.id);
+
+      // Get likes count
+      const { count: likesCount } = await supabase
+        .from('character_likes')
+        .select('id', { count: 'exact' })
+        .eq('character_id', character.id);
+
+      // Get favorites count
+      const { count: favoritesCount } = await supabase
+        .from('character_favorites')
+        .select('id', { count: 'exact' })
+        .eq('character_id', character.id);
+
+      // Get character tags
+      const { data: tagsData } = await supabase
+        .from('character_tags')
+        .select(`
+          tag:tags(id, name)
+        `)
+        .eq('character_id', character.id);
+
+      return {
+        ...character,
+        creator: creatorData,
+        actual_chat_count: chatCount || 0,
+        likes_count: likesCount || 0,
+        favorites_count: favoritesCount || 0,
+        tags: tagsData?.map(t => t.tag).filter(Boolean) || []
+      };
+    })
+  );
+
+  // Apply conversations sorting if specified (now that we have chat counts)
+  if (sortBy === 'conversations') {
+    charactersWithDetails.sort((a, b) => b.actual_chat_count - a.actual_chat_count);
+  }
+
+  const total = count || 0;
+  const hasMore = offset + limit < total;
+
+  return {
+    data: charactersWithDetails,
+    total,
+    hasMore
+  };
+}
+
+/**
  * Get user's own characters (all visibility levels)
  */
 export const getUserCharacters = async (userId: string) => {
@@ -202,7 +408,11 @@ export const getUserCharacters = async (userId: string) => {
       visibility,
       interaction_count,
       created_at,
-      updated_at
+      updated_at,
+      character_definitions!inner(
+        personality_summary,
+        scenario
+      )
     `)
     .eq('creator_id', userId)
     .order('updated_at', { ascending: false })
@@ -229,7 +439,15 @@ export const getUserCharacters = async (userId: string) => {
       return {
         ...character,
         actual_chat_count: chatCount || 0,
-        likes_count: likesCount || 0
+        likes_count: likesCount || 0,
+        tagline: (() => {
+          try {
+            const personalitySummary = JSON.parse(character.character_definitions?.personality_summary || '{}');
+            return personalitySummary.title || (character.character_definitions?.scenario as any)?.title || character.short_description || '';
+          } catch {
+            return (character.character_definitions?.scenario as any)?.title || character.short_description || '';
+          }
+        })()
       }
     })
   )
@@ -241,7 +459,6 @@ export const getUserCharacters = async (userId: string) => {
  * Get character with full details (respects visibility rules)
  */
 export const getCharacterDetails = async (characterId: string) => {
-  console.log('🔍 getCharacterDetails called with characterId:', characterId)
 
   const { data, error } = await supabase
     .from('characters')
@@ -258,7 +475,6 @@ export const getCharacterDetails = async (characterId: string) => {
     .eq('id', characterId)
     .maybeSingle()
 
-  console.log('📊 Character query result:', { data, error })
 
   if (error || !data) {
     console.error('❌ Failed to fetch character:', error)
@@ -266,7 +482,6 @@ export const getCharacterDetails = async (characterId: string) => {
   }
 
   // Fetch creator profile separately
-  console.log('🔍 Fetching creator profile for userId:', data.creator_id)
   const { data: creatorData, error: creatorError } = await supabase
     .from('profiles')
     .select('id, username, avatar_url')
@@ -276,7 +491,6 @@ export const getCharacterDetails = async (characterId: string) => {
   console.log('👤 Creator query result:', { creatorData, creatorError })
 
   // Fetch character definition separately
-  console.log('🔍 Fetching character definition for characterId:', characterId)
   const { data: definitionData, error: definitionError } = await supabase
     .from('character_definitions')
     .select('greeting, description, personality_summary, scenario')
@@ -286,7 +500,6 @@ export const getCharacterDetails = async (characterId: string) => {
   console.log('📄 Definition query result:', { definitionData, definitionError })
 
   // Fetch character tags separately
-  console.log('🔍 Fetching character tags for characterId:', characterId)
   const { data: tagsData, error: tagsError } = await supabase
     .from('character_tags')
     .select(`
@@ -302,10 +515,9 @@ export const getCharacterDetails = async (characterId: string) => {
     creator: creatorData,
     character_definitions: definitionData,
     definition: definitionData ? [definitionData] : [],
-    tags: tagsData || []
+    tags: tagsData?.map(t => t.tag).filter(Boolean) || []
   }
 
-  console.log('✅ Final character with details:', characterWithDetails)
 
   return { data: characterWithDetails, error: null }
 }
@@ -457,7 +669,107 @@ export const completeOnboardingTask = async (userId: string, taskId: number) => 
 // =============================================================================
 
 /**
- * Get user's chat sessions with last message preview
+ * Get user's chat sessions with pagination
+ */
+export const getUserChatsPaginated = async (
+  userId: string, 
+  page: number = 1, 
+  pageSize: number = 10
+) => {
+  const offset = (page - 1) * pageSize;
+  
+  // First get total count for pagination
+  const { count: totalCount } = await supabase
+    .from('chats')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  // Then get paginated data
+  const { data, error } = await supabase
+    .from('chats')
+    .select(`
+      id,
+      title,
+      last_message_at,
+      created_at,
+      character_id,
+      character:characters(
+        id, 
+        name, 
+        avatar_url,
+        short_description,
+        character_definitions!inner(
+          personality_summary,
+          scenario
+        )
+      )
+    `)
+    .eq('user_id', userId)
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + pageSize - 1);
+
+  if (error || !data) {
+    return { data: [], totalCount: 0, error };
+  }
+
+  // Fetch last message and user character settings for each chat
+  const chatsWithLastMessage = await Promise.all(
+    data.map(async (chat) => {
+      // Fetch message count for this chat
+      const { count: messageCount } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('chat_id', chat.id);
+
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('content, is_ai_message')
+        .eq('chat_id', chat.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const lastMessage = messages?.[0];
+
+      // Fetch user character settings
+      const { data: userSettings } = await supabase
+        .from('user_character_settings')
+        .select('chat_mode, time_awareness_enabled')
+        .eq('user_id', userId)
+        .eq('character_id', chat.character_id)
+        .maybeSingle();
+
+      return {
+        ...chat,
+        message_count: messageCount || 0, // Add message count here
+        character: {
+          ...chat.character,
+          tagline: (() => {
+            try {
+              const personalitySummary = JSON.parse(chat.character?.character_definitions?.personality_summary || '{}');
+              return personalitySummary.title || (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
+            } catch {
+              return (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
+            }
+          })()
+        },
+        messages: lastMessage ? [lastMessage] : [],
+        userSettings: userSettings || { chat_mode: 'storytelling', time_awareness_enabled: false }
+      };
+    })
+  );
+
+  return { 
+    data: chatsWithLastMessage, 
+    totalCount: totalCount || 0,
+    currentPage: page,
+    totalPages: Math.ceil((totalCount || 0) / pageSize),
+    error: null 
+  };
+};
+
+/**
+ * Get user's chat sessions with last message preview (legacy - keep for compatibility)
  */
 export const getUserChats = async (userId: string) => {
   const { data, error } = await supabase
@@ -467,16 +779,27 @@ export const getUserChats = async (userId: string) => {
       title,
       last_message_at,
       created_at,
-      character:characters(id, name, avatar_url)
+      character_id,
+      character:characters(
+        id, 
+        name, 
+        avatar_url,
+        short_description,
+        character_definitions!inner(
+          personality_summary,
+          scenario
+        )
+      )
     `)
     .eq('user_id', userId)
-    .order('last_message_at', { ascending: false })
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
 
   if (error || !data) {
     return { data: data || [], error }
   }
 
-  // Fetch last message for each chat
+  // Fetch last message and user character settings for each chat
   const chatsWithLastMessage = await Promise.all(
     data.map(async (chat) => {
       const { data: lastMessage } = await supabase
@@ -487,10 +810,30 @@ export const getUserChats = async (userId: string) => {
         .limit(1)
         .maybeSingle()
 
+      // Fetch user character settings
+      const { data: userSettings } = await supabase
+        .from('user_character_settings')
+        .select('chat_mode, time_awareness_enabled')
+        .eq('user_id', userId)
+        .eq('character_id', chat.character_id)
+        .maybeSingle()
+
       return {
         ...chat,
+        character: {
+          ...chat.character,
+          tagline: (() => {
+            try {
+              const personalitySummary = JSON.parse(chat.character?.character_definitions?.personality_summary || '{}');
+              return personalitySummary.title || (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
+            } catch {
+              return (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
+            }
+          })()
+        },
         lastMessage: lastMessage?.content || null,
-        lastMessageIsAI: lastMessage?.is_ai_message || false
+        lastMessageIsAI: lastMessage?.is_ai_message || false,
+        userSettings: userSettings || { chat_mode: 'storytelling', time_awareness_enabled: false }
       }
     })
   )
@@ -522,7 +865,7 @@ export const getChatMessages = async (chatId: string, limit = 50, offset = 0) =>
 
 /**
  * Get recent messages for a chat (for quick loading)
- * This function ALWAYS preserves historical context data regardless of current addon settings
+ * Context is now stored in messages.current_context by Edge Function
  */
 export const getRecentChatMessages = async (chatId: string, limit = 20) => {
   const { data, error } = await supabase
@@ -544,20 +887,12 @@ export const getRecentChatMessages = async (chatId: string, limit = 20) => {
   
   const messages = data.reverse();
   
-  // Fetch ALL context updates for these messages - NEVER filter based on current addon settings
-  // Historical context must be preserved regardless of current settings
+  // Context is now stored in messages.current_context - old tables removed
   const messageIds = messages.map(msg => msg.id);
-  const { data: contextData } = await supabase
-    .from('message_context')
-    .select('message_id, context_updates')
-    .in('message_id', messageIds);
+  const contextData = []; // Empty since tables were removed
   
-  // Fetch current context state for the chat (only for inheritance, not filtering)
-  const { data: currentContextData } = await supabase
-    .from('user_chat_context')
-    .select('context_type, current_context')
-    .eq('chat_id', chatId)
-    .neq('current_context', 'No context');
+  // Current context also moved to new system
+  const currentContextData = []; // Empty since table was removed
   
   // Build current context state for inheritance
   const currentContext = {};
@@ -613,20 +948,12 @@ export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder:
   
   const messages = data.reverse();
   
-  // Fetch ALL context updates for these messages - NEVER filter based on current addon settings
-  // Historical context must be preserved regardless of current settings
+  // Context is now stored in messages.current_context - old tables removed
   const messageIds = messages.map(msg => msg.id);
-  const { data: contextData } = await supabase
-    .from('message_context')
-    .select('message_id, context_updates')
-    .in('message_id', messageIds);
+  const contextData = []; // Empty since tables were removed
   
-  // Fetch current context state for the chat (only for inheritance, not filtering)
-  const { data: currentContextData } = await supabase
-    .from('user_chat_context')
-    .select('context_type, current_context')
-    .eq('chat_id', chatId)
-    .neq('current_context', 'No context');
+  // Current context also moved to new system
+  const currentContextData = []; // Empty since table was removed
   
   // Build current context state for inheritance
   const currentContext = {};
@@ -760,6 +1087,168 @@ export const getPublicWorldInfos = async (limit = 20, offset = 0) => {
   )
 
   return { data: worldInfosWithCreators, error: null }
+}
+
+/**
+ * Enhanced world info search with server-side filtering and pagination
+ */
+export const searchPublicWorldInfos = async (params: SearchParams): Promise<SearchResult<any>> => {
+  const { searchQuery, sortBy, filters, limit, offset } = params;
+
+  // Build the base query
+  let query = supabase
+    .from('world_infos')
+    .select(`
+      id,
+      name,
+      short_description,
+      interaction_count,
+      created_at,
+      creator_id
+    `, { count: 'exact' })
+    .eq('visibility', 'public');
+
+  // Apply text search if provided
+  if (searchQuery && searchQuery.trim()) {
+    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
+  }
+
+  // Apply creator filter if specified
+  if (filters.creator && filters.creator.trim()) {
+    // First get creator IDs that match the username
+    const { data: creators } = await supabase
+      .from('profiles')
+      .select('id')
+      .ilike('username', `%${filters.creator}%`);
+    
+    if (creators && creators.length > 0) {
+      const creatorIds = creators.map(c => c.id);
+      query = query.in('creator_id', creatorIds);
+    } else {
+      // No matching creators found, return empty result
+      return { data: [], total: 0, hasMore: false };
+    }
+  }
+
+  // Apply sorting
+  switch (sortBy) {
+    case 'newest':
+      query = query.order('created_at', { ascending: false });
+      break;
+    case 'conversations':
+    case 'popular':
+    default:
+      query = query.order('interaction_count', { ascending: false });
+      break;
+  }
+
+  // Apply pagination
+  query = query.range(offset, offset + limit - 1);
+
+  const { data, error, count } = await query;
+
+  if (error || !data) {
+    return { data: [], total: 0, hasMore: false, error };
+  }
+
+  let filteredData = data;
+
+  // Apply NSFW filtering based on tags
+  if (filters.nsfw === false) {
+    // User has NSFW disabled - exclude world infos with NSFW tag
+    const { data: nsfwWorldInfos } = await supabase
+      .from('world_info_tags')
+      .select('world_info_id')
+      .eq('tag_id', 24); // NSFW tag ID
+
+    if (nsfwWorldInfos && nsfwWorldInfos.length > 0) {
+      const nsfwWorldInfoIds = new Set(nsfwWorldInfos.map(w => w.world_info_id));
+      filteredData = filteredData.filter(worldInfo => !nsfwWorldInfoIds.has(worldInfo.id));
+    }
+  }
+  // If NSFW is true, show all content (no filtering needed)
+
+  // If we have tag filters, we need to filter by tags
+  if (filters.tags && filters.tags.length > 0) {
+    // Get world infos that have at least one of the specified tags
+    const { data: worldInfoTags } = await supabase
+      .from('world_info_tags')
+      .select(`
+        world_info_id,
+        tag:tags(name)
+      `)
+      .in('world_info_id', filteredData.map(w => w.id));
+
+    const worldInfosWithTags = new Set<string>();
+    worldInfoTags?.forEach(wt => {
+      if (wt.tag && filters.tags!.includes(wt.tag.name)) {
+        worldInfosWithTags.add(wt.world_info_id);
+      }
+    });
+
+    filteredData = filteredData.filter(w => worldInfosWithTags.has(w.id));
+  }
+
+  // Fetch additional data for filtered world infos
+  const worldInfosWithDetails = await Promise.all(
+    filteredData.map(async (worldInfo) => {
+      // Get creator profile
+      const { data: creatorData } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .eq('id', worldInfo.creator_id)
+        .maybeSingle();
+
+      // Get likes count
+      const { count: likesCount } = await supabase
+        .from('world_info_likes')
+        .select('id', { count: 'exact' })
+        .eq('world_info_id', worldInfo.id);
+
+      // Get favorites count
+      const { count: favoritesCount } = await supabase
+        .from('world_info_favorites')
+        .select('id', { count: 'exact' })
+        .eq('world_info_id', worldInfo.id);
+
+      // Get usage count (how many users are using this world info)
+      const { count: usageCount } = await supabase
+        .from('world_info_users')
+        .select('id', { count: 'exact' })
+        .eq('world_info_id', worldInfo.id);
+
+      // Get world info tags
+      const { data: tagsData } = await supabase
+        .from('world_info_tags')
+        .select(`
+          tag:tags(id, name)
+        `)
+        .eq('world_info_id', worldInfo.id);
+
+      return {
+        ...worldInfo,
+        creator: creatorData,
+        likes_count: likesCount || 0,
+        favorites_count: favoritesCount || 0,
+        usage_count: usageCount || 0,
+        tags: tagsData?.map(t => t.tag).filter(Boolean) || []
+      };
+    })
+  );
+
+  // Apply conversations/usage sorting if specified (now that we have usage counts)
+  if (sortBy === 'conversations') {
+    worldInfosWithDetails.sort((a, b) => b.usage_count - a.usage_count);
+  }
+
+  const total = count || 0;
+  const hasMore = offset + limit < total;
+
+  return {
+    data: worldInfosWithDetails,
+    total,
+    hasMore
+  };
 }
 
 // =============================================================================
@@ -945,7 +1434,11 @@ export const getUserFavorites = async (userId: string) => {
         avatar_url,
         interaction_count,
         created_at,
-        creator_id
+        creator_id,
+        character_definitions!inner(
+          personality_summary,
+          scenario
+        )
       )
     `)
     .eq('user_id', userId)
@@ -990,7 +1483,41 @@ export const getUserFavorites = async (userId: string) => {
         ...character,
         creator: creatorData,
         actual_chat_count: chatCount || 0,
-        likes_count: likesCount || 0
+        likes_count: likesCount || 0,
+        tagline: (() => {
+          // First try to get title from personality_summary JSON
+          const personalitySummary = character.character_definitions?.personality_summary;
+          if (personalitySummary && typeof personalitySummary === 'object') {
+            const parsedPersonality = personalitySummary as any;
+            if (parsedPersonality.title) {
+              return parsedPersonality.title;
+            }
+          }
+          
+          // Then try personality_summary as string (JSON)
+          if (personalitySummary && typeof personalitySummary === 'string') {
+            try {
+              const parsed = JSON.parse(personalitySummary);
+              if (parsed.title) {
+                return parsed.title;
+              }
+            } catch (e) {
+              // Not valid JSON, ignore
+            }
+          }
+          
+          // Then try scenario title
+          const scenario = character.character_definitions?.scenario;
+          if (scenario && typeof scenario === 'object') {
+            const parsedScenario = scenario as any;
+            if (parsedScenario.title) {
+              return parsedScenario.title;
+            }
+          }
+          
+          // Finally fallback to short_description
+          return character.short_description || '';
+        })()
       }
     })
   )
@@ -998,4 +1525,149 @@ export const getUserFavorites = async (userId: string) => {
   console.log('Processed favorite characters:', charactersWithDetails);
   
   return { data: charactersWithDetails, error: null };
+}
+
+// =============================================================================
+// CHAT DELETION QUERIES
+// =============================================================================
+
+/**
+ * Delete a chat and all its related data safely
+ */
+export const deleteChat = async (chatId: string, userId: string) => {
+  try {
+    console.log(`Starting deleteChat for chat ${chatId} by user ${userId}`);
+    
+    // Use the database function that properly handles all foreign key constraints
+    // Based on the schema review, this function deletes in the correct order:
+    // 1. character_memories (references chat_id)
+    // 2. chat_context (references chat_id with UNIQUE constraint) 
+    // 3. messages (references chat_id)
+    // 4. chats (main table)
+    const { data, error } = await (supabase as any)
+      .rpc('delete_chat_complete', {
+        p_chat_id: chatId,
+        p_user_id: userId
+      });
+
+    if (error) {
+      console.error(`Failed to delete chat ${chatId}:`, error);
+    } else {
+      console.log(`Successfully deleted chat ${chatId}`);
+    }
+
+    return { data, error };
+  } catch (err) {
+    console.error('Error in deleteChat:', err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Delete multiple chats in batch with proper error handling
+ */
+export const deleteMultipleChats = async (chatIds: string[], userId: string) => {
+  console.log(`Starting deletion of ${chatIds.length} chats:`, chatIds);
+  const results = [];
+  
+  // Process deletions in smaller batches to avoid overwhelming the database
+  const batchSize = 3; // Process 3 at a time
+  
+  for (let i = 0; i < chatIds.length; i += batchSize) {
+    const batch = chatIds.slice(i, i + batchSize);
+    console.log(`Processing batch ${Math.floor(i/batchSize) + 1}:`, batch);
+    
+    // Process current batch in parallel
+    const batchPromises = batch.map(async (chatId) => {
+      try {
+        console.log(`Deleting chat ${chatId}...`);
+        const result = await deleteChat(chatId, userId);
+        if (result.error) {
+          console.error(`Failed to delete chat ${chatId}:`, result.error);
+        } else {
+          console.log(`Successfully deleted chat ${chatId}`);
+        }
+        return result;
+      } catch (error) {
+        console.error(`Error deleting chat ${chatId}:`, error);
+        return { data: null, error };
+      }
+    });
+    
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
+    
+    // Small delay between batches to prevent rate limiting
+    if (i + batchSize < chatIds.length) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+  
+  const successCount = results.filter(r => !r.error).length;
+  const errorCount = results.filter(r => r.error).length;
+  console.log(`Deletion complete: ${successCount} successful, ${errorCount} failed`);
+  
+  return results;
+}
+
+/**
+ * Delete ALL chats for a user (DEV ONLY - DANGEROUS!)
+ */
+export const deleteAllUserChats = async (userId: string) => {
+  console.log(`⚠️ DELETING ALL CHATS for user ${userId}`);
+  
+  try {
+    // Get all chat IDs for the user
+    const { data: allChats, error: fetchError } = await supabase
+      .from('chats')
+      .select('id')
+      .eq('user_id', userId);
+    
+    if (fetchError) {
+      console.error('Error fetching chats:', fetchError);
+      return { success: false, error: fetchError, deletedCount: 0 };
+    }
+    
+    if (!allChats || allChats.length === 0) {
+      console.log('No chats to delete');
+      return { success: true, error: null, deletedCount: 0 };
+    }
+    
+    const chatIds = allChats.map(chat => chat.id);
+    console.log(`Found ${chatIds.length} chats to delete`);
+    
+    // Delete them using the existing batch delete function
+    const results = await deleteMultipleChats(chatIds, userId);
+    
+    const successCount = results.filter(r => !r.error).length;
+    const errorCount = results.filter(r => r.error).length;
+    
+    console.log(`✅ Deleted ${successCount} chats, ❌ Failed: ${errorCount}`);
+    
+    return { 
+      success: errorCount === 0, 
+      error: errorCount > 0 ? `Failed to delete ${errorCount} chats` : null,
+      deletedCount: successCount 
+    };
+  } catch (err) {
+    console.error('Error in deleteAllUserChats:', err);
+    return { success: false, error: err, deletedCount: 0 };
+  }
+}
+
+// =============================================================================
+// PERSONA QUERIES
+// =============================================================================
+
+/**
+ * Get user's personas (only for own profile)
+ */
+export const getUserPersonasForProfile = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('personas')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  return { data: data || [], error }
 }

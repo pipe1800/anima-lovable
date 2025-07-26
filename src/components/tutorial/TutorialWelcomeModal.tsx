@@ -28,31 +28,31 @@ export const TutorialWelcomeModal: React.FC<TutorialWelcomeModalProps> = ({
 
         <div className="space-y-4">
           <p className="text-gray-300 text-center">
-            Let's take a quick tour of the basic features to help you get started with your AI chat experience.
+            Let's take a quick tour of the chat interface to help you get the most out of your AI conversations.
           </p>
 
           <div className="space-y-3">
             <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg">
               <Zap className="w-5 h-5 text-[#FF7A00]" />
               <div>
-                <h4 className="text-white font-medium text-sm">Addons System</h4>
-                <p className="text-gray-400 text-xs">Enhance your chats with powerful extensions</p>
+                <h4 className="text-white font-medium text-sm">Chat Settings</h4>
+                <p className="text-gray-400 text-xs">Learn how to access and configure your chat</p>
               </div>
             </div>
 
             <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg">
               <BookOpen className="w-5 h-5 text-[#FF7A00]" />
               <div>
-                <h4 className="text-white font-medium text-sm">World Info</h4>
-                <p className="text-gray-400 text-xs">Add rich context to your conversations</p>
+                <h4 className="text-white font-medium text-sm">Core Features</h4>
+                <p className="text-gray-400 text-xs">Discover addons, memories, and persona system</p>
               </div>
             </div>
 
             <div className="flex items-center space-x-3 p-3 bg-[#0f0f0f] rounded-lg">
               <Users className="w-5 h-5 text-[#FF7A00]" />
               <div>
-                <h4 className="text-white font-medium text-sm">Discovery</h4>
-                <p className="text-gray-400 text-xs">Find amazing characters and content</p>
+                <h4 className="text-white font-medium text-sm">Navigation</h4>
+                <p className="text-gray-400 text-xs">Learn about the main menu and credit system</p>
               </div>
             </div>
           </div>

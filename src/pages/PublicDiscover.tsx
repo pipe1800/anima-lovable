@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
-import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
+import React, { useState, useEffect } from 'react';
+import { CharacterGrid } from '@/components/discover/CharacterGrid';
+import { CharacterFilterBar } from '@/components/discover/CharacterFilterBar';
+import { CharacterFilters } from '@/types/character';
+import { Button } from '@/components/ui/button';
+import { Link } from 'react-router-dom';
+import { TopBar } from '@/components/ui/TopBar';
+import { PublicNavigation } from '@/components/ui/PublicNavigation';
 import { DiscoverControlBar } from '@/components/discover/DiscoverControlBar';
 import { PublicCharacterGrid } from '@/components/discover/PublicCharacterGrid';
 import { Badge } from '@/components/ui/badge';
@@ -46,54 +51,13 @@ const PublicDiscover = () => {
       {/* Background Elements */}
       <div className="absolute inset-0 bg-gradient-radial from-[#FF7A00]/5 to-transparent opacity-50"></div>
       
-      {/* Sticky Navigation Bar */}
-      <nav className="sticky top-0 z-50 bg-[#1a1a2e]/95 backdrop-blur-sm border-b border-gray-700/50">
-        <div className="flex items-center justify-between h-16 pl-4 pr-4 sm:pr-6 lg:pr-8">
-          {/* Logo */}
-          <div className="flex-shrink-0">
-            <img 
-              src="https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM"
-              alt="Anima AI Chat" 
-              className="h-16 w-auto"
-            />
-          </div>
-
-          {/* Navigation Links */}
-          <div className="flex items-center space-x-4">
-            <Link to="/">
-              <Button 
-                variant="ghost" 
-                className="text-white hover:text-[#FF7A00] hover:bg-[#FF7A00]/10 font-medium"
-              >
-                Home
-              </Button>
-            </Link>
-            <Link to="/characters">
-              <Button 
-                variant="ghost" 
-                className="text-[#FF7A00] hover:text-white hover:bg-[#FF7A00]/10 font-medium"
-              >
-                Characters
-              </Button>
-            </Link>
-            <Link to="/auth">
-              <Button 
-                variant="outline" 
-                className="bg-transparent border-[#FF7A00] text-[#FF7A00] hover:bg-[#FF7A00] hover:text-white transition-colors"
-              >
-                Login
-              </Button>
-            </Link>
-            <Link to="/auth?mode=signup">
-              <Button 
-                className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-medium transition-colors"
-              >
-                Sign Up
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </nav>
+      {/* Standardized TopBar */}
+      <TopBar
+        title="Discover Characters"
+        subtitle="Explore amazing AI characters created by the community"
+        leftContent={<PublicNavigation />}
+        className="bg-[#1a1a2e]/95 backdrop-blur-sm"
+      />
 
       {/* Main Content */}
       <div className="relative z-10 w-full">

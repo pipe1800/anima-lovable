@@ -18,7 +18,7 @@ export async function fetchCharacterData(
 ): Promise<Character> {
   const { data: character, error } = await supabaseAdmin
     .from('character_definitions')
-    .select('personality_summary, description, scenario, greeting')
+    .select('character_id, personality_summary, description, scenario, greeting')
     .eq('character_id', characterId)
     .single();
 
@@ -27,13 +27,20 @@ export async function fetchCharacterData(
     throw new Error('Character definition not found');
   }
 
-  return character;
+  // Return character with id field mapped correctly
+  return {
+    id: character.character_id, // Map character_id to id
+    personality_summary: character.personality_summary,
+    description: character.description,
+    scenario: character.scenario,
+    greeting: character.greeting
+  };
 }
 
 export async function fetchConversationHistory(
   chatId: string,
   supabase: SupabaseClient,
-  limit: number = 20
+  limit: number = 100
 ): Promise<any[]> {
   const { data: messageHistory, error } = await supabase
     .from('messages')
@@ -56,7 +63,7 @@ export async function fetchUserProfile(
 ): Promise<any> {
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('username')
+    .select('username, timezone')
     .eq('id', userId)
     .single();
 
@@ -97,6 +104,27 @@ export async function fetchUserGlobalSettings(
   }
 
   return settings;
+}
+
+export async function fetchUserCharacterSettings(
+  userId: string,
+  characterId: string,
+  supabaseAdmin: SupabaseClient
+): Promise<{ chat_mode: 'storytelling' | 'companion'; time_awareness_enabled: boolean } | null> {
+  const { data: settings, error } = await supabaseAdmin
+    .from('user_character_settings')
+    .select('chat_mode, time_awareness_enabled')
+    .eq('user_id', userId)
+    .eq('character_id', characterId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') { // Not found error
+    console.error('User character settings error:', error);
+    return null;
+  }
+
+  // Return default values if no settings found
+  return settings || { chat_mode: 'storytelling', time_awareness_enabled: false };
 }
 
 export async function fetchUserSelectedWorldInfo(
@@ -380,33 +408,45 @@ export async function fetchCurrentContext(
   characterId: string,
   supabase: SupabaseClient
 ): Promise<CurrentContext> {
-  const { data: currentContextData } = await supabase
-    .from('user_chat_context')
-    .select('context_type, current_context')
+  // Query the correct table: chat_context
+  const { data: contextData, error } = await supabase
+    .from('chat_context')
+    .select('current_context')
     .eq('user_id', userId)
     .eq('chat_id', chatId)
-    .eq('character_id', characterId);
+    .eq('character_id', characterId)
+    .single();
 
-  const currentContext: CurrentContext = {};
-  
-  if (currentContextData) {
-    currentContextData.forEach((ctx) => {
-      if (ctx.current_context && ctx.current_context !== 'No context') {
-        const contextKey = ctx.context_type === 'mood' ? 'moodTracking'
-          : ctx.context_type === 'clothing' ? 'clothingInventory'
-          : ctx.context_type === 'location' ? 'locationTracking'
-          : ctx.context_type === 'time_weather' ? 'timeAndWeather'
-          : ctx.context_type === 'relationship' ? 'relationshipStatus'
-          : ctx.context_type === 'character_position' ? 'characterPosition'
-          : null;
-
-        if (contextKey) {
-          currentContext[contextKey as keyof CurrentContext] = ctx.current_context;
-        }
-      }
-    });
+  if (error || !contextData?.current_context) {
+    console.log('No context found in chat_context table for chat:', chatId);
+    return {};
   }
 
+  // The context is stored in database format, convert to interface format
+  const dbContext = contextData.current_context;
+  const currentContext: CurrentContext = {};
+  
+  // Convert database field names to interface field names
+  if (dbContext.mood && dbContext.mood !== 'No context') {
+    currentContext.moodTracking = dbContext.mood;
+  }
+  if (dbContext.clothing && dbContext.clothing !== 'No context') {
+    currentContext.clothingInventory = dbContext.clothing;
+  }
+  if (dbContext.location && dbContext.location !== 'No context') {
+    currentContext.locationTracking = dbContext.location;
+  }
+  if (dbContext.time_weather && dbContext.time_weather !== 'No context') {
+    currentContext.timeAndWeather = dbContext.time_weather;
+  }
+  if (dbContext.relationship && dbContext.relationship !== 'No context') {
+    currentContext.relationshipStatus = dbContext.relationship;
+  }
+  if (dbContext.character_position && dbContext.character_position !== 'No context') {
+    currentContext.characterPosition = dbContext.character_position;
+  }
+
+  console.log('✅ Fetched and converted context:', { dbContext, currentContext });
   return currentContext;
 }
 
@@ -597,4 +637,81 @@ export function replaceTemplates(content: string, context: TemplateContext): str
     console.error('Template replacement error:', error);
     return content;
   }
+}
+
+export async function getLatestAutoSummary(
+  characterId: string,
+  supabase: SupabaseClient
+): Promise<{ name: string; summary_content: string; created_at: string; id: string } | null> {
+  console.log('🤖 Fetching latest auto-summary for character:', {
+    characterId: characterId,
+    characterIdType: typeof characterId,
+    characterIdValue: characterId,
+    isUndefined: characterId === undefined,
+    isStringUndefined: characterId === 'undefined'
+  });
+
+  // Add validation to prevent UUID errors
+  if (!characterId || characterId === 'undefined' || typeof characterId !== 'string') {
+    console.warn('⚠️ Invalid characterId for auto-summary fetch, skipping:', characterId);
+    return null;
+  }
+
+  try {
+    const { data: summary, error } = await supabase
+      .from('character_memories')
+      .select('id, name, summary_content, created_at')
+      .eq('character_id', characterId)
+      .eq('is_auto_summary', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('❌ Error fetching auto-summary:', error);
+      return null;
+    }
+
+    if (summary) {
+      console.log('✅ Found latest auto-summary:', {
+        id: summary.id,
+        name: summary.name,
+        createdAt: summary.created_at,
+      });
+    } else {
+      console.log('🤷 No auto-summary found for character:', characterId);
+    }
+
+    return summary;
+  } catch (error) {
+    console.error('❌ Unexpected error fetching auto-summary:', error);
+    return null;
+  }
+}
+
+export async function fetchMessagesForSummary(
+  chatId: string,
+  supabase: SupabaseClient,
+  limit: number = 100 // Fetch a good number of recent messages for token analysis
+): Promise<Message[]> {
+  console.log(`📚 Fetching last ${limit} messages for summary generation for chat:`, chatId);
+
+  const { data: messages, error } = await supabase
+    .from('messages')
+    .select('content, is_ai_message, created_at')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: false }) // Get the most recent ones
+    .limit(limit);
+
+  if (error) {
+    console.error('❌ Error fetching messages for summary:', error);
+    return [];
+  }
+
+  // The messages are fetched in descending order, so we need to reverse them
+  // to get the correct chronological order for the summary.
+  const chronologicalMessages = messages.reverse();
+
+  console.log(`✅ Fetched ${chronologicalMessages.length} messages for summary.`);
+  return chronologicalMessages;
 }

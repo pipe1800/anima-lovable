@@ -6,14 +6,15 @@ import {
   getUserPlanAndModel,
   consumeCredits 
 } from './billing.ts';
+import { getLatestSummaryInfo } from './message-counter.ts';
+import { generateMessageBasedSummary } from './auto-summary-new.ts';
 
 import type { CreateMemoryRequest, ChatResponse } from '../types/index.ts';
 
 /**
- * Enhanced Memory Handler - Create Chat Summaries
+ * Enhanced Memory Handler - Create Manual Chat Summaries
  * 
- * This handler creates AI-powered summaries of chat conversations and stores them
- * as character-specific memories that can be referenced in future conversations.
+ * Updated for message-based system: Only summarizes messages NOT already in summaries
  */
 
 interface MemoryData {
@@ -295,10 +296,32 @@ export async function handleCreateMemory(
       };
     }
 
-    console.log(`📊 Found ${messageHistory.length} messages to summarize`);
+    console.log(`📊 Found ${messageHistory.length} total messages in chat`);
 
-    // Calculate token cost with new pricing: 5 credits per 300 tokens, minimum 5 credits
-    const estimatedTokens = estimateTokenCost(messageHistory);
+    // Get latest summary info to determine what messages to summarize
+    const { lastSummaryEndMessage } = await getLatestSummaryInfo(chatId, supabase);
+    
+    // Filter to only unsummarized messages
+    const unsummarizedMessages = messageHistory.filter(msg => 
+      msg.message_order > lastSummaryEndMessage
+    );
+
+    if (unsummarizedMessages.length === 0) {
+      return {
+        success: false,
+        error: 'No new messages to summarize - all messages are already covered by existing summaries'
+      };
+    }
+
+    console.log(`🔍 Manual summary scope:`, {
+      totalMessages: messageHistory.length,
+      lastSummaryEndMessage,
+      unsummarizedMessages: unsummarizedMessages.length,
+      messageRange: `${unsummarizedMessages[0]?.message_order || 0}-${unsummarizedMessages[unsummarizedMessages.length - 1]?.message_order || 0}`
+    });
+
+    // Calculate token cost based on unsummarized messages only
+    const estimatedTokens = estimateTokenCost(unsummarizedMessages);
     
     // New credit calculation: 5 credits per 300 tokens, minimum 5 credits
     const creditCost = Math.max(5, Math.ceil(estimatedTokens / 300) * 5);
@@ -326,10 +349,14 @@ export async function handleCreateMemory(
       };
     }
 
-    // Generate summary and keywords
-    const summaryResult = await generateChatSummary(messageHistory, character, openRouterKey);
+    // Generate summary using the new message-based system
+    const summaryData = await generateMessageBasedSummary(
+      unsummarizedMessages, 
+      character, 
+      openRouterKey
+    );
     
-    if (!summaryResult) {
+    if (!summaryData) {
       return {
         success: false,
         error: 'Failed to generate chat summary'
@@ -338,14 +365,15 @@ export async function handleCreateMemory(
 
     // Combine AI keywords with date keywords (limit total to reasonable number)
     const dateKeywords = createDateKeywords();
-    const allKeywords = [...summaryResult.keywords, ...dateKeywords];
+    const allKeywords = [...summaryData.keywords, ...dateKeywords];
     
     console.log('🏷️ Final keywords:', allKeywords);
 
+    const rangeEnd = Math.max(...unsummarizedMessages.map(m => m.message_order));
     const memoryData: MemoryData = {
-      summary_content: summaryResult.summary,
+      summary_content: summaryData.content,
       trigger_keywords: allKeywords,
-      message_count: messageHistory.length,
+      message_count: rangeEnd, // Store ending message number
       input_token_cost: creditCost
     };
 
@@ -366,15 +394,17 @@ export async function handleCreateMemory(
     }
 
     const endTime = Date.now();
-    console.log(`✅ Memory creation completed in ${endTime - startTime}ms`);
+    console.log(`✅ Manual memory creation completed in ${endTime - startTime}ms`);
 
     return {
       success: true,
       data: {
-        message: 'Memory created successfully',
-        summary: summaryResult.summary,
+        message: 'Manual memory created successfully',
+        summary: summaryData.content,
+        title: summaryData.title,
         keywords: allKeywords,
-        messageCount: messageHistory.length,
+        messageCount: unsummarizedMessages.length,
+        messageRange: `${unsummarizedMessages[0]?.message_order || 0}-${rangeEnd}`,
         creditCost: creditCost
       }
     };

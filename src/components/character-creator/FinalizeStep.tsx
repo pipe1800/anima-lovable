@@ -5,9 +5,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { User, MessageCircle, Heart, Sparkles, Globe, Link, Lock, Loader2 } from 'lucide-react';
-import { getUserPersonas, type Persona } from '@/lib/persona-operations';
 import { getUserActiveSubscription } from '@/lib/supabase-queries';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -28,8 +26,6 @@ type VisibilityType = 'public' | 'unlisted' | 'private';
 const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = false, isEditing = false, selectedTags, setSelectedTags }: FinalizeStepProps) => {
   const [visibility, setVisibility] = useState<VisibilityType>(data.visibility || 'public');
   const [enableNSFW, setEnableNSFW] = useState(data.nsfw_enabled || false);
-  const [personas, setPersonas] = useState<Persona[]>([]);
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string>(data.default_persona_id || 'none');
   const [userPlan, setUserPlan] = useState<string>('Guest Pass');
   const [nsfwTag, setNsfwTag] = useState<{ id: number; name: string } | null>(null);
 
@@ -40,13 +36,10 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
     return userPlan === 'True Fan' || userPlan === 'The Whale';
   };
 
-  // Load user's personas, subscription, and NSFW tag
+  // Load user's subscription and NSFW tag
   useEffect(() => {
     const loadUserData = async () => {
       try {
-        const userPersonas = await getUserPersonas();
-        setPersonas(userPersonas);
-
         // Fetch user subscription
         if (user) {
           const { data: subscription } = await getUserActiveSubscription(user.id);
@@ -80,10 +73,9 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   useEffect(() => {
     if (data) {
       setVisibility(data.visibility || 'public');
-      setSelectedPersonaId(data.default_persona_id || 'none');
       
       // Check if NSFW tag exists in selected tags to determine initial NSFW state
-      const hasNSFWTag = selectedTags.some(tag => tag.name.toLowerCase() === 'nsfw');
+      const hasNSFWTag = selectedTags.some(tag => tag?.name?.toLowerCase() === 'nsfw');
       setEnableNSFW(data.nsfw_enabled || hasNSFWTag);
     }
   }, [data, selectedTags]);
@@ -115,7 +107,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
     if (!nsfwTag) return; // No NSFW tag found in database
 
-    const nsfwTagIndex = selectedTags.findIndex(tag => tag.name.toLowerCase() === 'nsfw');
+    const nsfwTagIndex = selectedTags.findIndex(tag => tag?.name?.toLowerCase() === 'nsfw');
     
     if (checked && nsfwTagIndex === -1) {
       // Add NSFW tag if switch is turned on and tag doesn't exist
@@ -129,8 +121,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   const handleFinalize = () => {
     onUpdate({
       visibility,
-      nsfw_enabled: enableNSFW,
-      default_persona_id: selectedPersonaId === 'none' ? null : selectedPersonaId
+      nsfw_enabled: enableNSFW
     });
     onFinalize();
   };
@@ -177,15 +168,25 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
             </div>
             
             <div className="space-y-3 md:space-y-4">
-              {data.personality?.tags?.length > 0 && (
+              {/* Tags Display */}
+              {(selectedTags.length > 0 || data.personality?.tags?.length > 0) && (
                 <div>
                   <Label className="text-gray-400 text-xs md:text-sm mb-2 block">Personality Tags</Label>
                   <div className="flex flex-wrap gap-1.5 md:gap-2">
-                    {data.personality.tags.map((tag: string) => (
-                      <Badge key={tag} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
+                    {/* Display selectedTags if available (tag objects), otherwise display data.personality.tags (strings) */}
+                    {selectedTags.length > 0 ? (
+                      selectedTags.map((tag) => (
+                        <Badge key={`finalize-tag-${tag.id}`} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
+                          {tag.name}
+                        </Badge>
+                      ))
+                    ) : (
+                      data.personality?.tags?.map((tag: string, index: number) => (
+                        <Badge key={`personality-tag-${index}`} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
+                          {tag}
+                        </Badge>
+                      ))
+                    )}
                   </div>
                 </div>
               )}
@@ -283,31 +284,6 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
               </button>
             );
           })}
-        </div>
-
-        {/* Default Persona */}
-        <div className="bg-gray-800/30 rounded-xl p-4 md:p-6 border border-gray-700/50 mb-4 md:mb-6">
-          <div>
-            <Label className="text-white text-base md:text-lg font-medium block mb-2">
-              Default Persona
-            </Label>
-            <p className="text-gray-400 text-xs md:text-sm mb-3 md:mb-4">
-              Choose a persona that users will interact with by default when chatting with this character
-            </p>
-            <Select value={selectedPersonaId} onValueChange={setSelectedPersonaId}>
-              <SelectTrigger className="w-full bg-gray-700/50 border-gray-600 text-white h-9 md:h-10">
-                <SelectValue placeholder="Select a persona (optional)" />
-              </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-600">
-                <SelectItem value="none" className="text-gray-300">No default persona</SelectItem>
-                {personas.map((persona) => (
-                  <SelectItem key={persona.id} value={persona.id} className="text-white">
-                    {persona.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
         </div>
 
         {/* NSFW Toggle */}

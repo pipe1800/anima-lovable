@@ -1,26 +1,109 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, Bug, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Bug, RefreshCw, AlertTriangle, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { supabase } from '@/integrations/supabase/client';
 
 interface AddonDebugPanelProps {
   characterId?: string;
   userId?: string;
+  chatId?: string;
 }
 
-export const AddonDebugPanel = ({ characterId, userId }: AddonDebugPanelProps) => {
+export const AddonDebugPanel = ({ characterId, userId, chatId }: AddonDebugPanelProps) => {
   const { user, subscription, refreshSubscription } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [refreshingSubscription, setRefreshingSubscription] = useState(false);
+  const [messageStats, setMessageStats] = useState<{
+    totalMessages: number;
+    aiMessages: number;
+    lastSummaryAt: number | null;
+    nextSummaryAt: number;
+  } | null>(null);
   const { data: globalSettings, isLoading, refetch } = useUserGlobalChatSettings();
 
   const userPlan = subscription?.plan?.name || 'Guest Pass';
   const effectiveUserId = userId || user?.id;
   const debugEnabled = process.env.NODE_ENV === 'development';
+
+  // Fetch message statistics for the current chat
+  useEffect(() => {
+    const fetchMessageStats = async () => {
+      if (!chatId || !debugEnabled) {
+        setMessageStats(null);
+        return;
+      }
+
+      try {
+        // Get total message count and AI message count (excluding placeholders)
+        const { data: messages, error: messagesError } = await supabase
+          .from('messages')
+          .select('is_ai_message, content, message_order')
+          .eq('chat_id', chatId)
+          .order('created_at', { ascending: true });
+
+        if (messagesError) {
+          console.error('Debug: Failed to fetch messages:', messagesError);
+          return;
+        }
+
+        const totalMessages = messages?.length || 0;
+        
+        // FIXED: Match system logic - exclude placeholders and count correctly
+        const realAiMessages = messages?.filter(m => 
+          m.is_ai_message === true && 
+          !m.content.includes('[PLACEHOLDER]')
+        ) || [];
+
+        // Get the most recent auto-summary
+        const { data: summaries, error: summariesError } = await supabase
+          .from('character_memories')
+          .select('message_count, is_auto_summary')
+          .eq('chat_id', chatId)
+          .eq('is_auto_summary', true)
+          .order('message_count', { ascending: false })
+          .limit(1);
+
+        if (summariesError) {
+          console.error('Debug: Failed to fetch summaries:', summariesError);
+        }
+
+        const lastSummaryAt = summaries?.[0]?.message_count || 0;
+        
+        // Count AI messages after last summary (matching system logic)
+        const aiMessagesAfterSummary = realAiMessages.filter(m => 
+          m.message_order > lastSummaryAt
+        );
+        
+        const currentAiCount = aiMessagesAfterSummary.length;
+        const nextSummaryAt = lastSummaryAt + 15; // Next 15 AI messages after last summary
+
+        console.log('🔧 Debug Panel - FIXED Counter:', {
+          totalMessages,
+          totalAiMessages: realAiMessages.length,
+          lastSummaryAt,
+          aiMessagesAfterSummary: currentAiCount,
+          nextSummaryAt,
+          messagesUntilSummary: 15 - currentAiCount
+        });
+
+        setMessageStats({
+          totalMessages,
+          aiMessages: currentAiCount, // Show unsummarized AI messages
+          lastSummaryAt,
+          nextSummaryAt
+        });
+      } catch (error) {
+        console.error('Debug: Error fetching message stats:', error);
+      }
+    };
+
+    fetchMessageStats();
+  }, [chatId, debugEnabled]);
 
   // Check for subscription issues
   const hasSubscriptionIssue = user && !subscription;
@@ -174,6 +257,30 @@ export const AddonDebugPanel = ({ characterId, userId }: AddonDebugPanelProps) =
                 <div className="text-green-300 text-xs">No global settings found (using defaults)</div>
               )}
             </div>
+
+            {/* Message Count Statistics - Only show if we have a chatId */}
+            {chatId && messageStats && (
+              <div className="bg-purple-900/20 border border-purple-700/40 rounded-lg p-3">
+                <div className="flex items-center space-x-2 mb-2">
+                  <MessageCircle className="w-4 h-4 text-purple-400" />
+                  <h4 className="text-purple-400 font-medium text-sm">Message-Based Auto-Summary Status</h4>
+                </div>
+                
+                <div className="text-xs space-y-1">
+                  <div className="text-purple-300">Total Messages: <span className="text-purple-100">{messageStats.totalMessages}</span></div>
+                  <div className="text-purple-300">AI Messages After Last Summary: <span className="text-purple-100">{messageStats.aiMessages}</span></div>
+                  <div className="text-purple-300">Last Summary At Message: <span className="text-purple-100">{messageStats.lastSummaryAt || 'None'}</span></div>
+                  <div className="text-purple-300">Next Summary At Message: <span className="text-purple-100">{messageStats.nextSummaryAt}</span></div>
+                  <div className="text-purple-300">AI Messages Until Summary: <span className="text-purple-100">{Math.max(0, 15 - messageStats.aiMessages)}</span></div>
+                  
+                  <div className="mt-2 pt-2 border-t border-purple-700/40">
+                    <div className="text-xs text-purple-300">
+                      Auto-summaries trigger every 15 AI responses. Counter shows unsummarized AI messages only.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </CardContent>
         </CollapsibleContent>
       </Collapsible>

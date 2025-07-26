@@ -9,7 +9,13 @@
  * - Better IntelliSense support
  */
 
-import { getRecentChatMessages, getEarlierChatMessages, getCharacterDetails, getUserCredits } from '@/lib/supabase-queries';
+import { 
+  getRecentChatMessages, 
+  getEarlierChatMessages,
+  getUserCredits,
+  getCharacterDetails
+} from '@/lib/supabase-queries';
+import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
 
 // ============================================================================
 // QUERY KEY FACTORY - Prevents typos and ensures consistency
@@ -94,7 +100,7 @@ export const infiniteQueryConfigs = {
       
       if (result.error) throw result.error;
       
-      // ✅ PHASE 3: Optimized message transformation
+      // ✅ PHASE 3: Optimized message transformation with context conversion
       const messages = result.data.map(msg => ({
         id: msg.id,
         content: msg.content,
@@ -102,7 +108,7 @@ export const infiniteQueryConfigs = {
         timestamp: new Date(msg.created_at),
         status: 'sent' as const,
         contextUpdates: (msg as any).message_context?.[0]?.context_updates,
-        current_context: (msg as any).current_context,
+        current_context: convertDatabaseContextToTrackedContext((msg as any).current_context),
         message_order: (msg as any).message_order
       }));
       

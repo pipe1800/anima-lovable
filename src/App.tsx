@@ -4,6 +4,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { NSFWProvider } from "@/contexts/NSFWContext";
+import { TutorialProvider } from "@/contexts/TutorialContext";
 import OnboardingGuard from "@/components/auth/OnboardingGuard";
 import { AuthenticatedLayout } from "@/components/layout/AuthenticatedLayout";
 import Index from "./pages/Index";
@@ -19,6 +21,11 @@ import CharacterCreator from "./pages/CharacterCreator";
 import TestTags from "./pages/TestTags";
 import WorldInfo from "./pages/WorldInfo";
 import WorldInfoEditor from "./pages/WorldInfoEditor";
+import ImprovedWorldInfoList from "./components/world-info/ImprovedWorldInfoList";
+import { EnhancedWorldInfoList } from "./components/world-info/EnhancedWorldInfoList";
+import ImprovedWorldInfoPage from "./components/world-info/ImprovedWorldInfoPage";
+import UnifiedWorldInfoEditor from "./components/world-info/UnifiedWorldInfoEditor";
+import UnifiedWorldInfoEditorWrapper from "./components/world-info/UnifiedWorldInfoEditorWrapper";
 import UserProfile from "./pages/UserProfile";
 import Subscription from "./pages/Subscription";
 import Settings from "./pages/Settings";
@@ -38,14 +45,17 @@ import DialogueTestPage from "./pages/DialogueTestPage";
 
 const App = () => (
   <AuthProvider>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
+    <NSFWProvider>
+      <TutorialProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+        <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/characters" element={<PublicDiscover />} />
           <Route path="/characters/:characterId" element={<PublicCharacterProfile />} />
+          <Route path="/user/:userId" element={<UserProfile />} />
           <Route path="/world-info-view/:id" element={
             <OnboardingGuard requireOnboardingComplete={true}>
               <AuthenticatedLayout>
@@ -103,7 +113,21 @@ const App = () => (
           <Route path="/world-info" element={
             <OnboardingGuard requireOnboardingComplete={true}>
               <AuthenticatedLayout>
-                <WorldInfo />
+                <ImprovedWorldInfoPage />
+              </AuthenticatedLayout>
+            </OnboardingGuard>
+          } />
+          <Route path="/world-info/create" element={
+            <OnboardingGuard requireOnboardingComplete={true}>
+              <AuthenticatedLayout>
+                <UnifiedWorldInfoEditor mode="create" />
+              </AuthenticatedLayout>
+            </OnboardingGuard>
+          } />
+          <Route path="/world-info/:id/edit" element={
+            <OnboardingGuard requireOnboardingComplete={true}>
+              <AuthenticatedLayout>
+                <UnifiedWorldInfoEditorWrapper />
               </AuthenticatedLayout>
             </OnboardingGuard>
           } />
@@ -183,6 +207,8 @@ const App = () => (
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
+    </TutorialProvider>
+    </NSFWProvider>
   </AuthProvider>
 );
 

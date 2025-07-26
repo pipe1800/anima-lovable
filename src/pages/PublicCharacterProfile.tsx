@@ -4,6 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TopBar } from '@/components/ui/TopBar';
+import { PublicNavigation } from '@/components/ui/PublicNavigation';
+import { formatNumberWithK } from '@/lib/utils/formatting';
 import { 
   MessageCircle, 
   Heart,
@@ -16,6 +19,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
 
 interface CharacterData {
   id: string;
@@ -35,6 +39,7 @@ interface CharacterData {
     username: string;
     avatar_url: string | null;
   };
+  tags?: Array<{ id: number; name: string }>;
   actual_chat_count?: number;
   likes_count?: number;
 }
@@ -57,12 +62,13 @@ export default function PublicCharacterProfile() {
       try {
         setLoading(true);
 
-        // Fetch character with definitions
+        // Fetch character with definitions and tags
         const { data: characterData, error: characterError } = await supabase
           .from('characters')
           .select(`
             *,
-            character_definitions(*)
+            character_definitions(*),
+            character_tags(tag:tags(id, name))
           `)
           .eq('id', characterId)
           .eq('visibility', 'public')
@@ -97,6 +103,7 @@ export default function PublicCharacterProfile() {
         setCharacter({
           ...characterData,
           creator: creatorProfile || { username: 'Unknown', avatar_url: null },
+          tags: characterData.character_tags?.map((t: any) => t.tag).filter(Boolean) || [],
           actual_chat_count: chatCount || 0,
           likes_count: likesCount || 0
         });
@@ -123,40 +130,12 @@ export default function PublicCharacterProfile() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#121212]">
-        {/* Sticky Navigation Bar */}
-        <nav className="sticky top-0 z-50 bg-[#1a1a2e]/95 backdrop-blur-sm border-b border-gray-700/50">
-          <div className="flex items-center justify-between h-16 pl-4 pr-4 sm:pr-6 lg:pr-8">
-            <div className="flex-shrink-0">
-              <img 
-                src="https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM"
-                alt="Anima AI Chat" 
-                className="h-16 w-auto"
-              />
-            </div>
-            <div className="flex items-center space-x-4">
-              <Link to="/">
-                <Button variant="ghost" className="text-white hover:text-[#FF7A00] hover:bg-[#FF7A00]/10">
-                  Home
-                </Button>
-              </Link>
-              <Link to="/characters">
-                <Button variant="ghost" className="text-[#FF7A00] hover:text-white hover:bg-[#FF7A00]/10 font-medium">
-                  Characters
-                </Button>
-              </Link>
-              <Link to="/auth">
-                <Button variant="outline" className="bg-transparent border-[#FF7A00] text-[#FF7A00] hover:bg-[#FF7A00] hover:text-white transition-colors">
-                  Login
-                </Button>
-              </Link>
-              <Link to="/auth?mode=signup">
-                <Button className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-medium transition-colors">
-                  Sign Up
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </nav>
+        {/* Standardized TopBar */}
+        <TopBar
+          title="Loading Character..."
+          leftContent={<PublicNavigation />}
+          className="bg-[#1a1a2e]/95 backdrop-blur-sm"
+        />
 
         <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
           <div className="flex items-center space-x-2">
@@ -171,42 +150,15 @@ export default function PublicCharacterProfile() {
   if (error || !character) {
     return (
       <div className="min-h-screen bg-[#121212]">
-        {/* Sticky Navigation Bar */}
-        <nav className="sticky top-0 z-50 bg-[#1a1a2e]/95 backdrop-blur-sm border-b border-gray-700/50">
-          <div className="flex items-center justify-between h-16 pl-4 pr-4 sm:pr-6 lg:pr-8">
-            <div className="flex-shrink-0">
-              <img 
-                src="https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM"
-                alt="Anima AI Chat" 
-                className="h-16 w-auto"
-              />
-            </div>
-            <div className="flex items-center space-x-4">
-              <Link to="/">
-                <Button variant="ghost" className="text-white hover:text-[#FF7A00] hover:bg-[#FF7A00]/10">
-                  Home
-                </Button>
-              </Link>
-              <Link to="/characters">
-                <Button variant="ghost" className="text-[#FF7A00] hover:text-white hover:bg-[#FF7A00]/10 font-medium">
-                  Characters
-                </Button>
-              </Link>
-              <Link to="/auth">
-                <Button variant="outline" className="bg-transparent border-[#FF7A00] text-[#FF7A00] hover:bg-[#FF7A00] hover:text-white transition-colors">
-                  Login
-                </Button>
-              </Link>
-              <Link to="/auth?mode=signup">
-                <Button className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-medium transition-colors">
-                  Sign Up
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </nav>
-
-        <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+        {/* Standardized TopBar */}
+        <TopBar
+          title="Character Not Found"
+          subtitle="The character you're looking for might not exist or is not public"
+          leftContent={<PublicNavigation />}
+          className="bg-[#1a1a2e]/95 backdrop-blur-sm"
+        />
+        
+        <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center">
             <div className="text-red-400 text-lg mb-2">{error}</div>
             <Button onClick={() => navigate('/characters')} variant="outline">
@@ -221,54 +173,28 @@ export default function PublicCharacterProfile() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      {/* Sticky Navigation Bar */}
-      <nav className="sticky top-0 z-50 bg-[#1a1a2e]/95 backdrop-blur-sm border-b border-gray-700/50">
-        <div className="flex items-center justify-between h-16 pl-4 pr-4 sm:pr-6 lg:pr-8">
-          <div className="flex-shrink-0">
-            <img 
-              src="https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM"
-              alt="Anima AI Chat" 
-              className="h-16 w-auto"
-            />
-          </div>
-          <div className="flex items-center space-x-4">
-            <Link to="/">
-              <Button variant="ghost" className="text-white hover:text-[#FF7A00] hover:bg-[#FF7A00]/10">
-                Home
-              </Button>
-            </Link>
-            <Link to="/characters">
-              <Button variant="ghost" className="text-[#FF7A00] hover:text-white hover:bg-[#FF7A00]/10 font-medium">
-                Characters
-              </Button>
-            </Link>
-            <Link to="/auth">
-              <Button variant="outline" className="bg-transparent border-[#FF7A00] text-[#FF7A00] hover:bg-[#FF7A00] hover:text-white transition-colors">
-                Login
-              </Button>
-            </Link>
-            <Link to="/auth?mode=signup">
-              <Button className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-medium transition-colors">
-                Sign Up
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </nav>
+      {/* Standardized TopBar */}
+      <TopBar
+        title={character?.name || "Character Profile"}
+        subtitle={character?.short_description || "View character details and start chatting"}
+        leftContent={<PublicNavigation />}
+        rightContent={
+          <Button
+            onClick={() => navigate('/characters')}
+            variant="ghost"
+            size="sm"
+            className="text-gray-400 hover:text-white"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            <span className="hidden sm:inline">Back to Characters</span>
+            <span className="sm:hidden">Back</span>
+          </Button>
+        }
+        className="bg-[#1a1a2e]/95 backdrop-blur-sm"
+      />
 
       {/* Main Content */}
-      <div className="max-w-6xl mx-auto p-8 space-y-8">
-        {/* Back Button */}
-        <Button
-          onClick={() => navigate('/characters')}
-          variant="ghost"
-          className="text-gray-400 hover:text-white mb-4"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Characters
-        </Button>
-
-        {/* Character Hero Section */}
+      <div className="max-w-6xl mx-auto p-8 space-y-8">{/* Character Hero Section */}
         <Card className="bg-[#1a1a2e] border-gray-700/50 overflow-hidden">
           <div className="relative">
             {/* Background gradient */}
@@ -300,12 +226,12 @@ export default function PublicCharacterProfile() {
                   <div className="flex flex-wrap justify-center lg:justify-start gap-6 mb-6">
                     <div className="flex items-center space-x-2 text-gray-300">
                       <MessageCircle className="w-5 h-5 text-[#FF7A00]" />
-                      <span className="font-semibold">{character.actual_chat_count?.toLocaleString() || 0}</span>
+                      <span className="font-semibold">{formatNumberWithK(character.actual_chat_count || 0)}</span>
                       <span className="text-sm">conversations</span>
                     </div>
                     <div className="flex items-center space-x-2 text-gray-300">
                       <Heart className="w-5 h-5 text-[#FF7A00]" />
-                      <span className="font-semibold">{character.likes_count?.toLocaleString() || 0}</span>
+                      <span className="font-semibold">{formatNumberWithK(character.likes_count || 0)}</span>
                       <span className="text-sm">likes</span>
                     </div>
                     <div className="flex items-center space-x-2 text-gray-300">
@@ -423,13 +349,13 @@ export default function PublicCharacterProfile() {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">Conversations</span>
                   <Badge variant="secondary" className="bg-[#FF7A00]/20 text-[#FF7A00]">
-                    {character.actual_chat_count?.toLocaleString() || 0}
+                    {formatNumberWithK(character.actual_chat_count || 0)}
                   </Badge>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">Likes</span>
                   <Badge variant="secondary" className="bg-[#FF7A00]/20 text-[#FF7A00]">
-                    {character.likes_count?.toLocaleString() || 0}
+                    {formatNumberWithK(character.likes_count || 0)}
                   </Badge>
                 </div>
                 <div className="flex justify-between items-center">
@@ -464,6 +390,18 @@ export default function PublicCharacterProfile() {
             </Card>
           </div>
         </div>
+
+        {/* Related Characters Carousel */}
+        {character.tags && character.tags.length > 0 && (
+          <div className="space-y-4">
+            <h2 className="text-2xl font-bold text-white">Recommended Characters</h2>
+            <p className="text-gray-300">Characters with similar interests</p>
+            <RelatedCharactersCarousel 
+              currentCharacterId={character.id} 
+              tags={character.tags}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

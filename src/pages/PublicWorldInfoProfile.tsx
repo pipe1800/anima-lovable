@@ -17,6 +17,7 @@ import {
   Download,
   Edit2
 } from 'lucide-react';
+import { TopBar } from '@/components/ui/TopBar';
 import { supabase } from '@/integrations/supabase/client';
 import { getPublicWorldInfoDetails } from '@/lib/world-info-operations';
 import { useToast } from '@/hooks/use-toast';
@@ -282,58 +283,74 @@ export default function PublicWorldInfoProfile() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
+      <TopBar
+        title="World Info Details"
+        rightContent={
+          canEdit && (
+            <Button
+              onClick={() => navigate(`/world-info/${id}/edit`)}
+              className="bg-[#FF7A00] hover:bg-[#FF7A00]/80"
+            >
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit
+            </Button>
+          )
+        }
+      />
+      
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
-          {/* Header */}
-          <div className="p-6 border-b border-gray-700/50">
-            <div className="flex items-center gap-4 mb-4">
-              <Button
-                onClick={() => navigate(-1)}
-                variant="ghost"
-                size="sm"
-                className="text-gray-400 hover:text-white"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
-              </Button>
-            </div>
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold text-white">
-                {worldInfo.name}
-              </h1>
-              <div className="flex gap-2">
-                {/* Action Buttons */}
-                <Button
-                  onClick={handleLike}
-                  variant={worldInfo.isLiked ? "default" : "outline"}
-                  disabled={isLiking}
-                  className="border-gray-600"
-                >
-                  <Heart className={`mr-2 h-4 w-4 ${worldInfo.isLiked ? 'fill-current' : ''}`} />
-                  {worldInfo.likesCount} Likes
-                </Button>
-                {/* Only show Add to Collection if user is not the owner */}
-                {!isOwner && (
+          {/* Back button under TopBar */}
+          <div className="p-6">
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/world-info')}
+              className="text-gray-400 hover:text-white mb-4"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to World Info
+            </Button>
+          
+            {/* Header */}
+            <div className="border-b border-gray-700/50 pb-6">
+              <div className="flex items-center justify-between">
+                <h1 className="text-2xl font-bold text-white">
+                  {worldInfo.name}
+                </h1>
+                <div className="flex gap-2">
+                  {/* Action Buttons */}
                   <Button
-                    onClick={handleUseLorebook}
-                    variant={worldInfo.isUsed ? "outline" : "secondary"}
-                    disabled={isUsingLorebook}
+                    onClick={handleLike}
+                    variant={worldInfo.isLiked ? "default" : "outline"}
+                    disabled={isLiking}
                     className="border-gray-600"
                   >
-                    <Download className="mr-2 h-4 w-4" />
-                    {worldInfo.isUsed ? "Remove from Collection" : "Add to Collection"}
+                    <Heart className={`mr-2 h-4 w-4 ${worldInfo.isLiked ? 'fill-current' : ''}`} />
+                    {worldInfo.likesCount} Likes
                   </Button>
-                )}
-                {canEdit && (
-                  <Button
-                    onClick={handleEdit}
-                    variant="outline"
-                    className="border-gray-600 text-gray-300 hover:bg-gray-800"
-                  >
-                    <Edit2 className="w-4 h-4 mr-2" />
-                    Edit
-                  </Button>
-                )}
+                  {/* Only show Add to Collection if user is not the owner */}
+                  {!isOwner && (
+                    <Button
+                      onClick={handleUseLorebook}
+                      variant={worldInfo.isUsed ? "outline" : "secondary"}
+                      disabled={isUsingLorebook}
+                      className="border-gray-600"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      {worldInfo.isUsed ? "Remove from Collection" : "Add to Collection"}
+                    </Button>
+                  )}
+                  {canEdit && (
+                    <Button
+                      onClick={handleEdit}
+                      variant="outline"
+                      className="border-gray-600 text-gray-300 hover:bg-gray-800"
+                    >
+                      <Edit2 className="w-4 h-4 mr-2" />
+                      Edit
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

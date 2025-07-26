@@ -3,12 +3,48 @@ import type {
   AddonSettings, 
   TemplateContext, 
   CurrentContext,
-  ConversationMessage 
+  ConversationMessage,
+  SupabaseClient
 } from '../types/streaming-interfaces.ts';
+import {
+  estimateTokens,
+  calculateMessageTokens,
+} from './message-counter.ts';
+import { getMostRecentAutoSummary } from './auto-summary-new.ts';
 
 /**
  * Message generation and AI response handling
- * Handles system prompt building and OpenRouter API communication
+ * Handles system prompt   console.log('📤 OpenRouter request payload:', JSON.stringify({
+    model: payload.model,
+    messagesCount: payload.messages.length,
+    stream: payload.stream,
+    temperature: payload.temperature,
+    max_tokens: payload.max_tokens,
+    totalEstimatedTokens: payload.messages.reduce((total, msg) => total + estimateTokens(msg.content), 0),
+    messages: payload.messages.map((m, index) => ({ 
+      index,
+      role: m.role, 
+      contentLength: m.content.length,
+      estimatedTokens: estimateTokens(m.content),
+      contentPreview: m.content.substring(0, 200) + (m.content.length > 200 ? '...' : '')
+    }))
+  }, null, 2));
+
+  // CRITICAL: Calculate actual tokens being sent for debugging
+  const actualTokenCount = payload.messages.reduce((total, msg) => {
+    return total + estimateTokens(msg.content) + 4; // +4 for role overhead per message
+  }, 0);
+  
+  const systemMessage = payload.messages.find(m => m.role === 'system');
+  
+  console.log('🚨 TOKEN DISCREPANCY ANALYSIS:', {
+    calculatedTokensInPayload: actualTokenCount,
+    systemPromptTokens: systemMessage ? estimateTokens(systemMessage.content) : 0,
+    systemPromptLength: systemMessage?.content?.length || 0,
+    totalMessagesInPayload: payload.messages.length,
+    totalCharactersInPayload: payload.messages.reduce((sum, m) => sum + m.content.length, 0),
+    warningIfOver11k: actualTokenCount > 11000 ? '⚠️ EXCEEDS 11K TOKENS - SHOULD TRIGGER SUMMARY!' : 'Under 11k tokens'
+  });enRouter API communication
  * Separate from context extraction - uses user's plan-based model
  */
 
@@ -114,18 +150,28 @@ function getRelevantMemories(
     .slice(0, 3);
 }
 
-export function buildSystemPrompt(
+export async function buildSystemPrompt(
   character: Character,
   addonSettings: AddonSettings,
   templateContext: TemplateContext,
   currentContext: CurrentContext,
   selectedPersona: { name?: string; bio?: string; lore?: string } | null,
   replaceTemplatesFn: (content: string) => string,
+  supabase: SupabaseClient,
   worldInfoEntries?: Array<{ keywords: string[]; entry_text: string }> | null,
   userMessage?: string,
   conversationHistory?: any[],
-  characterMemories?: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null
-): string {
+  characterMemories?: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null,
+  chatMode?: 'storytelling' | 'companion',
+  timeAwarenessData?: {
+    enabled: boolean;
+    delaySeconds: number;
+    userTimezone: string;
+    userLocalTime: string;
+    conversationTone?: string;
+    urgencyLevel?: string;
+  }
+): Promise<string> {
   console.log('🎯 buildSystemPrompt called with:', {
     character: character ? 'loaded' : 'null',
     addonSettings,
@@ -161,7 +207,50 @@ IMPORTANT DIALOGUE GUIDELINES:
 - You are ONLY the character, never speak for the user
 - NEVER write the user's responses or actions
 - NEVER continue the conversation for the user
-- STOP your response when it's the user's turn to speak
+- STOP your response when it's the user's turn to speak`;
+
+  // Add chat mode specific guidelines
+  if (chatMode === 'companion') {
+    systemPrompt += `
+
+## CRITICAL COMPANION MODE RULES - HIGHEST PRIORITY
+
+YOU ARE IN COMPANION MODE. THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS:
+
+1. **RESPOND ONLY WITH DIALOGUE** - Your response must contain ONLY what ${character.name} says. Nothing else.
+
+2. **ABSOLUTELY FORBIDDEN**:
+   - NO descriptions of actions, emotions, or movements
+   - NO text between asterisks (*) or tildes (~)
+   - NO narration or scene-setting
+   - NO descriptions of clothing, appearance, or environment
+   - NO parenthetical statements
+   - NO third-person observations
+   - NO stage directions
+
+3. **IGNORE CONTEXT IN EXAMPLES** - Even if the character's greeting or example messages contain descriptions, actions, or narration, you MUST NOT include any in your responses.
+
+4. **CORRECT FORMAT**:
+   ✓ "Hello! How are you today?"
+   ✓ "That's interesting. Tell me more about it."
+   
+5. **INCORRECT FORMAT**:
+   ✗ "*smiles* Hello! How are you today?"
+   ✗ "Hello! *waves enthusiastically* How are you today?"
+   ✗ "(Speaking softly) Hello! How are you today?"
+
+REMEMBER: You are having a text conversation. Respond as if you're texting or instant messaging - pure dialogue only.`;
+  } else {
+    systemPrompt += `
+
+## STORYTELLING MODE ACTIVE
+
+You are in STORYTELLING MODE. You should:
+- Include rich descriptions of actions, emotions, and environment
+- Use asterisks (*) for actions and descriptions
+- Set the scene and create atmosphere
+- Describe ${character.name}'s appearance, movements, and emotional state when relevant
+- Create an immersive narrative experience
 - Focus primarily on dialogue and conversation as the character
 - Use direct speech frequently with quotation marks
 - Keep narrative descriptions brief and essential
@@ -169,6 +258,11 @@ IMPORTANT DIALOGUE GUIDELINES:
 - Express emotions and thoughts through words and dialogue
 - Avoid lengthy descriptive paragraphs
 - Make your character feel alive through speech
+
+Balance dialogue with descriptive elements to create an engaging story.`;
+  }
+
+  systemPrompt += `
 
 CRITICAL: You must ONLY play your character. Never write what the user says, thinks, or does. Stop your response when it's the user's turn to speak.
 
@@ -200,6 +294,57 @@ Stay in character and engage in natural dialogue with the user.`;
     if (contextParts.length > 0) {
       systemPrompt += '\n\n[CURRENT CONTEXT]\n' + contextParts.join('\n') + '\n[/CURRENT CONTEXT]';
     }
+  }
+
+  // Add time awareness context if enabled
+  if (timeAwarenessData?.enabled) {
+    const formatDelay = (seconds: number): string => {
+      if (seconds < 60) return `${seconds} seconds`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`;
+      return `${Math.floor(seconds / 86400)} days`;
+    };
+
+    const getDelayCategory = (seconds: number): string => {
+      if (seconds < 300) return 'short'; // < 5 min
+      if (seconds < 1800) return 'medium'; // < 30 min
+      if (seconds < 7200) return 'long'; // < 2 hours
+      return 'very_long';
+    };
+
+    systemPrompt += `\n\n[TIME AWARENESS ACTIVE]
+Current time: ${timeAwarenessData.userLocalTime}
+Timezone: ${timeAwarenessData.userTimezone} (we share the same timezone)`;
+
+    // Only add delay information if there's an actual delay > 30 seconds
+    if (timeAwarenessData.delaySeconds > 30) {
+      const delayCategory = getDelayCategory(timeAwarenessData.delaySeconds);
+      const formattedDelay = formatDelay(timeAwarenessData.delaySeconds);
+
+      systemPrompt += `\nTime since your last message: ${formattedDelay}
+Delay category: ${delayCategory}`;
+
+      if (timeAwarenessData.conversationTone && timeAwarenessData.conversationTone !== 'No context') {
+        systemPrompt += `\nConversation tone: ${timeAwarenessData.conversationTone}`;
+      }
+      if (timeAwarenessData.urgencyLevel && timeAwarenessData.urgencyLevel !== 'No context') {
+        systemPrompt += `\nUrgency level: ${timeAwarenessData.urgencyLevel}`;
+      }
+    }
+
+    systemPrompt += `\n\nIMPORTANT: You and the user are in the same timezone (${timeAwarenessData.userTimezone}). When asked about time, respond with the actual current time (${timeAwarenessData.userLocalTime}), not a placeholder like {current_time}.`;
+
+    if (timeAwarenessData.delaySeconds > 30) {
+      systemPrompt += `\n\nBased on your character's personality, react appropriately to this delay:
+- Consider the time gap when crafting your response
+- Take into account the current time (are they likely sleeping, working, etc.)
+- Factor in the conversation tone and urgency level
+- React authentically based on your personality traits (patient vs impatient, understanding vs demanding, etc.)
+- You may acknowledge the delay if it fits your character, but don't always mention it
+- When discussing time, remember you both share the same current time`;
+    }
+    
+    systemPrompt += `\n[/TIME AWARENESS]`;
   }
 
   // Add addon context if enabled
@@ -313,6 +458,45 @@ Stay in character and engage in natural dialogue with the user.`;
     }
   }
 
+  // Add most recent auto-summary for context continuity
+  try {
+    console.log('🤖 About to retrieve most recent auto-summary - character details:', {
+      characterExists: !!character,
+      characterName: character?.name,
+      characterId: character?.id,
+      characterIdType: typeof character?.id,
+      characterIdValue: character?.id
+    });
+    
+    // Validate character.id before calling
+    if (!character?.id || character.id === 'undefined') {
+      console.warn('⚠️ Skipping auto-summary fetch - invalid character.id:', character?.id);
+    } else {
+      console.log('🤖 Retrieving most recent auto-summary for character:', character.id);
+      const latestSummary = await getMostRecentAutoSummary(character.id, supabase);
+    
+      if (latestSummary) {
+        systemPrompt += '\n\n[CONVERSATION SUMMARY]';
+        systemPrompt += '\nMost recent conversation summary:';
+        systemPrompt += `\n${latestSummary.summary_content}`;
+        systemPrompt += '\n[/CONVERSATION SUMMARY]';
+        systemPrompt += '\nUse this summary to maintain continuity with previous conversations.';
+        
+        console.log('✅ Most recent auto-summary added to system prompt:', {
+          summaryName: latestSummary.name,
+          summaryLength: latestSummary.summary_content.length,
+          messageCount: latestSummary.message_count,
+          createdAt: latestSummary.created_at
+        });
+      } else {
+        console.log('❌ No auto-summary found for character:', character.id);
+      }
+    }
+  } catch (error) {
+    console.error('⚠️ Error retrieving most recent auto-summary:', error);
+    // Continue without auto-summary - this is non-critical
+  }
+
   console.log('📝 Final system prompt length:', systemPrompt.length);
   console.log('📋 System prompt preview:', systemPrompt.substring(0, 500) + '...');
 
@@ -348,6 +532,30 @@ export async function generateAIResponse(
   openRouterKey: string
 ): Promise<Response> {
   console.log('🎯 Generating AI response with model:', model);
+  
+  const payload = {
+    model: model, // User's plan-based model (different from context extraction)
+    messages: messages,
+    stream: true,
+    temperature: 0.7,
+    max_tokens: 1000
+  };
+  
+  console.log('📤 OpenRouter request payload:', JSON.stringify({
+    model: payload.model,
+    messagesCount: payload.messages.length,
+    stream: payload.stream,
+    temperature: payload.temperature,
+    max_tokens: payload.max_tokens,
+    totalEstimatedTokens: payload.messages.reduce((total, msg) => total + estimateTokens(msg.content), 0),
+    messages: payload.messages.map((m, index) => ({ 
+      index,
+      role: m.role, 
+      contentLength: m.content.length,
+      estimatedTokens: estimateTokens(m.content),
+      contentPreview: m.content.substring(0, 200) + (m.content.length > 200 ? '...' : '')
+    }))
+  }, null, 2));
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -357,13 +565,7 @@ export async function generateAIResponse(
       'HTTP-Referer': globalThis.Deno?.env?.get('SITE_URL') || 'https://yourapp.com',
       'X-Title': 'AnimaChat-Streaming'
     },
-    body: JSON.stringify({
-      model: model, // User's plan-based model (different from context extraction)
-      messages: messages,
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 1000
-    })
+    body: JSON.stringify(payload)
   });
 
   return response;

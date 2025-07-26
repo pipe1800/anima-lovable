@@ -14,34 +14,55 @@ import {
   LogOut,
   Crown,
   PowerOff,
-  BookOpen
+  BookOpen,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { getUserCredits } from '@/lib/supabase-queries';
-import { useUserSubscription } from '@/hooks/useProfile';
 
 // Preload the logo image to prevent reloading
-const LOGO_URL = 'https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM';
+const LOGO_URL = '/assets/logo.png';
 const logoImage = new Image();
 logoImage.src = LOGO_URL;
 
 const baseMainItems = [
   { title: "Dashboard", url: "/dashboard", icon: Home },
-  { title: "Create Character", url: "/character-creator", icon: Plus },
-  { title: "World Infos", url: "/world-info", icon: BookOpen, tutorialAttr: "world-info-nav" },
+  { title: "Create Character", url: "/character-creator", icon: Plus, tutorialAttr: "create-character-nav" },
   { title: "Discover", url: "/discover", icon: Compass, tutorialAttr: "discover-nav" },
+  { title: "World Infos", url: "/world-info", icon: BookOpen, tutorialAttr: "world-info-nav" },
   { title: "Profile", url: "/profile", icon: User },
 ];
 
 const AppSidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, signOut, loading } = useAuth();
+  const { user, profile, signOut, loading, subscription: authSubscription } = useAuth();
   const [userCredits, setUserCredits] = useState(0);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const currentPath = location.pathname;
-  const { data: userSubscription } = useUserSubscription();
+
+  // Load collapsed state from localStorage
+  useEffect(() => {
+    const savedState = localStorage.getItem('sidebarCollapsed');
+    if (savedState) {
+      setIsCollapsed(JSON.parse(savedState));
+    }
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setIsCollapsed(prev => {
+      const newState = !prev;
+      localStorage.setItem('sidebarCollapsed', JSON.stringify(newState));
+      
+      // Dispatch custom event for layout to listen
+      window.dispatchEvent(new CustomEvent('sidebarToggled'));
+      
+      return newState;
+    });
+  }, []);
 
   // Memoize the logo component to prevent re-rendering
   const MemoizedLogo = useMemo(() => {
@@ -58,17 +79,20 @@ const AppSidebar = () => {
 
   // Create main items with dynamic subscription icon
   const mainItems = useMemo(() => {
-    const hasActiveSubscription = userSubscription?.status === 'active' && userSubscription?.plans?.price_monthly > 0;
+    const hasActiveSubscription = authSubscription?.status === 'active' && authSubscription?.plan?.price_monthly > 0;
+    const planName = authSubscription?.plan?.name?.toLowerCase();
+    
     return [
       ...baseMainItems,
       { 
         title: "Subscription", 
         url: "/subscription", 
         icon: Crown,
-        isActive: hasActiveSubscription 
+        isActive: hasActiveSubscription,
+        planName: planName
       },
     ];
-  }, [userSubscription?.status]);
+  }, [authSubscription?.status, authSubscription?.plan]);
 
   const fetchCredits = useCallback(async () => {
     if (!user) return;
@@ -135,49 +159,115 @@ const AppSidebar = () => {
   }
 
   return (
-    <div className="fixed left-0 top-0 w-64 h-screen bg-[#1b1b1b] border-r border-gray-700/50 z-40">
+    <div className={`bg-[#0f0f0f] h-full text-white flex flex-col transition-all duration-300 ${
+      isCollapsed ? 'w-16' : 'w-64'
+    }`}>
       <div className="flex flex-col h-full">
-        <div className="border-b border-gray-700/50 p-4">
-          {/* App Logo */}
-          <div className="flex items-center justify-center px-4 py-4">
-            <MemoizedLogo />
+        {/* Header with logo */}
+        <div className="border-b border-gray-700/50 p-4 relative">
+          <div className="flex items-center justify-center">
+            {isCollapsed ? (
+              // Show favicon when collapsed
+              <img 
+                src="/assets/logo_emblem.png" 
+                alt="A" 
+                className="h-8 w-8"
+              />
+            ) : (
+              // Show full logo when expanded
+              <MemoizedLogo />
+            )}
           </div>
+          
+          {/* Toggle button */}
+          <button
+            onClick={toggleSidebar}
+            className="absolute -right-3 top-1/2 -translate-y-1/2 bg-[#1a1a2e] border border-gray-700 rounded-full p-1 hover:bg-[#FF7A00]/20 transition-colors"
+          >
+            {isCollapsed ? (
+              <ChevronRight className="w-4 h-4 text-gray-400" />
+            ) : (
+              <ChevronLeft className="w-4 h-4 text-gray-400" />
+            )}
+          </button>
         </div>
 
+        {/* Navigation items */}
         <div className="px-2 py-4 flex-1">
           <div className="space-y-3">
             {mainItems.map((item) => {
               const IconComponent = item.icon;
+              const isActiveItem = isActive(item.url);
               const isSubscriptionItem = item.title === "Subscription";
               const hasActiveSubscription = (item as any).isActive;
+              const planName = (item as any).planName;
+              
+              // Determine crown icon styling
+              let crownClasses = "w-5 h-5 flex-shrink-0";
+              if (isSubscriptionItem && hasActiveSubscription) {
+                if (planName?.includes('whale')) {
+                  crownClasses += " fill-yellow-500 text-yellow-500"; // Gold filled crown for Whale
+                } else if (planName?.includes('true fan')) {
+                  crownClasses += " fill-gray-300 text-gray-300"; // Silver filled crown for True Fan
+                } else {
+                  crownClasses += " fill-current text-current"; // Default filled
+                }
+              }
               
               return (
                 <NavLink 
                   key={item.title}
-                  to={item.url} 
-                  className={getNavClasses(isActive(item.url))}
+                  to={item.url}
+                  className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} w-full space-x-4 px-4 py-3.5 transition-all duration-200 text-base ${
+                    isActiveItem 
+                      ? 'bg-[#FF7A00]/20 text-[#FF7A00] border-r-2 border-[#FF7A00]' 
+                      : 'text-gray-300 hover:text-white hover:bg-gray-800/50'
+                  }`}
+                  title={isCollapsed ? item.title : undefined}
                   data-tutorial={(item as any).tutorialAttr}
                 >
-                  {isSubscriptionItem && hasActiveSubscription ? (
-                    <Crown className="w-5 h-5 flex-shrink-0 fill-yellow-500 text-yellow-500" />
+                  {isSubscriptionItem ? (
+                    <Crown className={crownClasses} />
                   ) : (
                     <IconComponent className="w-5 h-5 flex-shrink-0" />
                   )}
-                  <span className="font-medium text-base">{item.title}</span>
+                  {!isCollapsed && (
+                    <span className="font-medium text-base">{item.title}</span>
+                  )}
                 </NavLink>
               );
             })}
           </div>
         </div>
 
+        {/* User section */}
         <div className="border-t border-gray-700/50 p-4">
+          {!isCollapsed && profile && (
+            <div className="flex items-center space-x-3 mb-4">
+              <Avatar className="w-10 h-10">
+                <AvatarImage src={profile?.avatar_url} />
+                <AvatarFallback>{profile?.username?.[0] || 'U'}</AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white truncate">
+                  {profile?.username || 'User'}
+                </p>
+                <div className="flex items-center space-x-1">
+                  <Zap className="w-3 h-3 text-[#FF7A00]" />
+                  <span className="text-xs text-[#FF7A00]">{userCredits.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <Button 
             variant="ghost" 
-            className="w-full justify-start text-gray-400 hover:text-white hover:bg-gray-800/50 p-3 space-x-4"
+            className={`w-full ${isCollapsed ? 'justify-center' : 'justify-start'} text-gray-400 hover:text-white hover:bg-gray-800/50 p-3 space-x-4`}
             onClick={handleLogout}
+            title={isCollapsed ? 'Logout' : undefined}
           >
             <PowerOff className="w-5 h-5 flex-shrink-0" />
-            <span className="font-medium text-base">Logout</span>
+            {!isCollapsed && <span className="font-medium text-base">Logout</span>}
           </Button>
         </div>
       </div>

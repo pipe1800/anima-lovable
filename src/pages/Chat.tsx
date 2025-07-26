@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { User } from '@supabase/supabase-js';
@@ -7,6 +7,7 @@ import ChatInterface from '@/components/chat/ChatInterface';
 import { ChatLayout } from '@/components/chat/ChatLayout';
 import OnboardingChecklist from '@/components/OnboardingChecklist';
 import { TutorialManager } from '@/components/tutorial/TutorialManager';
+import { useContextManagement } from '@/hooks/useContextManagement';
 import type { TrackedContext } from '@/types/chat';
 
 const Chat = () => {
@@ -36,6 +37,49 @@ const Chat = () => {
   const selectedCharacter = location.state?.selectedCharacter;
   const existingChatId = chatId || location.state?.existingChatId;
   const fromOnboarding = location.state?.fromOnboarding;
+
+  // Set localStorage flag for tutorial trigger when coming from onboarding
+  useEffect(() => {
+    if (fromOnboarding && user) {
+      console.log('🎓 Chat: Setting fromOnboarding flag for tutorial');
+      localStorage.setItem('fromOnboarding', 'true');
+    }
+  }, [fromOnboarding, user]);
+
+  // Load context from database and sync with local state
+  const { context: loadedContext, reloadContext, isLoading: contextLoading } = useContextManagement(
+    currentChatId, 
+    characterId || '', 
+    user?.id || null
+  );
+
+  // Add a callback to reload context after message is sent
+  const handleMessageSent = useCallback(async () => {
+    if (!currentChatId || !characterId || !user?.id) return;
+    
+    console.log('🔄 Message sent, context will be extracted by backend');
+    
+    // The backend (send-message-handler) now handles context extraction
+    // Real-time subscription should pick up the changes automatically
+    // But we can add a small delay and force reload as backup
+    setTimeout(() => {
+      console.log('🔄 Triggering context reload as backup');
+      reloadContext();
+    }, 2000); // 2 second delay to allow backend processing
+  }, [reloadContext, user?.id, characterId, currentChatId]);
+
+  // Debug log the loaded context
+  useEffect(() => {
+    // Context debug information is available here if needed
+  }, [loadedContext, currentChatId, characterId, user?.id, contextLoading]);
+
+  // Sync context from database to local state when chat changes or context loads
+  useEffect(() => {
+    if (currentChatId && characterId && user?.id) {
+      console.log('🔄 Setting tracked context from database:', loadedContext);
+      setTrackedContext(loadedContext);
+    }
+  }, [currentChatId, characterId, user?.id, loadedContext]);
 
   // ALL useEffect hooks must be at the top, before any conditional returns
   useEffect(() => {
@@ -158,10 +202,74 @@ const Chat = () => {
 
   const handleCreditsUpdate = (balance: number) => {
     setCreditsBalance(balance);
-  };  const handleChatCreated = (chatId: string) => {
+  };  const handleChatCreated = useCallback(async (chatId: string) => {
     console.log('💬 Chat page: New chat created with ID:', chatId);
     setCurrentChatId(chatId);
-  };
+    
+    // 🎯 EXTRACT INITIAL CONTEXT FROM CHARACTER CARD + GREETING
+    console.log('🔍 Debug - Chat created context check:', {
+      chatId,
+      characterId: characterId,
+      userId: user?.id,
+      hasCharacterId: !!characterId,
+      hasUserId: !!user?.id,
+      willProceed: !!(characterId && user?.id)
+    });
+    
+    if (characterId && user?.id) {
+      console.log('🔄 Triggering initial context extraction for new chat...');
+      
+      try {
+        // Get addon settings for context extraction
+        console.log('📥 Fetching user global settings...');
+        const { data: globalSettings, error: settingsError } = await supabase
+          .from('user_global_chat_settings')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+
+        console.log('⚙️ Global settings result:', { globalSettings, settingsError });
+
+        if (globalSettings) {
+          const addonSettings = {
+            moodTracking: globalSettings.mood_tracking,
+            clothingInventory: globalSettings.clothing_inventory,
+            locationTracking: globalSettings.location_tracking,
+            timeAndWeather: globalSettings.time_and_weather,
+            relationshipStatus: globalSettings.relationship_status,
+            characterPosition: globalSettings.character_position
+          };
+
+          console.log('🎛️ Mapped addon settings:', addonSettings);
+
+          // Call extract-addon-context in INITIAL mode for character card + greeting
+          console.log('📞 Calling extract-addon-context function...');
+          const { data, error } = await supabase.functions.invoke('extract-addon-context', {
+            body: {
+              chat_id: chatId,
+              character_id: characterId,
+              addon_settings: addonSettings,
+              mode: 'initial' // 🎯 INITIAL MODE - extracts from character card + greeting
+            }
+          });
+
+          console.log('📤 Function call result:', { data, error });
+
+          if (error) {
+            console.error('❌ Initial context extraction error:', error);
+          } else if (data?.success) {
+            console.log('✅ Initial context extracted for greeting message:', data.context_summary);
+          } else {
+            console.log('⏭️ Initial context extraction skipped or failed:', data?.message);
+          }
+        } else {
+          console.log('⚠️ No global settings found - skipping context extraction');
+        }
+      } catch (error) {
+        console.error('❌ Error in initial context extraction:', error);
+      }
+    }
+  }, [characterId, user?.id]);
 
   if (loading) {
     return (
@@ -245,6 +353,7 @@ const Chat = () => {
             selectedWorldInfoId={selectedWorldInfoId}
             onChatCreated={handleChatCreated}
             onCreditsUpdate={handleCreditsUpdate}
+            onMessageSent={handleMessageSent}
           />
         </ChatLayout>
 

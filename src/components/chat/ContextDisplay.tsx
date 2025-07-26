@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { capitalizeText, isCharacterRelevantContext, getContextLabel, getAddonKey } from '@/lib/utils/textFormatting';
+import { convertDatabaseContextToTrackedContext, hasValidContext } from '@/utils/contextConverter';
 
 export interface TrackedContext {
   moodTracking: string;
@@ -51,42 +52,83 @@ interface ContextItem {
 
 export const ContextDisplay = ({ context, contextUpdates, currentContext, addonSettings, className = '' }: ContextDisplayProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  
+  // Use the most relevant context source
+  const effectiveContext = currentContext || context;
+  
+  // Debug logging
+  console.log('🎨 ContextDisplay render:', {
+    hasContext: !!context,
+    hasContextUpdates: !!contextUpdates,
+    hasCurrentContext: !!currentContext,
+    hasAddonSettings: !!addonSettings,
+    context,
+    contextUpdates,
+    currentContext,
+    addonSettings,
+    effectiveContext
+  });
 
   // Create all possible addon items
   const allAddonItems = [
-    { label: 'Mood Tracking', key: 'mood', addonKey: 'moodTracking' },
-    { label: 'Clothing Inventory', key: 'clothing', addonKey: 'clothingInventory' },
-    { label: 'Location Tracking', key: 'location', addonKey: 'locationTracking' },
-    { label: 'Time & Weather', key: 'weather', addonKey: 'timeAndWeather' },
-    { label: 'Relationship Status', key: 'relationship', addonKey: 'relationshipStatus' },
-    { label: 'Character Position', key: 'character_position', addonKey: 'characterPosition' },
+    { label: 'Mood Tracking', key: 'moodTracking', addonKey: 'moodTracking' },
+    { label: 'Clothing Inventory', key: 'clothingInventory', addonKey: 'clothingInventory' },
+    { label: 'Location Tracking', key: 'locationTracking', addonKey: 'locationTracking' },
+    { label: 'Time & Weather', key: 'timeAndWeather', addonKey: 'timeAndWeather' },
+    { label: 'Relationship Status', key: 'relationshipStatus', addonKey: 'relationshipStatus' },
+    { label: 'Character Position', key: 'characterPosition', addonKey: 'characterPosition' },
   ];
 
   // Process context data into unified format with FIXED KEY MAPPING
   let contextItems: ContextItem[] = [];
   
-  // Handle currentContext (from database) - PRIORITY 1
-  if (currentContext) {
+  // Handle effectiveContext (prioritized) - PRIORITY 1 - UNIVERSAL CONTEXT HANDLING
+  if (effectiveContext) {
+    // Check if context is already in TrackedContext format or needs conversion
+    let workingContext: TrackedContext;
+    
+    if ('moodTracking' in effectiveContext) {
+      // Already in TrackedContext format (from messages.current_context)
+      workingContext = effectiveContext as TrackedContext;
+    } else {
+      // Database format (from chat_context.current_context) - needs conversion
+      const convertedContext = convertDatabaseContextToTrackedContext(effectiveContext);
+      workingContext = convertedContext || {
+        moodTracking: 'No context',
+        clothingInventory: 'No context',
+        locationTracking: 'No context',
+        timeAndWeather: 'No context',
+        relationshipStatus: 'No context',
+        characterPosition: 'No context'
+      };
+    }
+    
     contextItems = allAddonItems.map(item => {
-      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true;
+      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
       
-      // Map database keys to display keys - handle both formats
+      // Get context value using both possible formats for maximum compatibility
       let contextValue = null;
-      if (item.key === 'mood') {
-        contextValue = (currentContext as DatabaseContext).mood || (currentContext as TrackedContext).moodTracking;
-      } else if (item.key === 'clothing') {
-        contextValue = (currentContext as DatabaseContext).clothing || (currentContext as TrackedContext).clothingInventory;
-      } else if (item.key === 'location') {
-        contextValue = (currentContext as DatabaseContext).location || (currentContext as TrackedContext).locationTracking;
-      } else if (item.key === 'weather') {
-        contextValue = (currentContext as DatabaseContext).time_weather || (currentContext as TrackedContext).timeAndWeather;
-      } else if (item.key === 'relationship') {
-        contextValue = (currentContext as DatabaseContext).relationship || (currentContext as TrackedContext).relationshipStatus;
-      } else if (item.key === 'character_position') {
-        contextValue = (currentContext as DatabaseContext).character_position || (currentContext as TrackedContext).characterPosition;
+      
+      if (typeof workingContext === 'object' && workingContext !== null) {
+        // Try TrackedContext format first (preferred)
+        if ('moodTracking' in workingContext) {
+          const trackedContext = workingContext as TrackedContext;
+          // Use the key directly since allAddonItems keys match TrackedContext properties
+          contextValue = trackedContext[item.key as keyof TrackedContext];
+        } else {
+          // Fallback to raw database format (shouldn't happen after conversion but just in case)
+          const dbContext = workingContext as any;
+          if (item.key === 'moodTracking') contextValue = dbContext.mood;
+          else if (item.key === 'clothingInventory') contextValue = dbContext.clothing;
+          else if (item.key === 'locationTracking') contextValue = dbContext.location;
+          else if (item.key === 'timeAndWeather') contextValue = dbContext.time_weather;
+          else if (item.key === 'relationshipStatus') contextValue = dbContext.relationship;
+          else if (item.key === 'characterPosition') contextValue = dbContext.character_position;
+        }
       }
       
-      if (contextValue && contextValue !== 'No context' && isCharacterRelevantContext(item.addonKey, contextValue)) {
+      // Filter out null, undefined, empty string, and "No context" values
+      if (contextValue && contextValue !== 'No context' && contextValue.trim() !== '' && isCharacterRelevantContext(item.addonKey, contextValue)) {
         return {
           label: item.label,
           value: capitalizeText(contextValue),
@@ -109,7 +151,7 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
   // Handle contextUpdates (from historical messages) - PRIORITY 2
   else if (contextUpdates && Object.keys(contextUpdates).length > 0) {
     contextItems = allAddonItems.map(item => {
-      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true;
+      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
       const updateData = contextUpdates[item.addonKey];
       
       if (updateData && updateData.current !== 'No context' && isCharacterRelevantContext(item.addonKey, updateData.current)) {
@@ -135,7 +177,7 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
   // Handle legacy context format - PRIORITY 3
   else if (context) {
     contextItems = allAddonItems.map(item => {
-      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true;
+      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
       const contextValue = context[item.addonKey];
       
       if (contextValue && contextValue !== 'No context' && isCharacterRelevantContext(item.addonKey, contextValue)) {
@@ -175,18 +217,42 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
     }).filter(Boolean);
   }
 
-  // Check if any stateful addons are enabled
-  const hasEnabledAddons = addonSettings && (
+  // Check if any stateful addons are enabled (default to true if settings not loaded yet)
+  const hasEnabledAddons = !addonSettings || (addonSettings && (
     addonSettings.moodTracking || 
     addonSettings.clothingInventory || 
     addonSettings.locationTracking || 
     addonSettings.timeAndWeather || 
     addonSettings.relationshipStatus ||
     addonSettings.characterPosition
-  );
+  ));
 
-  // Always show dropdown if addons are enabled, even if no context yet
-  if (!hasEnabledAddons) {
+  console.log('🎨 ContextDisplay visibility check:', {
+    hasEnabledAddons,
+    hasValidContextResult: hasValidContext(effectiveContext),
+    hasContext: !!context,
+    hasContextUpdates: !!contextUpdates,
+    hasCurrentContext: !!currentContext,
+    effectiveContext,
+    willRender: hasEnabledAddons || hasValidContext(effectiveContext)
+  });
+
+  // Show context if we have valid context data OR if addons are enabled OR while settings are loading
+  const shouldRender = hasEnabledAddons || hasValidContext(effectiveContext) || context || contextUpdates;
+  
+  // TEMPORARY: Force render if we have any context for debugging
+  const hasAnyContext = hasValidContext(effectiveContext) || hasValidContext(context);
+  const forceRender = hasAnyContext;
+  
+  console.log('🎨 ContextDisplay final render decision:', {
+    shouldRender,
+    hasAnyContext,
+    forceRender,
+    finalDecision: shouldRender || forceRender
+  });
+  
+  if (!shouldRender && !forceRender) {
+    console.log('🎨 ContextDisplay: Not rendering - no valid conditions met');
     return null;
   }
 

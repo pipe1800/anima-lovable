@@ -2,6 +2,7 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { TrendingUp, MessageCircle, Heart, Calendar, Eye } from 'lucide-react';
+import { formatNumberWithK } from '@/lib/utils/formatting';
 
 interface CharacterStatsSectionProps {
   character: {
@@ -28,14 +29,14 @@ export const CharacterStatsSection: React.FC<CharacterStatsSectionProps> = ({
         <div className="flex justify-between items-center">
           <span className="text-muted-foreground">Conversations</span>
           <Badge variant="secondary" className="bg-primary/20 text-primary">
-            {character.actual_chat_count?.toLocaleString() || 0}
+            {formatNumberWithK(character.actual_chat_count || 0)}
           </Badge>
         </div>
         
         <div className="flex justify-between items-center">
           <span className="text-muted-foreground">Likes</span>
           <Badge variant="secondary" className="bg-primary/20 text-primary">
-            {character.likes_count?.toLocaleString() || 0}
+            {formatNumberWithK(character.likes_count || 0)}
           </Badge>
         </div>
         

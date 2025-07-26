@@ -83,20 +83,47 @@ const ChatMessages = ({
     };
   }, [chatId]);
 
-  // Extract most recent context from AI messages
-  const mostRecentContext = React.useMemo(() => {
-    if (!messages.length) return trackedContext;
-    
-    // Find the most recent AI message with context
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      if (!message.isUser && message.current_context) {
-        return message.current_context;
+  // Use tracked context as the primary source (real-time from database), fall back to message context
+  const contextToUse = React.useMemo(() => {
+    // PRIORITY 1: Check tracked context from database (real-time updated)
+    if (trackedContext) {
+      const hasValidTrackedContext = Object.values(trackedContext).some(
+        value => value && value !== 'No context'
+      );
+      if (hasValidTrackedContext) {
+        console.log('💾 Using tracked context from database (PRIORITY 1):', trackedContext);
+        return trackedContext;
       }
     }
     
-    return trackedContext;
-  }, [messages, trackedContext]);
+    // PRIORITY 2: Fall back to context from messages if database context is empty
+    if (messages.length > 0) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        if (!message.isUser && message.current_context) {
+          const messageContext = message.current_context;
+          // Check if message context has valid values (not just "No context")
+          const hasValidMessageContext = Object.values(messageContext).some(
+            value => value && value !== 'No context'
+          );
+          if (hasValidMessageContext) {
+            console.log('📨 Using context from message (PRIORITY 2):', messageContext);
+            return messageContext;
+          }
+        }
+      }
+    }
+    
+    // PRIORITY 3: Default to tracked context structure even if all values are "No context"
+    return trackedContext || {
+      moodTracking: 'No context',
+      clothingInventory: 'No context',
+      locationTracking: 'No context',
+      timeAndWeather: 'No context',
+      relationshipStatus: 'No context',
+      characterPosition: 'No context'
+    };
+  }, [trackedContext, messages]);
 
   // ✅ SIMPLIFIED: Basic message grouping without complex streaming logic
   const messageGroups = useMemo(() => {
@@ -206,15 +233,27 @@ const ChatMessages = ({
             key={group.id} 
             group={group} 
             character={character}
-            trackedContext={mostRecentContext}
-            addonSettings={globalSettings ? {
-              moodTracking: globalSettings.mood_tracking,
-              clothingInventory: globalSettings.clothing_inventory,
-              locationTracking: globalSettings.location_tracking,
-              timeAndWeather: globalSettings.time_and_weather,
-              relationshipStatus: globalSettings.relationship_status,
-              characterPosition: globalSettings.character_position,
-            } : undefined}
+            trackedContext={contextToUse}
+            addonSettings={(() => {
+              const settings = globalSettings ? {
+                moodTracking: globalSettings.mood_tracking,
+                clothingInventory: globalSettings.clothing_inventory,
+                locationTracking: globalSettings.location_tracking,
+                timeAndWeather: globalSettings.time_and_weather,
+                relationshipStatus: globalSettings.relationship_status,
+                characterPosition: globalSettings.character_position,
+              } : {
+                // Default to all enabled while loading to ensure context displays
+                moodTracking: true,
+                clothingInventory: true,
+                locationTracking: true,
+                timeAndWeather: true,
+                relationshipStatus: true,
+                characterPosition: true,
+              };
+              
+              return settings;
+            })()}
           />
         ))
       ) : (

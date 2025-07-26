@@ -1,13 +1,14 @@
 
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { ProfileView } from '@/components/profile/ProfileView';
+import { NewProfileView } from '@/components/profile/NewProfileView';
 import { ProfileSettingsView } from '@/components/profile/ProfileSettingsView';
 
 const UserProfile = () => {
   return (
     <Routes>
-      <Route path="/" element={<ProfileView />} />
+      <Route path="/" element={<NewProfileView />} />
+      <Route path="/:userId" element={<NewProfileView />} />
       <Route path="/settings" element={<ProfileSettingsView />} />
     </Routes>
   );

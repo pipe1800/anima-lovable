@@ -1,28 +1,12 @@
-import type { 
-  Character, 
-  AddonSettings, 
-  TemplateContext, 
-  ContextData, 
-  SupabaseClient 
-} from '../types/interfaces.ts';
-
 /**
  * Context extraction utilities for addon features
  * Uses a separate lightweight model (mistralai/mistral-7b-instruct) specifically for context analysis
  * This keeps context extraction separate from message generation models
- */
-
-export async function extractInitialContext(
-  character: Character,
-  addonSettings: AddonSettings,
-  openRouterKey: string,
-  replaceTemplatesFn: (content: string) => string
-): Promise<ContextData | null> {
+ */ export async function extractInitialContext(character, addonSettings, openRouterKey, replaceTemplatesFn) {
   if (!addonSettings || !Object.values(addonSettings).some(Boolean)) {
     console.log('No addons enabled - skipping initial context extraction');
     return null;
   }
-
   const contextPrompt = `You are ${replaceTemplatesFn(character.personality_summary || 'a helpful assistant')}.
 
 ${character.description ? `Description: ${replaceTemplatesFn(character.description)}` : ''}
@@ -40,7 +24,6 @@ Based on the character description, scenario, and greeting, extract initial cont
 }
 
 Return only the JSON object with no additional text. If a field is not mentioned or unclear, use "No context".`;
-
   try {
     const contextResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -51,7 +34,7 @@ Return only the JSON object with no additional text. If a field is not mentioned
         'X-Title': 'AnimaChat-InitialContext'
       },
       body: JSON.stringify({
-        model: 'mistralai/mistral-7b-instruct', // Dedicated context extraction model
+        model: 'mistralai/mistral-7b-instruct',
         messages: [
           {
             role: 'user',
@@ -62,19 +45,12 @@ Return only the JSON object with no additional text. If a field is not mentioned
         max_tokens: 500
       })
     });
-
     if (contextResponse.ok) {
       const contextData = await contextResponse.json();
       const contextStr = contextData.choices?.[0]?.message?.content || '{}';
       console.log('📝 Initial context extraction response:', contextStr);
-
       try {
-        const cleanedContextStr = contextStr.trim()
-          .replace(/^```json\s*/, '')
-          .replace(/\s*```$/, '')
-          .replace(/^```\s*/, '')
-          .replace(/\s*```$/, '');
-        
+        const cleanedContextStr = contextStr.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
         const parsedContext = JSON.parse(cleanedContextStr);
         console.log('🔍 Parsed initial context:', parsedContext);
         return parsedContext;
@@ -86,32 +62,23 @@ Return only the JSON object with no additional text. If a field is not mentioned
   } catch (error) {
     console.error('Initial context extraction error:', error);
   }
-
   return null;
 }
-
-export async function extractContextFromResponse(
-  character: Character,
-  conversationContext: any[],
-  message: string,
-  aiResponse: string,
-  addonSettings: AddonSettings,
-  openRouterKey: string,
-  replaceTemplatesFn: (content: string) => string,
-  supabase: SupabaseClient,
-  userId: string,
-  chatId: string,
-  characterId: string
-): Promise<ContextData | null> {
+export async function extractContextFromResponse(character, conversationContext, message, aiResponse, addonSettings, openRouterKey, replaceTemplatesFn, supabase, userId, chatId, characterId) {
+  console.log('🔍 CONTEXT EXTRACTION DEBUG: Function called', {
+    timestamp: new Date().toISOString(),
+    chatId,
+    characterId,
+    callStack: new Error().stack?.split('\n').slice(0, 5)
+  });
+  
   if (!addonSettings || !Object.values(addonSettings).some(Boolean)) {
     console.log('No addons enabled - skipping context extraction');
     return null;
   }
-
   // Build context fields based on enabled addons only
-  const enabledFields: string[] = [];
-  const contextFields: Record<string, string> = {};
-
+  const enabledFields = [];
+  const contextFields = {};
   if (addonSettings.moodTracking) {
     enabledFields.push('"mood": "character\'s current emotional state"');
     contextFields.mood = 'mood';
@@ -137,13 +104,19 @@ export async function extractContextFromResponse(
     contextFields.character_position = 'character_position';
   }
 
+  // Add time awareness context extraction
+  if (addonSettings.timeAwareness) {
+    enabledFields.push('"conversation_tone": "current emotional tone (neutral/tense/romantic/playful/serious/angry/sad/excited)"');
+    enabledFields.push('"urgency_level": "conversation urgency (low/medium/high)"');
+    contextFields.conversation_tone = 'conversation_tone';
+    contextFields.urgency_level = 'urgency_level';
+  }
+
   if (enabledFields.length === 0) {
     console.log('No context addons enabled - skipping context extraction');
     return null;
   }
-
   console.log('🔧 Extracting context for enabled addons:', Object.keys(contextFields));
-
   // IMPROVED PROMPT - Focus on the conversation exchange, avoid context contamination
   const contextPrompt = `You are analyzing a conversation between a user and a character to extract context information.
 
@@ -171,7 +144,6 @@ Examples of GOOD responses:
 - "bedroom" (not "kitchen, bedroom")
 
 Return ONLY the JSON object with no additional text.`;
-
   try {
     const contextResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -182,7 +154,7 @@ Return ONLY the JSON object with no additional text.`;
         'X-Title': 'AnimaChat-Context'
       },
       body: JSON.stringify({
-        model: 'mistralai/mistral-7b-instruct', // Same dedicated context model
+        model: 'mistralai/mistral-7b-instruct',
         messages: [
           {
             role: 'user',
@@ -193,31 +165,22 @@ Return ONLY the JSON object with no additional text.`;
         max_tokens: 500
       })
     });
-
     if (contextResponse.ok) {
       const contextData = await contextResponse.json();
       const contextStr = contextData.choices?.[0]?.message?.content || '{}';
       console.log('📝 Raw context extraction response:', contextStr);
-
       try {
         // Clean the response to ensure it's valid JSON
-        const cleanedContextStr = contextStr.trim()
-          .replace(/^```json\s*/, '')
-          .replace(/\s*```$/, '')
-          .replace(/^```\s*/, '')
-          .replace(/\s*```$/, '');
-        
+        const cleanedContextStr = contextStr.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
         const parsedContext = JSON.parse(cleanedContextStr);
         console.log('🔍 Parsed context:', parsedContext);
-
         // Ensure we have values for all enabled fields (but don't contaminate with old context)
-        for (const [fieldKey, fieldType] of Object.entries(contextFields)) {
+        for (const [fieldKey, fieldType] of Object.entries(contextFields)){
           if (!parsedContext[fieldKey]) {
             // Only set to "No context" if the field is missing - don't use old values
             parsedContext[fieldKey] = 'No context';
           }
         }
-
         return parsedContext;
       } catch (parseError) {
         console.error('Failed to parse context JSON:', parseError);
@@ -228,65 +191,153 @@ Return ONLY the JSON object with no additional text.`;
   } catch (error) {
     console.error('Context extraction error:', error);
   }
-
   return null;
 }
-
-export async function saveContextUpdates(
-  extractedContext: ContextData,
-  addonSettings: AddonSettings,
-  userId: string,
-  chatId: string,
-  characterId: string,
-  supabase: SupabaseClient
-): Promise<void> {
+export async function saveContextUpdates(extractedContext, addonSettings, userId, chatId, characterId, supabase) {
   if (!extractedContext || !addonSettings) return;
-
   const contextMappings = [
-    { setting: 'moodTracking', field: 'mood', type: 'mood' },
-    { setting: 'clothingInventory', field: 'clothing', type: 'clothing' },
-    { setting: 'locationTracking', field: 'location', type: 'location' },
-    { setting: 'timeAndWeather', field: 'time_weather', type: 'time_weather' },
-    { setting: 'relationshipStatus', field: 'relationship', type: 'relationship' },
-    { setting: 'characterPosition', field: 'character_position', type: 'character_position' }
+    {
+      setting: 'moodTracking',
+      field: 'mood',
+      type: 'mood'
+    },
+    {
+      setting: 'clothingInventory',
+      field: 'clothing',
+      type: 'clothing'
+    },
+    {
+      setting: 'locationTracking',
+      field: 'location',
+      type: 'location'
+    },
+    {
+      setting: 'timeAndWeather',
+      field: 'time_weather',
+      type: 'time_weather'
+    },
+    {
+      setting: 'relationshipStatus',
+      field: 'relationship',
+      type: 'relationship'
+    },
+    {
+      setting: 'characterPosition',
+      field: 'character_position',
+      type: 'character_position'
+    },
+    {
+      setting: 'timeAwareness',
+      field: 'conversation_tone',
+      type: 'conversation_tone'
+    },
+    {
+      setting: 'timeAwareness',
+      field: 'urgency_level',
+      type: 'urgency_level'
+    }
   ];
 
-  const contextUpdatePromises: Promise<any>[] = [];
+  // Build the context object for the chat_context table
+  const contextData = {
+    mood: null,
+    clothing: null,
+    location: null,
+    relationship: null,
+    time_weather: null,
+    character_position: null,
+    conversation_tone: null,
+    urgency_level: null
+  };
 
-  for (const { setting, field, type } of contextMappings) {
-    if (addonSettings[setting as keyof AddonSettings] && extractedContext[field as keyof ContextData]) {
-      const newValue = extractedContext[field as keyof ContextData];
-      
+  let hasUpdates = false;
+
+  for (const { setting, field } of contextMappings) {
+    if (addonSettings[setting] && extractedContext[field]) {
+      const newValue = extractedContext[field];
       // Only update if we got a meaningful value (not "No context")
       if (newValue !== 'No context') {
-        console.log(`💾 Updating ${type} context:`, newValue);
-        contextUpdatePromises.push(
-          supabase.from('user_chat_context').upsert({
-            user_id: userId,
-            chat_id: chatId,
-            character_id: characterId,
-            context_type: type,
-            current_context: newValue,
-            updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'user_id,chat_id,character_id,context_type'
-          })
-        );
+        const contextKey = field === 'time_weather' ? 'time_weather' : 
+                          field === 'character_position' ? 'character_position' :
+                          field === 'conversation_tone' ? 'conversation_tone' :
+                          field === 'urgency_level' ? 'urgency_level' :
+                          field;
+        contextData[contextKey] = newValue;
+        hasUpdates = true;
+        console.log(`💾 Setting ${field} context:`, newValue);
       } else {
-        console.log(`⏭️ Skipping ${type} context update - no changes detected`);
+        console.log(`⏭️ Skipping ${field} context update - no changes detected`);
       }
     }
   }
 
-  if (contextUpdatePromises.length > 0) {
+  if (hasUpdates) {
     try {
-      const results = await Promise.allSettled(contextUpdatePromises);
-      const failures = results.filter((r) => r.status === 'rejected');
+      console.log('💾 Updating chat_context table with:', contextData);
       
-      if (failures.length > 0) {
-        console.error('Some context updates failed:', failures);
+      const { error } = await supabase
+        .from('chat_context')
+        .upsert({
+          user_id: userId,
+          chat_id: chatId,
+          character_id: characterId,
+          current_context: contextData,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'chat_id'
+        });
+
+      if (error) {
+        console.error('Context update error:', error);
       } else {
-        console.log('✅ All context updates saved successfully');
+        console.log('✅ Context saved to chat_context table successfully');
+        
+        // ALSO update the latest AI message with the new context for immediate UI update
+        console.log('🔄 Updating latest AI message with extracted context...');
+        try {
+          // Build message context format (different from chat_context format)
+          const messageContext = {
+            moodTracking: extractedContext.mood || 'No context',
+            clothingInventory: extractedContext.clothing || 'No context',
+            locationTracking: extractedContext.location || 'No context',
+            timeAndWeather: extractedContext.time_weather || 'No context',
+            relationshipStatus: extractedContext.relationship || 'No context',
+            characterPosition: extractedContext.character_position || 'No context',
+            conversationTone: extractedContext.conversation_tone || 'No context',
+            urgencyLevel: extractedContext.urgency_level || 'No context'
+          };
+          
+          // Find the latest AI message in this chat
+          const { data: latestMessage, error: messageError } = await supabase
+            .from('messages')
+            .select('id')
+            .eq('chat_id', chatId)
+            .eq('is_ai_message', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          
+          if (messageError) {
+            console.error('❌ Failed to find latest AI message:', messageError);
+          } else if (latestMessage) {
+            // Update the latest AI message with the extracted context
+            const { error: updateError } = await supabase
+              .from('messages')
+              .update({ 
+                current_context: messageContext,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', latestMessage.id);
+            
+            if (updateError) {
+              console.error('❌ Failed to update latest AI message with context:', updateError);
+            } else {
+              console.log('✅ Latest AI message updated with context - UI should update immediately');
+            }
+          }
+        } catch (msgUpdateError) {
+          console.error('❌ Error updating latest AI message:', msgUpdateError);
+        }
       }
     } catch (error) {
       console.error('Context update error:', error);

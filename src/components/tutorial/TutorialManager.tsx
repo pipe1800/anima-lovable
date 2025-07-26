@@ -14,56 +14,38 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
 
   useEffect(() => {
-    console.log('TutorialManager: Effect triggered with:', { shouldStart, user: !!user });
+    console.log('TutorialManager: Effect triggered with:', { 
+      shouldStart, 
+      user: !!user,
+      chatTutorialCompleted: user?.user_metadata?.chat_tutorial_completed 
+    });
     
-    const checkTutorial = () => {
-      if (!user) {
-        console.log('TutorialManager: No user found');
-        return;
-      }
-
-      const chatTutorialCompleted = user.user_metadata?.chat_tutorial_completed;
-      const onboardingCompleted = user.user_metadata?.onboarding_completed;
-      
-      console.log('TutorialManager: User metadata:', {
-        chatTutorialCompleted,
-        onboardingCompleted,
-        shouldStart
-      });
-      
-      // Multiple trigger conditions for robustness
-      const shouldShowTutorial = (
-        (shouldStart && onboardingCompleted && !chatTutorialCompleted) ||
-        (onboardingCompleted && !chatTutorialCompleted && !isActive) ||
-        // Fallback: check localStorage for recent onboarding completion
-        (localStorage.getItem('justCompletedOnboarding') === 'true' && !chatTutorialCompleted)
-      );
-      
-      console.log('TutorialManager: Should show tutorial:', shouldShowTutorial);
-      
-      if (shouldShowTutorial) {
-        setShowWelcomeModal(true);
-        // Clear localStorage flag
-        localStorage.removeItem('justCompletedOnboarding');
-      }
-    };
-
-    if (user) {
-      // Add delay to allow metadata to propagate
-      const timer = setTimeout(checkTutorial, 500);
-      return () => clearTimeout(timer);
+    if (!user) return;
+    
+    const chatTutorialCompleted = user.user_metadata?.chat_tutorial_completed;
+    const fromOnboarding = shouldStart || localStorage.getItem('fromOnboarding') === 'true';
+    
+    // Show tutorial if coming from onboarding and not completed
+    if (fromOnboarding && !chatTutorialCompleted) {
+      console.log('TutorialManager: Starting tutorial');
+      setShowWelcomeModal(true);
+      localStorage.removeItem('fromOnboarding');
     }
-  }, [shouldStart, user, isActive]);
+  }, [shouldStart, user]);
 
   const handleStartTutorial = () => {
+    console.log('TutorialManager: Starting tutorial from welcome modal');
     setShowWelcomeModal(false);
     startTutorial();
   };
 
   const handleSkipTutorial = () => {
+    console.log('TutorialManager: Skipping tutorial');
     setShowWelcomeModal(false);
     skipTutorial();
   };
+
+  console.log('TutorialManager: Rendering with isActive:', isActive, 'showWelcomeModal:', showWelcomeModal);
 
   return (
     <>
@@ -73,6 +55,7 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
         onSkip={handleSkipTutorial}
       />
       
+      {/* Use the correct TutorialOverlay */}
       {isActive && <TutorialOverlay />}
     </>
   );

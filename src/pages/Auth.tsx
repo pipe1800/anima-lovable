@@ -6,6 +6,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
 import { Eye, EyeOff, Check, X } from 'lucide-react';
+import { preloadDashboardData } from '@/hooks/useDashboard';
+import { useQueryClient } from '@tanstack/react-query';
 const Auth = () => {
   const [searchParams] = useSearchParams();
   const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'signup');
@@ -22,6 +24,7 @@ const Auth = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successUsername, setSuccessUsername] = useState('');
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Password validation state
   const [passwordValidation, setPasswordValidation] = useState({
@@ -51,8 +54,14 @@ const Auth = () => {
         // Check if user has completed onboarding
         const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
         if (isOnboardingCompleted) {
-          // User already completed onboarding, go to dashboard
-          navigate('/dashboard');
+          // User already completed onboarding, go to discover
+          navigate('/discover');
+          // Preload dashboard data in background
+          if (session.user?.id) {
+            setTimeout(() => {
+              preloadDashboardData(session.user.id, queryClient);
+            }, 1000);
+          }
         } else {
           // New user or incomplete onboarding, go to onboarding
           navigate('/onboarding');
@@ -70,7 +79,13 @@ const Auth = () => {
       if (session?.user && !showSuccess) {
         const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
         if (isOnboardingCompleted) {
-          navigate('/dashboard');
+          navigate('/discover');
+          // Preload dashboard data in background
+          if (session.user?.id) {
+            setTimeout(() => {
+              preloadDashboardData(session.user.id, queryClient);
+            }, 1000);
+          }
         } else {
           navigate('/onboarding');
         }
@@ -248,7 +263,7 @@ const Auth = () => {
       
       {/* Logo */}
       <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-20">
-        <img src="https://rclpyipeytqbamiwcuih.supabase.co/storage/v1/object/sign/images/45d0ba23-cfa2-404a-8527-54e83cb321ef.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9mYmU5OTM4My0yODYxLTQ0N2UtYThmOC1hY2JjNzU3YjQ0YzgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJpbWFnZXMvNDVkMGJhMjMtY2ZhMi00MDRhLTg1MjctNTRlODNjYjMyMWVmLnBuZyIsImlhdCI6MTc1MjI1MjA4MywiZXhwIjo0OTA1ODUyMDgzfQ.OKhncau8pVPBvcnDrafnifJdihe285oi5jcpp1z3-iM" alt="Anima AI Chat" className="h-16 w-auto" />
+        <img src="/assets/logo.png" alt="Anima AI Chat" className="h-16 w-auto" />
       </div>
 
       {/* Futuristic Background Animation */}

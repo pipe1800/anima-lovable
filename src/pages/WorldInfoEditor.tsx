@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Plus, Edit2, Trash2, Save, X, Search, Tag, User, BookOpen, Image, Loader2, ArrowLeft } from 'lucide-react';
+import { TopBar } from '@/components/ui/TopBar';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { Tables } from '@/integrations/supabase/types';
@@ -437,23 +438,10 @@ export default function WorldInfoEditor() {
     <div className="min-h-screen bg-[#121212]">
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
-          {/* Header */}
-          <div className="p-6 border-b border-gray-700/50">
-            <div className="flex items-center gap-4 mb-4">
-              <Button
-                onClick={handleBackToList}
-                variant="ghost"
-                size="sm"
-                className="text-gray-400 hover:text-white"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to World Infos
-              </Button>
-            </div>
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold text-white">
-                {id ? 'Edit World Info' : 'Create New World Info'}
-              </h1>
+          {/* Standardized TopBar */}
+          <TopBar
+            title={id ? 'Edit World Info' : 'Create New World Info'}
+            rightContent={
               <Button
                 onClick={handleCreateOrUpdateWorldInfo}
                 disabled={saving}
@@ -463,12 +451,21 @@ export default function WorldInfoEditor() {
                 <Save className="w-4 h-4 mr-2" />
                 {id ? 'Update' : 'Create'}
               </Button>
-            </div>
-          </div>
+            }
+          />
 
           {/* Content */}
           <div className="flex-1 overflow-auto p-6">
             <div className="max-w-4xl mx-auto space-y-6">
+              {/* Back button under TopBar */}
+              <Button
+                variant="ghost"
+                onClick={handleBackToList}
+                className="text-gray-400 hover:text-white mb-4"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to World Info
+              </Button>
               {/* World Info Details Card */}
               <Card className="bg-gray-800/50 border-gray-700">
                 <CardHeader>

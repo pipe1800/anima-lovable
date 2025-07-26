@@ -1,9 +1,12 @@
 import React from 'react';
-import { Shield, Gavel, Ban, Eye, AlertTriangle, Heart, Clock, Hammer } from 'lucide-react';
+import { Shield, Gavel, Ban, Eye, AlertTriangle, Heart, Clock, Hammer, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { TopBar } from '@/components/ui/TopBar';
+import { useNavigate } from 'react-router-dom';
 
 const CommunityGuidelines = () => {
+  const navigate = useNavigate();
   const coreRules = [
     {
       id: 'no-jerk',
@@ -71,21 +74,27 @@ const CommunityGuidelines = () => {
 
   return (
     <div className="min-h-screen bg-[#0F1117] text-white">
-      {/* Header */}
-      <div className="bg-[#1A1D23] border-b border-gray-700/50">
-        <div className="max-w-4xl mx-auto px-6 py-12">
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-[#FF7A00]/10 rounded-full mb-6">
-              <Shield className="w-8 h-8 text-[#FF7A00]" />
-            </div>
-            <h1 className="text-4xl font-bold text-white mb-4">Community Guidelines</h1>
-            <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-              These are the rules of engagement. Follow them, and we'll all have an amazing time. 
-              Break them, and you'll find yourself on the wrong side of the ban hammer.
-            </p>
+      {/* Standardized TopBar */}
+      <TopBar
+        title="Community Guidelines"
+        subtitle="These are the rules of engagement. Follow them, and we'll all have an amazing time."
+        leftContent={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(-1)}
+            className="text-gray-300 hover:text-white hover:bg-gray-700/50"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+        }
+        rightContent={
+          <div className="inline-flex items-center justify-center w-10 h-10 bg-[#FF7A00]/10 rounded-full">
+            <Shield className="w-5 h-5 text-[#FF7A00]" />
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Main Content */}
       <div className="max-w-4xl mx-auto px-6 py-12">
