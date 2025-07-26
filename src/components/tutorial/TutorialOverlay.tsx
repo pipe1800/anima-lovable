@@ -72,6 +72,17 @@ export const TutorialOverlay: React.FC = () => {
             }
           }
         }
+        
+        // Special handling for right panel steps
+        if (currentStepData.target?.includes('right-panel-tabs') || currentStepData.target?.includes('config-tab')) {
+          // Wait for panel slide-in animation to complete (300ms based on animate-slide-in-right)
+          setTimeout(() => {
+            const element = document.querySelector(currentStepData.target);
+            if (element) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+          }, 400); // Wait for panel animation + buffer
+        }
       } else {
         console.log('🎓 Clearing highlight - step has no target');
         setHighlight(null);
@@ -149,7 +160,7 @@ export const TutorialOverlay: React.FC = () => {
         document.removeEventListener('transitionend', updateRect);
         observer.disconnect();
       };
-    }, 50); // Shorter delay for snappier transitions
+    }, currentStepData?.target?.includes('right-panel-tabs') || currentStepData?.target?.includes('config-tab') ? 300 : 50); // Longer delay for panel tabs
 
     return () => {
       clearTimeout(timer);
@@ -439,7 +450,7 @@ export const TutorialOverlay: React.FC = () => {
       {/* Highlight box with glow effect */}
       {highlightedRect && (
         <div
-          className="fixed z-[50001] pointer-events-none" // FIX 2: Increased z-index
+          className="fixed z-[50001] pointer-events-none transition-all duration-300 ease-in-out" // Added transition
           style={{
             top: highlightedRect.top - 4,
             left: highlightedRect.left - 4,
@@ -450,6 +461,7 @@ export const TutorialOverlay: React.FC = () => {
             boxShadow: currentStepData.requiredInteraction 
               ? '0 0 0 4px rgba(255, 122, 0, 0.3), 0 0 30px rgba(255, 122, 0, 0.6), inset 0 0 20px rgba(255, 122, 0, 0.2)'
               : '0 0 0 4px rgba(255, 122, 0, 0.3), 0 0 20px rgba(255, 122, 0, 0.5)',
+            transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)' // Smooth transition
           }}
         >
           {currentStepData.requiredInteraction && (
@@ -460,11 +472,12 @@ export const TutorialOverlay: React.FC = () => {
 
       {/* Tutorial tooltip */}
       <div 
-        className="tutorial-tooltip fixed z-[50002] bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-6 transition-all duration-300" // FIX 2: Increased z-index
+        className="tutorial-tooltip fixed z-[50002] bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-6 transition-all duration-300 ease-in-out" // Added ease-in-out
         style={{
           ...getTooltipPosition(),
           minWidth: isMobile ? '300px' : '400px',
-          maxWidth: isMobile ? '90vw' : '400px'
+          maxWidth: isMobile ? '90vw' : '400px',
+          transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)' // Add smooth transition
         }}
       >
         {/* Header */}

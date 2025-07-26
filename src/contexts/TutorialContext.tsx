@@ -70,7 +70,7 @@ const tutorialSteps: TutorialStep[] = [
     description: 'Click on the Config tab to access advanced settings and features.',
     target: '[data-tutorial="config-tab"]',
     action: 'click',
-    position: 'bottom',
+    position: 'left',
     requiredInteraction: true
   },
   {
