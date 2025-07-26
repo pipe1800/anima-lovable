@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CreditCard, Loader2, Crown, Zap } from 'lucide-react';
+import { CreditCard, Loader2, Crown, Zap, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -27,6 +27,15 @@ interface UserSubscription {
   plan: Plan;
 }
 
+interface BillingHistoryItem {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  status: string;
+  type: 'subscription' | 'credit_pack';
+}
+
 export const BillingSettings = () => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -34,6 +43,11 @@ export const BillingSettings = () => {
   const [isChangingPlan, setIsChangingPlan] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showUpgradeConfirmation, setShowUpgradeConfirmation] = useState(false);
+  const [billingHistory, setBillingHistory] = useState<BillingHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [historyByYear, setHistoryByYear] = useState<Record<number, BillingHistoryItem[]>>({});
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
 
   const { 
     data: userSubscription, 
@@ -47,6 +61,177 @@ export const BillingSettings = () => {
   } = useAvailablePlans();
 
   const loading = subscriptionLoading || plansLoading;
+
+  // Fetch billing history
+  useEffect(() => {
+    const fetchBillingHistory = async () => {
+      if (!user) return;
+      
+      try {
+        setHistoryLoading(true);
+        
+        // Fetch subscription history
+        const { data: subscriptions, error: subError } = await supabase
+          .from('subscriptions')
+          .select(`
+            id,
+            created_at,
+            status,
+            plan:plans(name, price_monthly)
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (subError) {
+          console.error('Error fetching subscriptions:', subError);
+        }
+
+        // Fetch credit pack purchases
+        const { data: creditPurchases, error: creditError } = await supabase
+          .from('credit_pack_purchases')
+          .select(`
+            id,
+            created_at,
+            amount_paid,
+            status,
+            credit_pack:credit_packs(name, credits_granted)
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (creditError) {
+          console.error('Error fetching credit purchases:', creditError);
+        }
+
+        // Combine and format billing history
+        const history: BillingHistoryItem[] = [];
+
+        // Add subscription entries
+        if (subscriptions) {
+          subscriptions.forEach(sub => {
+            if (sub.plan) {
+              history.push({
+                id: sub.id,
+                date: sub.created_at,
+                description: `${sub.plan.name} Subscription`,
+                amount: sub.plan.price_monthly || 0,
+                status: sub.status,
+                type: 'subscription'
+              });
+            }
+          });
+        }
+
+        // Add credit pack purchases
+        if (creditPurchases) {
+          creditPurchases.forEach(purchase => {
+            if (purchase.credit_pack) {
+              history.push({
+                id: purchase.id,
+                date: purchase.created_at,
+                description: `${purchase.credit_pack.name} (${purchase.credit_pack.credits_granted.toLocaleString()} credits)`,
+                amount: purchase.amount_paid,
+                status: purchase.status,
+                type: 'credit_pack'
+              });
+            }
+          });
+        }
+
+        // Sort by date descending
+        history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        // Group billing history by year
+        const historyByYearMap: Record<number, BillingHistoryItem[]> = {};
+        history.forEach(item => {
+          const year = new Date(item.date).getFullYear();
+          if (!historyByYearMap[year]) {
+            historyByYearMap[year] = [];
+          }
+          historyByYearMap[year].push(item);
+        });
+
+        // Get available years and sort them in descending order (newest first)
+        const years = Object.keys(historyByYearMap)
+          .map(year => parseInt(year))
+          .sort((a, b) => b - a);
+
+        setBillingHistory(history);
+        setHistoryByYear(historyByYearMap);
+        setAvailableYears(years);
+        
+        // Reset to page 1 if current page is beyond available pages
+        if (currentPage > years.length) {
+          setCurrentPage(1);
+        }
+      } catch (error) {
+        console.error('Error fetching billing history:', error);
+      } finally {
+        setHistoryLoading(false);
+      }
+    };
+
+    fetchBillingHistory();
+  }, [user, currentPage]);
+
+  // Utility functions
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const getStatusBadge = (status: string) => {
+    const statusColors = {
+      active: 'bg-green-100 text-green-800',
+      completed: 'bg-green-100 text-green-800',
+      pending: 'bg-yellow-100 text-yellow-800',
+      cancelled: 'bg-red-100 text-red-800',
+      failed: 'bg-red-100 text-red-800',
+      refunded: 'bg-gray-100 text-gray-800'
+    };
+
+    return (
+      <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[status as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </span>
+    );
+  };
+
+  const getTypeIcon = (type: 'subscription' | 'credit_pack') => {
+    if (type === 'subscription') {
+      return <Calendar className="h-4 w-4 text-blue-500" />;
+    }
+    return <CreditCard className="h-4 w-4 text-purple-500" />;
+  };
+
+  // Get current year's data for display
+  const getCurrentYearData = () => {
+    if (availableYears.length === 0) return { year: new Date().getFullYear(), items: [] };
+    
+    const currentYearIndex = currentPage - 1;
+    const year = availableYears[currentYearIndex];
+    const items = historyByYear[year] || [];
+    
+    return { year, items };
+  };
+
+  const canGoToPreviousPage = () => currentPage > 1;
+  const canGoToNextPage = () => currentPage < availableYears.length;
+
+  const goToPreviousPage = () => {
+    if (canGoToPreviousPage()) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const goToNextPage = () => {
+    if (canGoToNextPage()) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
 
   const handleUpgradeClick = () => {
     setShowUpgradeConfirmation(true);
@@ -185,29 +370,6 @@ export const BillingSettings = () => {
     } finally {
       setIsCancelling(false);
     }
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
-
-
-  const renderPaymentMethod = () => {
-    return (
-      <div className="flex items-center">
-        <div className="w-6 h-6 bg-blue-600 rounded mr-3 flex items-center justify-center">
-          <span className="text-white text-xs font-bold">PP</span>
-        </div>
-        <div>
-          <p className="text-white">PayPal</p>
-          <p className="text-gray-400 text-sm">Connected account</p>
-        </div>
-      </div>
-    );
   };
 
   if (loading) {
@@ -398,19 +560,122 @@ export const BillingSettings = () => {
 
         <Separator className="bg-gray-700" />
 
-        {/* Payment Method */}
-        {userSubscription && (
-          <div>
-            <h3 className="text-lg font-semibold text-white mb-4">Payment Method</h3>
-            <div className="bg-gray-800/50 rounded-lg p-4">
-              {renderPaymentMethod()}
-            </div>
-            <p className="text-sm text-gray-400 mt-2">
-              Payment method is managed through PayPal. To update your payment method, 
-              please visit your PayPal account settings.
-            </p>
+        {/* Billing History */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Billing History</h3>
+            
+            {/* Year pagination controls */}
+            {availableYears.length > 1 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goToPreviousPage}
+                  disabled={!canGoToPreviousPage()}
+                  className="border-gray-600 text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                
+                <span className="text-sm text-gray-300 px-2">
+                  {getCurrentYearData().year}
+                </span>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goToNextPage}
+                  disabled={!canGoToNextPage()}
+                  className="border-gray-600 text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
-        )}
+          
+          {historyLoading ? (
+            <div className="bg-gray-800/50 rounded-lg p-6 flex items-center justify-center">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400 mr-2" />
+              <span className="text-gray-400">Loading billing history...</span>
+            </div>
+          ) : billingHistory.length === 0 ? (
+            <div className="bg-gray-800/50 rounded-lg p-6 text-center">
+              <CreditCard className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+              <p className="text-gray-400">No billing history found</p>
+              <p className="text-sm text-gray-500 mt-1">Your transaction history will appear here</p>
+            </div>
+          ) : getCurrentYearData().items.length === 0 ? (
+            <div className="bg-gray-800/50 rounded-lg p-6 text-center">
+              <Calendar className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+              <p className="text-gray-400">No transactions in {getCurrentYearData().year}</p>
+              <p className="text-sm text-gray-500 mt-1">Use the navigation above to view other years</p>
+            </div>
+          ) : (
+            <div className="bg-gray-800/50 rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-700/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                        Description
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                        Amount
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-700">
+                    {getCurrentYearData().items.map((item) => (
+                      <tr key={item.id} className="hover:bg-gray-700/30">
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            {getTypeIcon(item.type)}
+                            <span className="ml-2 text-sm text-gray-300">
+                              {formatDate(item.date)}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <span className="text-sm text-white">{item.description}</span>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <span className="text-sm font-medium text-white">
+                            ${item.amount.toFixed(2)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          {getStatusBadge(item.status)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Year summary and pagination info */}
+              {availableYears.length > 1 && (
+                <div className="px-4 py-3 bg-gray-700/30 border-t border-gray-700">
+                  <div className="flex items-center justify-between text-sm text-gray-400">
+                    <span>
+                      {getCurrentYearData().items.length} transactions in {getCurrentYearData().year}
+                    </span>
+                    <span>
+                      Page {currentPage} of {availableYears.length}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       
       {/* Upgrade Confirmation Dialog */}

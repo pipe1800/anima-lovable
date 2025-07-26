@@ -148,19 +148,6 @@ export const ProfileHeader: React.FC<ProfileHeaderProps> = ({
           </div>
 
           {/* Edit Button */}
-          {isOwnProfile && (
-            <Button
-              onClick={onEditToggle}
-              variant={isEditing ? "default" : "outline"}
-              className={cn(
-                "md:mb-4 self-start md:self-end",
-                isEditing && "bg-primary text-primary-foreground"
-              )}
-            >
-              <Edit3 className="w-4 h-4 mr-2" />
-              {isEditing ? "Done Editing" : "Edit Profile"}
-            </Button>
-          )}
         </div>
       </div>
     </div>

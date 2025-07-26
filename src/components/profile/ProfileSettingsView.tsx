@@ -2,7 +2,6 @@ import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ProfileSettings } from '@/components/settings/categories/ProfileSettings';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
-import { NotificationSettings } from '@/components/settings/categories/NotificationSettings';
 import { BillingSettings } from '@/components/settings/categories/BillingSettings';
 
 export const ProfileSettingsView = () => {
@@ -18,7 +17,7 @@ export const ProfileSettingsView = () => {
         {/* Horizontal Tabs Layout */}
         <div className="px-6">
           <Tabs defaultValue="profile" className="w-full">
-            <TabsList className="grid w-full grid-cols-4 bg-gray-800/50 p-1 rounded-lg mb-8 mt-6">
+            <TabsList className="grid w-full grid-cols-3 bg-gray-800/50 p-1 rounded-lg mb-8 mt-6">
               <TabsTrigger 
                 value="profile" 
                 className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-300"
@@ -37,12 +36,7 @@ export const ProfileSettingsView = () => {
               >
                 Subscription & Billing
               </TabsTrigger>
-              <TabsTrigger 
-                value="notifications" 
-                className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-300"
-              >
-                Notifications
-              </TabsTrigger>
+              {/* Removed Notifications tab */}
             </TabsList>
             
             <TabsContent value="profile" className="space-y-6">
@@ -57,9 +51,7 @@ export const ProfileSettingsView = () => {
               <BillingSettings />
             </TabsContent>
             
-            <TabsContent value="notifications" className="space-y-6">
-              <NotificationSettings />
-            </TabsContent>
+            {/* Removed Notifications TabsContent */}
           </Tabs>
         </div>
       </div>
