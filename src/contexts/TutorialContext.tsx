@@ -77,7 +77,7 @@ const tutorialSteps: TutorialStep[] = [
     id: 5,
     title: 'Memories - Long-term Context',
     description: 'Memories are automatically generated every 15 responses from the character to create a long-term memory effect. These memories are shared between chats and don\'t cost credits.',
-    target: '[data-tutorial="memories-button"]',
+    target: '[data-tutorial="create-memory"]',
     action: 'none',
     position: 'left',
     requiredInteraction: false
@@ -195,6 +195,14 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     };
   }, []);
 
+  // Ensure cleanup when component unmounts or tutorial becomes inactive
+  useEffect(() => {
+    if (!isActive) {
+      document.body.classList.remove('tutorial-active');
+      console.log('🎓 Tutorial cleanup: Removed body class');
+    }
+  }, [isActive]);
+
   // Update tutorial completion status
   const updateTutorialStatus = useCallback(async (userId: string, completed: boolean) => {
     try {
@@ -222,31 +230,50 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
   }, []);
 
   const completeTutorial = useCallback(async () => {
-    console.log('🎓 Completing tutorial');
+    console.log('🎓 Completing tutorial - CALLED');
+    console.log('🎓 Current state before completion:', { isActive, currentStep });
     
     // First set inactive to immediately hide overlay
     setIsActive(false);
+    console.log('🎓 Tutorial set to inactive');
     setCurrentStep(0);
     setCompletedSteps(new Set());
     setAddonDropdownOpen(false);
     setWorldInfoDropdownVisible(false);
     setHighlightedElement(null);
     
+    // Force remove body class
+    document.body.classList.remove('tutorial-active');
+    console.log('🎓 Body class removed');
+    
     // Then update database
     if (user?.id) {
-      await updateTutorialStatus(user.id, true);
+      try {
+        await updateTutorialStatus(user.id, true);
+        console.log('🎓 Tutorial status updated in database');
+      } catch (error) {
+        console.error('🎓 Failed to update tutorial status:', error);
+      }
     }
-  }, [user, updateTutorialStatus]);
+    
+    console.log('🎓 Tutorial completion finished');
+  }, [user, updateTutorialStatus, isActive, currentStep]);
 
   const nextStep = useCallback(() => {
+    console.log('🎓 NextStep called:', { currentStep, maxStep: tutorialSteps.length - 1 });
+    
     if (currentStep < tutorialSteps.length - 1) {
       const nextIndex = currentStep + 1;
       const nextStepData = tutorialSteps[nextIndex];
+      
+      console.log('🎓 Advancing to step:', { nextIndex, stepTitle: nextStepData?.title });
       
       // Update step and highlight together
       setCurrentStep(nextIndex);
       setHighlightedElement(nextStepData?.target || null);
     } else {
+      // Already on the final step, calling nextStep should complete tutorial
+      console.log('🎓 Already on final step, completing tutorial');
       completeTutorial();
     }
   }, [currentStep, completeTutorial]);

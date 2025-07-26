@@ -26,6 +26,13 @@ export const TutorialOverlay: React.FC = () => {
     highlightedElement
   });
 
+  // MOVE THE isActive CHECK TO THE TOP OF THE COMPONENT
+  // This should be the FIRST check in the render
+  if (!isActive) {
+    console.log('🎓 TutorialOverlay: Tutorial not active, unmounting');
+    return null;
+  }
+
   // Add this after the console.log at line 27
   useEffect(() => {
     console.log('🎓 ALL TUTORIAL STEPS:', tutorialSteps.map((step, idx) => ({
@@ -187,6 +194,13 @@ export const TutorialOverlay: React.FC = () => {
         return;
       }
 
+      // Check if click is on "Finish Tour" button in completion screen
+      const finishTourButton = (e.target as Element).closest('button');
+      if (finishTourButton && finishTourButton.textContent?.includes('Finish Tour')) {
+        console.log('🎓 Tutorial: Click on Finish Tour button, allowing interaction');
+        return;
+      }
+
       // Block all other clicks
       console.log('🎓 Tutorial: Blocking click outside highlighted area');
       e.preventDefault();
@@ -262,8 +276,9 @@ export const TutorialOverlay: React.FC = () => {
     }
   }, [highlightedElement, isActive]);
 
-  if (!isActive || !currentStepData) {
-    console.log('🎓 TutorialOverlay: Not rendering - inactive or no step data');
+  // Then check for currentStepData
+  if (!currentStepData) {
+    console.log('🎓 TutorialOverlay: No step data');
     return null;
   }
 
@@ -337,6 +352,14 @@ export const TutorialOverlay: React.FC = () => {
   };
 
   // Check if this is the final step
+  console.log('🎓 TutorialOverlay: Step check:', {
+    currentStep,
+    tutorialStepsLength: tutorialSteps.length,
+    isFinalStep: currentStep === tutorialSteps.length - 1,
+    currentStepData
+  });
+  
+  // THEN check for final step (without isActive check)
   if (currentStep === tutorialSteps.length - 1) {
     return (
       <div className="tutorial-overlay" ref={overlayRef}>
@@ -365,7 +388,12 @@ export const TutorialOverlay: React.FC = () => {
             </div>
             
             <Button
-              onClick={completeTutorial}
+              onClick={() => {
+                console.log('🎓 Finish Tour clicked - calling completeTutorial');
+                completeTutorial();
+                // Force immediate cleanup
+                document.body.classList.remove('tutorial-active');
+              }}
               className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white px-8 py-3 text-lg font-semibold"
             >
               Finish Tour
@@ -497,7 +525,12 @@ export const TutorialOverlay: React.FC = () => {
             ) : (
               <Button
                 size="sm"
-                onClick={completeTutorial}
+                onClick={() => {
+                  console.log('🎓 Finish Tour clicked - calling completeTutorial');
+                  completeTutorial();
+                  // Force immediate cleanup
+                  document.body.classList.remove('tutorial-active');
+                }}
                 className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
               >
                 Finish Tour

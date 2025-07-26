@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ChevronRight, Settings, Search, Heart, Star, MessageCircle, Info, Edit, User, Plus, Upload, X, ChevronDown, Trash2, Zap, Brain, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -108,6 +108,28 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       shouldShowButton: globalSettings?.enhanced_memory && currentChatId
     });
   }, [globalSettings, currentChatId]);
+
+  // Debug Tutorial - Memories Button
+  useEffect(() => {
+    console.log('🧠 Tutorial Debug - Memories Button:', {
+      isActive,
+      currentStep,
+      globalSettings,
+      enhancedMemory: globalSettings?.enhanced_memory,
+      shouldShowButton: (globalSettings?.enhanced_memory || (isActive && currentStep === 4))
+    });
+  }, [isActive, currentStep, globalSettings]);
+
+  // Auto-close right panel when tutorial completes
+  const prevIsActive = useRef(isActive);
+  useEffect(() => {
+    // Only close if tutorial just became inactive (was active, now it's not)
+    if (prevIsActive.current && !isActive && rightPanelOpen) {
+      console.log('🎓 Tutorial just completed, closing right panel');
+      setRightPanelOpen(false);
+    }
+    prevIsActive.current = isActive;
+  }, [isActive, rightPanelOpen]);
   
   const navigate = useNavigate();
 
@@ -363,16 +385,19 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
-  const handleRightPanelToggle = () => {
+  const handleRightPanelToggle = useCallback(() => {
+    console.log('🔧 Right panel toggle clicked:', { isActive, currentStep, rightPanelOpen });
+    
     setRightPanelOpen(prev => {
       const newState = !prev;
       // Only notify tutorial if tutorial is active
       if (newState && currentStep === 1 && isActive) {
+        console.log('🔧 Notifying tutorial of right panel toggle');
         handleStepAction('right-panel-toggled');
       }
       return newState;
     });
-  };
+  }, [currentStep, isActive, handleStepAction]);
 
     const handleWorldInfoSelect = async (worldInfo: { id: string; name: string } | null) => {
     console.log('🌍 ChatLayout: World info selection changed:', worldInfo);
@@ -759,7 +784,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
             )}
             
             {/* Create Memory Button */}
-            {globalSettings?.enhanced_memory && currentChatId && (
+            {currentChatId && (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -853,12 +878,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       {/* Right Panel - Slide in from right */}
       {rightPanelOpen && (
         <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black/50"
-            style={{ zIndex: 40 }}
-            onClick={() => setRightPanelOpen(false)}
-          />
+          {/* Backdrop removed to prevent dimming overlay confusion with tutorial */}
           
           {/* Panel - Low z-index to stay under tutorial */}
           <div 
@@ -1096,8 +1116,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                               Edit Character
                             </Button>
                           )}
-                          {/* View Memories Button - Only show if Enhanced Memory is enabled */}
-                          {globalSettings?.enhanced_memory && (
+                          {/* View Memories Button - Show if Enhanced Memory is enabled OR tutorial is active on step 5 */}
+                          {(globalSettings?.enhanced_memory || (isActive && currentStep === 4)) && (
                             <Button
                               data-tutorial="memories-button"
                               onClick={() => setShowMemoriesDialog(true)}
