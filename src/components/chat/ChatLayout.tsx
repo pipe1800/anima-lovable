@@ -70,7 +70,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [isCreatingPersona, setIsCreatingPersona] = useState(false);
   
   // Tutorial state
-  const { handleStepAction, worldInfoDropdownVisible, disableInteractions, startTutorial, isActive } = useTutorial();
+  const { handleStepAction, worldInfoDropdownVisible, disableInteractions, startTutorial, isActive, currentStep } = useTutorial();
   const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
   
   // Enhanced Memory state
@@ -364,8 +364,14 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   };
 
   const handleRightPanelToggle = () => {
-    setRightPanelOpen(!rightPanelOpen);
-    handleStepAction('right-panel-toggled');
+    setRightPanelOpen(prev => {
+      const newState = !prev;
+      // Only notify tutorial if tutorial is active
+      if (newState && currentStep === 1 && isActive) {
+        handleStepAction('right-panel-toggled');
+      }
+      return newState;
+    });
   };
 
     const handleWorldInfoSelect = async (worldInfo: { id: string; name: string } | null) => {
@@ -875,7 +881,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               </div>
 
               {/* Tabs */}
-              <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg" data-tutorial="panel-tabs">
+              <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg" data-tutorial="right-panel-tabs">
                 <button
                   onClick={() => setActiveTab('history')}
                   className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -1093,6 +1099,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                           {/* View Memories Button - Only show if Enhanced Memory is enabled */}
                           {globalSettings?.enhanced_memory && (
                             <Button
+                              data-tutorial="memories-button"
                               onClick={() => setShowMemoriesDialog(true)}
                               variant="outline"
                               className="w-full bg-transparent border-[#FF7A00]/50 hover:bg-[#FF7A00]/10 hover:text-[#FF7A00] text-[#FF7A00] border-[#FF7A00]/30"

@@ -475,7 +475,7 @@ export const ChatConfigurationTab = ({
       </Card>
 
       {/* Global Addon Settings */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+      <Card data-tutorial="global-addons-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-white font-medium text-sm">Global Addon Settings</h3>
           <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">

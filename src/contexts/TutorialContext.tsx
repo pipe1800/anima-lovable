@@ -8,9 +8,10 @@ interface TutorialStep {
   description: string;
   target: string | null;
   action?: 'click' | 'toggle' | 'save' | 'select' | 'none';
-  position?: 'top' | 'bottom' | 'left' | 'right';
+  position?: 'top' | 'bottom' | 'left' | 'right' | 'center';
   requiredInteraction?: boolean;
   forceOpen?: string; // Element to force open (like dropdown)
+  scrollTo?: boolean; // Whether to scroll to element
 }
 
 interface TutorialContextType {
@@ -57,83 +58,92 @@ const tutorialSteps: TutorialStep[] = [
   {
     id: 3,
     title: 'Panel Navigation',
-    description: 'Switch between History (past conversations), Details (character info), and Configuration (chat settings) tabs.',
-    target: '[data-tutorial="panel-tabs"]',
+    description: 'Use these tabs to switch between Chat History, Character Details, and Configuration settings.',
+    target: '[data-tutorial="right-panel-tabs"]',
     action: 'none',
-    position: 'left',
+    position: 'bottom',
     requiredInteraction: false
   },
   {
     id: 4,
-    title: 'Enhanced Memory',
-    description: 'Create memories from your conversations. The AI will remember important details for future chats. Click here when you want to save a memorable moment.',
-    target: '[data-tutorial="create-memory"]',
-    action: 'none',
-    position: 'left',
-    requiredInteraction: false
+    title: 'Configuration Tab',
+    description: 'Click on the Config tab to access advanced settings and features.',
+    target: '[data-tutorial="config-tab"]',
+    action: 'click',
+    position: 'bottom',
+    requiredInteraction: true
   },
   {
     id: 5,
-    title: 'Configuration Tab',
-    description: 'Click the Config tab to access persona and world info settings for this character.',
-    target: '[data-tutorial="config-tab"]',
-    action: 'click',
+    title: 'Memories - Long-term Context',
+    description: 'Memories are automatically generated every 15 responses from the character to create a long-term memory effect. These memories are shared between chats and don\'t cost credits.',
+    target: '[data-tutorial="memories-button"]',
+    action: 'none',
     position: 'left',
-    requiredInteraction: true
+    requiredInteraction: false
   },
   {
     id: 6,
     title: 'Personas - Your Character',
     description: 'Personas define who YOU are in the conversation. Create different personas to roleplay as different characters or aspects of yourself.',
-    target: '[data-tutorial="persona-section"] > .flex.items-center.justify-between',
+    target: '[data-tutorial="persona-section"]',
     action: 'none',
     position: 'left',
     requiredInteraction: false
   },
   {
     id: 7,
-    title: 'World Info & Addons',
-    description: 'Enhance conversations with world information and addons. Click here to explore available options.',
-    target: '[data-tutorial="world-info-section"] > .flex.items-center.justify-between',
-    action: 'click',
-    position: 'left',
-    requiredInteraction: true,
-    forceOpen: 'world-info-dropdown'
-  },
-  {
-    id: 8,
-    title: 'Your Credits',
-    description: 'Credits power AI responses and features. Keep track of your balance here.',
-    target: '[data-tutorial="credits-display"]',
+    title: 'World Info & Lore',
+    description: 'Enhance conversations with world information and lore. Explore the available options to add depth to your chats.',
+    target: '[data-tutorial="world-info-section"]',
     action: 'none',
-    position: 'bottom',
+    position: 'left',
     requiredInteraction: false
   },
   {
+    id: 8,
+    title: 'Global Addons',
+    description: 'Addons enhance your conversations with features like mood tracking and relationship dynamics. They use additional credits but create more immersive experiences.',
+    target: '[data-tutorial="global-addons-section"]',
+    action: 'none',
+    position: 'left',
+    requiredInteraction: false,
+    scrollTo: true
+  },
+  {
     id: 9,
-    title: 'Navigation Menu',
-    description: 'Access other parts of the app through the main navigation menu.',
-    target: '[data-tutorial="sidebar-trigger"]',
-    action: 'click',
+    title: 'Create Characters',
+    description: 'Build your own AI characters with unique personalities, backgrounds, and traits. Share them with the community or keep them private.',
+    target: '[data-tutorial="create-character-nav"]',
+    action: 'none',
     position: 'right',
-    requiredInteraction: true
+    requiredInteraction: false
   },
   {
     id: 10,
-    title: 'Explore More Features',
-    description: 'Use the sidebar to discover character creation, your dashboard, and other features.',
-    target: null,
+    title: 'Discover Characters',
+    description: 'Browse and chat with thousands of characters created by the community. Find your perfect AI companion, mentor, or adventure partner.',
+    target: '[data-tutorial="discover-nav"]',
     action: 'none',
     position: 'right',
     requiredInteraction: false
   },
   {
     id: 11,
-    title: 'Ready to Chat!',
-    description: 'You\'re all set! Start your conversation by typing a message below. Enjoy exploring the world of AI conversations!',
+    title: 'World Info Library',
+    description: 'Access and manage world building elements like locations, factions, and lore to create rich, consistent story worlds.',
+    target: '[data-tutorial="world-info-nav"]',
+    action: 'none',
+    position: 'right',
+    requiredInteraction: false
+  },
+  {
+    id: 12,
+    title: 'Welcome to Anima!',
+    description: 'You\'ve completed the tour! Now you\'re ready to create amazing AI conversations with all the powerful features at your fingertips.',
     target: null,
     action: 'none',
-    position: 'bottom',
+    position: 'center',
     requiredInteraction: false
   }
 ];
@@ -177,6 +187,14 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     };
   }, [isActive]);
 
+  // Add a cleanup effect to ensure body class is removed
+  useEffect(() => {
+    return () => {
+      // Cleanup on unmount
+      document.body.classList.remove('tutorial-active');
+    };
+  }, []);
+
   // Update tutorial completion status
   const updateTutorialStatus = useCallback(async (userId: string, completed: boolean) => {
     try {
@@ -205,16 +223,19 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
 
   const completeTutorial = useCallback(async () => {
     console.log('🎓 Completing tutorial');
-    if (user?.id) {
-      await updateTutorialStatus(user.id, true);
-    }
     
+    // First set inactive to immediately hide overlay
     setIsActive(false);
     setCurrentStep(0);
     setCompletedSteps(new Set());
     setAddonDropdownOpen(false);
     setWorldInfoDropdownVisible(false);
     setHighlightedElement(null);
+    
+    // Then update database
+    if (user?.id) {
+      await updateTutorialStatus(user.id, true);
+    }
   }, [user, updateTutorialStatus]);
 
   const nextStep = useCallback(() => {
@@ -269,12 +290,7 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     // Simple action handling - just advance to next step when actions complete
     if (action === 'right-panel-toggled' && currentStep === 1) {
       nextStep();
-    } else if (action === 'config-tab-clicked' && currentStep === 4) {
-      nextStep();
-    } else if (action === 'world-info-dropdown-opened' && currentStep === 6) {
-      setWorldInfoDropdownVisible(true);
-      nextStep();
-    } else if (action === 'sidebar-opened' && currentStep === 8) {
+    } else if (action === 'config-tab-clicked' && currentStep === 3) {
       nextStep();
     }
   }, [currentStep, nextStep]);

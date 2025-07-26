@@ -42,6 +42,29 @@ export const TutorialOverlay: React.FC = () => {
       if (currentStepData.target) {
         console.log('🎓 Setting highlight to:', currentStepData.target);
         setHighlight(currentStepData.target);
+        
+        // Handle scrollTo if needed
+        if (currentStepData.scrollTo) {
+          // For addons section, scroll the right panel content
+          if (currentStep === 7) { // Step 8 is now index 7
+            const rightPanel = document.querySelector('[data-tutorial="right-panel"]');
+            const addonsSection = document.querySelector(currentStepData.target) as HTMLElement;
+            if (rightPanel && addonsSection) {
+              const scrollContainer = rightPanel.querySelector('.overflow-y-auto') as HTMLElement;
+              if (scrollContainer) {
+                scrollContainer.scrollTo({
+                  top: addonsSection.offsetTop - 100,
+                  behavior: 'smooth'
+                });
+              }
+            }
+          } else {
+            const element = document.querySelector(currentStepData.target);
+            if (element) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+        }
       } else {
         console.log('🎓 Clearing highlight - step has no target');
         setHighlight(null);
@@ -49,6 +72,27 @@ export const TutorialOverlay: React.FC = () => {
       }
     }
   }, [currentStepData, setHighlight]);
+
+  // Ensure sidebar is visible for navigation steps
+  useEffect(() => {
+    if (isActive && currentStep >= 8 && currentStep <= 10) {
+      // Check if sidebar is collapsed
+      const sidebarCollapsed = localStorage.getItem('sidebarCollapsed');
+      if (sidebarCollapsed === 'true') {
+        // Temporarily expand sidebar for tutorial
+        localStorage.setItem('sidebarCollapsed', 'false');
+        window.dispatchEvent(new CustomEvent('sidebarToggled'));
+        
+        // Restore state when tutorial ends
+        return () => {
+          if (sidebarCollapsed === 'true') {
+            localStorage.setItem('sidebarCollapsed', 'true');
+            window.dispatchEvent(new CustomEvent('sidebarToggled'));
+          }
+        };
+      }
+    }
+  }, [isActive, currentStep]);
 
   useEffect(() => {
     if (!highlightedElement) {
@@ -291,6 +335,46 @@ export const TutorialOverlay: React.FC = () => {
 
     return position;
   };
+
+  // Check if this is the final step
+  if (currentStep === tutorialSteps.length - 1) {
+    return (
+      <div className="tutorial-overlay" ref={overlayRef}>
+        {/* Dark overlay */}
+        <div 
+          className="fixed inset-0 bg-black/80 z-[50000]"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        />
+        
+        {/* Centered completion message */}
+        <div className="fixed inset-0 flex items-center justify-center z-[50002]">
+          <div className="bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-8 max-w-md text-center">
+            <div className="mb-6">
+              <div className="w-20 h-20 bg-[#FF7A00]/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-10 h-10 text-[#FF7A00]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-3">Congratulations! 🎉</h3>
+              <p className="text-gray-300 text-lg">
+                You've successfully completed the tour and are ready to explore all the amazing features Anima has to offer. Let your creativity run wild!
+              </p>
+            </div>
+            
+            <Button
+              onClick={completeTutorial}
+              className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white px-8 py-3 text-lg font-semibold"
+            >
+              Finish Tour
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="tutorial-overlay" ref={overlayRef}>
