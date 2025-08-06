@@ -36,8 +36,8 @@ export function useUserWorldInfos() {
         .from('world_infos')
         .select(`
           *,
-          world_info_entries(count),
-          world_info_likes(count),
+          world_info_entries(id),
+          world_info_likes(id),
           world_info_tags(
             tags(*)
           )
@@ -49,8 +49,8 @@ export function useUserWorldInfos() {
       
       return data.map(worldInfo => ({
         ...worldInfo,
-        entriesCount: worldInfo.world_info_entries?.[0]?.count || 0,
-        likesCount: worldInfo.world_info_likes?.[0]?.count || 0,
+        entriesCount: worldInfo.world_info_entries?.length || 0,
+        likesCount: worldInfo.world_info_likes?.length || 0,
         tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || []
       }));
     },

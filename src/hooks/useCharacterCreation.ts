@@ -84,9 +84,12 @@ export function useCharacterCreation() {
   }, [location.state]);
 
   const loadCharacterForEditing = async (characterId: string) => {
+    console.log('🔄 Loading character for editing:', characterId);
+    
     try {
       const { data: character, error } = await getCharacterDetails(characterId);
       if (error || !character) {
+        console.error('❌ Failed to load character:', error);
         toast({
           title: "Error Loading Character",
           description: "Failed to load character data for editing.",
@@ -94,6 +97,16 @@ export function useCharacterCreation() {
         });
         return;
       }
+
+      console.log('✅ Character loaded successfully:', {
+        id: character.id,
+        name: character.name,
+        tagline: character.tagline,
+        short_description: character.short_description,
+        avatar_url: character.avatar_url,
+        visibility: character.visibility,
+        nsfw_enabled: character.nsfw_enabled
+      });
 
       // Parse the definition JSON to extract personality and dialogue data
       let definitionData: any = {};
@@ -109,8 +122,8 @@ export function useCharacterCreation() {
       const formData: CharacterFormData = {
         name: character.name,
         avatar: character.avatar_url || '',
-        title: character.tagline || '',
-        description: character.short_description || '',
+        title: character.tagline || '', // ✅ Keep mapping tagline to title
+        description: character.short_description || '', // ✅ Map short_description to description
         chatMode: (character.definition?.[0]?.chat_mode as 'storytelling' | 'companion') || 'storytelling',
         personality: {
           core_personality: character.definition?.[0]?.description || '',
@@ -127,15 +140,23 @@ export function useCharacterCreation() {
         default_persona_id: character.default_persona_id
       };
 
+      console.log('📝 Mapped character data to form:', {
+        formData: JSON.stringify(formData, null, 2)
+      });
+
       setCharacterData(formData);
       // Set selectedTags with the proper tag objects from the character's tags
       if (character.tags && Array.isArray(character.tags)) {
+        console.log('🏷️ Setting character tags:', character.tags);
         setSelectedTags(character.tags);
       } else {
+        console.log('📝 No tags found for character');
         setSelectedTags([]);
       }
+      
+      console.log('✅ Character loading completed successfully');
     } catch (error) {
-      console.error('Error loading character:', error);
+      console.error('❌ Error loading character:', error);
       toast({
         title: "Error",
         description: "Failed to load character data.",
@@ -175,6 +196,12 @@ export function useCharacterCreation() {
   }, [characterData]);
 
   const saveCharacter = async () => {
+    console.log('🔄 Starting character save process:', {
+      isEditing,
+      editingCharacterId,
+      characterData: JSON.stringify(characterData, null, 2)
+    });
+
     if (!user) {
       toast({
         title: "Authentication Required",
@@ -200,13 +227,38 @@ export function useCharacterCreation() {
     try {
       let character;
       if (isEditing && editingCharacterId) {
-        character = await updateCharacter(editingCharacterId, characterData as CharacterCreationData);
+        console.log('📝 Updating existing character:', {
+          characterId: editingCharacterId,
+          updateData: characterData,
+          selectedTags: selectedTags.map(t => t.name)
+        });
+        
+        // Ensure tags are included in the character data before updating
+        const updatedCharacterData = {
+          ...characterData,
+          personality: {
+            ...characterData.personality,
+            tags: selectedTags.map(tag => tag.name)
+          }
+        };
+        
+        character = await updateCharacter(editingCharacterId, updatedCharacterData as CharacterCreationData);
+        
+        console.log('✅ Character updated successfully:', character);
         
         // Save chat mode settings
         if (characterData.chatMode) {
+          console.log('💾 Saving chat mode settings:', characterData.chatMode);
           await upsertUserCharacterSettings(user.id, editingCharacterId, {
             chat_mode: characterData.chatMode
           });
+        }
+        
+        // Ensure selectedTags are properly included in characterData
+        if (selectedTags.length > 0) {
+          console.log('🏷️ Tags already included in update data:', selectedTags.map(t => t.name));
+        } else {
+          console.log('📝 No tags selected for this character');
         }
         
         toast({
@@ -214,7 +266,21 @@ export function useCharacterCreation() {
           description: `${character.name} has been successfully updated.`,
         });
       } else {
-        character = await createCharacter(characterData as CharacterCreationData);
+        console.log('🆕 Creating new character:', {
+          characterData,
+          selectedTags: selectedTags.map(t => t.name)
+        });
+        
+        // Ensure tags are included in the character data before creating
+        const updatedCharacterData = {
+          ...characterData,
+          personality: {
+            ...characterData.personality,
+            tags: selectedTags.map(tag => tag.name)
+          }
+        };
+        
+        character = await createCharacter(updatedCharacterData as CharacterCreationData);
         
         // Save chat mode settings
         if (characterData.chatMode && character.id) {

@@ -731,3 +731,58 @@ export const removeWorldInfoFromCollection = async (worldInfoId: string) => {
     throw error;
   }
 };
+
+export const importWorldInfo = async (jsonData: any, userId: string) => {
+  try {
+    // Validate the JSON structure
+    if (!jsonData.name || (!jsonData.entries && !jsonData.data?.entries)) {
+      throw new Error('Invalid world info format. Expected "name" and "entries" fields.');
+    }
+
+    // Handle both direct entries and nested data.entries structure
+    const entries = jsonData.entries || jsonData.data?.entries || {};
+    
+    // Create the world info
+    const worldInfo = await createWorldInfo({
+      name: jsonData.name || jsonData.data?.name || 'Imported World Info',
+      short_description: jsonData.description || jsonData.data?.description || '',
+      visibility: 'private'
+    });
+
+    // Process entries - handle both array and object formats
+    let entriesArray: any[] = [];
+    
+    if (Array.isArray(entries)) {
+      entriesArray = entries;
+    } else if (typeof entries === 'object') {
+      // Convert object entries to array
+      entriesArray = Object.entries(entries).map(([key, value]: [string, any]) => ({
+        keywords: value.keys || value.keywords || [key],
+        entry_text: value.content || value.entry || value.text || value.entry_text || ''
+      }));
+    }
+
+    // Add each entry to the world info
+    for (const entry of entriesArray) {
+      if (entry.keywords || entry.keys) {
+        const keywords = Array.isArray(entry.keywords || entry.keys) 
+          ? (entry.keywords || entry.keys) 
+          : [entry.keywords || entry.keys];
+        
+        const entryText = entry.entry_text || entry.content || entry.text || entry.entry || '';
+        
+        if (keywords.length > 0 && entryText) {
+          await addWorldInfoEntry(worldInfo.id, {
+            keywords: keywords.filter(k => k && k.trim()),
+            entry_text: entryText
+          });
+        }
+      }
+    }
+
+    return worldInfo;
+  } catch (error) {
+    console.error('Error importing world info:', error);
+    throw error;
+  }
+};

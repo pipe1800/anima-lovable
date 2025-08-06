@@ -140,6 +140,11 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
 };
 
 export const updateCharacter = async (characterId: string, characterData: CharacterCreationData) => {
+  console.log('🔄 updateCharacter called with:', {
+    characterId,
+    characterData: JSON.stringify(characterData, null, 2)
+  });
+
   try {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('Not authenticated');
@@ -147,11 +152,13 @@ export const updateCharacter = async (characterId: string, characterData: Charac
     // Update character record
     const characterUpdate: TablesUpdate<'characters'> = {
       name: characterData.name,
-      short_description: characterData.description,
+      short_description: characterData.description, // ✅ Map description to short_description
       avatar_url: characterData.avatar,
-      tagline: characterData.title,
+      tagline: characterData.title, // ✅ Map title to tagline
       visibility: characterData.visibility
     };
+
+    console.log('📝 Sending character update to database:', characterUpdate);
 
     const { data: character, error: characterError } = await supabase
       .from('characters')
@@ -161,10 +168,17 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       .select()
       .single();
 
-    if (characterError || !character) {
-      console.error('Error updating character:', characterError);
-      throw new Error('Failed to update character');
+    if (characterError) {
+      console.error('❌ Database character update error:', characterError);
+      throw new Error(`Failed to update character: ${characterError.message}`);
     }
+    
+    if (!character) {
+      console.error('❌ No character returned after update');
+      throw new Error('Character update returned no data');
+    }
+
+    console.log('✅ Character record updated successfully:', character);
 
     // Process example dialogues to ensure they're in the correct format
     const processedDialogue = {
@@ -191,6 +205,11 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       definition.addons = characterData.addons;
     }
 
+    console.log('📝 Updating character definition with:', {
+      characterId,
+      definition: JSON.stringify(definition, null, 2)
+    });
+
     const { error: definitionError } = await supabase
       .from('character_definitions')
       .update({
@@ -202,19 +221,31 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       .eq('character_id', characterId);
 
     if (definitionError) {
-      console.error('Error updating character definition:', definitionError);
-      throw new Error('Failed to update character definition');
+      console.error('❌ Error updating character definition:', definitionError);
+      throw new Error(`Failed to update character definition: ${definitionError.message}`);
     }
+
+    console.log('✅ Character definition updated successfully');
 
     // Update character tags
     // First, delete all existing tags for this character
-    await supabase
+    console.log('🏷️ Updating character tags for character:', characterId);
+    
+    const { error: deleteTagsError } = await supabase
       .from('character_tags')
       .delete()
       .eq('character_id', characterId);
 
+    if (deleteTagsError) {
+      console.error('❌ Error deleting existing tags:', deleteTagsError);
+    } else {
+      console.log('✅ Existing tags deleted successfully');
+    }
+
     // Then, save new character tags if any are selected
     if (characterData.personality.tags && characterData.personality.tags.length > 0) {
+      console.log('🔄 Adding new tags:', characterData.personality.tags);
+      
       // Get tag IDs from tag names
       const { data: tagData, error: tagError } = await supabase
         .from('tags')
@@ -222,8 +253,10 @@ export const updateCharacter = async (characterId: string, characterData: Charac
         .in('name', characterData.personality.tags);
 
       if (tagError) {
-        console.error('Error fetching tag IDs:', tagError);
+        console.error('❌ Error fetching tag IDs:', tagError);
       } else if (tagData) {
+        console.log('✅ Found matching tags:', tagData);
+        
         // Insert character_tags relationships
         const characterTagInserts = tagData.map(tag => ({
           character_id: characterId,
@@ -235,14 +268,23 @@ export const updateCharacter = async (characterId: string, characterData: Charac
           .insert(characterTagInserts);
 
         if (characterTagsError) {
-          console.error('Error updating character tags:', characterTagsError);
+          console.error('❌ Error updating character tags:', characterTagsError);
+        } else {
+          console.log('✅ Character tags updated successfully');
         }
       }
+    } else {
+      console.log('📝 No tags to add for this character');
     }
 
+    console.log('✅ Character update completed successfully:', character);
     return character;
   } catch (error) {
-    console.error('Error in updateCharacter:', error);
-    throw error;
+    console.error('❌ Error in updateCharacter:', error);
+    // Re-throw with more context
+    if (error instanceof Error) {
+      throw new Error(`Character update failed: ${error.message}`);
+    }
+    throw new Error('Character update failed with unknown error');
   }
 };

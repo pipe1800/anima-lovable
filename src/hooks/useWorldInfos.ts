@@ -28,8 +28,8 @@ const fetchUserWorldInfos = async (userId: string): Promise<WorldInfoWithDetails
     .from('world_infos')
     .select(`
       *,
-      world_info_entries(count),
-      world_info_likes(count),
+      world_info_entries(id),
+      world_info_likes(id),
       world_info_tags(
         tags(id, name)
       )
@@ -58,8 +58,8 @@ const fetchUserWorldInfoCollection = async (userId: string): Promise<WorldInfoWi
     .select(`
       world_infos(
         *,
-        world_info_entries(count),
-        world_info_likes(count),
+        world_info_entries(id),
+        world_info_likes(id),
         world_info_tags(
           tags(id, name)
         )

@@ -32,7 +32,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUserWorldInfos, usePublicWorldInfos, useAllTags } from '@/hooks/useWorldInfos';
+import { importWorldInfo } from '@/lib/world-info-operations';
 import { cn } from '@/lib/utils';
 import StandardizedWorldInfoCard from './StandardizedWorldInfoCard';
 
@@ -40,6 +42,7 @@ export default function ImprovedWorldInfoPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // State - Start with discover tab as default
@@ -126,10 +129,18 @@ export default function ImprovedWorldInfoPage() {
 
     setImporting(true);
     try {
-      // Note: This would need to be implemented in world-info-operations
+      const text = await file.text();
+      const jsonData = JSON.parse(text);
+      
+      // Import the world info
+      const importedWorldInfo = await importWorldInfo(jsonData, user?.id!);
+      
+      // Invalidate queries to refresh the list
+      await queryClient.invalidateQueries({ queryKey: ['user-world-infos'] });
+      
       toast({
-        title: "Coming Soon",
-        description: "Import functionality will be available soon"
+        title: "Import Successful",
+        description: `Successfully imported "${importedWorldInfo.name}"`,
       });
     } catch (error) {
       console.error('Import error:', error);

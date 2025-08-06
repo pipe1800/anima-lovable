@@ -217,16 +217,13 @@ const FeatureComparisonTable = ({ plans }: { plans: Plan[] }) => {
         return plan.price_monthly === 0 ? 'Free' : `$${plan.price_monthly}/mo`;
       case 'credits':
         return plan.monthly_credits_allowance.toLocaleString();
-      case 'messages':
-        return plan.name === 'Guest Pass' ? '75/day' : 'Unlimited';
-      case 'characters':
-        return plan.name === 'Guest Pass' ? '1' : plan.name === 'True Fan' ? 'Up to 50' : 'Unlimited';
+
       case 'premium_models':
         return plan.name !== 'Guest Pass';
       case 'priority':
         return plan.name !== 'Guest Pass';
       case 'memory':
-        return plan.name === 'Guest Pass' ? 'Standard' : plan.name === 'True Fan' ? '8K Context' : '16K+ Context';
+        return plan.name === 'Guest Pass' ? 'Standard' : plan.name === 'True Fan' ? '8K Context' : '16K Context';
       case 'nsfw':
         return plan.name !== 'Guest Pass';
       case 'addons':
@@ -648,7 +645,7 @@ export default function Subscription() {
     },
     {
       question: "What happens to unused credits?",
-      answer: "Monthly credits don't roll over, but purchased credit packs never expire. We recommend choosing a plan that matches your usage."
+      answer: "Monthly credits roll over for a maximum of 2x your monthly allowance. For example, if you have the True Fan plan, you can accumulate a total of 30,000 credits."
     },
     {
       question: "Can I upgrade my plan?",
@@ -656,7 +653,7 @@ export default function Subscription() {
     },
     {
       question: "What payment methods do you accept?",
-      answer: "We accept all major credit cards and PayPal. All payments are processed securely through PayPal's payment gateway, even if you choose to pay with a credit card."
+      answer: "Currently we only accept Paypal, but we plan to add more payment methods in the future. All payments are processed securely through PayPal's payment gateway, even if you choose to pay with a credit card."
     }
   ];
 

@@ -62,7 +62,7 @@ export default function StandardizedWorldInfoCard({
   const [showDeleteDialog, setShowDeleteDialog] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
 
-  // Extract data with fallbacks
+  // Extract data with proper fallbacks for different data structures
   const {
     id,
     name,
@@ -72,6 +72,8 @@ export default function StandardizedWorldInfoCard({
     creator,
     creator_id,
     profiles,
+    world_info_entries = [],
+    world_info_likes = [],
     entriesCount = 0,
     entry_count = 0,
     likesCount = 0,
@@ -81,11 +83,11 @@ export default function StandardizedWorldInfoCard({
     interaction_count = 0
   } = worldInfo;
 
-  // Normalize data
-  const displayTags = tags.slice(0, 4);
-  const totalEntries = entriesCount || entry_count || 0;
-  const totalLikes = likesCount || likes_count || like_count || 0;
+  // Normalize data - handle both count properties and array lengths
+  const totalEntries = entriesCount || entry_count || world_info_entries?.length || 0;
+  const totalLikes = likesCount || likes_count || like_count || world_info_likes?.length || 0;
   const totalUses = (usage_count || 0) + (interaction_count || 0);
+  const displayTags = tags.slice(0, 4);
   const creatorName = creator?.username || profiles?.username || 'Anonymous';
   const creatorAvatar = creator?.avatar_url || profiles?.avatar_url;
 
