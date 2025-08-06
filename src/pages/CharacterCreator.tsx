@@ -173,19 +173,22 @@ const CharacterCreator = () => {
   };
 
   const handleStepChange = useCallback((step: number) => {
-    // Validate current step before moving
-    if (step > currentStep && !validateStep(currentStep)) {
-      toast({
-        title: "Incomplete Step",
-        description: "Please complete all required fields before proceeding.",
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    if (step >= 1 && step <= STEPS.length) {
-      setCurrentStep(step);
-    }
+    // Use setTimeout to ensure any pending state updates are processed before validation
+    setTimeout(() => {
+      // Validate current step before moving
+      if (step > currentStep && !validateStep(currentStep)) {
+        toast({
+          title: "Incomplete Step",
+          description: "Please complete all required fields before proceeding.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      if (step >= 1 && step <= STEPS.length) {
+        setCurrentStep(step);
+      }
+    }, 0);
   }, [currentStep, validateStep, toast, setCurrentStep]);
 
   const handleNext = () => {

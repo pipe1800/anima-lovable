@@ -152,11 +152,23 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
   };
 
   const handleNext = () => {
-    onUpdate(formData);
-    onNext();
+    // Ensure all form data is up to date before proceeding
+    const updatedFormData = {
+      ...formData,
+      name: formData.name.trim(),
+      description: formData.description.trim()
+    };
+    
+    // Update parent state first
+    onUpdate(updatedFormData);
+    
+    // Use setTimeout to ensure state update is processed before validation
+    setTimeout(() => {
+      onNext();
+    }, 0);
   };
 
-  const isValid = formData.name.trim(); // Short description is no longer required
+  const isValid = formData.name.trim() && formData.description.trim();
 
   return (
     <div className="flex-1 overflow-auto bg-[#121212]">
