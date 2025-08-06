@@ -157,7 +157,6 @@ export function useCharacterCreation() {
       case 1: // Foundation
         const name = characterData.name?.trim();
         const description = characterData.description?.trim();
-        console.log('Validating step 1:', { name, description, hasName: !!name, hasDescription: !!description });
         return !!(name && description);
       case 2: // Personality
         return !!(

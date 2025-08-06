@@ -50,10 +50,18 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
   const { toast } = useToast();
 
   const handleInputChange = (field: string, value: string | boolean) => {
+    // Update local state
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
+    
+    // Immediately update parent with trimmed values for name and description
+    if (field === 'name' || field === 'description') {
+      onUpdate({ [field]: typeof value === 'string' ? value.trim() : value });
+    } else {
+      onUpdate({ [field]: value });
+    }
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,20 +160,11 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
   };
 
   const handleNext = () => {
-    // Ensure all form data is up to date before proceeding
-    const updatedFormData = {
-      ...formData,
-      name: formData.name.trim(),
-      description: formData.description.trim()
-    };
-    
-    // Update parent state first
-    onUpdate(updatedFormData);
-    
-    // Use setTimeout to ensure state update is processed before validation
-    setTimeout(() => {
+    // Don't update again here - the data is already synced via handleInputChange
+    // Just validate and proceed
+    if (formData.name.trim() && formData.description.trim()) {
       onNext();
-    }, 0);
+    }
   };
 
   const isValid = formData.name.trim() && formData.description.trim();
