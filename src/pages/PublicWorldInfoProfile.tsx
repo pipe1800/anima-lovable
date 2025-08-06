@@ -17,7 +17,7 @@ import {
   Download,
   Edit2
 } from 'lucide-react';
-import { TopBar } from '@/components/ui/TopBar';
+import { PublicTopBar } from '@/components/ui/PublicTopBar';
 import { supabase } from '@/integrations/supabase/client';
 import { getPublicWorldInfoDetails } from '@/lib/world-info-operations';
 import { useToast } from '@/hooks/use-toast';
@@ -260,22 +260,28 @@ export default function PublicWorldInfoProfile() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#121212] flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen bg-[#121212]">
+        <PublicTopBar />
+        <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
       </div>
     );
   }
 
   if (error || !worldInfo) {
     return (
-      <div className="min-h-screen bg-[#121212] flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4 text-white">World Info Not Found</h2>
-          <p className="text-gray-400 mb-4">{error || 'The world info you are looking for does not exist or is not public.'}</p>
-          <Button onClick={() => navigate('/')} variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Go Back
-          </Button>
+      <div className="min-h-screen bg-[#121212]">
+        <PublicTopBar />
+        <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4 text-white">World Info Not Found</h2>
+            <p className="text-gray-400 mb-4">{error || 'The world info you are looking for does not exist or is not public.'}</p>
+            <Button onClick={() => navigate('/')} variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Go Back
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -283,23 +289,31 @@ export default function PublicWorldInfoProfile() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      <TopBar
-        title="World Info Details"
-        rightContent={
-          canEdit && (
-            <Button
-              onClick={() => navigate(`/world-info/${id}/edit`)}
-              className="bg-[#FF7A00] hover:bg-[#FF7A00]/80"
-            >
-              <Edit2 className="w-4 h-4 mr-2" />
-              Edit
-            </Button>
-          )
-        }
-      />
+      <PublicTopBar />
       
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
+          {/* Header */}
+          <div className="p-6 border-b border-gray-700">
+            <div className="max-w-6xl mx-auto flex items-center justify-between">
+              <h1 className="text-2xl font-bold text-white">
+                {worldInfo?.name || 'World Info Details'}
+              </h1>
+              {canEdit && (
+                <Button
+                  onClick={() => navigate(`/world-info/${id}/edit`)}
+                  className="bg-[#FF7A00] hover:bg-[#FF7A00]/80"
+                >
+                  <Edit2 className="w-4 h-4 mr-2" />
+                  Edit
+                </Button>
+              )}
+            </div>
+          </div>
+          
+          {/* Content */}
+          <div className="flex-1 overflow-hidden">
+            <div className="h-full flex flex-col">
           {/* Back button under TopBar */}
           <div className="p-6">
             <Button
@@ -509,6 +523,8 @@ export default function PublicWorldInfoProfile() {
                 </Card>
               )}
             </div>
+          </div>
+        </div>
           </div>
         </div>
       </main>

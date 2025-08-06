@@ -1,88 +1,14 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import { Menu, X } from "lucide-react";
+import { PublicTopBar } from "@/components/ui/PublicTopBar";
+
 const HeroSection = () => {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   return <section className="min-h-screen bg-gradient-to-b from-[#121212] to-[#1a1a2e] text-white relative overflow-hidden">
       {/* Background Elements */}
       <div className="absolute inset-0 bg-gradient-radial from-[#FF7A00]/5 to-transparent opacity-50"></div>
       
-      {/* Sticky Navigation Bar */}
-      <nav className="sticky top-0 z-50 bg-[#1a1a2e]/95 backdrop-blur-sm border-b border-gray-700/50">
-        <div className="flex items-center justify-between h-16 pl-4 pr-4 sm:pr-6 lg:pr-8">
-          {/* Logo */}
-          <div className="flex-shrink-0">
-            <img 
-              src="/assets/logo.png" 
-              alt="Anima AI Chat" 
-              className="h-10 w-auto"
-            />
-          </div>
-
-          {/* Desktop Navigation Links */}
-          <div className="hidden md:flex items-center space-x-4">
-            <Link to="/">
-              <Button variant="ghost" className="text-[#FF7A00] hover:text-white hover:bg-[#FF7A00]/10 font-medium">
-                Home
-              </Button>
-            </Link>
-            <Link to="/characters">
-              <Button variant="ghost" className="text-white hover:text-[#FF7A00] hover:bg-[#FF7A00]/10">
-                Characters
-              </Button>
-            </Link>
-            <Link to="/auth">
-              <Button variant="outline" className="bg-transparent border-[#FF7A00] text-[#FF7A00] hover:bg-[#FF7A00] hover:text-white transition-colors">
-                Login
-              </Button>
-            </Link>
-            <Link to="/auth?mode=signup">
-              <Button className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-medium transition-colors">
-                Sign Up
-              </Button>
-            </Link>
-          </div>
-
-          {/* Mobile Menu Button */}
-          <div className="md:hidden">
-            <Button variant="ghost" size="sm" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="text-white hover:text-[#FF7A00] hover:bg-[#FF7A00]/10">
-              {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-            </Button>
-          </div>
-        </div>
-
-        {/* Mobile Navigation Menu */}
-        {mobileMenuOpen && <div className="md:hidden border-t border-gray-700/50 bg-[#1a1a2e]/98 backdrop-blur-sm">
-            <div className="px-6 py-6 space-y-4">
-              <Link to="/" onClick={() => setMobileMenuOpen(false)}>
-                <div className="flex items-center py-3 px-4 rounded-lg hover:bg-[#FF7A00]/10 transition-colors">
-                  <span className="text-[#FF7A00] font-medium text-lg">Home</span>
-                </div>
-              </Link>
-              
-              <Link to="/characters" onClick={() => setMobileMenuOpen(false)}>
-                <div className="flex items-center py-3 px-4 rounded-lg hover:bg-[#FF7A00]/10 transition-colors">
-                  <span className="text-white font-medium text-lg">Characters</span>
-                </div>
-              </Link>
-              
-              <div className="border-t border-gray-700/30 my-4"></div>
-              
-              <Link to="/auth" onClick={() => setMobileMenuOpen(false)}>
-                <div className="flex items-center px-4 rounded-lg border border-[#FF7A00]/50 hover:bg-[#FF7A00]/10 transition-colors py-[9px] my-[20px]">
-                  <span className="text-[#FF7A00] font-medium text-lg">Login</span>
-                </div>
-              </Link>
-              
-              <Link to="/auth?mode=signup" onClick={() => setMobileMenuOpen(false)}>
-                <div className="flex items-center px-4 rounded-lg bg-[#FF7A00] hover:bg-[#FF7A00]/90 transition-colors py-[9px]">
-                  <span className="text-white font-semibold text-lg">Sign Up</span>
-                </div>
-              </Link>
-            </div>
-          </div>}
-      </nav>
+      {/* Use the new PublicTopBar */}
+      <PublicTopBar />
       
       {/* Content */}
       <div className="relative z-10 flex items-center justify-center min-h-[calc(100vh-4rem)] pt-8 px-4 sm:px-6 mt-4">

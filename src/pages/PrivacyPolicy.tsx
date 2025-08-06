@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { PublicTopBar } from '@/components/ui/PublicTopBar';
 import { ArrowLeft } from 'lucide-react';
 
 const PrivacyPolicy = () => {
@@ -8,31 +9,8 @@ const PrivacyPolicy = () => {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      {/* TopBar - Same as landing page */}
-      <header className="sticky top-0 z-50 bg-[#1a1a2e]/95 backdrop-blur-sm border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center cursor-pointer" onClick={() => navigate('/')}>
-              <img src="/assets/logo.png" alt="Anima Chat" className="h-8 w-auto" />
-            </div>
-            <div className="flex items-center space-x-4">
-              <Button
-                onClick={() => navigate('/auth')}
-                variant="ghost"
-                className="text-gray-300 hover:text-white"
-              >
-                Sign In
-              </Button>
-              <Button
-                onClick={() => navigate('/auth?mode=signup')}
-                className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-              >
-                Get Started
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* Use the standardized PublicTopBar */}
+      <PublicTopBar />
 
       {/* Content */}
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">

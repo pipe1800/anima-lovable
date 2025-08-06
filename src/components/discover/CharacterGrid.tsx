@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { usePublicCharacters } from '@/hooks/useCharacters';
 import { useChatCreation } from '@/hooks/useChatCreation';
+import { useAuth } from '@/contexts/AuthContext';
 import { CharacterCardSkeleton } from './CharacterCardSkeleton';
 
 interface CharacterGridProps {
@@ -129,6 +130,7 @@ export function CharacterGrid({
   onPageChange
 }: CharacterGridProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { startChat, isCreating } = useChatCreation();
 
   // Use initial characters if no search has been performed
@@ -142,6 +144,23 @@ export function CharacterGrid({
   const loading = hasSearched ? isLoading : initialLoading;
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
+  const handleViewCharacter = (character: PublicCharacter) => {
+    // Navigate to public character profile if not logged in
+    if (!user) {
+      navigate(`/characters/${character.id}`);
+    } else {
+      navigate(`/character/${character.id}`);
+    }
+  };
+
+  const handleStartChat = (character: PublicCharacter) => {
+    if (!user) {
+      // Redirect to auth with signup mode
+      navigate('/auth?mode=signup');
+    } else {
+      startChat(character);
+    }
+  };
   // Loading state with skeleton cards
   if (loading) {
     return (
@@ -165,13 +184,7 @@ export function CharacterGrid({
         </div>
       </div>
     );
-  }
-
-  const handleViewCharacter = (character: PublicCharacter) => {
-    navigate(`/character/${character.id}`);
-  };
-
-  return (
+  }  return (
     <div className="px-3 sm:px-6 py-4 sm:py-8">
       {/* Results Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-8 space-y-2 sm:space-y-0">
@@ -245,18 +258,18 @@ export function CharacterGrid({
                   <Button
                     onClick={(e) => {
                       e.stopPropagation();
-                      startChat(character);
+                      handleStartChat(character);
                     }}
-                    disabled={isCreating}
+                    disabled={user && isCreating}
                     className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium text-sm disabled:opacity-50"
                     size="sm"
                   >
-                    {isCreating ? (
+                    {user && isCreating ? (
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     ) : (
                       <MessageCircle className="w-4 h-4 mr-2" />
                     )}
-                    {isCreating ? 'Creating...' : 'Start Chat'}
+                    {user ? (isCreating ? 'Creating...' : 'Start Chat') : 'Sign Up to Chat'}
                   </Button>
                 </div>
               </div>

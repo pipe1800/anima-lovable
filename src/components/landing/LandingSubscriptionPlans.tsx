@@ -108,8 +108,6 @@ export const LandingSubscriptionPlans = () => {
       description: 'Perfect for trying out the platform',
       features: [
         '1,000 credits/month',
-        '75 messages/day limit',
-        '1 character slot',
         'Standard AI models',
         'Basic features'
       ]
@@ -121,13 +119,13 @@ export const LandingSubscriptionPlans = () => {
       description: 'For dedicated AI enthusiasts',
       features: [
         '15,000 credits/month',
-        'Unlimited messages',
-        'Up to 50 characters',
+        'Unlimited characters',
         'Premium AI models',
         '8K context memory',
         'NSFW content access',
         'Priority generation',
-        'Credit booster packs'
+        'Credit booster packs',
+        'Advanced features',
       ]
     },
     {
@@ -137,15 +135,13 @@ export const LandingSubscriptionPlans = () => {
       description: 'The ultimate AI experience',
       features: [
         '32,000 credits/month',
-        'Unlimited messages',
         'Unlimited characters',
-        'All premium AI models',
+        'Premium AI models',
         '16K+ context memory',
         'NSFW content access',
         'Top priority generation',
         'Credit booster packs',
         'Advanced features',
-        'Priority support'
       ]
     }
   ];
