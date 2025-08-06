@@ -17,7 +17,7 @@ export const MobileHeader = ({
   className = "bg-[#1a1a2e] border-b border-gray-700/50"
 }: MobileHeaderProps) => {
   return (
-    <header className={`md:hidden p-3 sm:p-4 ${className}`}>
+    <header className={`md:hidden p-3 sm:p-4 select-none ${className}`}>
       <div className="flex items-center justify-between">
         {/* Left: Mobile Menu */}
         <div className="flex-shrink-0">

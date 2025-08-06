@@ -175,6 +175,57 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+
+  /* Prevent text selection on non-interactive elements */
+  /* Allow selection only on specific interactive elements */
+  input,
+  textarea,
+  [contenteditable="true"],
+  .select-text,
+  .selectable {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+
+  /* Prevent text cursor on buttons and interactive elements */
+  button,
+  a,
+  [role="button"] {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    cursor: pointer;
+  }
+
+  /* Ensure message content in chat is selectable */
+  .message-content,
+  .chat-message {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+
+  /* Prevent selection on UI chrome elements */
+  nav,
+  header,
+  footer,
+  aside,
+  .sidebar,
+  .topbar,
+  .navbar {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
   }
 
   /* Typography hierarchy */

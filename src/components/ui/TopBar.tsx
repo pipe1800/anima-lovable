@@ -24,7 +24,7 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header className={cn(
-      "bg-[#1a1a2e]",
+      "bg-[#1a1a2e] select-none",
       showBorder && "border-b border-gray-700/50",
       sticky && "sticky top-0",
       "z-30", // Lower than sidebar (z-50) to avoid overlap

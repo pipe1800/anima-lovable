@@ -75,7 +75,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
             >
               <FormattedMessage 
                 content={message.content}
-                className="whitespace-pre-wrap"
+                className="whitespace-pre-wrap select-text message-content"
               />
               {/* Removed streaming indicator - no longer needed with simplified approach */}
             </div>

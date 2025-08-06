@@ -5,7 +5,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Upload, User, Sparkles, Loader2, Camera, Image as ImageIcon } from 'lucide-react';
-import { ImageCropper } from '@/components/ui/image-cropper';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -28,8 +27,6 @@ export default function FoundationStep({
   isParsingCard = false 
 }: FoundationStepProps) {
   const [isUploading, setIsUploading] = useState(false);
-  const [showCropper, setShowCropper] = useState(false);
-  const [tempImageUrl, setTempImageUrl] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pngInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
@@ -52,21 +49,20 @@ export default function FoundationStep({
       return;
     }
 
-    const url = URL.createObjectURL(file);
-    setTempImageUrl(url);
-    setShowCropper(true);
-  };
-
-  const handleCropComplete = async (croppedImageUrl: string) => {
-    setShowCropper(false);
-    setIsUploading(true);
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "File Too Large",
+        description: "Please select an image smaller than 5MB.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
-      const response = await fetch(croppedImageUrl);
-      const blob = await response.blob();
-      const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+      setIsUploading(true);
       
-      const avatarUrl = await uploadAvatar(file, user!.id);
+      // Upload directly without cropping
+      const avatarUrl = await uploadAvatar(file, user.id);
       
       if (avatarUrl) {
         handleInputChange('avatar', avatarUrl);
@@ -84,10 +80,6 @@ export default function FoundationStep({
       });
     } finally {
       setIsUploading(false);
-      if (tempImageUrl) {
-        URL.revokeObjectURL(tempImageUrl);
-        setTempImageUrl('');
-      }
     }
   };
 
@@ -271,20 +263,6 @@ export default function FoundationStep({
           </Button>
         </div>
       </div>
-
-      {/* Image Cropper Modal */}
-      {showCropper && (
-        <ImageCropper
-          imageUrl={tempImageUrl}
-          isOpen={showCropper}
-          onClose={() => {
-            setShowCropper(false);
-            URL.revokeObjectURL(tempImageUrl);
-            setTempImageUrl('');
-          }}
-          onCrop={handleCropComplete}
-        />
-      )}
     </div>
   );
 }
