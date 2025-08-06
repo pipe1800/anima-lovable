@@ -317,4 +317,29 @@ All colors MUST be HSL.
   body.tutorial-active {
     overflow: hidden;
   }
+
+  /* Video performance optimizations */
+  video {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    perspective: 1000px;
+    will-change: transform;
+    pointer-events: none;
+  }
+
+  /* Optimize rendering for smooth scrolling */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Hardware acceleration for scrollable containers */
+  .overflow-auto,
+  .overflow-scroll,
+  .overflow-y-auto,
+  .overflow-y-scroll {
+    -webkit-overflow-scrolling: touch;
+    will-change: scroll-position;
+  }
 }
