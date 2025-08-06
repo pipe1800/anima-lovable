@@ -24,11 +24,6 @@ const FAQ = () => {
       answer: "Absolutely. We use industry-standard SSL encryption for all transactions, and we never store your credit card details on our servers. Your security is our top priority."
     },
     {
-      id: "item-4",
-      question: "What is your refund policy?",
-      answer: "We offer a 30-day, no-questions-asked money-back guarantee. If you're not completely satisfied with your purchase, simply contact us within 30 days for a full refund."
-    },
-    {
       id: "item-5",
       question: "How do I get started?",
       answer: "Getting started is simple! You can begin chatting with our AI characters immediately without creating an account. To access advanced features and create your own characters, simply sign up for free."

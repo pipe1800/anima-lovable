@@ -7,20 +7,10 @@ const CustomerTestimonial = () => {
     <section className="py-12 sm:py-16 lg:py-20 px-4 sm:px-6 bg-[#1a1a2e]">
       <div className="max-w-6xl mx-auto">
         {/* Main Testimonial */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 items-center mb-16 sm:mb-20">
+        <div className="grid grid-cols-1 lg:grid-cols-1 gap-8 sm:gap-12 items-center mb-16 sm:mb-20">
           {/* Left Column - Customer Photo */}
           <div className="flex justify-center order-1 lg:order-1">
             <div className="relative">
-              <Avatar className="w-32 h-32 sm:w-40 sm:h-40 lg:w-48 lg:h-48 xl:w-56 xl:h-56 shadow-2xl border-4 border-[#FF7A00]/20">
-                <AvatarImage 
-                  src="https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?w=400&h=400&fit=crop&crop=face" 
-                  alt="Gaming enthusiast testimonial"
-                  className="object-cover"
-                />
-                <AvatarFallback className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-br from-gray-800 to-gray-900 text-[#FF7A00]">
-                  RP
-                </AvatarFallback>
-              </Avatar>
               {/* Decorative glow effect */}
               <div className="absolute -top-1 -right-1 sm:-top-2 sm:-right-2 w-8 h-8 sm:w-12 sm:h-12 lg:w-16 lg:h-16 bg-gradient-to-br from-[#FF7A00]/30 to-[#FF7A00]/10 rounded-full blur-sm"></div>
             </div>
