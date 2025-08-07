@@ -13,7 +13,6 @@ import { useToast } from '@/hooks/use-toast';
 import { Crown, CreditCard, Check, X, TrendingUp } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { MobileHeader } from '@/components/layout/MobileHeader';
 import {
   Accordion,
   AccordionContent,
@@ -129,7 +128,7 @@ const PlanCard = ({
     >
       {isPopular && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
-          <Badge className="bg-[#FF7A00] text-white px-3 py-1">
+          <Badge className="bg-[#FF7A00] text-white px-2 sm:px-3 py-1 text-xs sm:text-sm">
             Most Popular
           </Badge>
         </div>
@@ -137,41 +136,41 @@ const PlanCard = ({
       
       <Card className={`h-full flex flex-col ${isPopular ? 'border-[#FF7A00] shadow-lg shadow-[#FF7A00]/20' : 'border-gray-700'} 
         ${isCurrentPlan ? 'bg-[#1a1a2e]/80' : 'bg-[#1a1a2e]'} hover:border-gray-600 transition-all`}>
-        <CardHeader className="pb-4">
+        <CardHeader className="pb-3 sm:pb-4">
           <div className="flex items-start justify-between">
-            <div>
-              <CardTitle className="text-2xl text-white flex items-center gap-2">
+            <div className="w-full">
+              <CardTitle className="text-xl sm:text-2xl text-white flex items-center gap-2">
                 {plan.name}
-                {plan.name === 'True Fan' && <Crown className="w-5 h-5 fill-gray-300 text-gray-300" />}
-                {plan.name === 'The Whale' && <Crown className="w-5 h-5 fill-yellow-500 text-yellow-500" />}
+                {plan.name === 'True Fan' && <Crown className="w-4 h-4 sm:w-5 sm:h-5 fill-gray-300 text-gray-300" />}
+                {plan.name === 'The Whale' && <Crown className="w-4 h-4 sm:w-5 sm:h-5 fill-yellow-500 text-yellow-500" />}
               </CardTitle>
               {plan.description && (
-                <CardDescription className="mt-2">{plan.description}</CardDescription>
+                <CardDescription className="mt-1 sm:mt-2 text-xs sm:text-sm">{plan.description}</CardDescription>
               )}
             </div>
             {isCurrentPlan && (
-              <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/50">
-                Current Plan
+              <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/50 text-xs whitespace-nowrap ml-2">
+                Current
               </Badge>
             )}
           </div>
           
-          <div className="mt-4">
+          <div className="mt-3 sm:mt-4">
             <div className="flex items-baseline gap-1">
-              <span className="text-4xl font-bold text-white">
+              <span className="text-3xl sm:text-4xl font-bold text-white">
                 ${plan.price_monthly}
               </span>
-              <span className="text-gray-400">/month</span>
+              <span className="text-gray-400 text-sm">/month</span>
             </div>
-            <p className="text-sm text-gray-400 mt-1">
+            <p className="text-xs sm:text-sm text-gray-400 mt-1">
               {plan.monthly_credits_allowance.toLocaleString()} credits/month
             </p>
           </div>
         </CardHeader>
         
-        <CardContent className="flex-1 flex flex-col">
-          <div className="space-y-3 flex-1">
-            {getFeatures().map((feature: string, idx: number) => (
+        <CardContent className="flex-1 flex flex-col px-4 sm:px-6">
+          <div className="space-y-2 sm:space-y-3 flex-1">
+            {getFeatures().slice(0, 5).map((feature: string, idx: number) => (
               <PlanFeature key={idx} feature={feature} included={true} />
             ))}
           </div>
@@ -179,7 +178,7 @@ const PlanCard = ({
           <Button
             onClick={onSelect}
             disabled={disabled || isCurrentPlan}
-            className={`w-full mt-6 ${
+            className={`w-full mt-4 sm:mt-6 py-2 sm:py-3 text-sm sm:text-base ${
               isCurrentPlan 
                 ? 'bg-gray-700 text-gray-400' 
                 : canUpgrade 
@@ -295,31 +294,31 @@ const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPu
   return (
     <motion.div whileHover={{ scale: 1.02 }} transition={{ duration: 0.2 }}>
       <Card className="bg-[#1a1a2e] border-gray-700 hover:border-[#FF7A00]/50 transition-all h-full">
-        <CardHeader>
+        <CardHeader className="pb-3 sm:pb-4">
           <div className="flex items-start justify-between">
             <div>
-              <CardTitle className="text-xl text-white">{pack.name}</CardTitle>
-              <p className="text-3xl font-bold text-[#FF7A00] mt-2">
+              <CardTitle className="text-lg sm:text-xl text-white">{pack.name}</CardTitle>
+              <p className="text-2xl sm:text-3xl font-bold text-[#FF7A00] mt-1 sm:mt-2">
                 {pack.credits_granted.toLocaleString()}
               </p>
-              <p className="text-sm text-gray-400">credits</p>
+              <p className="text-xs sm:text-sm text-gray-400">credits</p>
             </div>
             {bonusPercentage > 0 && (
-              <Badge className="bg-green-500/20 text-green-400 border-green-500/50">
-                +{bonusPercentage}% bonus
+              <Badge className="bg-green-500/20 text-green-400 border-green-500/50 text-xs">
+                +{bonusPercentage}%
               </Badge>
             )}
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-2xl font-bold text-white">${pack.price}</span>
-            <span className="text-sm text-gray-400">${(pack.price / pack.credits_granted * 1000).toFixed(2)}/1k</span>
+        <CardContent className="px-4 sm:px-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <span className="text-xl sm:text-2xl font-bold text-white">${pack.price}</span>
+            <span className="text-xs sm:text-sm text-gray-400">${(pack.price / pack.credits_granted * 1000).toFixed(2)}/1k</span>
           </div>
           <Button 
             onClick={onPurchase} 
             disabled={disabled}
-            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/90"
+            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/90 py-2 text-sm sm:text-base"
           >
             <CreditCard className="w-4 h-4 mr-2" />
             Buy Now
@@ -341,6 +340,7 @@ export default function Subscription() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [activeMobilePlan, setActiveMobilePlan] = useState<number>(0);
 
   const currentPlan = userSubscription?.plan || null;
 
@@ -617,21 +617,18 @@ export default function Subscription() {
 
   if (isLoading) {
     return (
-      <>
-        <MobileHeader title="Subscription" />
-        <div className="min-h-screen bg-[#121212] pt-24 pb-12">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="space-y-8">
-              <Skeleton className="h-12 w-64 mx-auto" />
-              <div className="grid md:grid-cols-3 gap-6">
-                {[1, 2, 3].map(i => (
-                  <Skeleton key={i} className="h-96" />
-                ))}
-              </div>
+      <div className="min-h-screen bg-[#121212] pt-24 pb-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="space-y-8">
+            <Skeleton className="h-12 w-64 mx-auto" />
+            <div className="grid md:grid-cols-3 gap-6">
+              {[1, 2, 3].map(i => (
+                <Skeleton key={i} className="h-96" />
+              ))}
             </div>
           </div>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -659,55 +656,129 @@ export default function Subscription() {
 
   return (
     <>
-      <MobileHeader title="Subscription" />
-      <div className="min-h-screen bg-[#121212] pt-24 pb-12">
+      <div className="min-h-screen bg-[#121212] pt-16 md:pt-24 pb-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="text-center mb-12">
-            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+          {/* Header - Mobile optimized */}
+          <div className="text-center mb-8 md:mb-12">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-3 md:mb-4">
               Choose Your Plan
             </h1>
-            <p className="text-xl text-gray-400 max-w-2xl mx-auto">
+            <p className="text-lg sm:text-xl text-gray-400 max-w-2xl mx-auto px-2">
               Unlock the full potential of AI conversations with our flexible subscription plans
             </p>
           </div>
 
-          {/* Plans */}
-          <div className={`grid gap-6 lg:gap-8 mb-16 ${
-            visiblePlans.length === 1 
-              ? 'md:grid-cols-1 max-w-md mx-auto' 
-              : visiblePlans.length === 2 
-                ? 'md:grid-cols-2 max-w-4xl mx-auto' 
-                : 'md:grid-cols-3'
-          }`}>
-            {visiblePlans.map((plan, idx) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                currentPlan={currentPlan}
-                isPopular={plan.name === 'True Fan' && visiblePlans.length > 2}
-                onSelect={() => handlePlanAction(plan)}
-                disabled={!!processingAction}
-              />
-            ))}
+          {/* Plans - Desktop grid and Mobile tabs */}
+          <div className="mb-12 md:mb-16">
+            {/* Desktop grid - unchanged */}
+            <div className={`hidden md:grid gap-6 lg:gap-8 ${
+              visiblePlans.length === 1 
+                ? 'grid-cols-1 max-w-md mx-auto' 
+                : visiblePlans.length === 2 
+                  ? 'grid-cols-2 max-w-4xl mx-auto' 
+                  : 'grid-cols-3'
+            }`}>
+              {visiblePlans.map((plan, idx) => (
+                <PlanCard
+                  key={plan.id}
+                  plan={plan}
+                  currentPlan={currentPlan}
+                  isPopular={plan.name === 'True Fan' && visiblePlans.length > 2}
+                  onSelect={() => handlePlanAction(plan)}
+                  disabled={!!processingAction}
+                />
+              ))}
+            </div>
+
+            {/* Mobile tabs */}
+            <div className="block md:hidden">
+              {/* Tab buttons */}
+              <div className="flex justify-center mb-6">
+                <div className="flex bg-[#1a1a2e]/50 rounded-lg p-1 border border-gray-700">
+                  {visiblePlans.map((plan, idx) => (
+                    <button
+                      key={plan.id}
+                      onClick={() => setActiveMobilePlan(idx)}
+                      className={`px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                        activeMobilePlan === idx
+                          ? 'bg-[#FF7A00] text-white shadow-sm'
+                          : 'text-gray-400 hover:text-white hover:bg-[#1a1a2e]/80'
+                      }`}
+                    >
+                      {plan.name}
+                      {plan.name === 'True Fan' && visiblePlans.length > 2 && (
+                        <span className="ml-1 text-xs">⭐</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Active plan card */}
+              <div className="max-w-sm mx-auto">
+                {visiblePlans[activeMobilePlan] && (
+                  <PlanCard
+                    key={visiblePlans[activeMobilePlan].id}
+                    plan={visiblePlans[activeMobilePlan]}
+                    currentPlan={currentPlan}
+                    isPopular={visiblePlans[activeMobilePlan].name === 'True Fan' && visiblePlans.length > 2}
+                    onSelect={() => handlePlanAction(visiblePlans[activeMobilePlan])}
+                    disabled={!!processingAction}
+                  />
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Feature Comparison Table */}
-          <FeatureComparisonTable plans={plans} />
+          {/* Feature Comparison Table - Hidden on mobile, show simplified version */}
+          <div className="hidden md:block">
+            <FeatureComparisonTable plans={plans} />
+          </div>
+          
+          {/* Mobile Feature Comparison - Simplified accordion */}
+          <div className="block md:hidden mb-12">
+            <h2 className="text-2xl font-bold text-white text-center mb-6">
+              Compare Features
+            </h2>
+            <Accordion type="single" collapsible className="w-full space-y-3">
+              {plans.map((plan) => (
+                <AccordionItem key={plan.id} value={plan.id} className="bg-[#1a1a2e]/50 border border-gray-700 rounded-lg px-4">
+                  <AccordionTrigger className="text-left hover:no-underline py-4">
+                    <span className="text-lg text-white font-semibold">{plan.name}</span>
+                  </AccordionTrigger>
+                  <AccordionContent className="text-gray-400 pb-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span>Monthly Price:</span>
+                        <span className="text-white font-semibold">${plan.price_monthly}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Monthly Credits:</span>
+                        <span className="text-white font-semibold">{plan.monthly_credits_allowance.toLocaleString()}</span>
+                      </div>
+                      <div className="pt-2 border-t border-gray-700/50">
+                        <p className="text-sm">All plans include character creation, chat features, and community access.</p>
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </div>
 
-          {/* Credit Packs - Only for paid users */}
+          {/* Credit Packs - Mobile optimized */}
           {currentPlan && currentPlan.price_monthly > 0 && creditPacks.length > 0 && (
-            <div className="mb-16">
-              <div className="text-center mb-8">
-                <h2 className="text-3xl font-bold text-white mb-3">
+            <div className="mb-12 md:mb-16">
+              <div className="text-center mb-6 md:mb-8">
+                <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2 md:mb-3">
                   Need More Credits?
                 </h2>
-                <p className="text-gray-400">
+                <p className="text-gray-400 text-sm sm:text-base">
                   Boost your conversations with one-time credit purchases
                 </p>
               </div>
               
-              <div className="grid md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {creditPacks.map(pack => (
                   <CreditPackCard
                     key={pack.id}
@@ -720,18 +791,18 @@ export default function Subscription() {
             </div>
           )}
 
-          {/* FAQ Section */}
-          <div className="mt-16">
-            <h2 className="text-2xl font-bold text-white text-center mb-8">
+          {/* FAQ Section - Mobile optimized */}
+          <div className="mt-12 md:mt-16">
+            <h2 className="text-xl sm:text-2xl font-bold text-white text-center mb-6 md:mb-8">
               Frequently Asked Questions
             </h2>
-            <Accordion type="single" collapsible className="w-full space-y-4">
+            <Accordion type="single" collapsible className="w-full space-y-3 md:space-y-4">
               {faqs.map((faq, index) => (
-                <AccordionItem key={index} value={`item-${index}`} className="bg-[#1a1a2e]/50 border border-gray-700 rounded-lg px-6">
-                  <AccordionTrigger className="text-left hover:no-underline py-6">
-                    <span className="text-lg text-white">{faq.question}</span>
+                <AccordionItem key={index} value={`item-${index}`} className="bg-[#1a1a2e]/50 border border-gray-700 rounded-lg px-4 sm:px-6">
+                  <AccordionTrigger className="text-left hover:no-underline py-4 sm:py-6">
+                    <span className="text-base sm:text-lg text-white pr-2">{faq.question}</span>
                   </AccordionTrigger>
-                  <AccordionContent className="text-gray-400 pb-6">
+                  <AccordionContent className="text-gray-400 pb-4 sm:pb-6 text-sm sm:text-base">
                     {faq.answer}
                   </AccordionContent>
                 </AccordionItem>

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
 import { supabase } from '@/integrations/supabase/client';
-import { getPublicWorldInfoDetails } from '@/lib/world-info-operations';
+import { getPublicWorldInfoDetails, addWorldInfoToCollection, removeWorldInfoFromCollection } from '@/lib/world-info-operations';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -70,7 +70,7 @@ export default function PublicWorldInfoProfile() {
 
   // Permission checks
   const isOwner = user && worldInfo && worldInfo.creator_id === user.id;
-  const canEdit = isOwner || (user && worldInfo && worldInfo.isUsed);
+  const canEdit = isOwner;
 
   useEffect(() => {
     const fetchWorldInfoData = async () => {
@@ -84,27 +84,33 @@ export default function PublicWorldInfoProfile() {
         // Fetch similar world infos
         if (data.tags && data.tags.length > 0) {
           const tagIds = data.tags.map(tag => tag.id);
-          const { data: similarData } = await supabase
-            .from('world_infos')
-            .select(`
-              id,
-              name,
-              short_description,
-              avatar_url,
-              creator:profiles!creator_id(username)
-            `)
-            .eq('visibility', 'public')
-            .neq('id', data.id)
-            .in('id', 
-              await supabase
-                .from('world_info_tags')
-                .select('world_info_id')
-                .in('tag_id', tagIds)
-                .then(({ data }) => data?.map(d => d.world_info_id) || [])
-            )
-            .limit(6);
           
-          setSimilarWorldInfos(similarData || []);
+          // First get world info IDs that have similar tags
+          const { data: taggedWorldInfos } = await supabase
+            .from('world_info_tags')
+            .select('world_info_id')
+            .in('tag_id', tagIds);
+          
+          const similarWorldInfoIds = taggedWorldInfos
+            ?.map(d => d.world_info_id)
+            .filter(wid => wid !== data.id) || []; // Exclude current world info
+          
+          if (similarWorldInfoIds.length > 0) {
+            const { data: similarData } = await supabase
+              .from('world_infos')
+              .select(`
+                id,
+                name,
+                short_description,
+                avatar_url,
+                creator:profiles!creator_id(username)
+              `)
+              .eq('visibility', 'public')
+              .in('id', similarWorldInfoIds)
+              .limit(6);
+            
+            setSimilarWorldInfos(similarData || []);
+          }
         }
       } catch (err) {
         console.error('Error fetching world info:', err);
@@ -135,12 +141,26 @@ export default function PublicWorldInfoProfile() {
       if (worldInfo.isLiked) {
         // Remove like
         const { error } = await supabase
-          .from('world_info_likes')
+          .from('world_info_user_likes')
           .delete()
           .eq('world_info_id', worldInfo.id)
           .eq('user_id', user.user.id);
 
         if (error) throw error;
+
+        // Update likes_count in world_infos table
+        const { data: currentData } = await supabase
+          .from('world_infos')
+          .select('likes_count')
+          .eq('id', worldInfo.id)
+          .single();
+        
+        if (currentData) {
+          await supabase
+            .from('world_infos')
+            .update({ likes_count: Math.max(currentData.likes_count - 1, 0) })
+            .eq('id', worldInfo.id);
+        }
 
         setWorldInfo(prev => prev ? {
           ...prev,
@@ -150,11 +170,27 @@ export default function PublicWorldInfoProfile() {
       } else {
         // Add like
         const { error } = await supabase
-          .from('world_info_likes')
+          .from('world_info_user_likes')
           .insert({
             world_info_id: worldInfo.id,
             user_id: user.user.id
           });
+
+        if (error) throw error;
+
+        // Update likes_count in world_infos table
+        const { data: currentData } = await supabase
+          .from('world_infos')
+          .select('likes_count')
+          .eq('id', worldInfo.id)
+          .single();
+        
+        if (currentData) {
+          await supabase
+            .from('world_infos')
+            .update({ likes_count: currentData.likes_count + 1 })
+            .eq('id', worldInfo.id);
+        }
 
         if (error) throw error;
 
@@ -177,33 +213,19 @@ export default function PublicWorldInfoProfile() {
   };
 
   const handleUseLorebook = async () => {
-    if (!worldInfo || isUsingLorebook) return;
-
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) {
-      toast({
-        title: "Authentication Required",
-        description: "Please log in to use this lorebook",
-        variant: "destructive"
-      });
-      return;
-    }
-
+    if (!user || !worldInfo) return;
+    
     setIsUsingLorebook(true);
+    
     try {
       if (worldInfo.isUsed) {
-        // Remove from collection
-        const { error } = await supabase
-          .from('world_info_users')
-          .delete()
-          .eq('world_info_id', worldInfo.id)
-          .eq('user_id', user.user.id);
-
-        if (error) throw error;
-
+        // Use the proper function that handles interaction count
+        await removeWorldInfoFromCollection(worldInfo.id);
+        
         setWorldInfo(prev => prev ? {
           ...prev,
-          isUsed: false
+          isUsed: false,
+          interaction_count: Math.max((prev.interaction_count || 0) - 1, 0)
         } : null);
 
         toast({
@@ -211,19 +233,13 @@ export default function PublicWorldInfoProfile() {
           description: "This lorebook has been removed from your collection",
         });
       } else {
-        // Add to collection
-        const { error } = await supabase
-          .from('world_info_users')
-          .insert({
-            world_info_id: worldInfo.id,
-            user_id: user.user.id
-          });
-
-        if (error) throw error;
-
+        // Use the proper function that handles interaction count
+        await addWorldInfoToCollection(worldInfo.id);
+        
         setWorldInfo(prev => prev ? {
           ...prev,
-          isUsed: true
+          isUsed: true,
+          interaction_count: (prev.interaction_count || 0) + 1
         } : null);
 
         toast({
@@ -232,11 +248,11 @@ export default function PublicWorldInfoProfile() {
         });
       }
     } catch (error) {
-      console.error('Error toggling lorebook usage:', error);
+      console.error('Error updating lorebook collection:', error);
       toast({
         title: "Error",
-        description: "Failed to update lorebook collection",
-        variant: "destructive"
+        description: error instanceof Error ? error.message : "Failed to update collection",
+        variant: "destructive",
       });
     } finally {
       setIsUsingLorebook(false);
@@ -261,7 +277,6 @@ export default function PublicWorldInfoProfile() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#121212]">
-        <PublicTopBar />
         <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
@@ -272,7 +287,6 @@ export default function PublicWorldInfoProfile() {
   if (error || !worldInfo) {
     return (
       <div className="min-h-screen bg-[#121212]">
-        <PublicTopBar />
         <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
           <div className="text-center">
             <h2 className="text-2xl font-bold mb-4 text-white">World Info Not Found</h2>
@@ -289,27 +303,11 @@ export default function PublicWorldInfoProfile() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      <PublicTopBar />
       
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
           {/* Header */}
-          <div className="p-6 border-b border-gray-700">
-            <div className="max-w-6xl mx-auto flex items-center justify-between">
-              <h1 className="text-2xl font-bold text-white">
-                {worldInfo?.name || 'World Info Details'}
-              </h1>
-              {canEdit && (
-                <Button
-                  onClick={() => navigate(`/world-info/${id}/edit`)}
-                  className="bg-[#FF7A00] hover:bg-[#FF7A00]/80"
-                >
-                  <Edit2 className="w-4 h-4 mr-2" />
-                  Edit
-                </Button>
-              )}
-            </div>
-          </div>
+          
           
           {/* Content */}
           <div className="flex-1 overflow-hidden">

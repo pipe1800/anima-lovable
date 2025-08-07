@@ -2,7 +2,7 @@ import React from 'react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Menu, Home, Compass, MessageSquare, User, Settings, Crown, Zap, Users, Plus, LogOut, Star } from 'lucide-react';
+import { Menu, Home, Compass, MessageSquare, User, Settings, Crown, Zap, Users, Plus, LogOut, Star, ChevronLeft } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { NSFWToggle } from '@/components/NSFWToggle';
@@ -61,11 +61,11 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
             <Menu className="h-7 w-7" />
           </Button>
         </SheetTrigger>
-      <SheetContent side="left" className="w-80 bg-[#121212] border-gray-700 p-0">
+      <SheetContent side="left" className="w-2/3 md:w-80 bg-[#121212] border-gray-700 p-0 [&>button]:hidden">
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="p-6 border-b border-gray-700">
-            <div className="flex items-center justify-center mb-4">
+          <div className="p-6 border-b border-gray-700 relative">
+            <div className="flex items-center justify-center">
               <img 
                 src={LOGO_URL} 
                 alt="Anima AI Chat" 
@@ -74,24 +74,14 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
                 style={{ imageRendering: 'crisp-edges' }}
               />
             </div>
-            <div className="flex items-center space-x-3">
-              <Avatar className="w-12 h-12 ring-2 ring-[#FF7A00]/50">
-                <AvatarImage 
-                  src={profile?.avatar_url || "https://images.unsplash.com/photo-1649972904349-6e44c42644a7?w=150&h=150&fit=crop&crop=face"} 
-                  alt={profile?.username || "User"} 
-                />
-                <AvatarFallback className="bg-[#FF7A00] text-white font-bold">
-                  {profile?.username?.substring(0, 2).toUpperCase() || user?.email?.substring(0, 2).toUpperCase() || 'U'}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <p className="text-white font-bold">@{username}</p>
-                <div className="flex items-center space-x-1">
-                  <Zap className="w-4 h-4 text-[#FF7A00]" />
-                  <span className="text-[#FF7A00] text-sm font-bold">{userCredits.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
+            
+            {/* Toggle button - matching desktop style */}
+            <button
+              onClick={() => setOpen(false)}
+              className="absolute -right-3 top-1/2 -translate-y-1/2 bg-[#1a1a2e] border border-gray-700 rounded-full p-1 hover:bg-[#FF7A00]/20 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4 text-gray-400" />
+            </button>
           </div>
 
           {/* Navigation */}
@@ -139,13 +129,6 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
         </div>
         </SheetContent>
       </Sheet>
-      
-      {/* Favorite Icon */}
-      {showFavoriteIcon && (
-        <Button variant="ghost" size="icon" className="md:hidden text-white hover:bg-gray-700 p-2">
-          <Star className="h-6 w-6" />
-        </Button>
-      )}
     </div>
   );
 };

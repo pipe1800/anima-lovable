@@ -35,6 +35,7 @@ export interface CharacterCreationData {
   visibility: 'public' | 'unlisted' | 'private';
   nsfw_enabled?: boolean;
   default_persona_id?: string | null;
+  time_awareness_enabled?: boolean;
 }
 
 export const createCharacter = async (characterData: CharacterCreationData) => {
@@ -132,6 +133,36 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
       }
     }
 
+    // ✅ FIX: Handle time awareness setting for new character
+    if (characterData.time_awareness_enabled !== undefined) {
+      const timeAwarenessValue = characterData.time_awareness_enabled;
+      
+      console.log('⏰ Setting time awareness for new character:', {
+        characterId: character.id,
+        userId: user.user.id,
+        time_awareness_enabled: timeAwarenessValue
+      });
+
+      // Insert user character settings for time awareness
+      const { error: settingsError } = await supabase
+        .from('user_character_settings')
+        .upsert({
+          user_id: user.user.id,
+          character_id: character.id,
+          time_awareness_enabled: timeAwarenessValue,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,character_id'
+        });
+
+      if (settingsError) {
+        console.error('❌ Failed to set time awareness for new character:', settingsError);
+      } else {
+        console.log('✅ Time awareness setting created successfully for new character');
+      }
+    }
+
     return character;
   } catch (error) {
     console.error('Error in createCharacter:', error);
@@ -142,6 +173,9 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
 export const updateCharacter = async (characterId: string, characterData: CharacterCreationData) => {
   console.log('🔄 updateCharacter called with:', {
     characterId,
+    title_field: characterData.title,
+    title_defined: characterData.title !== undefined,
+    title_truthy: !!characterData.title,
     characterData: JSON.stringify(characterData, null, 2)
   });
 
@@ -154,11 +188,17 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       name: characterData.name,
       short_description: characterData.description, // ✅ Map description to short_description
       avatar_url: characterData.avatar,
-      tagline: characterData.title, // ✅ Map title to tagline
+      tagline: characterData.title || '', // ✅ Ensure title is mapped to tagline (with fallback)
       visibility: characterData.visibility
     };
 
-    console.log('📝 Sending character update to database:', characterUpdate);
+    console.log('📝 Sending character update to database:', {
+      ...characterUpdate,
+      debug_title_mapping: {
+        form_title: characterData.title,
+        will_become_tagline: characterUpdate.tagline
+      }
+    });
 
     const { data: character, error: characterError } = await supabase
       .from('characters')
@@ -178,7 +218,44 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       throw new Error('Character update returned no data');
     }
 
-    console.log('✅ Character record updated successfully:', character);
+    console.log('✅ Character record updated successfully:', {
+      id: character.id,
+      name: character.name,
+      tagline: character.tagline,
+      short_description: character.short_description,
+      visibility: character.visibility,
+      avatar_url: character.avatar_url
+    });
+
+    // ✅ FIX: Handle time awareness setting update
+    if (characterData.time_awareness_enabled !== undefined) {
+      const timeAwarenessValue = characterData.time_awareness_enabled;
+      
+      console.log('⏰ Updating time awareness setting:', {
+        characterId,
+        userId: user.user.id,
+        time_awareness_enabled: timeAwarenessValue,
+        value_type: typeof timeAwarenessValue
+      });
+
+      // Update or insert user character settings for time awareness
+      const { error: settingsError } = await supabase
+        .from('user_character_settings')
+        .upsert({
+          user_id: user.user.id,
+          character_id: characterId,
+          time_awareness_enabled: timeAwarenessValue,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,character_id'
+        });
+
+      if (settingsError) {
+        console.error('❌ Failed to update time awareness setting:', settingsError);
+      } else {
+        console.log('✅ Time awareness setting updated successfully');
+      }
+    }
 
     // Process example dialogues to ensure they're in the correct format
     const processedDialogue = {

@@ -73,7 +73,6 @@ export default function StandardizedWorldInfoCard({
     creator_id,
     profiles,
     world_info_entries = [],
-    world_info_likes = [],
     entriesCount = 0,
     entry_count = 0,
     likesCount = 0,
@@ -85,7 +84,7 @@ export default function StandardizedWorldInfoCard({
 
   // Normalize data - handle both count properties and array lengths
   const totalEntries = entriesCount || entry_count || world_info_entries?.length || 0;
-  const totalLikes = likesCount || likes_count || like_count || world_info_likes?.length || 0;
+  const totalLikes = likesCount || likes_count || like_count || 0;
   const totalUses = (usage_count || 0) + (interaction_count || 0);
   const displayTags = tags.slice(0, 4);
   const creatorName = creator?.username || profiles?.username || 'Anonymous';
@@ -141,7 +140,7 @@ export default function StandardizedWorldInfoCard({
     <>
       <Card 
         className={cn(
-          "bg-[#1a1a2e] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-2xl hover:shadow-[#FF7A00]/20 group overflow-hidden hover:scale-105 hover:-translate-y-2 transform cursor-pointer",
+          "bg-[#1a1a2e] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-2xl hover:shadow-[#FF7A00]/20 group overflow-hidden hover:scale-105 hover:-translate-y-2 transform cursor-pointer flex flex-col h-full",
           className
         )}
         style={{
@@ -149,7 +148,7 @@ export default function StandardizedWorldInfoCard({
         }}
         onClick={handleView}
       >
-        <CardContent className="p-0">
+        <CardContent className="p-0 flex flex-col h-full">
           {/* Avatar Section */}
           <div className="relative h-32 bg-gradient-to-br from-[#FF7A00]/10 to-[#FF7A00]/5 flex items-center justify-center">
             <Avatar className="w-24 h-24 ring-4 ring-[#FF7A00]/30 group-hover:ring-[#FF7A00]/60 transition-all duration-300">
@@ -220,89 +219,112 @@ export default function StandardizedWorldInfoCard({
           </div>
 
           {/* Content Section */}
-          <div className="p-5 space-y-4">
-            {/* Title */}
-            <h3 className="text-white font-bold text-xl group-hover:text-[#FF7A00] transition-colors line-clamp-1">
-              {name}
-            </h3>
+          <div className="p-3 flex flex-col flex-1">
+            <div className="flex flex-col h-full">
+              {/* Title - Fixed space */}
+              <div className="mb-2">
+                <h3 className="text-white font-medium text-lg group-hover:text-[#FF7A00] transition-colors line-clamp-1">
+                  {name}
+                </h3>
+              </div>
 
-            {/* Description */}
-            {short_description && (
-              <p className="text-gray-400 text-sm line-clamp-2">
-                {short_description}
-              </p>
-            )}
-
-            {/* Tags */}
-            {displayTags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {displayTags.map((tag, idx) => (
-                  <Badge 
-                    key={idx}
-                    variant="secondary"
-                    className="text-xs bg-gray-700/50 text-gray-300 border-gray-600"
-                  >
-                    {typeof tag === 'string' ? tag : tag.name}
-                  </Badge>
-                ))}
-                {tags.length > 4 && (
-                  <Badge 
-                    variant="secondary"
-                    className="text-xs bg-gray-700/50 text-gray-300 border-gray-600"
-                  >
-                    +{tags.length - 4}
-                  </Badge>
+              {/* Description - Fixed space */}
+              <div className="mb-2 h-8">
+                {short_description ? (
+                  <p className="text-gray-400 text-xs line-clamp-2">
+                    {short_description}
+                  </p>
+                ) : (
+                  <div className="h-8"></div>
                 )}
               </div>
-            )}
 
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-2 text-sm">
-              <div className="flex items-center gap-1.5 text-gray-300">
-                <FileText className="w-4 h-4 text-gray-400" />
-                <span>{totalEntries}</span>
+              {/* Tags - Fixed space */}
+              <div className="mb-2 h-5">
+                {displayTags.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {displayTags.map((tag, idx) => (
+                      <Badge 
+                        key={idx}
+                        variant="secondary"
+                        className="text-[10px] bg-gray-700/50 text-gray-300 border-gray-600 px-1.5 py-0.5"
+                      >
+                        {typeof tag === 'string' ? tag : tag.name}
+                      </Badge>
+                    ))}
+                    {tags.length > 4 && (
+                      <Badge 
+                        variant="secondary"
+                        className="text-[10px] bg-gray-700/50 text-gray-300 border-gray-600 px-1.5 py-0.5"
+                      >
+                        +{tags.length - 4}
+                      </Badge>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-5"></div>
+                )}
               </div>
-              <div className="flex items-center gap-1.5 text-gray-300">
-                <Heart className="w-4 h-4 text-gray-400" />
-                <span>{totalLikes}</span>
+
+              {/* Spacer to push content to bottom */}
+              <div className="flex-1"></div>
+
+              {/* Stats - Always at same position */}
+              <div className="mb-2">
+                <div className="grid grid-cols-3 gap-1 text-xs">
+                  <div className="flex items-center gap-1 text-gray-300">
+                    <FileText className="w-3 h-3 text-gray-400" />
+                    <span>{totalEntries}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-gray-300">
+                    <Heart className="w-3 h-3 text-gray-400" />
+                    <span>{totalLikes}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-gray-300">
+                    <Download className="w-3 h-3 text-gray-400" />
+                    <span>{totalUses}</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 text-gray-300">
-                <Users className="w-4 h-4 text-gray-400" />
-                <span>{totalUses}</span>
+
+              {/* Creator info - Fixed space */}
+              <div className="mb-2">
+                {showCreator ? (
+                  <div className="pt-2 border-t border-gray-700/50 flex items-center gap-1.5">
+                    <Avatar className="w-4 h-4">
+                      {creatorAvatar ? (
+                        <AvatarImage src={creatorAvatar} />
+                      ) : (
+                        <AvatarFallback className="bg-gray-700 text-[10px]">
+                          {creatorName[0]?.toUpperCase()}
+                        </AvatarFallback>
+                      )}
+                    </Avatar>
+                    <span className="text-xs text-gray-400">
+                      by <span className="text-gray-300">@{creatorName}</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="h-6"></div>
+                )}
               </div>
             </div>
 
-            {/* Creator info */}
-            {showCreator && (
-              <div className="pt-3 border-t border-gray-700/50 flex items-center gap-2">
-                <Avatar className="w-6 h-6">
-                  {creatorAvatar ? (
-                    <AvatarImage src={creatorAvatar} />
-                  ) : (
-                    <AvatarFallback className="bg-gray-700 text-xs">
-                      {creatorName[0]?.toUpperCase()}
-                    </AvatarFallback>
-                  )}
-                </Avatar>
-                <span className="text-sm text-gray-400">
-                  by <span className="text-gray-300">@{creatorName}</span>
-                </span>
-              </div>
-            )}
-
-            {/* Action Button */}
-            <Button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleView();
-              }}
-              variant="outline"
-              size="sm"
-              className="w-full border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 hover:border-[#FF7A00] bg-transparent"
-            >
-              <Eye className="w-4 h-4 mr-2" />
-              View Details
-            </Button>
+            {/* Action Button - Always at bottom */}
+            <div className="pt-2 border-t border-gray-700/30">
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleView();
+                }}
+                variant="outline"
+                size="sm"
+                className="w-full h-7 text-xs border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 hover:border-[#FF7A00] bg-transparent"
+              >
+                <Eye className="w-3 h-3 mr-1" />
+                View Details
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

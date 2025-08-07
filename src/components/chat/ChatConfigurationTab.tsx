@@ -740,26 +740,26 @@ export const ChatConfigurationTab = ({
         </div>
       </Card>
 
-      {/* Save Button - Fixed Position */}
+      {/* Save Button - Mobile Responsive Fixed Position */}
       {hasUnsavedChanges && (
-        <div className="fixed bottom-6 right-6 z-50">
+        <div className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 z-50">
           <div className="flex gap-2">
             <Button
               variant="outline"
               onClick={handleDiscardChanges}
               disabled={saving}
-              className="bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700"
+              className="bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700 text-sm"
             >
               Discard
             </Button>
             <Button
               onClick={handleSaveChanges}
               disabled={saving || !hasUnsavedChanges}
-              className="bg-[#FF7A00] hover:bg-[#FF8A10] text-white shadow-lg"
+              className="bg-[#FF7A00] hover:bg-[#FF8A10] text-white shadow-lg text-sm"
             >
               {saving ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                  <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
                   Saving...
                 </>
               ) : (

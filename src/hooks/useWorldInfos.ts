@@ -29,7 +29,6 @@ const fetchUserWorldInfos = async (userId: string): Promise<WorldInfoWithDetails
     .select(`
       *,
       world_info_entries(id),
-      world_info_likes(id),
       world_info_tags(
         tags(id, name)
       )
@@ -46,7 +45,7 @@ const fetchUserWorldInfos = async (userId: string): Promise<WorldInfoWithDetails
   return (worldInfosWithCounts || []).map(worldInfo => ({
     ...worldInfo,
     entriesCount: worldInfo.world_info_entries?.length || 0,
-    likesCount: worldInfo.world_info_likes?.length || 0,
+    likesCount: worldInfo.likes_count || 0,
     tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || []
   }));
 };
@@ -59,7 +58,6 @@ const fetchUserWorldInfoCollection = async (userId: string): Promise<WorldInfoWi
       world_infos(
         *,
         world_info_entries(id),
-        world_info_likes(id),
         world_info_tags(
           tags(id, name)
         )
@@ -91,7 +89,7 @@ const fetchUserWorldInfoCollection = async (userId: string): Promise<WorldInfoWi
   return worldInfos.map(worldInfo => ({
     ...worldInfo,
     entriesCount: worldInfo.world_info_entries?.length || 0,
-    likesCount: worldInfo.world_info_likes?.length || 0,
+    likesCount: worldInfo.likes_count || 0,
     tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || [],
     creator: creatorsMap.get(worldInfo.creator_id)
   }));
@@ -102,8 +100,29 @@ export const useUserWorldInfos = () => {
   
   return useQuery({
     queryKey: ['user-world-infos', user?.id],
-    queryFn: () => fetchUserWorldInfos(user!.id),
-    enabled: !!user?.id,
+    queryFn: async () => {
+      if (!user) return [];
+      
+      // Get user's own world infos
+      const ownWorldInfosPromise = fetchUserWorldInfos(user.id);
+      
+      // Get user's collected world infos
+      const collectionPromise = fetchUserWorldInfoCollection(user.id);
+      
+      const [ownWorldInfos, collectionWorldInfos] = await Promise.all([
+        ownWorldInfosPromise,
+        collectionPromise
+      ]);
+      
+      // Combine both lists and remove duplicates
+      const allWorldInfos = [...ownWorldInfos, ...collectionWorldInfos];
+      const uniqueWorldInfos = allWorldInfos.filter((worldInfo, index, self) => 
+        index === self.findIndex(w => w.id === worldInfo.id)
+      );
+      
+      return uniqueWorldInfos;
+    },
+    enabled: !!user,
     staleTime: 1000 * 60 * 5, // 5 minutes
     gcTime: 1000 * 60 * 10, // 10 minutes
   });
@@ -184,8 +203,10 @@ export const usePublicWorldInfos = () => {
         .from('world_infos')
         .select(`
           *,
-          world_info_likes(count),
-          world_info_favorites(count)
+          world_info_entries(id),
+          world_info_tags(
+            tags(id, name)
+          )
         `)
         .eq('visibility', 'public')
         .order('created_at', { ascending: false });
@@ -208,8 +229,9 @@ export const usePublicWorldInfos = () => {
       return worldInfos.map(worldInfo => ({
         ...worldInfo,
         creator: creatorsMap.get(worldInfo.creator_id),
-        likes_count: worldInfo.world_info_likes?.length || 0,
-        favorites_count: worldInfo.world_info_favorites?.length || 0,
+        entriesCount: worldInfo.world_info_entries?.length || 0,
+        likesCount: worldInfo.likes_count || 0,
+        tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || [],
         usage_count: worldInfo.interaction_count
       }));
     },

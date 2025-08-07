@@ -401,38 +401,32 @@ const ChatInterface = ({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-[#121212]">
       {/* Debug Panel - Lazy loaded for performance */}
       <Suspense fallback={<LoadingSpinner />}>
         <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
       </Suspense>
       
-      {/* Insufficient Credits Modal */}
-      <InsufficientCreditsModal
-        isOpen={showInsufficientCreditsModal}
-        onClose={handleCloseInsufficientCreditsModal}
-        currentBalance={creditsBalance}
-        onUpgrade={handleUpgrade}
-      />
-      
-      {/* Messages Area - Simplified without frontend streaming */}
-      <ChatMessages 
-        chatId={currentChatId}
-        character={character}
-        trackedContext={effectiveTrackedContext}
-        streamingMessage="" 
-        isStreaming={isStreaming}
-        messages={messages}
-        hasMore={hasMore}
-        isFetchingNextPage={isFetchingNextPage}
-        isLoadingMessages={isLoadingMessages}
-        fetchNextPage={fetchNextPage}
-        isRealtimeConnected={isRealtimeConnected}
-        debugInfo={debugInfo}
-      />
+      {/* Messages Area - Mobile Responsive */}
+      <div className="flex-1 overflow-hidden">
+        <ChatMessages 
+          chatId={currentChatId}
+          character={character}
+          trackedContext={effectiveTrackedContext}
+          streamingMessage="" 
+          isStreaming={isStreaming}
+          messages={messages}
+          hasMore={hasMore}
+          isFetchingNextPage={isFetchingNextPage}
+          isLoadingMessages={isLoadingMessages}
+          fetchNextPage={fetchNextPage}
+          isRealtimeConnected={isRealtimeConnected}
+          debugInfo={debugInfo}
+        />
+      </div>
 
-      {/* Typing Indicator with Reserved Space */}
-      <div className="px-6 pb-2 min-h-[2.5rem] flex items-center">
+      {/* Typing Indicator with Reserved Space - Mobile Responsive */}
+      <div className="px-3 sm:px-6 pb-2 min-h-[2.5rem] flex items-center">
         <div 
           className={`flex items-center space-x-2 text-gray-400 transition-all duration-300 ${
             (isTyping || isStreaming) ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
@@ -443,33 +437,41 @@ const ChatInterface = ({
             <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
             <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
           </div>
-          <span className="text-sm">
+          <span className="text-xs sm:text-sm">
             {isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`}
           </span>
         </div>
       </div>
 
-      {/* Input Form */}
-      <form onSubmit={handleSendMessage} className="p-4 border-t bg-background">
-        <div className="flex gap-2">
+      {/* Input Area - Mobile Responsive */}
+      <div className="border-t border-gray-700/50 bg-[#0f0f0f] p-3 sm:p-4">
+        <form onSubmit={handleSendMessage} className="flex items-center space-x-2 sm:space-x-3">
           <input
             ref={inputRef}
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={`Message ${character.name}...`}
-            className="flex-1 px-4 py-2 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+            className="flex-1 bg-[#1a1a2e] border border-gray-700/50 rounded-lg px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-white placeholder-gray-400 focus:outline-none focus:border-[#FF7A00] focus:ring-1 focus:ring-[#FF7A00]/20"
             disabled={isTyping || !currentChatId}
           />
           <button
             type="submit"
             disabled={!inputValue.trim() || isTyping || !currentChatId}
-            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50 disabled:cursor-not-allowed px-3 sm:px-4 py-2 sm:py-3 rounded-lg transition-colors h-auto"
           >
-            <Send className="w-5 h-5" />
+            <Send className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
-        </div>
-      </form>
+        </form>
+      </div>
+
+      {/* Modals */}
+      <InsufficientCreditsModal
+        isOpen={showInsufficientCreditsModal}
+        onClose={handleCloseInsufficientCreditsModal}
+        currentBalance={creditsBalance}
+        onUpgrade={handleUpgrade}
+      />
     </div>
   );
 };

@@ -37,7 +37,6 @@ export function useUserWorldInfos() {
         .select(`
           *,
           world_info_entries(id),
-          world_info_likes(id),
           world_info_tags(
             tags(*)
           )
@@ -50,7 +49,7 @@ export function useUserWorldInfos() {
       return data.map(worldInfo => ({
         ...worldInfo,
         entriesCount: worldInfo.world_info_entries?.length || 0,
-        likesCount: worldInfo.world_info_likes?.length || 0,
+        likesCount: worldInfo.likes_count || 0,
         tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || []
       }));
     },
@@ -69,13 +68,11 @@ export function useUserWorldInfoCollection() {
       if (!user) return [];
       
       const { data, error } = await supabase
-        .from('world_info_likes')
+        .from('world_info_user_likes')
         .select(`
           world_infos(
             *,
             world_info_entries(count),
-            world_info_likes(count),
-            profiles!world_infos_creator_id_fkey(username),
             world_info_tags(
               tags(*)
             )
@@ -91,8 +88,7 @@ export function useUserWorldInfoCollection() {
         .map(worldInfo => ({
           ...worldInfo,
           entriesCount: worldInfo.world_info_entries?.[0]?.count || 0,
-          likesCount: worldInfo.world_info_likes?.[0]?.count || 0,
-          creatorUsername: worldInfo.profiles?.username,
+          likesCount: worldInfo.likes_count || 0,
           tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || []
         }));
     },
@@ -110,14 +106,12 @@ export function useWorldInfo(id: string) {
         .from('world_infos')
         .select(`
           *,
-          profiles!world_infos_creator_id_fkey(username, avatar_url),
           world_info_entries(
             id, keywords, entry_text, created_at
           ),
           world_info_tags(
             tags(*)
-          ),
-          world_info_likes(count)
+          )
         `)
         .eq('id', id)
         .single();
@@ -126,10 +120,9 @@ export function useWorldInfo(id: string) {
       
       return {
         ...data,
-        creator: data.profiles,
         entries: data.world_info_entries || [],
         tags: data.world_info_tags?.map(wt => wt.tags).filter(Boolean) || [],
-        likesCount: data.world_info_likes?.[0]?.count || 0
+        likesCount: data.likes_count || 0
       };
     },
     enabled: !!id,
@@ -176,6 +169,52 @@ export function useWorldInfoTags(worldInfoId: string) {
   });
 }
 
+// Get public world infos
+export function usePublicWorldInfos() {
+  return useQuery({
+    queryKey: ['public-world-infos'],
+    queryFn: async () => {
+      const { data: worldInfos, error } = await supabase
+        .from('world_infos')
+        .select(`
+          *,
+          world_info_entries(id),
+          world_info_tags(
+            tags(id, name)
+          )
+        `)
+        .eq('visibility', 'public')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw new Error('Failed to fetch public world infos');
+      }
+
+      if (!worldInfos || worldInfos.length === 0) return [];
+
+      // Get creator profiles separately
+      const creatorIds = [...new Set(worldInfos.map(w => w.creator_id))];
+      const { data: creators } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url')
+        .in('id', creatorIds);
+
+      const creatorsMap = new Map(creators?.map(c => [c.id, c]) || []);
+
+      return worldInfos.map(worldInfo => ({
+        ...worldInfo,
+        creator: creatorsMap.get(worldInfo.creator_id),
+        entriesCount: worldInfo.world_info_entries?.length || 0,
+        likesCount: worldInfo.likes_count || 0,
+        tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || [],
+        usage_count: worldInfo.interaction_count
+      }));
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
+    gcTime: 1000 * 60 * 10, // 10 minutes
+  });
+}
+
 // Like/unlike world info mutation
 export function useWorldInfoLike() {
   const queryClient = useQueryClient();
@@ -186,17 +225,47 @@ export function useWorldInfoLike() {
       if (!user) throw new Error('User not authenticated');
       
       if (liked) {
+        // Add like
         const { error } = await supabase
-          .from('world_info_likes')
+          .from('world_info_user_likes')
           .insert({ world_info_id: worldInfoId, user_id: user.id });
         if (error) throw error;
+        
+        // Increment likes_count
+        const { data: currentData } = await supabase
+          .from('world_infos')
+          .select('likes_count')
+          .eq('id', worldInfoId)
+          .single();
+        
+        if (currentData) {
+          await supabase
+            .from('world_infos')
+            .update({ likes_count: currentData.likes_count + 1 })
+            .eq('id', worldInfoId);
+        }
       } else {
+        // Remove like
         const { error } = await supabase
-          .from('world_info_likes')
+          .from('world_info_user_likes')
           .delete()
           .eq('world_info_id', worldInfoId)
           .eq('user_id', user.id);
         if (error) throw error;
+        
+        // Decrement likes_count
+        const { data: currentData } = await supabase
+          .from('world_infos')
+          .select('likes_count')
+          .eq('id', worldInfoId)
+          .single();
+        
+        if (currentData) {
+          await supabase
+            .from('world_infos')
+            .update({ likes_count: Math.max(currentData.likes_count - 1, 0) })
+            .eq('id', worldInfoId);
+        }
       }
     },
     onSuccess: (_, { worldInfoId }) => {
@@ -211,8 +280,9 @@ export function useWorldInfoLike() {
 export const useWorldInfoQueries = {
   useAllTags,
   useUserWorldInfos,
-  useWorldInfoCollection,
+  useUserWorldInfoCollection,
   useWorldInfo,
   useWorldInfoEntries,
+  usePublicWorldInfos,
   useWorldInfoLike
 };

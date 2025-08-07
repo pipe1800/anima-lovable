@@ -404,6 +404,7 @@ export const getUserCharacters = async (userId: string) => {
       id,
       name,
       short_description,
+      tagline,
       avatar_url,
       visibility,
       interaction_count,
@@ -466,6 +467,7 @@ export const getCharacterDetails = async (characterId: string) => {
       id,
       name,
       short_description,
+      tagline,
       avatar_url,
       visibility,
       interaction_count,
@@ -1060,8 +1062,8 @@ export const getPublicWorldInfos = async (limit = 20, offset = 0) => {
 
       // Get likes count
       const { count: likesCount } = await supabase
-        .from('world_info_likes')
-        .select('id', { count: 'exact' })
+        .from('world_info_user_likes')
+        .select('*', { count: 'exact' })
         .eq('world_info_id', worldInfo.id)
 
       // Get favorites count
@@ -1201,8 +1203,8 @@ export const searchPublicWorldInfos = async (params: SearchParams): Promise<Sear
 
       // Get likes count
       const { count: likesCount } = await supabase
-        .from('world_info_likes')
-        .select('id', { count: 'exact' })
+        .from('world_info_user_likes')
+        .select('*', { count: 'exact' })
         .eq('world_info_id', worldInfo.id);
 
       // Get favorites count

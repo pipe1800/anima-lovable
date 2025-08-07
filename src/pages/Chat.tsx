@@ -324,38 +324,42 @@ const Chat = () => {
   return (
     <SidebarProvider>
       <div className="flex h-screen w-full">
-        {/* Onboarding Checklist - shows completion animation */}
+        {/* Onboarding Checklist - Mobile Responsive */}
         {showOnboarding && !onboardingCompleted && (
-          <OnboardingChecklist
-            currentStep={isFirstMessage ? 2 : 3}
-            isVisible={true}
-            isCompleting={!isFirstMessage}
-          />
+          <div className="fixed inset-0 z-50 md:relative md:inset-auto">
+            <OnboardingChecklist
+              currentStep={isFirstMessage ? 2 : 3}
+              isVisible={true}
+              isCompleting={!isFirstMessage}
+            />
+          </div>
         )}
 
         {/* Main Chat Layout */}
-        <ChatLayout 
-          character={character} 
-          currentChatId={currentChatId}
-          trackedContext={trackedContext}
-          onContextUpdate={setTrackedContext}
-          onPersonaChange={handlePersonaChange}
-          onWorldInfoChange={handleWorldInfoChange}
-          creditsBalance={creditsBalance}
-        >
-          <ChatInterface
-            character={character}
-            onFirstMessage={handleFirstMessage}
-            existingChatId={currentChatId}
+        <div className="flex-1 flex flex-col h-full">
+          <ChatLayout 
+            character={character} 
+            currentChatId={currentChatId}
             trackedContext={trackedContext}
             onContextUpdate={setTrackedContext}
-            selectedPersonaId={selectedPersonaId}
-            selectedWorldInfoId={selectedWorldInfoId}
-            onChatCreated={handleChatCreated}
-            onCreditsUpdate={handleCreditsUpdate}
-            onMessageSent={handleMessageSent}
-          />
-        </ChatLayout>
+            onPersonaChange={handlePersonaChange}
+            onWorldInfoChange={handleWorldInfoChange}
+            creditsBalance={creditsBalance}
+          >
+            <ChatInterface
+              character={character}
+              onFirstMessage={handleFirstMessage}
+              existingChatId={currentChatId}
+              trackedContext={trackedContext}
+              onContextUpdate={setTrackedContext}
+              selectedPersonaId={selectedPersonaId}
+              selectedWorldInfoId={selectedWorldInfoId}
+              onChatCreated={handleChatCreated}
+              onCreditsUpdate={handleCreditsUpdate}
+              onMessageSent={handleMessageSent}
+            />
+          </ChatLayout>
+        </div>
 
         {/* Tutorial Manager */}
         <TutorialManager shouldStart={fromOnboarding && onboardingCompleted} />

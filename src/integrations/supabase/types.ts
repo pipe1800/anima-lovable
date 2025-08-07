@@ -1057,7 +1057,7 @@ export type Database = {
           },
         ]
       }
-      world_info_likes: {
+      world_info_user_likes: {
         Row: {
           created_at: string
           id: string
@@ -1151,6 +1151,7 @@ export type Database = {
           creator_id: string
           id: string
           interaction_count: number
+          likes_count: number
           name: string
           short_description: string | null
           updated_at: string
@@ -1161,6 +1162,7 @@ export type Database = {
           creator_id: string
           id?: string
           interaction_count?: number
+          likes_count?: number
           name: string
           short_description?: string | null
           updated_at?: string
@@ -1171,6 +1173,7 @@ export type Database = {
           creator_id?: string
           id?: string
           interaction_count?: number
+          likes_count?: number
           name?: string
           short_description?: string | null
           updated_at?: string
