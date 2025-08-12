@@ -160,6 +160,7 @@ const Onboarding = () => {
 
   const getCanGoNext = () => {
     if (currentStep === 0) return selectedVibes.length > 0;
+    if (currentStep === 1) return false; // Disable Next on ProfileSetup; use Save & Continue instead
     if (currentStep === 3) return false; // Disable next button on character selection step
     return true;
   };

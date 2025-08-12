@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -26,15 +25,29 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
   const [usernameError, setUsernameError] = useState('');
   
-  // Check if user needs to set username (social auth users)
-  const needsUsername = !profile?.username || profile.username === user?.email?.split('@')[0];
+  // Detect if the account was created via social auth (Google/Discord)
+  const provider = (user as any)?.app_metadata?.provider || (user as any)?.app_metadata?.providers?.[0];
+  const isSocialSignup = provider === 'google' || provider === 'discord';
+
+  // Detect auto-generated username from DB trigger: 'user_' + first 8 chars of id
+  const autoUsername = user?.id ? `user_${user.id.slice(0, 8)}` : undefined;
+  const isAutoUsername = profile?.username === autoUsername || (!!profile?.username && profile.username.startsWith('user_') && profile.username.length === 13);
+  
+  // Require a username if it's missing, equals email local-part, or is auto-generated placeholder
+  const needsUsername = !profile?.username || profile.username === user?.email?.split('@')[0] || isAutoUsername;
 
   useEffect(() => {
-    // Initialize username from profile if it exists
-    if (profile?.username && !needsUsername) {
-      setUsername(profile.username);
+    // Initialize username: if auto placeholder, suggest email local-part; else use existing; else suggest from email
+    if (profile?.username) {
+      if (isAutoUsername) {
+        if (user?.email) setUsername(user.email.split('@')[0].toLowerCase());
+      } else {
+        setUsername(profile.username);
+      }
+    } else if (user?.email) {
+      setUsername(user.email.split('@')[0].toLowerCase());
     }
-  }, [profile, needsUsername]);
+  }, [profile, user?.email, isAutoUsername]);
 
   // Debounced username check
   useEffect(() => {
@@ -66,7 +79,7 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
           .neq('id', user?.id) // Exclude current user
           .single();
 
-        if (error && error.code === 'PGRST116') {
+        if (error && (error as any).code === 'PGRST116') {
           // No rows returned means username is available
           setUsernameAvailable(true);
         } else if (data) {
@@ -142,12 +155,6 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
         <p className="text-gray-400 text-center mb-4 text-sm sm:text-base">
           {needsUsername ? 'Choose your username and personalize your profile' : 'Personalize your profile (optional)'}
         </p>
-        <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 mb-6">
-          <p className="text-orange-200 text-sm text-center">
-            <strong>Note:</strong> This profile information is for your account only and won't be shared with AI characters. 
-            In the next step, you'll create personas that the AI will interact with during conversations.
-          </p>
-        </div>
 
         <div className="space-y-6">
           {/* Username field - only show if needed  */}
