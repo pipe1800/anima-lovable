@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -60,9 +59,7 @@ const VibeSelection = ({ selectedVibes, setSelectedVibes }: VibeSelectionProps) 
       </p>
 
       <div className="overflow-visible p-4 -m-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1.5 sm:gap-2 md:gap-3 mb-8 max-h-[60vh] overflow-y-auto px-1" style="
-    padding: 10px;
-">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1.5 sm:gap-2 md:gap-3 mb-8 max-h-[60vh] overflow-y-auto px-1" style={{ padding: 10 }}>
         {vibes.map((vibe) => {
           const IconComponent = vibe.icon;
           const isSelected = selectedVibes.includes(vibe.id);
