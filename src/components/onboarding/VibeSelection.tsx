@@ -97,4 +97,4 @@ const VibeSelection = ({ selectedVibes, setSelectedVibes }: VibeSelectionProps) 
   );
 };
 
-export default VibeSelection;
+export default VibeSelection; 
