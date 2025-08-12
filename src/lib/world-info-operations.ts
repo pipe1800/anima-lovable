@@ -71,7 +71,7 @@ export const getWorldInfosByUser = async () => {
 
         // Get likes count
         const { count: likesCount } = await supabase
-          .from('world_info_likes')
+          .from('world_info_user_likes')
           .select('*', { count: 'exact', head: true })
           .eq('world_info_id', worldInfo.id);
 
@@ -142,7 +142,7 @@ export const getUserWorldInfoCollection = async () => {
 
         // Get likes count
         const { count: likesCount } = await supabase
-          .from('world_info_likes')
+          .from('world_info_user_likes')
           .select('*', { count: 'exact', head: true })
           .eq('world_info_id', worldInfo.id);
 
@@ -532,33 +532,21 @@ export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
 
     const tags = worldInfoTags?.map(wt => wt.tag) || [];
 
-    // Fetch like and favorite status if user is authenticated
+    // Fetch like status if user is authenticated
     let isLiked = false;
-    let isFavorited = false;
     let isUsed = false;
-    let likesCount = 0;
-    let favoritesCount = 0;
 
     if (isAuthenticated) {
-      // Check if user has liked this world info
-      const { data: likeData } = await supabase
-        .from('world_info_likes')
-        .select('id')
+      // Check if user has liked this world info - only select what we need
+      const { data: likeData, error: likeError } = await supabase
+        .from('world_info_user_likes')
+        .select('user_id')
         .eq('world_info_id', worldInfoId)
         .eq('user_id', user.user.id)
-        .single();
+        .maybeSingle();
 
-      isLiked = !!likeData;
-
-      // Check if user has favorited this world info
-      const { data: favoriteData } = await supabase
-        .from('world_info_favorites')
-        .select('id')
-        .eq('world_info_id', worldInfoId)
-        .eq('user_id', user.user.id)
-        .single();
-
-      isFavorited = !!favoriteData;
+      // Ignore errors for likes check, just default to false
+      isLiked = !likeError && !!likeData;
 
       // Check if user is using this world info
       const { data: usageData } = await supabase
@@ -566,34 +554,21 @@ export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
         .select('id')
         .eq('world_info_id', worldInfoId)
         .eq('user_id', user.user.id)
-        .single();
+        .maybeSingle();
 
       isUsed = !!usageData;
     }
 
-    // Get total likes and favorites count
-    const { count: likesCountData } = await supabase
-      .from('world_info_likes')
-      .select('*', { count: 'exact', head: true })
-      .eq('world_info_id', worldInfoId);
-
-    const { count: favoritesCountData } = await supabase
-      .from('world_info_favorites')
-      .select('*', { count: 'exact', head: true })
-      .eq('world_info_id', worldInfoId);
-
-    likesCount = likesCountData || 0;
-    favoritesCount = favoritesCountData || 0;
+    // Get total likes count - use the likes_count column from world_infos table
+    const likesCount = worldInfo.likes_count || 0;
 
     return {
       ...worldInfo,
       entries: entries || [],
       tags,
       isLiked,
-      isFavorited,
       isUsed,
       likesCount,
-      favoritesCount,
       creator: creatorData
     };
   } catch (error) {
@@ -611,31 +586,46 @@ export const toggleWorldInfoLike = async (worldInfoId: string) => {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('Not authenticated');
 
-    // Check if already liked
+    // Check if already liked - using correct table name
     const { data: existingLike } = await supabase
-      .from('world_info_likes')
-      .select('id')
+      .from('world_info_user_likes')
+      .select('*')
       .eq('world_info_id', worldInfoId)
       .eq('user_id', user.user.id)
       .single();
 
     if (existingLike) {
-      // Unlike
+      // Unlike - using correct delete approach for composite key table
       const { error } = await supabase
-        .from('world_info_likes')
+        .from('world_info_user_likes')
         .delete()
-        .eq('id', existingLike.id);
+        .eq('world_info_id', worldInfoId)
+        .eq('user_id', user.user.id);
 
       if (error) {
         console.error('Error removing like:', error);
         throw new Error('Failed to remove like');
       }
 
+      // Decrement likes_count
+      const { data: currentData } = await supabase
+        .from('world_infos')
+        .select('likes_count')
+        .eq('id', worldInfoId)
+        .single();
+      
+      if (currentData) {
+        await supabase
+          .from('world_infos')
+          .update({ likes_count: Math.max(currentData.likes_count - 1, 0) })
+          .eq('id', worldInfoId);
+      }
+
       return { isLiked: false };
     } else {
       // Like
       const { error } = await supabase
-        .from('world_info_likes')
+        .from('world_info_user_likes')
         .insert({
           world_info_id: worldInfoId,
           user_id: user.user.id
@@ -644,6 +634,20 @@ export const toggleWorldInfoLike = async (worldInfoId: string) => {
       if (error) {
         console.error('Error adding like:', error);
         throw new Error('Failed to add like');
+      }
+
+      // Increment likes_count
+      const { data: currentData } = await supabase
+        .from('world_infos')
+        .select('likes_count')
+        .eq('id', worldInfoId)
+        .single();
+      
+      if (currentData) {
+        await supabase
+          .from('world_infos')
+          .update({ likes_count: currentData.likes_count + 1 })
+          .eq('id', worldInfoId);
       }
 
       return { isLiked: true };
@@ -659,15 +663,20 @@ export const addWorldInfoToCollection = async (worldInfoId: string) => {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('Not authenticated');
 
+    console.log('=== START addWorldInfoToCollection ===');
+    console.log('WorldInfo ID:', worldInfoId);
+    console.log('User ID:', user.user.id);
+
     // Check if already in collection
     const { data: existingUsage } = await supabase
       .from('world_info_users')
       .select('id')
       .eq('world_info_id', worldInfoId)
       .eq('user_id', user.user.id)
-      .single();
+      .maybeSingle();
 
     if (existingUsage) {
+      console.log('Already in collection, returning early');
       return { isUsed: true };
     }
 
@@ -684,23 +693,66 @@ export const addWorldInfoToCollection = async (worldInfoId: string) => {
       throw new Error('Failed to add to collection');
     }
 
-    // Increment usage count
-    const { data: currentWorldInfo } = await supabase
+    console.log('Successfully added to world_info_users table');
+
+    // Get current interaction_count before RPC
+    const { data: beforeData } = await supabase
       .from('world_infos')
       .select('interaction_count')
       .eq('id', worldInfoId)
       .single();
+    
+    console.log('Interaction count BEFORE RPC:', beforeData?.interaction_count);
 
-    const { error: updateError } = await supabase
-      .from('world_infos')
-      .update({ 
-        interaction_count: (currentWorldInfo?.interaction_count || 0) + 1
-      })
-      .eq('id', worldInfoId);
+    // Use RPC function for atomic increment
+    console.log('Calling RPC with params:', { world_info_id: worldInfoId });
+    
+    const { data: rpcData, error: rpcError } = await supabase.rpc('increment_world_info_interaction_count', {
+      world_info_id: worldInfoId
+    });
 
-    if (updateError) {
-      console.error('Error updating usage count:', updateError);
+    console.log('RPC Response - Data:', rpcData);
+    console.log('RPC Response - Error:', rpcError);
+
+    if (rpcError) {
+      console.error('RPC FAILED! Full error object:', {
+        message: rpcError.message,
+        details: rpcError.details,
+        hint: rpcError.hint,
+        code: rpcError.code
+      });
+      
+      // Try direct update as fallback
+      console.log('Attempting direct UPDATE as fallback...');
+      
+      const { data: updateData, error: updateError } = await supabase
+        .from('world_infos')
+        .update({ interaction_count: (beforeData?.interaction_count || 0) + 1 })
+        .eq('id', worldInfoId)
+        .select('interaction_count')
+        .single();
+      
+      if (updateError) {
+        console.error('Direct UPDATE also failed:', {
+          message: updateError.message,
+          details: updateError.details,
+          hint: updateError.hint,
+          code: updateError.code
+        });
+      } else {
+        console.log('Direct UPDATE succeeded! New count:', updateData?.interaction_count);
+      }
     }
+
+    // Get interaction_count after RPC
+    const { data: afterData } = await supabase
+      .from('world_infos')
+      .select('interaction_count')
+      .eq('id', worldInfoId)
+      .single();
+    
+    console.log('Interaction count AFTER RPC:', afterData?.interaction_count);
+    console.log('=== END addWorldInfoToCollection ===');
 
     return { isUsed: true };
   } catch (error) {
@@ -714,6 +766,18 @@ export const removeWorldInfoFromCollection = async (worldInfoId: string) => {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('Not authenticated');
 
+    // Check if it's in the collection before removing
+    const { data: existingUsage } = await supabase
+      .from('world_info_users')
+      .select('id')
+      .eq('world_info_id', worldInfoId)
+      .eq('user_id', user.user.id)
+      .maybeSingle();
+
+    if (!existingUsage) {
+      return { isUsed: false };
+    }
+
     const { error } = await supabase
       .from('world_info_users')
       .delete()
@@ -725,9 +789,73 @@ export const removeWorldInfoFromCollection = async (worldInfoId: string) => {
       throw new Error('Failed to remove from collection');
     }
 
+    // Use RPC function for atomic decrement
+    const { error: rpcError } = await supabase.rpc('decrement_world_info_interaction_count', {
+      world_info_id: worldInfoId
+    });
+
+    if (rpcError) {
+      console.error('Error decrementing interaction count:', rpcError);
+    }
+
     return { isUsed: false };
   } catch (error) {
     console.error('Error in removeWorldInfoFromCollection:', error);
+    throw error;
+  }
+};
+
+export const importWorldInfo = async (jsonData: any, userId: string) => {
+  try {
+    // Validate the JSON structure
+    if (!jsonData.name || (!jsonData.entries && !jsonData.data?.entries)) {
+      throw new Error('Invalid world info format. Expected "name" and "entries" fields.');
+    }
+
+    // Handle both direct entries and nested data.entries structure
+    const entries = jsonData.entries || jsonData.data?.entries || {};
+    
+    // Create the world info
+    const worldInfo = await createWorldInfo({
+      name: jsonData.name || jsonData.data?.name || 'Imported World Info',
+      short_description: jsonData.description || jsonData.data?.description || '',
+      visibility: 'private'
+    });
+
+    // Process entries - handle both array and object formats
+    let entriesArray: any[] = [];
+    
+    if (Array.isArray(entries)) {
+      entriesArray = entries;
+    } else if (typeof entries === 'object') {
+      // Convert object entries to array
+      entriesArray = Object.entries(entries).map(([key, value]: [string, any]) => ({
+        keywords: value.keys || value.keywords || [key],
+        entry_text: value.content || value.entry || value.text || value.entry_text || ''
+      }));
+    }
+
+    // Add each entry to the world info
+    for (const entry of entriesArray) {
+      if (entry.keywords || entry.keys) {
+        const keywords = Array.isArray(entry.keywords || entry.keys) 
+          ? (entry.keywords || entry.keys) 
+          : [entry.keywords || entry.keys];
+        
+        const entryText = entry.entry_text || entry.content || entry.text || entry.entry || '';
+        
+        if (keywords.length > 0 && entryText) {
+          await addWorldInfoEntry(worldInfo.id, {
+            keywords: keywords.filter(k => k && k.trim()),
+            entry_text: entryText
+          });
+        }
+      }
+    }
+
+    return worldInfo;
+  } catch (error) {
+    console.error('Error importing world info:', error);
     throw error;
   }
 };

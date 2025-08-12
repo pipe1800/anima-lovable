@@ -22,7 +22,7 @@ CREATE TABLE public.world_info_entries (
 );
 
 -- Create world_info_likes table (mirrors character_likes)
-CREATE TABLE public.world_info_likes (
+CREATE TABLE public.world_info_user_likes (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   world_info_id UUID NOT NULL REFERENCES public.world_infos(id) ON DELETE CASCADE,
   user_id UUID NOT NULL,

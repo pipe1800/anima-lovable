@@ -4,8 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { TopBar } from '@/components/ui/TopBar';
-import { PublicNavigation } from '@/components/ui/PublicNavigation';
+import { PublicTopBar } from '@/components/ui/PublicTopBar';
 import { formatNumberWithK } from '@/lib/utils/formatting';
 import { 
   MessageCircle, 
@@ -130,13 +129,7 @@ export default function PublicCharacterProfile() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#121212]">
-        {/* Standardized TopBar */}
-        <TopBar
-          title="Loading Character..."
-          leftContent={<PublicNavigation />}
-          className="bg-[#1a1a2e]/95 backdrop-blur-sm"
-        />
-
+        <PublicTopBar />
         <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
           <div className="flex items-center space-x-2">
             <Loader2 className="w-8 h-8 animate-spin text-[#FF7A00]" />
@@ -150,13 +143,7 @@ export default function PublicCharacterProfile() {
   if (error || !character) {
     return (
       <div className="min-h-screen bg-[#121212]">
-        {/* Standardized TopBar */}
-        <TopBar
-          title="Character Not Found"
-          subtitle="The character you're looking for might not exist or is not public"
-          leftContent={<PublicNavigation />}
-          className="bg-[#1a1a2e]/95 backdrop-blur-sm"
-        />
+        <PublicTopBar />
         
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center">
@@ -173,28 +160,11 @@ export default function PublicCharacterProfile() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      {/* Standardized TopBar */}
-      <TopBar
-        title={character?.name || "Character Profile"}
-        subtitle={character?.short_description || "View character details and start chatting"}
-        leftContent={<PublicNavigation />}
-        rightContent={
-          <Button
-            onClick={() => navigate('/characters')}
-            variant="ghost"
-            size="sm"
-            className="text-gray-400 hover:text-white"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            <span className="hidden sm:inline">Back to Characters</span>
-            <span className="sm:hidden">Back</span>
-          </Button>
-        }
-        className="bg-[#1a1a2e]/95 backdrop-blur-sm"
-      />
-
+      <PublicTopBar />
+      
       {/* Main Content */}
-      <div className="max-w-6xl mx-auto p-8 space-y-8">{/* Character Hero Section */}
+      <div className="max-w-6xl mx-auto p-8 space-y-8">
+        {/* Character Hero Section */}
         <Card className="bg-[#1a1a2e] border-gray-700/50 overflow-hidden">
           <div className="relative">
             {/* Background gradient */}

@@ -41,9 +41,9 @@ CREATE TABLE public.character_memories (
   is_auto_summary boolean DEFAULT false,
   name text,
   CONSTRAINT character_memories_pkey PRIMARY KEY (id),
+  CONSTRAINT character_memories_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
   CONSTRAINT character_memories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT character_memories_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT character_memories_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id)
+  CONSTRAINT character_memories_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
 );
 CREATE TABLE public.character_tags (
   character_id uuid NOT NULL,
@@ -102,9 +102,9 @@ CREATE TABLE public.chats (
   context_ceiling_warned boolean DEFAULT false,
   chat_mode text NOT NULL DEFAULT 'storytelling'::text CHECK (chat_mode = ANY (ARRAY['storytelling'::text, 'companion'::text])),
   CONSTRAINT chats_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_chats_selected_persona FOREIGN KEY (selected_persona_id) REFERENCES public.personas(id),
+  CONSTRAINT chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
+  CONSTRAINT fk_chats_selected_persona FOREIGN KEY (selected_persona_id) REFERENCES public.personas(id)
 );
 CREATE TABLE public.credit_pack_purchases (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -206,9 +206,11 @@ CREATE TABLE public.profiles (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   default_persona_id uuid,
   timezone text DEFAULT 'UTC'::text,
+  banner_url text,
+  banner_updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
-  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
-  CONSTRAINT fk_profiles_default_persona FOREIGN KEY (default_persona_id) REFERENCES public.personas(id)
+  CONSTRAINT fk_profiles_default_persona FOREIGN KEY (default_persona_id) REFERENCES public.personas(id),
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.public_app_settings (
   setting_key text NOT NULL,
@@ -224,8 +226,8 @@ CREATE TABLE public.subscriptions (
   paypal_subscription_id text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
-  CONSTRAINT subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.plans(id),
-  CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+  CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.plans(id)
 );
 CREATE TABLE public.tags (
   id integer NOT NULL DEFAULT nextval('tags_id_seq'::regclass),
@@ -239,14 +241,6 @@ CREATE TABLE public.user_age_verification (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_age_verification_pkey PRIMARY KEY (id),
   CONSTRAINT user_age_verification_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.user_character_addons_backup (
-  id uuid,
-  user_id uuid,
-  character_id uuid,
-  addon_settings jsonb,
-  created_at timestamp with time zone,
-  updated_at timestamp with time zone
 );
 CREATE TABLE public.user_character_settings (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -268,17 +262,9 @@ CREATE TABLE public.user_character_world_info_settings (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_character_world_info_settings_pkey PRIMARY KEY (id),
-  CONSTRAINT user_character_world_info_settings_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT user_character_world_info_settings_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id),
+  CONSTRAINT user_character_world_info_settings_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT user_character_world_info_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.user_character_world_info_settings_backup (
-  id uuid,
-  user_id uuid,
-  character_id uuid,
-  world_info_id uuid,
-  created_at timestamp with time zone,
-  updated_at timestamp with time zone
 );
 CREATE TABLE public.user_global_chat_settings (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -306,8 +292,8 @@ CREATE TABLE public.user_onboarding_progress (
   task_id integer NOT NULL,
   completed_at timestamp with time zone,
   CONSTRAINT user_onboarding_progress_pkey PRIMARY KEY (user_id, task_id),
-  CONSTRAINT user_onboarding_progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT user_onboarding_progress_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.onboarding_checklist_items(id)
+  CONSTRAINT user_onboarding_progress_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.onboarding_checklist_items(id),
+  CONSTRAINT user_onboarding_progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.world_info_entries (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -319,27 +305,19 @@ CREATE TABLE public.world_info_entries (
   CONSTRAINT world_info_entries_pkey PRIMARY KEY (id),
   CONSTRAINT world_info_entries_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
 );
-CREATE TABLE public.world_info_favorites (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  world_info_id uuid NOT NULL,
-  user_id uuid NOT NULL,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT world_info_favorites_pkey PRIMARY KEY (id),
-  CONSTRAINT world_info_favorites_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
-);
-CREATE TABLE public.world_info_likes (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  world_info_id uuid NOT NULL,
-  user_id uuid NOT NULL,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT world_info_likes_pkey PRIMARY KEY (id),
-  CONSTRAINT world_info_likes_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
-);
 CREATE TABLE public.world_info_tags (
   world_info_id uuid NOT NULL,
   tag_id integer NOT NULL,
-  CONSTRAINT world_info_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id),
-  CONSTRAINT world_info_tags_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
+  CONSTRAINT world_info_tags_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id),
+  CONSTRAINT world_info_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id)
+);
+CREATE TABLE public.world_info_user_likes (
+  user_id uuid NOT NULL,
+  world_info_id uuid NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT world_info_user_likes_pkey PRIMARY KEY (user_id, world_info_id),
+  CONSTRAINT world_info_user_likes_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT world_info_user_likes_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
 );
 CREATE TABLE public.world_info_users (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -347,8 +325,8 @@ CREATE TABLE public.world_info_users (
   world_info_id uuid NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT world_info_users_pkey PRIMARY KEY (id),
-  CONSTRAINT world_info_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT world_info_users_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
+  CONSTRAINT world_info_users_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id),
+  CONSTRAINT world_info_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.world_infos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -359,6 +337,7 @@ CREATE TABLE public.world_infos (
   interaction_count integer NOT NULL DEFAULT 0,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  likes_count integer NOT NULL DEFAULT 0,
   CONSTRAINT world_infos_pkey PRIMARY KEY (id),
   CONSTRAINT world_infos_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES auth.users(id)
 );

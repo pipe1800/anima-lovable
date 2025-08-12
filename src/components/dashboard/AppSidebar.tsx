@@ -159,7 +159,7 @@ const AppSidebar = () => {
   }
 
   return (
-    <div className={`bg-[#0f0f0f] h-full text-white flex flex-col transition-all duration-300 ${
+    <div className={`bg-[#0f0f0f] h-full text-white flex flex-col transition-all duration-300 select-none ${
       isCollapsed ? 'w-16' : 'w-64'
     }`}>
       <div className="flex flex-col h-full">

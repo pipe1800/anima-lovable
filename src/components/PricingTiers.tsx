@@ -1,11 +1,12 @@
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check } from "lucide-react";
+import { Check, Crown } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getUserActiveSubscription } from "@/lib/supabase-queries";
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 
 interface PricingTiersProps {
   isYearly?: boolean;
@@ -80,16 +81,16 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
 
   const pricingTiers = [
     {
-      name: "The Guest Pass",
+      name: "Guest Pass",
       monthlyPrice: "$0",
       yearlyPrice: "$0",
       period: isYearly ? "year" : "month",
       features: [
-        "75 Messages/Day",
-        "Standard AI Models", 
-        "Create 1 Custom Character",
-        "Community Access",
-        "Queue during peak hours"
+        "1,000 credits/month",
+        "75 messages/day limit", 
+        "1 character slot",
+        "Standard AI models",
+        "Basic features"
       ],
       popular: false,
       savings: null
@@ -100,11 +101,14 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
       yearlyPrice: "$143.52",
       period: isYearly ? "year" : "month",
       features: [
-        "Unlimited Messages",
-        "Access to Premium AI Models",
-        "Create up to 50 Characters",
-        "No Queue",
-        "Enhanced Memory (8k Context)"
+        "15,000 credits/month",
+        "Unlimited messages",
+        "Up to 50 characters",
+        "Premium AI models",
+        "8K context memory",
+        "NSFW content access",
+        "Priority generation",
+        "Credit booster packs"
       ],
       popular: true,
       savings: "Save 20%"
@@ -115,17 +119,21 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
       yearlyPrice: "$239.52",
       period: isYearly ? "year" : "month",
       features: [
-        "All 'True Fan' benefits",
-        "Priority Access to Experimental Models",
-        "God-Tier Memory (16k+ Context)",
-        "Monthly Bonus Credits"
+        "32,000 credits/month",
+        "Unlimited messages",
+        "Unlimited characters",
+        "All premium AI models",
+        "16K+ context memory",
+        "NSFW content access",
+        "Top priority generation",
+        "Credit booster packs",
+        "Advanced features",
+        "Priority support"
       ],
       popular: false,
       savings: "Save 20%"
     }
-  ];
-
-  return (
+  ];  return (
     <section className="py-12 sm:py-16 lg:py-20 px-4 sm:px-6 bg-[#121212]">
       <div className="max-w-7xl mx-auto">
         {/* Section Headline */}
@@ -141,9 +149,11 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
             const buttonConfig = getButtonConfig(tier.name);
             
             return (
-              <div
+              <motion.div
                 key={index}
-                className={`relative ${
+                whileHover={{ y: -4 }}
+                transition={{ duration: 0.2 }}
+                className={`relative h-full ${
                   tier.popular 
                     ? "md:scale-105 md:-translate-y-4" 
                     : ""
@@ -176,10 +186,12 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
                   }`}
                 >
                   <CardHeader className="text-center pb-4">
-                    {/* Tier Name */}
-                    <h3 className="text-xl sm:text-2xl font-bold text-white mb-4">
+                    {/* Tier Name with Crown */}
+                    <CardTitle className="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center justify-center gap-2">
                       {tier.name}
-                    </h3>
+                      {tier.name === 'True Fan' && <Crown className="w-5 h-5 fill-gray-300 text-gray-300" />}
+                      {tier.name === 'The Whale' && <Crown className="w-5 h-5 fill-yellow-500 text-yellow-500" />}
+                    </CardTitle>
                     
                     {/* Price */}
                     <div className="mb-4">
@@ -190,6 +202,13 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
                         / {tier.period}
                       </span>
                     </div>
+                    
+                    {/* Credits info for non-free plans */}
+                    {tier.name !== 'Guest Pass' && (
+                      <p className="text-sm text-gray-400 mt-1">
+                        {tier.name === 'True Fan' ? '15,000' : '32,000'} credits/month
+                      </p>
+                    )}
                   </CardHeader>
 
                   <CardContent className="px-6 pb-6">
@@ -238,7 +257,7 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
                     )}
                   </CardFooter>
                 </Card>
-              </div>
+              </motion.div>
             );
           })}
         </div>

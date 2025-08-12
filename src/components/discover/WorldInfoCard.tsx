@@ -10,7 +10,8 @@ import {
   Star,
   BookOpen,
   Eye,
-  Users
+  Users,
+  Download
 } from 'lucide-react';
 
 interface WorldInfoCardProps {
@@ -103,8 +104,8 @@ export function WorldInfoCard({ worldInfo, index }: WorldInfoCardProps) {
               <span>{formatNumberWithK(worldInfo.favorites_count)}</span>
             </div>
             <div className="flex items-center space-x-1 text-gray-300">
-              <Users className="w-5 h-5" />
-              <span>{formatNumberWithK(worldInfo.usage_count)}</span>
+              <Download className="w-5 h-5" />
+              <span>{formatNumberWithK(worldInfo.interaction_count)}</span>
             </div>
             <div className="flex items-center space-x-1 text-gray-300">
               <Eye className="w-5 h-5" />

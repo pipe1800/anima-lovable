@@ -15,6 +15,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TopBar } from '@/components/ui/TopBar';
 import { 
@@ -32,7 +40,9 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUserWorldInfos, usePublicWorldInfos, useAllTags } from '@/hooks/useWorldInfos';
+import { createWorldInfo, addWorldInfoEntry } from '@/lib/world-info-operations';
 import { cn } from '@/lib/utils';
 import StandardizedWorldInfoCard from './StandardizedWorldInfoCard';
 
@@ -40,6 +50,7 @@ export default function ImprovedWorldInfoPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // State - Start with discover tab as default
@@ -49,6 +60,9 @@ export default function ImprovedWorldInfoPage() {
   const [sortBy, setSortBy] = useState('most-used');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importStatus, setImportStatus] = useState<'idle' | 'reading' | 'creating' | 'entries' | 'complete'>('idle');
+  const [importedEntriesCount, setImportedEntriesCount] = useState({ current: 0, total: 0 });
   const [isDesktop, setIsDesktop] = useState(false);
 
   // Check if desktop on mount and window resize
@@ -124,13 +138,111 @@ export default function ImprovedWorldInfoPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    setImporting(true);
-    try {
-      // Note: This would need to be implemented in world-info-operations
+    if (!file.name.endsWith('.json')) {
       toast({
-        title: "Coming Soon",
-        description: "Import functionality will be available soon"
+        title: "Error",
+        description: "Please select a JSON file.",
+        variant: "destructive"
       });
+      return;
+    }
+
+    try {
+      setImporting(true);
+      setImportProgress(0);
+      setImportStatus('reading');
+      setImportedEntriesCount({ current: 0, total: 0 });
+
+      // Read file
+      const text = await file.text();
+      setImportProgress(20);
+      
+      const jsonData = JSON.parse(text);
+      
+      // Validate JSON structure
+      if (!jsonData.name || (!jsonData.entries && !jsonData.data?.entries)) {
+        toast({
+          title: "Error",
+          description: "Invalid JSON format. Expected 'name' and 'entries' fields.",
+          variant: "destructive"
+        });
+        setImporting(false);
+        setImportStatus('idle');
+        return;
+      }
+
+      setImportStatus('creating');
+      setImportProgress(30);
+
+      // Create the main World Info record
+      const newWorldInfo = await createWorldInfo({
+        name: jsonData.name || jsonData.data?.name || 'Imported World Info',
+        short_description: jsonData.description || jsonData.data?.description || '',
+        visibility: 'private'
+      });
+
+      setImportProgress(40);
+      setImportStatus('entries');
+
+      // Handle both direct entries and nested data.entries structure
+      const entries = jsonData.entries || jsonData.data?.entries || {};
+      let entriesArray: any[] = [];
+      
+      if (Array.isArray(entries)) {
+        entriesArray = entries;
+      } else if (typeof entries === 'object') {
+        // Convert object entries to array
+        entriesArray = Object.entries(entries).map(([key, value]: [string, any]) => ({
+          keywords: value.keys || value.keywords || [key],
+          entry_text: value.content || value.entry || value.text || value.entry_text || ''
+        }));
+      }
+
+      setImportedEntriesCount({ current: 0, total: entriesArray.length });
+      
+      // Import entries with progress tracking
+      for (let i = 0; i < entriesArray.length; i++) {
+        const entry = entriesArray[i];
+        
+        if (entry.keywords || entry.keys) {
+          const keywords = Array.isArray(entry.keywords || entry.keys) 
+            ? (entry.keywords || entry.keys) 
+            : [entry.keywords || entry.keys];
+          
+          const entryText = entry.entry_text || entry.content || entry.text || entry.entry || '';
+          
+          if (keywords.length > 0 && entryText) {
+            await addWorldInfoEntry(newWorldInfo.id, {
+              keywords: keywords.filter(k => k && k.trim()),
+              entry_text: entryText
+            });
+          }
+        }
+        
+        // Update progress
+        const entryProgress = 40 + ((i + 1) / entriesArray.length) * 50;
+        setImportProgress(entryProgress);
+        setImportedEntriesCount({ current: i + 1, total: entriesArray.length });
+      }
+
+      setImportProgress(100);
+      setImportStatus('complete');
+
+      // Invalidate queries to refresh the list
+      await queryClient.invalidateQueries({ queryKey: ['user-world-infos'] });
+      
+      toast({
+        title: "Import Successful",
+        description: `Successfully imported "${newWorldInfo.name}" with ${entriesArray.length} entries`
+      });
+
+      // Close dialog after a short delay
+      setTimeout(() => {
+        setImporting(false);
+        setImportStatus('idle');
+        setImportProgress(0);
+      }, 1500);
+
     } catch (error) {
       console.error('Import error:', error);
       toast({
@@ -138,8 +250,10 @@ export default function ImprovedWorldInfoPage() {
         description: error instanceof Error ? error.message : "Failed to import world info. Please check the file format.",
         variant: "destructive"
       });
-    } finally {
       setImporting(false);
+      setImportStatus('idle');
+      setImportProgress(0);
+    } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -361,7 +475,7 @@ export default function ImprovedWorldInfoPage() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
                   {filteredAndSortedWorldInfos.map((worldInfo: any, index: number) => (
                     <StandardizedWorldInfoCard
                       key={worldInfo.id}
@@ -403,7 +517,7 @@ export default function ImprovedWorldInfoPage() {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
                   {filteredAndSortedWorldInfos.map((worldInfo: any, index: number) => (
                     <StandardizedWorldInfoCard
                       key={worldInfo.id}
@@ -420,6 +534,70 @@ export default function ImprovedWorldInfoPage() {
           </Tabs>
         </div>
       </div>
+
+      {/* Import Progress Dialog */}
+      <Dialog open={importing} onOpenChange={(open) => {
+        if (!open && importStatus !== 'entries') {
+          setImporting(false);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {importStatus === 'complete' ? 'Import Complete!' : 'Importing World Info'}
+            </DialogTitle>
+            <DialogDescription>
+              {importStatus === 'reading' && 'Reading file...'}
+              {importStatus === 'creating' && 'Creating world info...'}
+              {importStatus === 'entries' && `Importing entries (${importedEntriesCount.current}/${importedEntriesCount.total})...`}
+              {importStatus === 'complete' && 'Your world info has been successfully imported.'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Progress Bar */}
+            <div className="w-full bg-gray-700 rounded-full h-2.5">
+              <div 
+                className="bg-[#FF7A00] h-2.5 rounded-full transition-all duration-300"
+                style={{ width: `${importProgress}%` }}
+              />
+            </div>
+            
+            {/* Progress Text */}
+            <div className="text-center text-sm text-gray-400">
+              {Math.round(importProgress)}% Complete
+            </div>
+            
+            {/* Status Icon */}
+            <div className="flex items-center justify-center py-4">
+              {importStatus === 'complete' ? (
+                <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center">
+                  <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              ) : (
+                <Loader2 className="w-8 h-8 animate-spin text-[#FF7A00]" />
+              )}
+            </div>
+          </div>
+          
+          {importStatus === 'complete' && (
+            <DialogFooter>
+              <Button
+                onClick={() => {
+                  setImporting(false);
+                  setImportStatus('idle');
+                  setImportProgress(0);
+                }}
+                className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/80"
+              >
+                Done
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Hidden file input for import */}
       <input

@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { createCharacter, updateCharacter } from '@/lib/character-operations';
 import { getCharacterDetails } from '@/lib/supabase-queries';
-import { upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
+import { upsertUserCharacterSettings, getUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
 import type { CharacterCreationData } from '@/lib/character-operations';
 import type { Tables } from '@/integrations/supabase/types';
 
@@ -36,6 +36,9 @@ export interface CharacterFormData {
   visibility: 'public' | 'unlisted' | 'private';
   nsfw_enabled: boolean;
   default_persona_id?: string | null;
+  
+  // User-specific settings
+  timeAwarenessEnabled?: boolean;
 }
 
 const INITIAL_CHARACTER_DATA: CharacterFormData = {
@@ -56,7 +59,8 @@ const INITIAL_CHARACTER_DATA: CharacterFormData = {
   },
   visibility: 'public',
   nsfw_enabled: false,
-  default_persona_id: null
+  default_persona_id: null,
+  timeAwarenessEnabled: false
 };
 
 export function useCharacterCreation() {
@@ -84,9 +88,12 @@ export function useCharacterCreation() {
   }, [location.state]);
 
   const loadCharacterForEditing = async (characterId: string) => {
+    console.log('🔄 Loading character for editing:', characterId);
+    
     try {
       const { data: character, error } = await getCharacterDetails(characterId);
       if (error || !character) {
+        console.error('❌ Failed to load character:', error);
         toast({
           title: "Error Loading Character",
           description: "Failed to load character data for editing.",
@@ -94,6 +101,23 @@ export function useCharacterCreation() {
         });
         return;
       }
+
+      console.log('✅ Character loaded successfully:', {
+        id: character.id,
+        name: character.name,
+        tagline: character.tagline,
+        tagline_is_null: character.tagline === null,
+        tagline_is_undefined: character.tagline === undefined,
+        tagline_length: character.tagline?.length,
+        short_description: character.short_description,
+        avatar_url: character.avatar_url,
+        visibility: character.visibility,
+        nsfw_enabled: character.nsfw_enabled
+      });
+
+      // Load user character settings
+      const userSettings = user ? await getUserCharacterSettings(user.id, characterId) : null;
+      console.log('⚙️ User character settings loaded:', userSettings);
 
       // Parse the definition JSON to extract personality and dialogue data
       let definitionData: any = {};
@@ -109,9 +133,9 @@ export function useCharacterCreation() {
       const formData: CharacterFormData = {
         name: character.name,
         avatar: character.avatar_url || '',
-        title: character.tagline || '',
-        description: character.short_description || '',
-        chatMode: (character.definition?.[0]?.chat_mode as 'storytelling' | 'companion') || 'storytelling',
+        title: character.tagline || '', // ✅ Keep mapping tagline to title
+        description: character.short_description || '', // ✅ Map short_description to description
+        chatMode: (userSettings?.chat_mode as 'storytelling' | 'companion') || 'storytelling', // ✅ Use user settings
         personality: {
           core_personality: character.definition?.[0]?.description || '',
           tags: definitionData.personality?.tags || character.tags?.map((t: any) => t.name) || [],
@@ -124,18 +148,38 @@ export function useCharacterCreation() {
         },
         visibility: character.visibility || 'public',
         nsfw_enabled: character.nsfw_enabled || false,
-        default_persona_id: character.default_persona_id
+        default_persona_id: character.default_persona_id,
+        // ✅ Include user-specific settings
+        timeAwarenessEnabled: userSettings?.time_awareness_enabled || false
       };
+
+      console.log('📝 Mapped character data to form:', {
+        title_mapping: {
+          database_tagline: character.tagline,
+          mapped_to_form_title: formData.title,
+          mapping_successful: character.tagline === formData.title
+        },
+        user_settings_mapping: {
+          chat_mode: userSettings?.chat_mode || 'default',
+          time_awareness_enabled: userSettings?.time_awareness_enabled || false,
+          user_settings_exist: !!userSettings
+        },
+        formData: JSON.stringify(formData, null, 2)
+      });
 
       setCharacterData(formData);
       // Set selectedTags with the proper tag objects from the character's tags
       if (character.tags && Array.isArray(character.tags)) {
+        console.log('🏷️ Setting character tags:', character.tags);
         setSelectedTags(character.tags);
       } else {
+        console.log('📝 No tags found for character');
         setSelectedTags([]);
       }
+      
+      console.log('✅ Character loading completed successfully');
     } catch (error) {
-      console.error('Error loading character:', error);
+      console.error('❌ Error loading character:', error);
       toast({
         title: "Error",
         description: "Failed to load character data.",
@@ -155,10 +199,9 @@ export function useCharacterCreation() {
   const validateStep = useCallback((step: number): boolean => {
     switch (step) {
       case 1: // Foundation
-        return !!(
-          characterData.name?.trim()
-          // Removed description requirement
-        );
+        const name = characterData.name?.trim();
+        const description = characterData.description?.trim();
+        return !!(name && description);
       case 2: // Personality
         return !!(
           characterData.personality?.core_personality &&
@@ -176,6 +219,12 @@ export function useCharacterCreation() {
   }, [characterData]);
 
   const saveCharacter = async () => {
+    console.log('🔄 Starting character save process:', {
+      isEditing,
+      editingCharacterId,
+      characterData: JSON.stringify(characterData, null, 2)
+    });
+
     if (!user) {
       toast({
         title: "Authentication Required",
@@ -201,13 +250,58 @@ export function useCharacterCreation() {
     try {
       let character;
       if (isEditing && editingCharacterId) {
-        character = await updateCharacter(editingCharacterId, characterData as CharacterCreationData);
+        console.log('📝 Updating existing character:', {
+          characterId: editingCharacterId,
+          title: characterData.title, // ✅ Add this to see if title is present
+          tagline_will_be: characterData.title || '', // ✅ Show what tagline will be set to
+          timeAwareness: characterData.timeAwarenessEnabled, // ✅ Log the time awareness value
+          updateData: characterData,
+          selectedTags: selectedTags.map(t => t.name)
+        });
         
-        // Save chat mode settings
+        // Ensure tags are included in the character data before updating
+        const updatedCharacterData = {
+          ...characterData,
+          title: characterData.title || '', // ✅ Explicitly ensure title is included
+          time_awareness_enabled: characterData.timeAwarenessEnabled, // ✅ Map from camelCase to snake_case
+          personality: {
+            ...characterData.personality,
+            tags: selectedTags.map(tag => tag.name)
+          }
+        };
+        
+        console.log('📝 Final update data being sent:', {
+          title: updatedCharacterData.title,
+          name: updatedCharacterData.name,
+          description: updatedCharacterData.description,
+          visibility: updatedCharacterData.visibility,
+          time_awareness_enabled: updatedCharacterData.time_awareness_enabled, // ✅ Log it
+          user_settings_to_save: {
+            chat_mode: characterData.chatMode,
+            time_awareness_enabled: updatedCharacterData.time_awareness_enabled
+          }
+        });
+        
+        character = await updateCharacter(editingCharacterId, updatedCharacterData as CharacterCreationData);
+        
+        console.log('✅ Character updated successfully:', character);
+        
+        // Save chat mode settings (time awareness is now handled in updateCharacter)
         if (characterData.chatMode) {
+          console.log('💾 Saving chat mode settings:', {
+            chat_mode: characterData.chatMode
+          });
+          
           await upsertUserCharacterSettings(user.id, editingCharacterId, {
             chat_mode: characterData.chatMode
           });
+        }
+        
+        // Ensure selectedTags are properly included in characterData
+        if (selectedTags.length > 0) {
+          console.log('🏷️ Tags already included in update data:', selectedTags.map(t => t.name));
+        } else {
+          console.log('📝 No tags selected for this character');
         }
         
         toast({
@@ -215,10 +309,25 @@ export function useCharacterCreation() {
           description: `${character.name} has been successfully updated.`,
         });
       } else {
-        character = await createCharacter(characterData as CharacterCreationData);
+        console.log('🆕 Creating new character:', {
+          characterData,
+          selectedTags: selectedTags.map(t => t.name)
+        });
         
-        // Save chat mode settings
-        if (characterData.chatMode && character.id) {
+        // Ensure tags are included in the character data before creating
+        const updatedCharacterData = {
+          ...characterData,
+          time_awareness_enabled: characterData.timeAwarenessEnabled, // ✅ Map from camelCase to snake_case
+          personality: {
+            ...characterData.personality,
+            tags: selectedTags.map(tag => tag.name)
+          }
+        };
+        
+        character = await createCharacter(updatedCharacterData as CharacterCreationData);
+        
+        // Save chat mode for new character (time awareness is now handled in createCharacter)
+        if (character.id && characterData.chatMode) {
           await upsertUserCharacterSettings(user.id, character.id, {
             chat_mode: characterData.chatMode
           });

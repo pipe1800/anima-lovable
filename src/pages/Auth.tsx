@@ -8,6 +8,7 @@ import { User } from '@supabase/supabase-js';
 import { Eye, EyeOff, Check, X } from 'lucide-react';
 import { preloadDashboardData } from '@/hooks/useDashboard';
 import { useQueryClient } from '@tanstack/react-query';
+import { PublicTopBar } from '@/components/ui/PublicTopBar';
 const Auth = () => {
   const [searchParams] = useSearchParams();
   const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'signup');
@@ -250,21 +251,11 @@ const Auth = () => {
         `}</style>
       </div>;
   }
-  return <div className="min-h-screen bg-[#121212] relative overflow-hidden flex items-center justify-center">
-      {/* Back Button */}
-      <div className="absolute top-6 left-6 z-20">
-        <Link to="/" className="flex items-center text-white hover:text-[#FF7A00] transition-colors">
-          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back
-        </Link>
-      </div>
+  return <div className="min-h-screen bg-[#121212] flex flex-col">
+      {/* Use PublicTopBar without auth buttons */}
+      <PublicTopBar showAuthButtons={false} />
       
-      {/* Logo */}
-      <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-20">
-        <img src="/assets/logo.png" alt="Anima AI Chat" className="h-16 w-auto" />
-      </div>
+      <div className="flex-1 relative overflow-hidden flex items-center justify-center">
 
       {/* Futuristic Background Animation */}
       <div className="absolute inset-0 opacity-20">
@@ -456,6 +447,7 @@ const Auth = () => {
           50% { transform: translateY(-20px) scale(1.2); opacity: 0.8; }
         }
       `}</style>
+      </div>
     </div>;
 };
 export default Auth;

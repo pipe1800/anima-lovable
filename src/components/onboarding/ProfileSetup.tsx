@@ -1,11 +1,13 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Upload, User } from 'lucide-react';
+import { Upload, User, Loader2, Check, X } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useProfile';
 import { updateProfile } from '@/lib/supabase-queries';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface ProfileSetupProps {
@@ -15,10 +17,72 @@ interface ProfileSetupProps {
 
 const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
   const { user, profile } = useCurrentUser();
+  const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
   const [avatar, setAvatar] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [usernameError, setUsernameError] = useState('');
+  
+  // Check if user needs to set username (social auth users)
+  const needsUsername = !profile?.username || profile.username === user?.email?.split('@')[0];
+
+  useEffect(() => {
+    // Initialize username from profile if it exists
+    if (profile?.username && !needsUsername) {
+      setUsername(profile.username);
+    }
+  }, [profile, needsUsername]);
+
+  // Debounced username check
+  useEffect(() => {
+    if (!needsUsername) return;
+    
+    const checkUsername = async () => {
+      if (!username || username.length < 3) {
+        setUsernameAvailable(null);
+        setUsernameError(username.length > 0 ? 'Username must be at least 3 characters' : '');
+        return;
+      }
+
+      // Username validation
+      if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+        setUsernameError('Username can only contain letters, numbers, - and _');
+        setUsernameAvailable(false);
+        return;
+      }
+
+      setCheckingUsername(true);
+      setUsernameError('');
+
+      try {
+        // Check if username is taken
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('username', username)
+          .neq('id', user?.id) // Exclude current user
+          .single();
+
+        if (error && error.code === 'PGRST116') {
+          // No rows returned means username is available
+          setUsernameAvailable(true);
+        } else if (data) {
+          setUsernameAvailable(false);
+          setUsernameError('Username is already taken');
+        }
+      } catch (error) {
+        console.error('Error checking username:', error);
+      } finally {
+        setCheckingUsername(false);
+      }
+    };
+
+    const timeoutId = setTimeout(checkUsername, 500); // Debounce
+    return () => clearTimeout(timeoutId);
+  }, [username, user?.id, needsUsername]);
 
   const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -38,12 +102,19 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
       return;
     }
 
+    // Validate username if needed
+    if (needsUsername && (!username || !usernameAvailable)) {
+      toast.error('Please choose a valid username');
+      return;
+    }
+
     setIsLoading(true);
     try {
       // For now, we'll just save the bio. In a real app, you'd upload the avatar to storage first
       const avatarUrl = avatarPreview || profile?.avatar_url || '';
       
       const { error } = await updateProfile(user.id, {
+        username: username.trim() || undefined,
         bio: bio.trim() || undefined,
         avatar_url: avatarUrl || undefined
       });
@@ -69,7 +140,7 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
           Step 2: Your Account Profile
         </h2>
         <p className="text-gray-400 text-center mb-4 text-sm sm:text-base">
-          Personalize your profile (optional)
+          {needsUsername ? 'Choose your username and personalize your profile' : 'Personalize your profile (optional)'}
         </p>
         <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 mb-6">
           <p className="text-orange-200 text-sm text-center">
@@ -79,6 +150,32 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
         </div>
 
         <div className="space-y-6">
+          {/* Username field - only show if needed  */}
+          {needsUsername && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Username *
+              </label>
+              <div className="relative">
+                <Input
+                  placeholder="Choose a unique username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                  className="bg-[#121212] border-gray-600 text-white placeholder:text-gray-500 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20 pr-10"
+                  required
+                />
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                  {checkingUsername && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
+                  {!checkingUsername && usernameAvailable === true && <Check className="w-4 h-4 text-green-500" />}
+                  {!checkingUsername && usernameAvailable === false && <X className="w-4 h-4 text-red-500" />}
+                </div>
+              </div>
+              {usernameError && (
+                <p className="text-xs text-red-400 mt-1">{usernameError}</p>
+              )}
+            </div>
+          )}
+
           {/* Avatar Upload */}
           <div className="text-center">
             <label className="block text-sm font-medium text-gray-300 mb-3">
@@ -135,19 +232,21 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
         <div className="mt-8 space-y-3">
           <Button
             onClick={handleSaveAndContinue}
-            disabled={isLoading}
+            disabled={isLoading || (needsUsername && (!username || !usernameAvailable))}
             className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-bold py-3 rounded-lg shadow-lg hover:shadow-[#FF7A00]/25 transition-all duration-300"
           >
             {isLoading ? 'Saving...' : 'Save & Continue'}
           </Button>
           
-          <button
-            onClick={onSkip}
-            disabled={isLoading}
-            className="w-full text-gray-400 hover:text-[#FF7A00] transition-colors duration-300 text-sm underline-offset-4 hover:underline disabled:opacity-50"
-          >
-            I'll do this later
-          </button>
+          {!needsUsername && (
+            <button
+              onClick={onSkip}
+              disabled={isLoading}
+              className="w-full text-gray-400 hover:text-[#FF7A00] transition-colors duration-300 text-sm underline-offset-4 hover:underline disabled:opacity-50"
+            >
+              I'll do this later
+            </button>
+          )}
         </div>
       </Card>
     </div>

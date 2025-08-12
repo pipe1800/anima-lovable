@@ -5,7 +5,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Upload, User, Loader2, Clock, Info, MessageSquare, Image as ImageIcon } from 'lucide-react';
-import { ImageCropper } from '@/components/ui/image-cropper';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -45,18 +44,24 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
     }
   }, [data]);
   const [isUploading, setIsUploading] = useState(false);
-  const [showCropper, setShowCropper] = useState(false);
-  const [tempImageUrl, setTempImageUrl] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pngInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const { toast } = useToast();
 
   const handleInputChange = (field: string, value: string | boolean) => {
+    // Update local state
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
+    
+    // Immediately update parent with trimmed values for name and description
+    if (field === 'name' || field === 'description') {
+      onUpdate({ [field]: typeof value === 'string' ? value.trim() : value });
+    } else {
+      onUpdate({ [field]: value });
+    }
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -83,46 +88,17 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
       return;
     }
 
-    // Create temporary URL for cropping
-    const imageUrl = URL.createObjectURL(file);
-    setTempImageUrl(imageUrl);
-    setShowCropper(true);
-  };
-
-  const handlePNGUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    // If it's a PNG character card, handle it differently
-    if (file.type === 'image/png' && onFileChange) {
-      onFileChange(file);
-      
-      // Also set it as avatar and show cropper
-      const imageUrl = URL.createObjectURL(file);
-      setTempImageUrl(imageUrl);
-      setShowCropper(true);
-    }
-  };
-
-  const handleCropComplete = async (croppedImageUrl: string) => {
     try {
       setIsUploading(true);
-      setShowCropper(false);
       
-      // Convert data URL to blob
-      const response = await fetch(croppedImageUrl);
-      const blob = await response.blob();
-      
-      // Create file from blob
-      const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
-      
-      const avatarUrl = await uploadAvatar(file, user!.id);
+      // Upload directly without cropping
+      const avatarUrl = await uploadAvatar(file, user.id);
       
       if (avatarUrl) {
         handleInputChange('avatar', avatarUrl);
         toast({
           title: "Upload Successful",
-          description: "Avatar uploaded and cropped successfully!",
+          description: "Avatar uploaded successfully!",
         });
       } else {
         throw new Error('Upload failed');
@@ -136,21 +112,41 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
       });
     } finally {
       setIsUploading(false);
-      cleanupTempImage();
       resetFileInput();
     }
   };
 
-  const handleCropCancel = () => {
-    setShowCropper(false);
-    cleanupTempImage();
-    resetFileInput();
-  };
+  const handlePNGUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-  const cleanupTempImage = () => {
-    if (tempImageUrl) {
-      URL.revokeObjectURL(tempImageUrl);
-      setTempImageUrl('');
+    // If it's a PNG character card, handle it differently
+    if (file.type === 'image/png' && onFileChange) {
+      onFileChange(file);
+      
+      // Also set it as avatar directly without cropping
+      try {
+        setIsUploading(true);
+        const avatarUrl = await uploadAvatar(file, user!.id);
+        
+        if (avatarUrl) {
+          handleInputChange('avatar', avatarUrl);
+          toast({
+            title: "Upload Successful",
+            description: "Avatar uploaded successfully!",
+          });
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+        toast({
+          title: "Upload Failed",
+          description: "Failed to upload avatar. Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsUploading(false);
+        resetFileInput();
+      }
     }
   };
 
@@ -164,11 +160,14 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
   };
 
   const handleNext = () => {
-    onUpdate(formData);
-    onNext();
+    // Don't update again here - the data is already synced via handleInputChange
+    // Just validate and proceed
+    if (formData.name.trim() && formData.description.trim()) {
+      onNext();
+    }
   };
 
-  const isValid = formData.name.trim(); // Short description is no longer required
+  const isValid = formData.name.trim() && formData.description.trim();
 
   return (
     <div className="flex-1 overflow-auto bg-[#121212]">
@@ -443,16 +442,6 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
         </div>
       </div>
 
-      {/* Image Cropper Modal - Character card aspect ratio */}
-      {showCropper && (
-        <ImageCropper
-          imageUrl={tempImageUrl}
-          isOpen={showCropper}
-          onClose={handleCropCancel}
-          onCrop={handleCropComplete}
-          aspectRatio={0.8} // 4:5 aspect ratio for character cards (width:height = 256:320)
-        />
-      )}
     </div>
   );
 };

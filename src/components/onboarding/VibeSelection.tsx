@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -59,7 +58,8 @@ const VibeSelection = ({ selectedVibes, setSelectedVibes }: VibeSelectionProps) 
         What are you in the mood for? Pick a few tags so we can recommend the perfect companions.
       </p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1.5 sm:gap-2 md:gap-3 mb-8 max-h-[60vh] overflow-y-auto px-1">
+      <div className="overflow-visible p-4 -m-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1.5 sm:gap-2 md:gap-3 mb-8 max-h-[60vh] overflow-y-auto px-1" style={{ padding: 10 }}>
         {vibes.map((vibe) => {
           const IconComponent = vibe.icon;
           const isSelected = selectedVibes.includes(vibe.id);
@@ -67,12 +67,13 @@ const VibeSelection = ({ selectedVibes, setSelectedVibes }: VibeSelectionProps) 
           return (
             <Card
               key={vibe.id}
-              className={`relative cursor-pointer transition-all duration-300 transform hover:scale-105 ${
+              className={`relative cursor-pointer transition-all duration-300 transform hover:scale-110 hover:shadow-xl hover:z-10 ${
                 isSelected 
                   ? 'border-[#FF7A00] border-2 shadow-lg shadow-[#FF7A00]/25 bg-[#1a1a2e]' 
                   : 'border-gray-700 hover:border-gray-600 bg-[#1a1a2e]/80'
               }`}
               onClick={() => toggleVibe(vibe.id)}
+              style={{ transformOrigin: 'center' }}
             >
               <div className="p-2 sm:p-3 text-center">
                 <div className={`w-8 h-8 sm:w-10 sm:h-10 mx-auto mb-2 rounded-full bg-gradient-to-br ${vibe.color} flex items-center justify-center`}>
@@ -90,9 +91,10 @@ const VibeSelection = ({ selectedVibes, setSelectedVibes }: VibeSelectionProps) 
             </Card>
           );
         })}
+        </div>
       </div>
     </div>
   );
 };
 
-export default VibeSelection;
+export default VibeSelection; 

@@ -36,6 +36,8 @@ import PublicDiscover from "./pages/PublicDiscover";
 import PublicCharacterProfile from "./pages/PublicCharacterProfile";
 import PublicWorldInfoProfile from "./pages/PublicWorldInfoProfile";
 import NotFound from "./pages/NotFound";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfUse from "./pages/TermsOfUse";
 import { PayPalVerification } from "./components/PayPalVerification";
 import { UpgradeVerification as ComponentUpgradeVerification } from "./components/UpgradeVerification";
 import { UpgradeCallback } from "./pages/UpgradeCallback";
@@ -56,6 +58,8 @@ const App = () => (
           <Route path="/characters" element={<PublicDiscover />} />
           <Route path="/characters/:characterId" element={<PublicCharacterProfile />} />
           <Route path="/user/:userId" element={<UserProfile />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfUse />} />
           <Route path="/world-info-view/:id" element={
             <OnboardingGuard requireOnboardingComplete={true}>
               <AuthenticatedLayout>

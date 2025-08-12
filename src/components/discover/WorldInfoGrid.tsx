@@ -11,7 +11,8 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
-  Users
+  Users,
+  Download
 } from 'lucide-react';
 import { WorldInfoCard } from './WorldInfoCard';
 
@@ -288,8 +289,8 @@ export function WorldInfoGrid({
                       <span className="text-xs sm:text-sm">{worldInfo.likes_count}</span>
                     </div>
                     <div className="flex items-center space-x-1">
-                      <Users className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="text-xs sm:text-sm">{worldInfo.usage_count}</span>
+                      <Download className="w-3 h-3 sm:w-4 sm:h-4" />
+                      <span className="text-xs sm:text-sm">{worldInfo.interaction_count}</span>
                     </div>
                   </div>
                   {worldInfo.creator && (

@@ -106,7 +106,7 @@ export const BillingSettings = () => {
         // Combine and format billing history
         const history: BillingHistoryItem[] = [];
 
-        // Add subscription entries
+        // Add subscription entries test 
         if (subscriptions) {
           subscriptions.forEach(sub => {
             if (sub.plan) {

@@ -173,8 +173,9 @@ const CharacterCreator = () => {
   };
 
   const handleStepChange = useCallback((step: number) => {
-    // Validate current step before moving
-    if (step > currentStep && !validateStep(currentStep)) {
+    // Only validate when jumping to a later step via step indicators
+    // Not when using the Next button (which has its own validation)
+    if (step > currentStep + 1 && !validateStep(currentStep)) {
       toast({
         title: "Incomplete Step",
         description: "Please complete all required fields before proceeding.",
@@ -186,11 +187,13 @@ const CharacterCreator = () => {
     if (step >= 1 && step <= STEPS.length) {
       setCurrentStep(step);
     }
-  }, [currentStep, validateStep, toast, setCurrentStep]);
+  }, [currentStep, validateStep, toast]);
 
   const handleNext = () => {
+    // The step components handle their own validation via the disabled button
+    // No need to validate here again
     if (currentStep < STEPS.length) {
-      handleStepChange(currentStep + 1);
+      setCurrentStep(currentStep + 1);
     }
   };
 

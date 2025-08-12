@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import AppSidebar from '@/components/dashboard/AppSidebar';
 import { SidebarTrigger } from '@/components/ui/sidebar';
+import { MobileHeader } from '@/components/layout/MobileHeader';
 import { toast } from 'sonner';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { ChatConfigurationTab } from './ChatConfigurationTab';
@@ -715,99 +716,108 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const isCharacterOwner = currentUser && characterDetails && currentUser.id === characterDetails.creator_id;
 
   return (
-    <div className="flex h-screen w-full bg-[#121212]">
-      {/* Left Sidebar */}
-      <AppSidebar />
+    <div className="flex flex-col md:flex-row h-full bg-[#121212] relative overflow-hidden">
+      {/* Mobile Header - Only visible on mobile */}
+      <div className="md:hidden">
+        <MobileHeader 
+          title={`Chat with ${character.name}`}
+          userCredits={creditsBalance}
+          username={currentUser?.email?.split('@')[0] || 'User'}
+        />
+      </div>
       
-      {/* Main Chat Area - Remove the fixed ml-64 */}
-      <div className="flex-1 flex flex-col">
-        {/* Chat Header */}
-        <header className="bg-[#1a1a2e] border-b border-gray-700/50 p-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <SidebarTrigger 
-              className="text-gray-400 hover:text-white" 
-              data-tutorial="sidebar-trigger"
-            />
-            <Avatar className="w-10 h-10 ring-2 ring-[#FF7A00]/50">
-              <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
-              <AvatarFallback className="bg-[#FF7A00] text-white font-bold">
-                {character.fallback}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <h1 className="text-white font-semibold">{character.name}</h1>
-              <p className="text-gray-400 text-sm">{character.tagline}</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center space-x-3">
-            {/* Credits Balance */}
-            {creditsBalance !== undefined && (
-              <div 
-                className="flex items-center space-x-2 px-3 py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg"
-                data-tutorial="credits-display"
-              >
-                <Zap className="w-3 h-3 text-[#FF7A00]" />
-                <span className="text-sm font-medium text-white">{creditsBalance.toLocaleString()}</span>
-                <span className="text-xs text-gray-400">credits</span>
+      {/* Desktop Sidebar - Only visible on desktop */}
+      <div className="hidden md:block">
+        <AppSidebar />
+      </div>
+
+      {/* Main Chat Area - Takes full width on mobile, adjusts for sidebar on desktop */}
+      <div className="flex-1 flex flex-col h-full relative">
+        {/* Chat Header - Mobile Responsive */}
+        <header className="bg-[#0f0f0f] border-b border-gray-700/50 p-3 sm:p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
+              <Avatar className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0">
+                <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
+                <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-sm sm:text-base">
+                  {character.fallback}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-white font-semibold text-sm sm:text-base truncate">{character.name}</h1>
+                <p className="text-gray-400 text-xs sm:text-sm truncate">{character.tagline}</p>
               </div>
-            )}
+            </div>
             
-            {/* DEV: Test Tutorial Button */}
-            {process.env.NODE_ENV === 'development' && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={async () => {
-                  console.log('🎯 Manual tutorial trigger - forcing start');
-                  
-                  // Reset the tutorial completion in profiles table
-                  if (currentUser?.id) {
-                    const { error } = await supabase
-                      .from('profiles')
-                      .update({ onboarding_completed: false })
-                      .eq('id', currentUser.id);
+            <div className="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
+              {/* Credits Balance - Hide text on mobile */}
+              {creditsBalance !== undefined && (
+                <div 
+                  className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg"
+                  data-tutorial="credits-display"
+                >
+                  <Zap className="w-3 h-3 sm:w-4 sm:h-4 text-[#FF7A00]" />
+                  <span className="text-xs sm:text-sm font-medium text-white">{creditsBalance.toLocaleString()}</span>
+                  <span className="hidden sm:inline text-xs text-gray-400">credits</span>
+                </div>
+              )}
+              
+              {/* DEV: Test Tutorial Button - Mobile Responsive */}
+              {process.env.NODE_ENV === 'development' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    console.log('🎯 Manual tutorial trigger - forcing start');
                     
-                    if (!error) {
-                      console.log('🎯 Tutorial completion reset in profiles');
+                    // Reset the tutorial completion in profiles table
+                    if (currentUser?.id) {
+                      const { error } = await supabase
+                        .from('profiles')
+                        .update({ onboarding_completed: false })
+                        .eq('id', currentUser.id);
+                      
+                      if (!error) {
+                        console.log('🎯 Tutorial completion reset in profiles');
+                      }
                     }
-                  }
-                  
-                  // Start the tutorial
-                  startTutorial();
-                }}
-                className="bg-[#0f0f0f] border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 hover:border-blue-400 transition-all duration-200"
-                title="Start tutorial (dev only)"
-              >
-                📚 Tutorial
-              </Button>
-            )}
-            
-            {/* Create Memory Button */}
-            {currentChatId && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={isCreatingMemory}
-                    className="bg-[#0f0f0f] border-purple-500/50 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 hover:border-purple-400 transition-all duration-200"
-                    title="Create memory from this conversation"
-                    data-tutorial="create-memory"
-                  >
-                    {isCreatingMemory ? (
-                      <>
-                        <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin mr-2" />
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <Brain className="w-3 h-3 mr-2" />
-                        Create Memory
-                      </>
-                    )}
-                  </Button>
-                </AlertDialogTrigger>
+                    
+                    // Start the tutorial
+                    startTutorial();
+                  }}
+                  className="bg-[#0f0f0f] border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 hover:border-blue-400 transition-all duration-200 text-xs sm:text-sm px-2 sm:px-3"
+                  title="Start tutorial (dev only)"
+                >
+                  <span className="hidden sm:inline">📚 Tutorial</span>
+                  <span className="sm:hidden">📚</span>
+                </Button>
+              )}
+              
+              {/* Create Memory Button - Mobile Responsive */}
+              {currentChatId && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isCreatingMemory}
+                      className="bg-[#0f0f0f] border-purple-500/50 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 hover:border-purple-400 transition-all duration-200 text-xs sm:text-sm px-2 sm:px-3"
+                      title="Create memory from this conversation"
+                      data-tutorial="create-memory"
+                    >
+                      {isCreatingMemory ? (
+                        <>
+                          <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin mr-1 sm:mr-2" />
+                          <span className="hidden sm:inline">Creating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Brain className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
+                          <span className="hidden sm:inline">Create Memory</span>
+                        </>
+                      )}
+                    </Button>
+                  </AlertDialogTrigger>
                 <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
                   <AlertDialogHeader>
                     <AlertDialogTitle className="text-white flex items-center gap-2">
@@ -854,18 +864,18 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                 </AlertDialogContent>
               </AlertDialog>
             )}
-            
-            {/* Settings Menu */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleRightPanelToggle}
-              className="text-gray-400 hover:text-white hover:bg-gray-800"
-              data-tutorial="right-panel-toggle"
-              style={{ position: 'relative', zIndex: isActive ? 1000002 : 'auto' }}
-            >
-              <Settings className="w-7 h-7" />
-            </Button>
+              {/* Settings Menu - Mobile Responsive */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleRightPanelToggle}
+                className="text-gray-400 hover:text-white hover:bg-gray-800 w-8 h-8 sm:w-10 sm:h-10"
+                data-tutorial="right-panel-toggle"
+                style={{ position: 'relative', zIndex: isActive ? 1000002 : 'auto' }}
+              >
+                <Settings className="w-5 h-5 sm:w-6 sm:h-6" />
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -875,53 +885,48 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         </div>
       </div>
 
-      {/* Right Panel - Slide in from right */}
+      {/* Right Panel - Mobile Responsive Full Screen Overlay */}
       {rightPanelOpen && (
         <>
-          {/* Backdrop removed to prevent dimming overlay confusion with tutorial */}
-          
-          {/* Panel - Low z-index to stay under tutorial */}
+          {/* Backdrop - Mobile Only */}
           <div 
-            className="fixed right-0 top-0 h-full w-[544px] bg-[#0f0f0f] border-l border-gray-700/50 flex flex-col animate-slide-in-right"
-            style={{ zIndex: 41 }}
+            className="md:hidden fixed inset-0 bg-black/50 z-40"
+            onClick={() => setRightPanelOpen(false)}
+          />
+          
+          {/* Panel - Full screen on mobile, slide-in on desktop */}
+          <div 
+            className="fixed inset-0 md:inset-auto md:right-0 md:top-0 md:h-full w-full md:w-[544px] bg-[#0f0f0f] md:border-l border-gray-700/50 flex flex-col animate-slide-in-right z-[41]"
             data-tutorial="right-panel"
           >
             {/* Panel Header */}
             <div className="p-4 border-b border-gray-700/50">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-center mb-4">
                 <h2 className="text-white font-semibold">Panel</h2>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setRightPanelOpen(false)}
-                  className="text-gray-400 hover:text-white hover:bg-gray-800"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
               </div>
 
-              {/* Tabs */}
+              {/* Tabs - Mobile Responsive */}
               <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg" data-tutorial="right-panel-tabs">
                 <button
                   onClick={() => setActiveTab('history')}
-                  className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
                     activeTab === 'history'
                       ? 'bg-[#FF7A00] text-white'
                       : 'text-gray-400 hover:text-white'
                   }`}
                 >
-                  <MessageCircle className="w-4 h-4" />
+                  <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
                   <span>Chats</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('details')}
-                  className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
                     activeTab === 'details'
                       ? 'bg-[#FF7A00] text-white'
                       : 'text-gray-400 hover:text-white'
                   }`}
                 >
-                  <Info className="w-4 h-4" />
+                  <Info className="w-3 h-3 sm:w-4 sm:h-4" />
                   <span>Details</span>
                 </button>
                 <button
@@ -930,19 +935,19 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                     handleStepAction('config-tab-clicked');
                   }}
                   data-tutorial="config-tab"
-                  className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
                     activeTab === 'config'
                       ? 'bg-[#FF7A00] text-white'
                       : 'text-gray-400 hover:text-white'
                   }`}
                 >
-                  <Settings className="w-4 h-4" />
+                  <Settings className="w-3 h-3 sm:w-4 sm:h-4" />
                   <span>Config</span>
                 </button>
               </div>
             </div>
 
-            {/* Panel Content */}
+            {/* Panel Content - Mobile Responsive */}
             <div className="flex-1 overflow-y-auto">
               {activeTab === 'history' && (
                 <div className="p-4">
@@ -952,7 +957,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                       placeholder="Search chats..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="bg-[#1a1a2e] border-gray-700/50 text-white placeholder-gray-400 pl-10 focus:ring-[#FF7A00] focus:border-[#FF7A00]"
+                      className="bg-[#1a1a2e] border-gray-700/50 text-white placeholder-gray-400 pl-10 text-sm focus:ring-[#FF7A00] focus:border-[#FF7A00]"
                     />
                   </div>
 
@@ -1049,59 +1054,70 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               )}
 
               {activeTab === 'details' && (
-                <div className="p-4">
+                <div className="p-4 space-y-6">
                   {loading ? (
                     <div className="text-gray-400 text-center py-4">Loading character details...</div>
                   ) : (
-                    <div className="space-y-6">
-                      <div className="text-center">
-                        <Avatar className="w-24 h-24 mx-auto mb-4 ring-4 ring-[#FF7A00]/30">
-                          <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
-                          <AvatarFallback className="bg-[#FF7A00] text-white text-2xl font-bold">
-                            {character.fallback}
-                          </AvatarFallback>
-                        </Avatar>
-                        <h2 className="text-xl font-bold text-white">{character.name}</h2>
-                      </div>
-
+                    <>
+                      {/* Character Info - Mobile Responsive */}
                       <div>
-                        <h3 className="text-white font-semibold mb-2">About</h3>
-                        <p className="text-gray-300 text-sm leading-relaxed">
-                          {characterDetails?.short_description || character.tagline || 'No description available.'}
-                        </p>
-                      </div>
+                        <h3 className="text-white font-semibold mb-3 text-sm sm:text-base">Character Info</h3>
+                        <div className="space-y-4">
+                          <div className="flex items-start space-x-3">
+                            <Avatar className="w-12 h-12 sm:w-16 sm:h-16 flex-shrink-0">
+                              <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
+                              <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-sm sm:text-base">
+                                {character.fallback}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="text-white font-medium text-sm sm:text-base truncate">{character.name}</h4>
+                              <p className="text-gray-400 text-xs sm:text-sm line-clamp-2">{character.tagline}</p>
+                            </div>
+                          </div>
+                          
+                          {characterDetails?.short_description && (
+                            <div>
+                              <p className="text-gray-300 text-sm leading-relaxed">
+                                {characterDetails.short_description}
+                              </p>
+                            </div>
+                          )}
 
-                      {characterDetails?.tags && characterDetails.tags.length > 0 && (
-                        <div>
-                          <h3 className="text-white font-semibold mb-3">Tags</h3>
-                          <div className="flex flex-wrap gap-2">
-                            {characterDetails.tags.map((tagItem: any, index: number) => (
-                              <Badge
-                                key={index}
-                                variant="secondary"
-                                className="bg-[#1a1a2e] text-gray-300 border border-gray-600/50 text-xs"
-                              >
-                                {tagItem.tag?.name || tagItem.name}
-                              </Badge>
-                            ))}
+                          {characterDetails?.tags && characterDetails.tags.length > 0 && (
+                            <div>
+                              <h4 className="text-white font-medium mb-2 text-sm">Tags</h4>
+                              <div className="flex flex-wrap gap-2">
+                                {characterDetails.tags.map((tagItem: any, index: number) => (
+                                  <Badge
+                                    key={index}
+                                    variant="secondary"
+                                    className="bg-[#1a1a2e] text-gray-300 border border-gray-600/50 text-xs"
+                                  >
+                                    {tagItem.tag?.name || tagItem.name}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div>
+                            <h4 className="text-white font-medium mb-1 text-sm">Creator</h4>
+                            <p className="text-gray-400 text-xs sm:text-sm">
+                              @{characterDetails?.profiles?.username || characterDetails?.creator?.username || 'Unknown'}
+                            </p>
                           </div>
                         </div>
-                      )}
-
-                      <div>
-                        <h3 className="text-white font-semibold mb-2">Creator</h3>
-                        <p className="text-gray-400 text-sm">
-                          Created by @{characterDetails?.profiles?.username || characterDetails?.creator?.username || 'Unknown'}
-                        </p>
                       </div>
 
+                      {/* Actions - Mobile Responsive */}
                       <div>
-                        <h3 className="text-white font-semibold mb-3">Actions</h3>
+                        <h3 className="text-white font-semibold mb-3 text-sm sm:text-base">Actions</h3>
                         <div className="space-y-3">
                           <Button
                             onClick={handleStartNewChat}
                             disabled={isCreatingNewChat}
-                            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50"
+                            className="w-full bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50 text-sm"
                           >
                             <MessageCircle className="w-4 h-4 mr-2" />
                             {isCreatingNewChat ? 'Creating...' : 'Start New Chat'}
@@ -1110,7 +1126,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                             <Button
                               onClick={handleEditCharacter}
                               variant="outline"
-                              className="w-full bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-gray-300"
+                              className="w-full bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-gray-300 text-sm"
                             >
                               <Edit className="w-4 h-4 mr-2" />
                               Edit Character
@@ -1122,7 +1138,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                               data-tutorial="memories-button"
                               onClick={() => setShowMemoriesDialog(true)}
                               variant="outline"
-                              className="w-full bg-transparent border-[#FF7A00]/50 hover:bg-[#FF7A00]/10 hover:text-[#FF7A00] text-[#FF7A00] border-[#FF7A00]/30"
+                              className="w-full bg-transparent border-[#FF7A00]/50 hover:bg-[#FF7A00]/10 hover:text-[#FF7A00] text-[#FF7A00] border-[#FF7A00]/30 text-sm"
                             >
                               <Brain className="w-4 h-4 mr-2" />
                               View Memories ({memories.length})
@@ -1133,32 +1149,32 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                               variant="outline"
                               size="sm"
                               onClick={handleLike}
-                              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white ${
+                              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-xs sm:text-sm ${
                                 isLiked ? 'text-red-400 border-red-400' : 'text-gray-300'
                               }`}
                             >
-                              <Heart className={`w-4 h-4 mr-2 ${isLiked ? 'fill-current' : ''}`} />
+                              <Heart className={`w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 ${isLiked ? 'fill-current' : ''}`} />
                               {isLiked ? 'Liked' : 'Like'}
                             </Button>
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={handleFavorite}
-                              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white ${
+                              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-xs sm:text-sm ${
                                 isFavorited ? 'text-yellow-400 border-yellow-400' : 'text-gray-300'
                               }`}
                             >
-                              <Star className={`w-4 h-4 mr-2 ${isFavorited ? 'fill-current' : ''}`} />
+                              <Star className={`w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2 ${isFavorited ? 'fill-current' : ''}`} />
                               {isFavorited ? 'Favorited' : 'Favorite'}
                             </Button>
                           </div>
                         </div>
                       </div>
                       
-                      {/* Chat Mode Settings - Only show if user is logged in */}
+                      {/* Chat Settings - Mobile Responsive */}
                       {currentUser && (
                         <div>
-                          <h3 className="text-white font-semibold mb-3">Chat Settings</h3>
+                          <h3 className="text-white font-semibold mb-3 text-sm sm:text-base">Chat Settings</h3>
                           <div className="space-y-4">
                             <CharacterChatModeToggle
                               chatMode={chatMode}
@@ -1167,12 +1183,12 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                               disabled={chatModeLoading}
                             />
                             
-                            {/* Time Awareness Toggle */}
+                            {/* Time Awareness Toggle - Mobile Responsive */}
                             <div className="space-y-3">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center space-x-2">
                                   <Clock className="w-4 h-4 text-[#FF7A00]" />
-                                  <span className="text-white text-sm font-medium">Time Awareness</span>
+                                  <span className="text-white text-xs sm:text-sm font-medium">Time Awareness</span>
                                 </div>
                                 <Switch
                                   checked={timeAwarenessEnabled}
@@ -1195,7 +1211,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
                           </div>
                         </div>
                       )}
-                    </div>
+                    </>
                   )}
                 </div>
               )}
