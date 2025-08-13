@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
+import logger from '@/utils/logger';
 
 export function useRealtimeUpdates(userId: string | undefined) {
   const queryClient = useQueryClient();
+  const log = logger.scoped('RealtimeUpdates');
 
   useEffect(() => {
     if (!userId) return;
@@ -20,7 +22,7 @@ export function useRealtimeUpdates(userId: string | undefined) {
           filter: `user_id=eq.${userId}`
         },
         (payload) => {
-          console.log('Chat update received:', payload);
+          log.debug('Chat update received:', payload);
           // Invalidate queries to refetch fresh data
           queryClient.invalidateQueries({ queryKey: ['dashboard-data'] });
           queryClient.invalidateQueries({ queryKey: ['user-chats'] });
@@ -41,7 +43,7 @@ export function useRealtimeUpdates(userId: string | undefined) {
           filter: `user_id=eq.${userId}`
         },
         (payload) => {
-          console.log('Credit update received:', payload);
+          log.debug('Credit update received:', payload);
           queryClient.invalidateQueries({ queryKey: ['user-credits'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-data'] });
         }
@@ -60,7 +62,7 @@ export function useRealtimeUpdates(userId: string | undefined) {
           filter: `created_by=eq.${userId}`
         },
         (payload) => {
-          console.log('Character update received:', payload);
+          log.debug('Character update received:', payload);
           queryClient.invalidateQueries({ queryKey: ['dashboard-data'] });
           queryClient.invalidateQueries({ queryKey: ['user-characters'] });
         }
@@ -79,7 +81,7 @@ export function useRealtimeUpdates(userId: string | undefined) {
           filter: `user_id=eq.${userId}`
         },
         (payload) => {
-          console.log('Subscription update received:', payload);
+          log.debug('Subscription update received:', payload);
           queryClient.invalidateQueries({ queryKey: ['user-subscription'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard-data'] });
         }
@@ -92,5 +94,5 @@ export function useRealtimeUpdates(userId: string | undefined) {
       characterSubscription.unsubscribe();
       subscriptionUpdates.unsubscribe();
     };
-  }, [userId, queryClient]);
+  }, [userId, queryClient, log]);
 }

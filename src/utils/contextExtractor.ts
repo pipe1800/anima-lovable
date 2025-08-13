@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { TrackedContext } from '@/types/chat';
+import logger from '@/utils/logger';
 
 interface AddonSettings {
   moodTracking?: boolean;
@@ -39,7 +40,7 @@ export async function extractAndUpdateContext({
   addonSettings
 }: ExtractContextParams): Promise<TrackedContext | null> {
   try {
-    console.log('🔄 Calling extract-addon-context function...');
+    logger.info('🔄 Calling extract-addon-context function...');
     
     // Call the extract-addon-context edge function
     const { data, error } = await supabase.functions.invoke('extract-addon-context', {
@@ -54,18 +55,18 @@ export async function extractAndUpdateContext({
     });
 
     if (error) {
-      console.error('❌ Context extraction error:', error);
+      logger.error('❌ Context extraction error:', error);
       return null;
     }
 
     const response = data as ContextExtractionResponse;
     
     if (!response.success) {
-      console.error('❌ Context extraction failed:', response.error || response.message);
+      logger.error('❌ Context extraction failed:', response.error || response.message);
       return null;
     }
 
-    console.log('✅ Context extracted successfully:', response.context_summary);
+    logger.info('✅ Context extracted successfully:', response.context_summary);
 
     // Convert the extracted context to TrackedContext format
     if (response.context_summary) {
@@ -86,7 +87,7 @@ export async function extractAndUpdateContext({
 
     return null;
   } catch (error) {
-    console.error('❌ Context extraction error:', error);
+    logger.error('❌ Context extraction error:', error);
     return null;
   }
 }
@@ -96,7 +97,7 @@ export async function extractAndUpdateContext({
  */
 async function updateMessageWithContext(messageId: string, context: TrackedContext): Promise<void> {
   try {
-    console.log('💾 Updating message with context:', messageId);
+    logger.info('💾 Updating message with context:', messageId);
     
     const { error } = await supabase
       .from('messages')
@@ -104,12 +105,12 @@ async function updateMessageWithContext(messageId: string, context: TrackedConte
       .eq('id', messageId);
 
     if (error) {
-      console.error('❌ Failed to update message with context:', error);
+      logger.error('❌ Failed to update message with context:', error);
     } else {
-      console.log('✅ Message updated with context successfully');
+      logger.info('✅ Message updated with context successfully');
     }
   } catch (error) {
-    console.error('❌ Error updating message with context:', error);
+    logger.error('❌ Error updating message with context:', error);
   }
 }
 
@@ -122,7 +123,7 @@ export async function extractInitialContext(
   addonSettings: AddonSettings
 ): Promise<TrackedContext | null> {
   try {
-    console.log('🔄 Extracting initial context for character greeting...');
+    logger.info('🔄 Extracting initial context for character greeting...');
     
     const { data, error } = await supabase.functions.invoke('extract-addon-context', {
       body: {
@@ -133,14 +134,14 @@ export async function extractInitialContext(
     });
 
     if (error) {
-      console.error('❌ Initial context extraction error:', error);
+      logger.error('❌ Initial context extraction error:', error);
       return null;
     }
 
     const response = data as ContextExtractionResponse;
     
     if (!response.success || !response.context_summary) {
-      console.log('⏭️ No initial context extracted');
+      logger.debug('⏭️ No initial context extracted');
       return null;
     }
 
@@ -154,10 +155,10 @@ export async function extractInitialContext(
       characterPosition: response.context_summary.character_position || 'No context'
     };
 
-    console.log('✅ Initial context extracted:', trackedContext);
+    logger.info('✅ Initial context extracted:', trackedContext);
     return trackedContext;
   } catch (error) {
-    console.error('❌ Initial context extraction error:', error);
+    logger.error('❌ Initial context extraction error:', error);
     return null;
   }
 }

@@ -55,19 +55,6 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
   
   // Use the most relevant context source
   const effectiveContext = currentContext || context;
-  
-  // Debug logging
-  console.log('🎨 ContextDisplay render:', {
-    hasContext: !!context,
-    hasContextUpdates: !!contextUpdates,
-    hasCurrentContext: !!currentContext,
-    hasAddonSettings: !!addonSettings,
-    context,
-    contextUpdates,
-    currentContext,
-    addonSettings,
-    effectiveContext
-  });
 
   // Create all possible addon items
   const allAddonItems = [
@@ -227,16 +214,6 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
     addonSettings.characterPosition
   ));
 
-  console.log('🎨 ContextDisplay visibility check:', {
-    hasEnabledAddons,
-    hasValidContextResult: hasValidContext(effectiveContext),
-    hasContext: !!context,
-    hasContextUpdates: !!contextUpdates,
-    hasCurrentContext: !!currentContext,
-    effectiveContext,
-    willRender: hasEnabledAddons || hasValidContext(effectiveContext)
-  });
-
   // Show context if we have valid context data OR if addons are enabled OR while settings are loading
   const shouldRender = hasEnabledAddons || hasValidContext(effectiveContext) || context || contextUpdates;
   
@@ -244,15 +221,7 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
   const hasAnyContext = hasValidContext(effectiveContext) || hasValidContext(context);
   const forceRender = hasAnyContext;
   
-  console.log('🎨 ContextDisplay final render decision:', {
-    shouldRender,
-    hasAnyContext,
-    forceRender,
-    finalDecision: shouldRender || forceRender
-  });
-  
   if (!shouldRender && !forceRender) {
-    console.log('🎨 ContextDisplay: Not rendering - no valid conditions met');
     return null;
   }
 

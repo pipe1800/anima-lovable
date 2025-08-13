@@ -9,6 +9,7 @@ import OnboardingChecklist from '@/components/OnboardingChecklist';
 import { TutorialManager } from '@/components/tutorial/TutorialManager';
 import { useContextManagement } from '@/hooks/useContextManagement';
 import type { TrackedContext } from '@/types/chat';
+import logger from '@/utils/logger';
 
 const Chat = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -21,7 +22,6 @@ const Chat = () => {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
-  const [creditsBalance, setCreditsBalance] = useState<number>(0);
   const [trackedContext, setTrackedContext] = useState<TrackedContext>({
     moodTracking: 'No context',
     clothingInventory: 'No context',
@@ -38,13 +38,16 @@ const Chat = () => {
   const existingChatId = chatId || location.state?.existingChatId;
   const fromOnboarding = location.state?.fromOnboarding;
 
+  // Scoped logger (declare before any usage)
+  const log = logger.scoped('ChatPage');
+
   // Set localStorage flag for tutorial trigger when coming from onboarding
   useEffect(() => {
     if (fromOnboarding && user) {
-      console.log('🎓 Chat: Setting fromOnboarding flag for tutorial');
+      log.debug('🎓 Chat: Setting fromOnboarding flag for tutorial');
       localStorage.setItem('fromOnboarding', 'true');
     }
-  }, [fromOnboarding, user]);
+  }, [fromOnboarding, user, log]);
 
   // Load context from database and sync with local state
   const { context: loadedContext, reloadContext, isLoading: contextLoading } = useContextManagement(
@@ -53,20 +56,73 @@ const Chat = () => {
     user?.id || null
   );
 
+  // Define triggerInitialExtraction before it's used
+  const triggerInitialExtraction = useCallback(async () => {
+    log.info('🔄 Triggering initial context extraction for new chat...');
+    
+    try {
+      // Get addon settings for context extraction
+      log.debug('📥 Fetching user global settings...');
+      const { data: globalSettings, error: settingsError } = await supabase
+        .from('user_global_chat_settings')
+        .select('*')
+        .eq('user_id', user?.id as string)
+        .single();
+
+      log.debug('⚙️ Global settings result:', { globalSettings, settingsError });
+
+      if (globalSettings) {
+        const addonSettings = {
+          moodTracking: globalSettings.mood_tracking,
+          clothingInventory: globalSettings.clothing_inventory,
+          locationTracking: globalSettings.location_tracking,
+          timeAndWeather: globalSettings.time_and_weather,
+          relationshipStatus: globalSettings.relationship_status,
+          characterPosition: globalSettings.character_position
+        };
+
+        log.debug('🎛️ Mapped addon settings:', addonSettings);
+
+        // Call extract-addon-context in INITIAL mode for character card + greeting
+        log.debug('📞 Calling extract-addon-context function...');
+        const { data, error } = await supabase.functions.invoke('extract-addon-context', {
+          body: {
+            chat_id: chatId,
+            character_id: characterId,
+            addon_settings: addonSettings,
+            mode: 'initial'
+          }
+        });
+
+        log.debug('📤 Function call result:', { data, error });
+
+        if (error) {
+          log.error('❌ Initial context extraction error:', error);
+        } else if (data?.success && data?.context_summary) {
+          log.info('✅ Initial context extracted for greeting message:', data.context_summary);
+        } else {
+          log.debug('⏭️ Initial context extraction skipped or failed:', data?.message);
+        }
+      } else {
+        log.debug('⚠️ No global settings found - skipping context extraction');
+      }
+    } catch (error) {
+      log.error('❌ Error in initial context extraction:', error);
+    }
+  }, [characterId, chatId, user?.id, log]);
+
   // Add a callback to reload context after message is sent
   const handleMessageSent = useCallback(async () => {
-    if (!currentChatId || !characterId || !user?.id) return;
-    
-    console.log('🔄 Message sent, context will be extracted by backend');
+    log.debug('🔄 Message sent, context will be extracted by backend');
     
     // The backend (send-message-handler) now handles context extraction
     // Real-time subscription should pick up the changes automatically
     // But we can add a small delay and force reload as backup
     setTimeout(() => {
-      console.log('🔄 Triggering context reload as backup');
+      log.debug('🔄 Triggering context reload as backup');
       reloadContext();
-    }, 2000); // 2 second delay to allow backend processing
-  }, [reloadContext, user?.id, characterId, currentChatId]);
+    }, 2000);
+  }, [reloadContext, user?.id, characterId, currentChatId, log]);
 
   // Debug log the loaded context
   useEffect(() => {
@@ -76,10 +132,10 @@ const Chat = () => {
   // Sync context from database to local state when chat changes or context loads
   useEffect(() => {
     if (currentChatId && characterId && user?.id) {
-      console.log('🔄 Setting tracked context from database:', loadedContext);
+      log.debug('🔄 Setting tracked context from database:', loadedContext);
       setTrackedContext(loadedContext);
     }
-  }, [currentChatId, characterId, user?.id, loadedContext]);
+  }, [currentChatId, characterId, user?.id, loadedContext, log]);
 
   // ALL useEffect hooks must be at the top, before any conditional returns
   useEffect(() => {
@@ -89,7 +145,7 @@ const Chat = () => {
         
         // Check if onboarding is completed
         const isCompleted = session.user.user_metadata?.onboarding_completed;
-        console.log('Chat: Onboarding completed status:', isCompleted);
+        log.debug('Chat: Onboarding completed status:', isCompleted);
         
         setOnboardingCompleted(!!isCompleted);
         
@@ -123,7 +179,7 @@ const Chat = () => {
     );
 
     return () => subscription.unsubscribe();
-  }, [navigate, loading]);
+  }, [navigate, loading, log]);
 
   // Initialize currentChatId from existingChatId
   useEffect(() => {
@@ -160,14 +216,14 @@ const Chat = () => {
           .single();
         
         if (error || !data) {
-          console.error('Error fetching character:', error);
+          log.error('Error fetching character:', error);
           navigate('/dashboard');
           return;
         }
         
         setCharacterData(data);
       } catch (error) {
-        console.error('Error fetching character:', error);
+        log.error('Error fetching character:', error);
         navigate('/dashboard');
       } finally {
         setCharacterLoading(false);
@@ -175,9 +231,9 @@ const Chat = () => {
     };
     
     fetchCharacter();
-  }, [user, loading, characterId, selectedCharacter, navigate, existingChatId, chatId, currentChatId]);
+  }, [user, loading, characterId, selectedCharacter, navigate, existingChatId, chatId, currentChatId, log]);
 
-    const handleFirstMessage = () => {
+  const handleFirstMessage = () => {
     setIsFirstMessage(false);
     setOnboardingCompleted(true);
     
@@ -190,112 +246,28 @@ const Chat = () => {
     setSelectedPersonaId(personaId);
   };
 
-  const handleWorldInfoChange = (worldInfoId: string | null) => {
-    console.log('🌍 Chat.tsx: World info change received:', worldInfoId);
+  const handleWorldInfoChange = useCallback((worldInfoId: string | null) => {
+    log.debug('🌍 Chat.tsx: World info change received:', worldInfoId);
     setSelectedWorldInfoId(worldInfoId);
-  };
+  }, [log]);
 
   // Log world info changes
   useEffect(() => {
-    console.log('🌍 Chat.tsx: selectedWorldInfoId state changed to:', selectedWorldInfoId);
-  }, [selectedWorldInfoId]);
+    log.debug('🌍 Chat.tsx: selectedWorldInfoId state changed to:', selectedWorldInfoId);
+  }, [selectedWorldInfoId, log]);
 
-  const handleCreditsUpdate = (balance: number) => {
-    setCreditsBalance(balance);
-  };  const handleChatCreated = useCallback(async (chatId: string) => {
-    console.log('💬 Chat page: New chat created with ID:', chatId);
-    setCurrentChatId(chatId);
-    
-    // 🎯 EXTRACT INITIAL CONTEXT FROM CHARACTER CARD + GREETING
-    console.log('🔍 Debug - Chat created context check:', {
+  const handleChatCreated = useCallback((chatId: string) => {
+    log.info('💬 Chat page: New chat created with ID:', chatId);
+    log.debug('🔍 Debug - Chat created context check:', {
       chatId,
-      characterId: characterId,
-      userId: user?.id,
-      hasCharacterId: !!characterId,
-      hasUserId: !!user?.id,
-      willProceed: !!(characterId && user?.id)
+      hasLoadedContext: !!loadedContext,
     });
     
+    // 🎯 EXTRACT INITIAL CONTEXT FROM CHARACTER CARD + GREETING
     if (characterId && user?.id) {
-      console.log('🔄 Triggering initial context extraction for new chat...');
-      
-      try {
-        // Get addon settings for context extraction
-        console.log('📥 Fetching user global settings...');
-        const { data: globalSettings, error: settingsError } = await supabase
-          .from('user_global_chat_settings')
-          .select('*')
-          .eq('user_id', user.id)
-          .single();
-
-        console.log('⚙️ Global settings result:', { globalSettings, settingsError });
-
-        if (globalSettings) {
-          const addonSettings = {
-            moodTracking: globalSettings.mood_tracking,
-            clothingInventory: globalSettings.clothing_inventory,
-            locationTracking: globalSettings.location_tracking,
-            timeAndWeather: globalSettings.time_and_weather,
-            relationshipStatus: globalSettings.relationship_status,
-            characterPosition: globalSettings.character_position
-          };
-
-          console.log('🎛️ Mapped addon settings:', addonSettings);
-
-          // Call extract-addon-context in INITIAL mode for character card + greeting
-          console.log('📞 Calling extract-addon-context function...');
-          const { data, error } = await supabase.functions.invoke('extract-addon-context', {
-            body: {
-              chat_id: chatId,
-              character_id: characterId,
-              addon_settings: addonSettings,
-              mode: 'initial' // 🎯 INITIAL MODE - extracts from character card + greeting
-            }
-          });
-
-          console.log('📤 Function call result:', { data, error });
-
-          if (error) {
-            console.error('❌ Initial context extraction error:', error);
-          } else if (data?.success) {
-            console.log('✅ Initial context extracted for greeting message:', data.context_summary);
-          } else {
-            console.log('⏭️ Initial context extraction skipped or failed:', data?.message);
-          }
-        } else {
-          console.log('⚠️ No global settings found - skipping context extraction');
-        }
-      } catch (error) {
-        console.error('❌ Error in initial context extraction:', error);
-      }
+      triggerInitialExtraction();
     }
-  }, [characterId, user?.id]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#121212] flex items-center justify-center">
-        <div className="text-white">Loading...</div>
-      </div>
-    );
-  }
-
-  // Return early if no user - redirect handled by useEffect
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-[#121212] flex items-center justify-center">
-        <div className="text-white">Redirecting...</div>
-      </div>
-    );
-  }
-
-  // Show loading while character is being fetched
-  if (characterLoading || (!characterData && (selectedCharacter || characterId))) {
-    return (
-      <div className="min-h-screen bg-[#121212] flex items-center justify-center">
-        <div className="text-white">Loading character...</div>
-      </div>
-    );
-  }
+  }, [characterId, user?.id, triggerInitialExtraction, log, loadedContext]);
 
   // If no character data available, show error
   if (!characterData) {
@@ -344,7 +316,6 @@ const Chat = () => {
             onContextUpdate={setTrackedContext}
             onPersonaChange={handlePersonaChange}
             onWorldInfoChange={handleWorldInfoChange}
-            creditsBalance={creditsBalance}
           >
             <ChatInterface
               character={character}
@@ -355,7 +326,6 @@ const Chat = () => {
               selectedPersonaId={selectedPersonaId}
               selectedWorldInfoId={selectedWorldInfoId}
               onChatCreated={handleChatCreated}
-              onCreditsUpdate={handleCreditsUpdate}
               onMessageSent={handleMessageSent}
             />
           </ChatLayout>

@@ -11,6 +11,7 @@ import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { supabase } from '@/integrations/supabase/client';
 import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 import { handleChatError } from '@/utils/chatErrorHandling';
+import logger from '@/utils/logger';
 
 // Debug components - Only load when needed
 const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
@@ -41,7 +42,6 @@ interface ChatInterfaceProps {
   selectedPersonaId?: string | null;
   selectedWorldInfoId?: string | null;
   onChatCreated?: (chatId: string) => void; // New callback for when chat is created
-  onCreditsUpdate?: (balance: number) => void; // New callback for credits balance updates
   onMessageSent?: () => Promise<void>; // New callback for when message is sent
 }
 
@@ -54,7 +54,6 @@ const ChatInterface = ({
   selectedPersonaId: propSelectedPersonaId,
   selectedWorldInfoId,
   onChatCreated,
-  onCreditsUpdate,
   onMessageSent
 }: ChatInterfaceProps) => {
   const [inputValue, setInputValue] = useState('');
@@ -67,11 +66,12 @@ const ChatInterface = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+  const log = logger.scoped('ChatInterface');
 
   // Listen for auto-summary success events and show notification
   useEffect(() => {
     const handleAutoSummary = (event: CustomEvent) => {
-      console.log('✅ Auto-summary notification received:', event.detail);
+      log.info('Auto-summary notification received:', event.detail);
       toast({
         title: "🧠 New Memory Added",
         description: "Conversation automatically summarized to maintain performance.",
@@ -84,7 +84,7 @@ const ChatInterface = ({
     return () => {
       window.removeEventListener('autoSummarySuccess', handleAutoSummary as EventListener);
     };
-  }, [toast]);
+  }, [toast, log]);
 
   // Create chat if needed
   useEffect(() => {
@@ -93,7 +93,7 @@ const ChatInterface = ({
       
       const initializeChat = async () => {
         try {
-          console.log('🎯 ChatInterface: Creating new chat for character:', character.id);
+          log.info('Creating new chat for character:', character.id);
           
           const { data, error } = await supabase.functions.invoke('chat-management', {
             body: {
@@ -109,7 +109,7 @@ const ChatInterface = ({
           if (error) throw error;
           
           if (data?.success && data?.chat_id) {
-            console.log('✅ ChatInterface: Chat created successfully:', data.chat_id);
+            log.info('Chat created successfully:', data.chat_id);
             setCurrentChatId(data.chat_id);
             // Notify parent component about the new chat ID
             onChatCreated?.(data.chat_id);
@@ -121,12 +121,8 @@ const ChatInterface = ({
             );
           }
         } catch (error) {
-          console.error('Error creating chat:', error);
-          toast({
-            title: "Error",
-            description: "Failed to create chat session",
-            variant: "destructive"
-          });
+          const chatError = handleChatError(error, 'creating chat', false);
+          toast({ title: 'Error', description: chatError.message, variant: 'destructive' });
         } finally {
           setIsCreatingChat(false);
         }
@@ -134,7 +130,7 @@ const ChatInterface = ({
       
       initializeChat();
     }
-  }, [currentChatId, user, character, propSelectedPersonaId, onChatCreated, isCreatingChat]);
+  }, [currentChatId, user, character, propSelectedPersonaId, onChatCreated, isCreatingChat, log, toast]);
 
   // Use new orchestrator hook
   const {
@@ -166,13 +162,13 @@ const ChatInterface = ({
   useEffect(() => {
     if (isStreaming) {
       const timeoutId = setTimeout(() => {
-        console.warn('⚠️ Streaming timeout detected, clearing stuck state');
+        log.warn('⚠️ Streaming timeout detected, clearing stuck state');
         // Force clear streaming state if it's been too long
       }, 30000); // 30 second timeout
       
       return () => clearTimeout(timeoutId);
     }
-  }, [isStreaming]);
+  }, [isStreaming, log]);
 
   // Use performance monitoring
   const { metrics, updateMetrics } = useChatPerformance(currentChatId);
@@ -208,14 +204,11 @@ const ChatInterface = ({
   // Sync tracked context with parent - only sync when there are meaningful differences
   useEffect(() => {
     if (effectiveTrackedContext && onContextUpdate) {
-      // Check if contexts have meaningful differences (ignore "No context" values)
       const hasValidParentContext = Object.values(parentTrackedContext).some(value => value !== 'No context');
       const hasValidEffectiveContext = Object.values(effectiveTrackedContext).some(value => value !== 'No context');
       
-      // Only sync if the effective context has valid content and parent doesn't, 
-      // or if there are actual differences in valid content
       if (!hasValidParentContext && hasValidEffectiveContext) {
-        console.log('🔄 Syncing context from orchestrator to parent (parent has no valid context):', {
+        log.debug('Syncing context to parent (parent has no valid context):', {
           from: parentTrackedContext,
           to: effectiveTrackedContext
         });
@@ -231,7 +224,7 @@ const ChatInterface = ({
         );
 
         if (isContextDifferent) {
-          console.log('🔄 Syncing context from orchestrator to parent (contexts differ):', {
+          log.debug('Syncing context to parent (contexts differ):', {
             from: parentTrackedContext,
             to: effectiveTrackedContext
           });
@@ -239,14 +232,7 @@ const ChatInterface = ({
         }
       }
     }
-  }, [effectiveTrackedContext, parentTrackedContext, onContextUpdate]);
-
-  // Update parent with credits balance whenever it changes
-  useEffect(() => {
-    if (onCreditsUpdate && typeof creditsBalance === 'number') {
-      onCreditsUpdate(creditsBalance);
-    }
-  }, [creditsBalance, onCreditsUpdate]);
+  }, [effectiveTrackedContext, parentTrackedContext, onContextUpdate, log]);
 
   // Initialize chat for existing chat
   useEffect(() => {
@@ -267,10 +253,10 @@ const ChatInterface = ({
   // Sync selected persona when prop changes
   useEffect(() => {
     if (propSelectedPersonaId !== undefined) {
-      console.log('🔄 ChatInterface: Persona prop changed to:', propSelectedPersonaId);
+      log.debug('🔄 ChatInterface: Persona prop changed to:', propSelectedPersonaId);
       setSelectedPersonaId(propSelectedPersonaId);
     }
-  }, [propSelectedPersonaId]);
+  }, [propSelectedPersonaId, log]);
 
   // Fetch user's best persona for template replacement (only if no persona prop provided)
   useEffect(() => {
@@ -373,7 +359,7 @@ const ChatInterface = ({
 
   const handleUpgrade = () => {
     // Navigate to upgrade page or show upgrade modal
-    console.log('Navigate to upgrade page');
+    log.info('Navigate to upgrade page');
   };
 
   const handleCloseInsufficientCreditsModal = () => {
@@ -405,7 +391,7 @@ const ChatInterface = ({
           chatId={currentChatId}
           character={character}
           trackedContext={effectiveTrackedContext}
-          streamingMessage="" 
+          streamingMessage={streamingMessage}
           isStreaming={isStreaming}
           messages={messages}
           hasMore={hasMore}

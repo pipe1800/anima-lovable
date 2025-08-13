@@ -5,6 +5,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, CheckCircle, XCircle, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import logger from '@/utils/logger';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/queries/chatQueries';
 
 const CreditPurchaseVerification = () => {
   const [searchParams] = useSearchParams();
@@ -19,12 +22,14 @@ const CreditPurchaseVerification = () => {
     creditsAdded?: number;
     amountPaid?: number;
   }>({});
+  const queryClient = useQueryClient();
+  const log = logger.scoped('CreditPurchaseVerification');
 
   useEffect(() => {
     const finalizePurchase = async () => {
       // Prevent duplicate calls
       if (isVerifying) {
-        console.log('Verification already in progress, skipping...');
+        log.debug('Verification already in progress, skipping...');
         return;
       }
       
@@ -32,14 +37,14 @@ const CreditPurchaseVerification = () => {
       
       // Get all URL parameters to debug what PayPal is sending
       const allParams = Object.fromEntries(searchParams.entries());
-      console.log('All PayPal return parameters:', allParams);
+      log.info('All PayPal return parameters:', allParams);
       
       // PayPal returns the order token as 'token' parameter
       const token = searchParams.get('token');
       const payerId = searchParams.get('PayerID');
       const packId = searchParams.get('pack_id');
       
-      console.log('Credit purchase verification attempt:', {
+      log.info('Credit purchase verification attempt:', {
         token: token,
         PayerID: payerId,
         pack_id: packId,
@@ -47,39 +52,28 @@ const CreditPurchaseVerification = () => {
       });
 
       if (!token) {
-        console.error('Missing token parameter:', { token });
+        log.error('Missing token parameter:', { token });
         setStatus('error');
         setMessage('Missing order token from PayPal. Please try your purchase again.');
         return;
       }
 
       try {
-        console.log('Calling paypal-management with capture-order operation:', { orderId: token, packId });
-        
-        // We need to get the credit pack ID from the pack_id parameter
-        if (!packId) {
-          throw new Error('Missing credit pack ID parameter');
-        }
-        
         const { data, error } = await supabase.functions.invoke('paypal-management', {
           body: { 
             operation: 'capture-order',
-            orderID: token,
-            creditPackId: packId
+            token,
+            payerId,
+            packId
           }
         });
 
-        console.log('Capture response:', { data, error });
+        log.debug('Finalization response:', { data, error });
 
         if (error) {
-          console.error('Capture error:', error);
+          log.error('Finalization error:', error);
           setStatus('error');
-          setMessage(`Purchase finalization failed: ${error.message || 'Unknown error'}`);
-          toast({
-            title: "Purchase Failed",
-            description: `Failed to finalize credit purchase: ${error.message || 'Unknown error'}`,
-            variant: "destructive"
-          });
+          setMessage('Finalization failed. Please contact support.');
           return;
         }
 
@@ -95,6 +89,12 @@ const CreditPurchaseVerification = () => {
             title: "Credits Purchased!",
             description: `${data.data?.creditsGranted?.toLocaleString()} credits have been added to your account.`,
           });
+
+          // Invalidate user credits and profile so balance updates everywhere
+          if (user?.id) {
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
+          }
           
           // Send success message to parent window and close popup
           setTimeout(() => {
@@ -111,7 +111,7 @@ const CreditPurchaseVerification = () => {
           setMessage('Credit purchase finalization failed. Please contact support.');
         }
       } catch (error) {
-        console.error('Finalization error:', error);
+        log.error('Finalization error:', error);
         setStatus('error');
         setMessage('An error occurred during purchase finalization. Please contact support.');
       } finally {

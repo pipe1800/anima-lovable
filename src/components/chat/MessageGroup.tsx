@@ -26,11 +26,15 @@ interface MessageGroupProps {
     relationshipStatus?: boolean;
     characterPosition?: boolean;
   };
+  // New: control font size of message content
+  fontSizeClass?: string;
 }
 
 // ✅ PHASE 3: Memoized component to prevent unnecessary re-renders
-export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings }: MessageGroupProps) {
+export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
+
+  const sizeClass = fontSizeClass || 'text-base';
 
   return (
     <div className="mb-6">
@@ -52,7 +56,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
           {messages.map((message, index) => (
             <div
               key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-              className={`px-4 py-2 text-sm ${
+              className={`px-4 py-2 ${sizeClass} ${
                 isUser
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground'
@@ -104,15 +108,6 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
               addonSettings.relationshipStatus ||
               addonSettings.characterPosition
             );
-            
-            console.log('🏷️ MessageGroup context check:', {
-              hasContextUpdates,
-              hasCurrentContext,
-              hasEnabledAddons,
-              latestMessageId: latestMessage.id,
-              addonSettings,
-              willShowContext: hasContextUpdates || hasCurrentContext || hasEnabledAddons
-            });
             
             if (hasContextUpdates || hasCurrentContext || hasEnabledAddons) {
               return (

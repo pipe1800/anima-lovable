@@ -16,6 +16,7 @@ import {
   getCharacterDetails
 } from '@/lib/supabase-queries';
 import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
+import { supabase } from '@/integrations/supabase/client';
 
 // ============================================================================
 // QUERY KEY FACTORY - Prevents typos and ensures consistency
@@ -26,6 +27,7 @@ export const queryKeys = {
     all: ['chat'] as const,
     messages: (chatId: string) => ['chat', 'messages', chatId] as const,
     context: (chatId: string, characterId: string) => ['chat', 'context', chatId, characterId] as const,
+    messageCount: (chatId: string) => ['chat', 'message-count', chatId] as const,
   },
   
   // User queries  
@@ -54,6 +56,23 @@ export const queryConfigs = {
     gcTime: 5 * 60 * 1000, // 5 minutes 
     refetchOnWindowFocus: false, // Let real-time handle updates
     refetchOnReconnect: true, // Important for connectivity issues
+  }),
+  
+  // Lightweight message count per chat (for memory dialog)
+  chatMessageCount: (chatId: string) => ({
+    queryKey: queryKeys.chat.messageCount(chatId),
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('chat_id', chatId)
+        .neq('is_placeholder', true);
+      if (error) throw error;
+      return count || 0;
+    },
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    refetchOnWindowFocus: false,
   }),
   
   // User credits - balanced updates with background refresh
@@ -136,6 +155,7 @@ export const invalidationHelpers = {
   invalidateChatData: (queryClient: any, chatId: string) => {
     queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(chatId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.chat.context(chatId, '') });
+    queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatId) });
   },
   
   // Invalidate user-related queries  
@@ -154,6 +174,10 @@ export const invalidationHelpers = {
       queryKey: queryKeys.user.credits(userId),
       exact: true 
     });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.chat.messageCount(chatId),
+      exact: true
+    });
   }
 } as const;
 
@@ -162,10 +186,12 @@ export const invalidationHelpers = {
 // ============================================================================
 export type QueryKey = 
   | ReturnType<typeof queryKeys.chat.messages>
+  | ReturnType<typeof queryKeys.chat.messageCount>
   | ReturnType<typeof queryKeys.user.credits>
   | ReturnType<typeof queryKeys.character.details>;
 
 export type QueryConfig = 
   | ReturnType<typeof queryConfigs.chatMessages>
+  | ReturnType<typeof queryConfigs.chatMessageCount>
   | ReturnType<typeof queryConfigs.userCredits>
   | ReturnType<typeof queryConfigs.characterDetails>;

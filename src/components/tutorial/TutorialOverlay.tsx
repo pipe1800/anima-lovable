@@ -2,8 +2,10 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { Button } from '@/components/ui/button';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import logger from '@/utils/logger';
 
 export const TutorialOverlay: React.FC = () => {
+  const log = logger.scoped('TutorialOverlay');
   const { 
     isActive, 
     currentStepData, 
@@ -20,34 +22,32 @@ export const TutorialOverlay: React.FC = () => {
   const [highlightedRect, setHighlightedRect] = useState<DOMRect | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  console.log('🎓 TutorialOverlay: Rendering', {
-    isActive,
-    currentStepData,
-    highlightedElement
-  });
+  useEffect(() => {
+    log.debug('🎓 TutorialOverlay: Rendering/updated', {/* redacted debug to avoid heavy objects */});
+  }, [/* deps causing re-render */]);
 
   // MOVE THE isActive CHECK TO THE TOP OF THE COMPONENT
   // This should be the FIRST check in the render
   if (!isActive) {
-    console.log('🎓 TutorialOverlay: Tutorial not active, unmounting');
+    log.debug('🎓 TutorialOverlay: Tutorial not active, unmounting');
     return null;
   }
 
   // Add this after the console.log at line 27
   useEffect(() => {
-    console.log('🎓 ALL TUTORIAL STEPS:', tutorialSteps.map((step, idx) => ({
+    log.debug('🎓 ALL TUTORIAL STEPS (titles only):', tutorialSteps.map((step, idx) => ({
       step: idx,
       title: step.title,
       target: step.target,
       requiredInteraction: step.requiredInteraction
     })));
-  }, [tutorialSteps]);
+  }, [tutorialSteps, log]);
 
-    // FIX 1: PROPERLY clear highlight when step has no target
+  // FIX 1: PROPERLY clear highlight when step has no target
   useEffect(() => {
     if (currentStepData) {
       if (currentStepData.target) {
-        console.log('🎓 Setting highlight to:', currentStepData.target);
+        log.debug('🎓 Setting highlight to:', currentStepData.target);
         setHighlight(currentStepData.target);
         
         // Handle scrollTo if needed
@@ -84,12 +84,12 @@ export const TutorialOverlay: React.FC = () => {
           }, 400); // Wait for panel animation + buffer
         }
       } else {
-        console.log('🎓 Clearing highlight - step has no target');
+        log.debug('🎓 Clearing highlight - step has no target');
         setHighlight(null);
-        setHighlightedRect(null); // Also clear the rect immediately
+        setHighlightedRect(null);
       }
     }
-  }, [currentStepData, setHighlight]);
+  }, [currentStepData, setHighlight, log]);
 
   // Ensure sidebar is visible for navigation steps
   useEffect(() => {
@@ -114,7 +114,7 @@ export const TutorialOverlay: React.FC = () => {
 
   useEffect(() => {
     if (!highlightedElement) {
-      console.log('🎓 No highlighted element - clearing rect immediately');
+      log.debug('🎓 No highlighted element - clearing rect immediately');
       setHighlightedRect(null);
       return;
     }
@@ -127,9 +127,9 @@ export const TutorialOverlay: React.FC = () => {
       if (element) {
         const rect = element.getBoundingClientRect();
         setHighlightedRect(rect);
-        console.log('🎓 Updated highlight rect for:', highlightedElement);
+        log.debug('🎓 Updated highlight rect for:', highlightedElement);
       } else {
-        console.warn('🎓 TutorialOverlay: Element not found:', highlightedElement);
+        log.warn('🎓 TutorialOverlay: Element not found:', highlightedElement);
         setHighlightedRect(null);
       }
     };
@@ -181,17 +181,17 @@ export const TutorialOverlay: React.FC = () => {
           let clickedElement = e.target as Node;
           while (clickedElement) {
             if (clickedElement === targetElement) {
-              console.log('🎓 Tutorial: Click on highlighted element - allowing through');
+              log.debug('🎓 Tutorial: Click on highlighted element - allowing through');
               // Don't prevent default - let the click go through
               
               // If this step requires interaction, advance after a delay
               if (currentStepData?.requiredInteraction) {
                 setTimeout(() => {
-                  console.log('🎓 Tutorial: Advancing to next step after interaction');
+                  log.debug('🎓 Tutorial: Advancing to next step after interaction');
                   nextStep();
-                }, 500); // Give time for UI to update
+                }, 500);
               }
-              return; // Let the click proceed naturally
+              return;
             }
             clickedElement = clickedElement.parentNode as Node;
           }
@@ -201,19 +201,19 @@ export const TutorialOverlay: React.FC = () => {
       // Check if click is on the tutorial tooltip itself
       const tooltipElement = document.querySelector('.tutorial-tooltip');
       if (tooltipElement && tooltipElement.contains(e.target as Node)) {
-        console.log('🎓 Tutorial: Click on tooltip, allowing interaction');
+        log.debug('🎓 Tutorial: Click on tooltip, allowing interaction');
         return;
       }
 
       // Check if click is on "Finish Tour" button in completion screen
       const finishTourButton = (e.target as Element).closest('button');
       if (finishTourButton && finishTourButton.textContent?.includes('Finish Tour')) {
-        console.log('🎓 Tutorial: Click on Finish Tour button, allowing interaction');
+        log.debug('🎓 Tutorial: Click on Finish Tour button, allowing interaction');
         return;
       }
 
       // Block all other clicks
-      console.log('🎓 Tutorial: Blocking click outside highlighted area');
+      log.debug('🎓 Tutorial: Blocking click outside highlighted area');
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
@@ -227,7 +227,7 @@ export const TutorialOverlay: React.FC = () => {
       document.removeEventListener('click', handleGlobalClick, true);
       document.removeEventListener('mousedown', handleGlobalClick, true);
     };
-  }, [isActive, highlightedElement, currentStepData, nextStep]);
+  }, [isActive, highlightedElement, currentStepData, nextStep, log]);
 
   // Add keyboard navigation
   useEffect(() => {
@@ -269,7 +269,7 @@ export const TutorialOverlay: React.FC = () => {
           childEl.style.pointerEvents = 'auto';
         });
         
-        console.log('🎓 Applied high z-index to highlighted element:', highlightedElement);
+        log.debug('🎓 Applied high z-index to highlighted element:', highlightedElement);
         
         return () => {
           // Restore original values
@@ -289,7 +289,7 @@ export const TutorialOverlay: React.FC = () => {
 
   // Then check for currentStepData
   if (!currentStepData) {
-    console.log('🎓 TutorialOverlay: No step data');
+    log.debug('🎓 TutorialOverlay: No step data');
     return null;
   }
 
@@ -363,11 +363,11 @@ export const TutorialOverlay: React.FC = () => {
   };
 
   // Check if this is the final step
-  console.log('🎓 TutorialOverlay: Step check:', {
+  log.debug('🎓 TutorialOverlay: Step check:', {
     currentStep,
     tutorialStepsLength: tutorialSteps.length,
     isFinalStep: currentStep === tutorialSteps.length - 1,
-    currentStepData
+    // Avoid logging large currentStepData object in production
   });
   
   // THEN check for final step (without isActive check)
@@ -400,9 +400,8 @@ export const TutorialOverlay: React.FC = () => {
             
             <Button
               onClick={() => {
-                console.log('🎓 Finish Tour clicked - calling completeTutorial');
+                log.info('🎓 Finish Tour clicked - calling completeTutorial');
                 completeTutorial();
-                // Force immediate cleanup
                 document.body.classList.remove('tutorial-active');
               }}
               className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white px-8 py-3 text-lg font-semibold"
@@ -539,9 +538,8 @@ export const TutorialOverlay: React.FC = () => {
               <Button
                 size="sm"
                 onClick={() => {
-                  console.log('🎓 Finish Tour clicked - calling completeTutorial');
+                  log.info('🎓 Finish Tour clicked - calling completeTutorial');
                   completeTutorial();
-                  // Force immediate cleanup
                   document.body.classList.remove('tutorial-active');
                 }}
                 className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"

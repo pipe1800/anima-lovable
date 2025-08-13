@@ -5,6 +5,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import logger from '@/utils/logger';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/queries/chatQueries';
 
 export const PayPalVerification = () => {
   const [searchParams] = useSearchParams();
@@ -14,6 +17,8 @@ export const PayPalVerification = () => {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('Verifying your subscription...');
   const [isVerifying, setIsVerifying] = useState(false);
+  const queryClient = useQueryClient();
+  const log = logger.scoped('PayPalVerification');
 
   useEffect(() => {
     // Wait for user authentication to be determined
@@ -33,21 +38,21 @@ export const PayPalVerification = () => {
     const verifySubscription = async () => {
       // Prevent duplicate calls
       if (isVerifying) {
-        console.log('Verification already in progress, skipping...');
+        log.debug('Verification already in progress, skipping...');
         return;
       }
       
       setIsVerifying(true);
       // Get all URL parameters to debug what PayPal is sending
       const allParams = Object.fromEntries(searchParams.entries());
-      console.log('All PayPal return parameters:', allParams);
+      log.info('All PayPal return parameters:', allParams);
       
       // PayPal can return subscription info in different ways
       const subscriptionId = searchParams.get('subscription_id') || searchParams.get('subscriptionID');
       const token = searchParams.get('token');
       const payerId = searchParams.get('PayerID');
       
-      console.log('PayPal verification attempt:', {
+      log.info('PayPal verification attempt:', {
         subscription_id: subscriptionId,
         token: token,
         PayerID: payerId,
@@ -55,38 +60,29 @@ export const PayPalVerification = () => {
       });
 
       if (!subscriptionId && !token) {
-        console.error('Missing critical parameters:', { subscriptionId, token });
         setStatus('error');
-        setMessage('Missing verification parameters from PayPal. Please try subscribing again.');
+        setMessage('Missing verification parameters.');
         return;
       }
 
       try {
-        console.log('Calling paypal-management verify-subscription with:', { subscriptionId, token });
-        
         const { data, error } = await supabase.functions.invoke('paypal-management', {
           body: { 
             operation: 'verify-subscription',
-            subscriptionId: subscriptionId || token, // Use token as fallback
-            token: token
+            subscriptionId: subscriptionId || token
           }
         });
 
-        console.log('Verification response:', { data, error });
+        log.debug('Verification response:', { data, error });
 
         if (error) {
-          console.error('Verification error:', error);
+          log.error('Verification error:', error);
           setStatus('error');
-          setMessage(`Verification failed: ${error.message || 'Unknown error'}`);
-          toast({
-            title: "Verification Failed",
-            description: `Failed to verify subscription: ${error.message || 'Unknown error'}`,
-            variant: "destructive"
-          });
+          setMessage('Verification failed. Please contact support.');
           return;
         }
 
-        if (data?.success) {
+        if (data?.success && (data?.data?.verified || data?.verified)) {
           setStatus('success');
           const planName = data.subscription?.plan?.name || 'subscription plan';
           setMessage(`Welcome to ${planName}! Your subscription is now active.`);
@@ -94,6 +90,12 @@ export const PayPalVerification = () => {
             title: "Subscription Activated!",
             description: `Your ${planName} subscription is now active.`,
           });
+
+          // Invalidate user credits/profile to reflect new plan/credits
+          if (user?.id) {
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
+          }
           
           // Send success message to parent window and close popup
           setTimeout(() => {
@@ -110,7 +112,7 @@ export const PayPalVerification = () => {
           setMessage('Subscription verification failed. Please contact support.');
         }
       } catch (error) {
-        console.error('Verification error:', error);
+        log.error('Verification error:', error);
         setStatus('error');
         setMessage('An error occurred during verification. Please contact support.');
       } finally {
@@ -119,7 +121,7 @@ export const PayPalVerification = () => {
     };
 
     verifySubscription();
-  }, [searchParams, user, toast, navigate, isVerifying]);
+  }, [searchParams, user, toast, navigate, isVerifying, log, queryClient]);
 
   const getIcon = () => {
     switch (status) {

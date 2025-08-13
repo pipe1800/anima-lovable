@@ -2,34 +2,31 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
+import logger from '@/utils/logger';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/queries/chatQueries';
 
 export const UpgradeCallback = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const log = logger.scoped('UpgradeCallback');
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('Completing your subscription upgrade...');
 
   useEffect(() => {
-    const completeUpgrade = async () => {
-      const subscriptionId = searchParams.get('subscription_id');
-      const targetPlanId = searchParams.get('target_plan_id');
+    const processUpgrade = async () => {
+      const subscriptionId = searchParams.get('subscriptionId');
       const token = searchParams.get('token');
-      
-      console.log('Upgrade callback parameters:', {
-        subscription_id: subscriptionId,
-        target_plan_id: targetPlanId,
-        token,
-        all_params: Object.fromEntries(searchParams.entries())
-      });
 
-      if (!subscriptionId || !targetPlanId) {
+      if (!subscriptionId || !token) {
         setStatus('error');
         setMessage('Missing upgrade parameters. Please contact support.');
         return;
       }
 
       try {
-        console.log('Using paypal-management to verify subscription upgrade');
+        log.info('Using paypal-management to verify subscription upgrade');
 
         const { data, error } = await supabase.functions.invoke('paypal-management', {
           body: { 
@@ -38,10 +35,10 @@ export const UpgradeCallback = () => {
           }
         });
 
-        console.log('Function response:', { data, error });
+        log.debug('Function response:', { data, error });
 
         if (error) {
-          console.error('Function error:', error);
+          log.error('Function error:', error);
           throw new Error(`Edge Function Error: ${error.message}`);
         }
 
@@ -50,23 +47,25 @@ export const UpgradeCallback = () => {
           const creditsText = data.creditsAdded ? ` and received ${data.creditsAdded.toLocaleString()} additional credits` : '';
           
           setMessage(`Upgrade complete! You've been upgraded to ${data.newPlan || 'your new plan'}${creditsText}. Your PayPal subscription has been updated.`);
-          
+
+          // Invalidate credits/profile to reflect new plan/credits
           // Redirect to settings after 3 seconds
           setTimeout(() => {
             navigate('/settings?tab=billing');
           }, 3000);
         } else {
-          throw new Error('Upgrade completion failed');
+          setStatus('error');
+          setMessage('Could not verify your upgrade. Please contact support.');
         }
-      } catch (error) {
-        console.error('Upgrade completion error:', error);
+      } catch (err: any) {
+        log.error('Upgrade verification failed:', err);
         setStatus('error');
-        setMessage(error instanceof Error ? error.message : 'Failed to complete upgrade');
+        setMessage(err.message || 'Unexpected error during upgrade verification.');
       }
     };
 
-    completeUpgrade();
-  }, [searchParams, navigate]);
+    processUpgrade();
+  }, [searchParams, navigate, queryClient, log]);
 
   return (
     <div className="min-h-screen bg-[#0B1426] flex items-center justify-center p-4">

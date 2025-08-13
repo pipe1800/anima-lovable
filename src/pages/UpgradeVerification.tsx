@@ -5,6 +5,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import logger from '@/utils/logger';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/queries/chatQueries';
 
 const useQuery = () => {
   return new URLSearchParams(useLocation().search);
@@ -18,6 +21,8 @@ const UpgradeVerification = () => {
   const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'auth-required'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
   const [hasProcessed, setHasProcessed] = useState(false); // Use a simple flag instead of isProcessing
+  const queryClient = useQueryClient();
+  const log = logger.scoped('UpgradeVerification');
 
   useEffect(() => {
     // Wait for user authentication to be determined
@@ -34,7 +39,7 @@ const UpgradeVerification = () => {
 
     // Prevent multiple executions with a simple flag
     if (hasProcessed) {
-      console.log('[UPGRADE-VERIFICATION] Already processed, skipping...');
+      log.debug('[UPGRADE-VERIFICATION] Already processed, skipping...');
       return;
     }
 
@@ -51,7 +56,7 @@ const UpgradeVerification = () => {
           return;
         }
 
-        console.log('[UPGRADE-VERIFICATION] Starting upgrade verification with subscription ID:', paypalSubscriptionId);
+        log.info('[UPGRADE-VERIFICATION] Starting upgrade verification with subscription ID:', paypalSubscriptionId);
 
         // Use paypal-management to verify the subscription
         const { data, error } = await supabase.functions.invoke('paypal-management', {
@@ -61,10 +66,10 @@ const UpgradeVerification = () => {
           }
         });
 
-        console.log('[UPGRADE-VERIFICATION] Verification response:', { data, error });
+        log.debug('[UPGRADE-VERIFICATION] Verification response:', { data, error });
 
         if (error) {
-          console.error('[UPGRADE-VERIFICATION] Verification error:', error);
+          log.error('[UPGRADE-VERIFICATION] Verification error:', error);
           setStatus('error');
           setErrorMessage(`Upgrade verification failed: ${error.message || 'Unknown error'}`);
           return;
@@ -72,7 +77,13 @@ const UpgradeVerification = () => {
 
         if (data?.success && data?.data?.verified) {
           setStatus('success');
-          console.log('[UPGRADE-VERIFICATION] Upgrade verification successful');
+          log.info('[UPGRADE-VERIFICATION] Upgrade verification successful');
+
+          // Invalidate credits/profile to refresh plan benefits
+          if (user?.id) {
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+            queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
+          }
           
           // Send success message to parent window and close popup
           setTimeout(() => {
@@ -89,7 +100,7 @@ const UpgradeVerification = () => {
           setErrorMessage('Upgrade verification failed. Please contact support.');
         }
       } catch (error) {
-        console.error('[UPGRADE-VERIFICATION] Verification error:', error);
+        log.error('[UPGRADE-VERIFICATION] Verification error:', error);
         setStatus('error');
         setErrorMessage('An error occurred during upgrade verification. Please contact support.');
       }

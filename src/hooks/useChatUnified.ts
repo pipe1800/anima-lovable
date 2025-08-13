@@ -7,6 +7,7 @@ import { handleChatError } from '@/utils/chatErrorHandling';
 import { queryConfigs, infiniteQueryConfigs, invalidationHelpers, queryKeys } from '@/queries/chatQueries';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import type { Message, TrackedContext, ChatState, ChatAction } from '@/types/chat';
+import logger from '@/utils/logger';
 
 /**
  * Unified Chat Hook - Replaces 4 separate hooks
@@ -113,6 +114,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // REAL-TIME SUBSCRIPTIONS (replaces useChatRealtime)
   // ============================================================================
   const addDebugInfo = useCallback((info: string) => {
+    logger.debug(info);
     dispatch({ type: 'ADD_DEBUG_INFO', payload: info });
   }, []);
 
@@ -207,6 +209,53 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // ============================================================================
   // STREAMING AI RESPONSES (replaces useChatStreaming)
   // ============================================================================
+  const fetchAndUpdateContext = useCallback(async (chatIdLocal: string) => {
+    if (!user) return;
+    try {
+      const { data: contextData, error } = await supabase
+        .from('chat_context')
+        .select('current_context')
+        .eq('chat_id', chatIdLocal)
+        .eq('user_id', user.id)
+        .eq('character_id', characterId)
+        .maybeSingle();
+
+      if (!error && contextData?.current_context) {
+        logger.debug('Fresh context fetched', contextData.current_context);
+
+        const rawContext = contextData.current_context as any;
+        const convertedContext = {
+          moodTracking: rawContext?.mood || 'No context',
+          clothingInventory: rawContext?.clothing || 'No context',
+          locationTracking: rawContext?.location || 'No context',
+          timeAndWeather: rawContext?.time_weather || 'No context',
+          relationshipStatus: rawContext?.relationship || 'No context',
+          characterPosition: rawContext?.character_position || 'No context'
+        } as TrackedContext;
+
+        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
+        logger.debug('Context updated in UI immediately!');
+      }
+    } catch (err) {
+      logger.error('Failed to fetch fresh context:', err);
+    }
+  }, [user, characterId]);
+
+  // Helper to finalize streaming and refresh messages/context
+  const finalizeStreaming = useCallback((chatIdParam: string) => {
+    // Clear streaming state
+    dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
+    // Refresh messages to show final result
+    invalidationHelpers.invalidateChatData(queryClient, chatIdParam);
+    // Also refresh credits and message count explicitly
+    if (user?.id) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+    }
+    queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatIdParam), exact: true });
+    // Fetch context shortly after backend finishes
+    setTimeout(() => fetchAndUpdateContext(chatIdParam), 1000);
+  }, [queryClient, fetchAndUpdateContext, user?.id]);
+
   const invokeStreamingAI = async (
     chatId: string, 
     userMessage: string, 
@@ -314,13 +363,13 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                 try {
                   const completionData = JSON.parse(data);
                   if (completionData.done === true) {
-                    console.log('🏁 Instant mode - Stream completed');
+                    logger.info('Instant mode - Stream completed');
                     
                     isStreamingRef.current = false;
                     
                     // Check for context ceiling warning
                     if (completionData.metadata?.contextCeilingReached) {
-                      console.log('⚠️ Context ceiling reached, emitting warning');
+                      logger.warn('Context ceiling reached, emitting warning');
                       // Emit context ceiling event
                       window.dispatchEvent(new CustomEvent('contextCeilingReached', {
                         detail: {
@@ -330,47 +379,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                       }));
                     }
                     
-                    // Clear streaming state and refresh to show complete message
-                    dispatch({
-                      type: 'SET_STREAMING',
-                      payload: { isStreaming: false, message: '' }
-                    });
-                    
-                    // Refresh messages to show final result
-                    invalidationHelpers.invalidateChatData(queryClient, chatId);
-                    
-                    // Context fetching logic...
-                    setTimeout(async () => {
-                      try {
-                        const { data: contextData, error } = await supabase
-                          .from('chat_context')
-                          .select('current_context')
-                          .eq('chat_id', chatId)
-                          .eq('user_id', user.id)
-                          .eq('character_id', characterId)
-                          .maybeSingle();
-                        
-                        if (!error && contextData?.current_context) {
-                          console.log('✅ Fresh context fetched:', contextData.current_context);
-                          
-                          const rawContext = contextData.current_context as any;
-                          const convertedContext = {
-                            moodTracking: rawContext?.mood || 'No context',
-                            clothingInventory: rawContext?.clothing || 'No context',
-                            locationTracking: rawContext?.location || 'No context',
-                            timeAndWeather: rawContext?.time_weather || 'No context',
-                            relationshipStatus: rawContext?.relationship || 'No context',
-                            characterPosition: rawContext?.character_position || 'No context'
-                          };
-                          
-                          dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
-                          console.log('🎯 Context updated in UI immediately!');
-                        }
-                      } catch (err) {
-                        console.error('❌ Failed to fetch fresh context:', err);
-                      }
-                    }, 1000);
-                    
+                    finalizeStreaming(chatId);
                     const endTime = Date.now();
                     return { content: fullMessage };
                   }
@@ -379,68 +388,29 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                 }
                 
                 if (data === '[DONE]') {
-                  console.log('🏁 Instant mode - Stream completed (legacy)');
+                  logger.info('Instant mode - Stream completed (legacy)');
                   
                   isStreamingRef.current = false;
                   
-                  // Clear streaming state and refresh to show complete message
-                  dispatch({
-                    type: 'SET_STREAMING',
-                    payload: { isStreaming: false, message: '' }
-                  });
-                  
-                  // Refresh messages to show final result
-                  invalidationHelpers.invalidateChatData(queryClient, chatId);
-                  
-                  // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
-                  console.log('🔄 AI message completed, fetching fresh context...');
-                  setTimeout(async () => {
-                    try {
-                      const { data: contextData, error } = await supabase
-                        .from('chat_context')
-                        .select('current_context')
-                        .eq('chat_id', chatId)
-                        .eq('user_id', user.id)
-                        .eq('character_id', characterId)
-                        .maybeSingle();
-                      
-                      if (!error && contextData?.current_context) {
-                        console.log('✅ Fresh context fetched:', contextData.current_context);
-                        
-                        // Cast to expected context format
-                        const rawContext = contextData.current_context as any;
-                        
-                        // Convert to frontend format
-                        const convertedContext = {
-                          moodTracking: rawContext?.mood || 'No context',
-                          clothingInventory: rawContext?.clothing || 'No context',
-                          locationTracking: rawContext?.location || 'No context',
-                          timeAndWeather: rawContext?.time_weather || 'No context',
-                          relationshipStatus: rawContext?.relationship || 'No context',
-                          characterPosition: rawContext?.character_position || 'No context'
-                        };
-                        
-                        // Update the context state
-                        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
-                        console.log('🎯 Context updated in UI immediately!');
-                      }
-                    } catch (err) {
-                      console.error('❌ Failed to fetch fresh context:', err);
-                    }
-                  }, 1000); // 1 second delay for backend processing
-                  
+                  finalizeStreaming(chatId);
                   const endTime = Date.now();
                   return { content: fullMessage };
                 }
                 
-                // Consume content but don't display until complete
+                // Real-time streaming display
                 try {
                   const parsed = JSON.parse(data);
                   if (parsed.choices?.[0]?.delta?.content) {
-                    fullMessage += parsed.choices[0].delta.content;
+                    const content = parsed.choices[0].delta.content;
+                    fullMessage += content;
+                    dispatch({
+                      type: 'SET_STREAMING',
+                      payload: { isStreaming: true, message: fullMessage }
+                    });
+                    await new Promise(resolve => setTimeout(resolve, 50));
                   }
                 } catch (e) {
-                  // Skip invalid JSON chunks
+                  // Not JSON or streaming content, ignore
                 }
               }
             }
@@ -448,7 +418,6 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         } finally {
           reader.releaseLock();
         }
-        
       } else {
         // SMOOTH MODE: Real-time character-by-character streaming
         try {
@@ -467,13 +436,13 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                 try {
                   const completionData = JSON.parse(data);
                   if (completionData.done === true) {
-                    console.log('🏁 Smooth mode - Stream completed');
+                    logger.info('Smooth mode - Stream completed');
                     
                     isStreamingRef.current = false;
                     
                     // Check for context ceiling warning
                     if (completionData.metadata?.contextCeilingReached) {
-                      console.log('⚠️ Context ceiling reached, emitting warning');
+                      logger.warn('Context ceiling reached, emitting warning');
                       // Emit context ceiling event
                       window.dispatchEvent(new CustomEvent('contextCeilingReached', {
                         detail: {
@@ -483,47 +452,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                       }));
                     }
                     
-                    // Clear streaming state and refresh to show final message
-                    dispatch({
-                      type: 'SET_STREAMING',
-                      payload: { isStreaming: false, message: '' }
-                    });
-                    
-                    // Refresh messages to get the final database message
-                    invalidationHelpers.invalidateChatData(queryClient, chatId);
-                    
-                    // Context fetching logic...
-                    setTimeout(async () => {
-                      try {
-                        const { data: contextData, error } = await supabase
-                          .from('chat_context')
-                          .select('current_context')
-                          .eq('chat_id', chatId)
-                          .eq('user_id', user.id)
-                          .eq('character_id', characterId)
-                          .maybeSingle();
-                        
-                        if (!error && contextData?.current_context) {
-                          console.log('✅ Fresh context fetched:', contextData.current_context);
-                          
-                          const rawContext = contextData.current_context as any;
-                          const convertedContext = {
-                            moodTracking: rawContext?.mood || 'No context',
-                            clothingInventory: rawContext?.clothing || 'No context',
-                            locationTracking: rawContext?.location || 'No context',
-                            timeAndWeather: rawContext?.time_weather || 'No context',
-                            relationshipStatus: rawContext?.relationship || 'No context',
-                            characterPosition: rawContext?.character_position || 'No context'
-                          };
-                          
-                          dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
-                          console.log('🎯 Context updated in UI immediately!');
-                        }
-                      } catch (err) {
-                        console.error('❌ Failed to fetch fresh context:', err);
-                      }
-                    }, 1000);
-                    
+                    finalizeStreaming(chatId);
                     const endTime = Date.now();
                     return { content: fullMessage };
                   }
@@ -532,93 +461,11 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                 }
                 
                 if (data === '[DONE]') {
-                  console.log('🏁 Smooth mode - Stream completed (legacy)');
+                  logger.info('Smooth mode - Stream completed (legacy)');
                   
                   isStreamingRef.current = false;
                   
-                  // Clear streaming state and refresh to show final message
-                  dispatch({
-                    type: 'SET_STREAMING',
-                    payload: { isStreaming: false, message: '' }
-                  });
-                  
-                  // Refresh messages to get the final database message
-                  invalidationHelpers.invalidateChatData(queryClient, chatId);
-                  
-                  // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
-                  console.log('🔄 AI message completed (smooth mode), fetching fresh context...');
-                  setTimeout(async () => {
-                    try {
-                      const { data: contextData, error } = await supabase
-                        .from('chat_context')
-                        .select('current_context')
-                        .eq('chat_id', chatId)
-                        .eq('user_id', user.id)
-                        .eq('character_id', characterId)
-                        .maybeSingle();
-                      
-                      if (!error && contextData?.current_context) {
-                        console.log('✅ Fresh context fetched:', contextData.current_context);
-                        
-                        // Cast to expected context format
-                        const rawContext = contextData.current_context as any;
-                        
-                        // Convert to frontend format
-                        const convertedContext = {
-                          moodTracking: rawContext?.mood || 'No context',
-                          clothingInventory: rawContext?.clothing || 'No context',
-                          locationTracking: rawContext?.location || 'No context',
-                          timeAndWeather: rawContext?.time_weather || 'No context',
-                          relationshipStatus: rawContext?.relationship || 'No context',
-                          characterPosition: rawContext?.character_position || 'No context'
-                        };
-                        
-                        // Update the context state
-                        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
-                        console.log('🎯 Context updated in UI immediately!');
-                      }
-                    } catch (err) {
-                      console.error('❌ Failed to fetch fresh context:', err);
-                    }
-                  }, 1000); // 1 second delay for backend processing
-                  
-                  // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
-                  console.log('🔄 AI message completed (smooth mode), fetching fresh context...');
-                  setTimeout(async () => {
-                    try {
-                      const { data: contextData, error } = await supabase
-                        .from('chat_context')
-                        .select('current_context')
-                        .eq('chat_id', chatId)
-                        .eq('user_id', user.id)
-                        .eq('character_id', characterId)
-                        .maybeSingle();
-                      
-                      if (!error && contextData?.current_context) {
-                        console.log('✅ Fresh context fetched:', contextData.current_context);
-                        
-                        // Cast to expected context format
-                        const rawContext = contextData.current_context as any;
-                        
-                        // Convert to frontend format
-                        const convertedContext = {
-                          moodTracking: rawContext?.mood || 'No context',
-                          clothingInventory: rawContext?.clothing || 'No context',
-                          locationTracking: rawContext?.location || 'No context',
-                          timeAndWeather: rawContext?.time_weather || 'No context',
-                          relationshipStatus: rawContext?.relationship || 'No context',
-                          characterPosition: rawContext?.character_position || 'No context'
-                        };
-                        
-                        // Update the context state
-                        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
-                        console.log('🎯 Context updated in UI immediately!');
-                      }
-                    } catch (err) {
-                      console.error('❌ Failed to fetch fresh context:', err);
-                    }
-                  }, 1000); // 1 second delay for backend processing
-                  
+                  finalizeStreaming(chatId);
                   const endTime = Date.now();
                   return { content: fullMessage };
                 }
@@ -629,14 +476,10 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                   if (parsed.choices?.[0]?.delta?.content) {
                     const content = parsed.choices[0].delta.content;
                     fullMessage += content;
-                    
-                    // Update streaming message
                     dispatch({
                       type: 'SET_STREAMING',
                       payload: { isStreaming: true, message: fullMessage }
                     });
-                    
-                    // Add small delay for smooth streaming experience
                     await new Promise(resolve => setTimeout(resolve, 50));
                   }
                 } catch (e) {
@@ -654,7 +497,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       
     } catch (error) {
       isStreamingRef.current = false;
-      console.error('Streaming error:', error);
+      logger.error('Streaming error:', error);
       throw error;
     }
   };
@@ -791,7 +634,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // Update context when extracted context changes
   useEffect(() => {
     if (extractedContext !== state.trackedContext) {
-      console.log('🔄 useChatUnified: Updating context:', {
+      logger.debug('useChatUnified: Updating context', {
         from: state.trackedContext,
         to: extractedContext
       });
@@ -830,7 +673,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       
       return result;
     } catch (error) {
-      console.error('Send message error:', error);
+      logger.error('Send message error:', error);
       handleChatError(error, 'Failed to send message');
       throw error;
     } finally {

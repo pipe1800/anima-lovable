@@ -1,3 +1,5 @@
+import logger from '@/utils/logger';
+
 export interface CharacterCardData {
   name?: string;
   description?: string;
@@ -34,7 +36,7 @@ export interface CharacterCardData {
 // Keep this file as a placeholder for types or minimal helpers if needed.
 
 export async function parseCharacterCard(_file: File): Promise<CharacterCardData | null> {
-  console.warn('parseCharacterCard is deprecated on the client. Use the Edge Function instead.');
+  logger.warn('parseCharacterCard is deprecated on the client. Use the Edge Function instead.');
   return null;
 }
 

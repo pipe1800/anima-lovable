@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, ChevronDown, Plus, Upload, Image, X, Zap, Type, Edit } from 'lucide-react';
+import { Settings, ChevronDown, Plus, Upload, Image, X, Zap, Type, Edit, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { UserGlobalChatSettings } from '@/types/chatSettings';
 import { updateChatSelectedPersona } from '@/lib/chat-persona-operations';
 import { updateUserDefaultPersona } from '@/lib/character-persona-operations';
+import { CharacterChatModeToggle } from '@/components/character-creator/CharacterChatModeToggle';
 
 interface ChatConfigurationTabProps {
   characterId: string;
@@ -33,6 +34,14 @@ interface ChatConfigurationTabProps {
   onWorldInfoSelect: (worldInfo: any) => void;
   currentChatId?: string;
   selectedWorldInfoId?: string | null;
+  // Moved from Details tab -> now configured here per chat
+  chatMode: 'storytelling' | 'companion';
+  onChatModeChange: (mode: 'storytelling' | 'companion') => void;
+  chatModeLoading: boolean;
+  timeAwarenessEnabled: boolean;
+  onTimeAwarenessChange: (enabled: boolean) => void;
+  timeAwarenessLoading: boolean;
+  userTimezone: string;
 }
 
 export const ChatConfigurationTab = ({
@@ -48,7 +57,14 @@ export const ChatConfigurationTab = ({
   onWorldInfoSelect,
   currentChatId,
   selectedWorldInfoId,
-  onPersonaSaved
+  onPersonaSaved,
+  chatMode,
+  onChatModeChange,
+  chatModeLoading,
+  timeAwarenessEnabled,
+  onTimeAwarenessChange,
+  timeAwarenessLoading,
+  userTimezone,
 }: ChatConfigurationTabProps) => {
   const { subscription } = useAuth();
   const queryClient = useQueryClient();
@@ -323,6 +339,12 @@ export const ChatConfigurationTab = ({
         // Save to localStorage for the current chat
         if (currentChatId) {
           localStorage.setItem(`chat-background-${currentChatId}`, imageData);
+          // Notify listeners (ChatMessages) of the change for live update
+          window.dispatchEvent(
+            new CustomEvent('background-image-updated', {
+              detail: { chatId: currentChatId, backgroundImage: imageData },
+            })
+          );
         }
       };
       reader.readAsDataURL(file);
@@ -334,6 +356,12 @@ export const ChatConfigurationTab = ({
     // Remove from localStorage for the current chat
     if (currentChatId) {
       localStorage.removeItem(`chat-background-${currentChatId}`);
+      // Notify listeners (ChatMessages) of the change for live update
+      window.dispatchEvent(
+        new CustomEvent('background-image-updated', {
+          detail: { chatId: currentChatId, backgroundImage: null },
+        })
+      );
     }
   };
 
@@ -472,6 +500,48 @@ export const ChatConfigurationTab = ({
           disabled={!effectiveSettings?.dynamic_world_info}
           selectedWorldInfoId={selectedWorldInfoId}
         />
+      </Card>
+
+      {/* Chat Settings (per chat) */}
+      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white font-medium text-sm">Chat Settings</h3>
+          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
+            Chat
+          </Badge>
+        </div>
+        <div className="space-y-4">
+          <CharacterChatModeToggle
+            chatMode={chatMode}
+            onChange={onChatModeChange}
+            showWarning={false}
+            disabled={chatModeLoading}
+          />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Clock className="w-4 h-4 text-[#FF7A00]" />
+                <span className="text-white text-xs sm:text-sm font-medium">Time Awareness</span>
+              </div>
+              <Switch
+                checked={timeAwarenessEnabled}
+                onCheckedChange={onTimeAwarenessChange}
+                disabled={timeAwarenessLoading}
+                className="data-[state=checked]:bg-[#FF7A00]"
+              />
+            </div>
+            <p className="text-gray-400 text-xs leading-relaxed">
+              When enabled, the character will react to how long you take to respond based on their personality. 
+              Patient characters stay calm with delays, while impatient ones may show frustration.
+            </p>
+            {timeAwarenessEnabled && (
+              <p className="text-gray-400 text-xs mt-2">
+                <Clock className="w-3 h-3 inline mr-1" />
+                Your timezone: {userTimezone}
+              </p>
+            )}
+          </div>
+        </div>
       </Card>
 
       {/* Global Addon Settings */}
