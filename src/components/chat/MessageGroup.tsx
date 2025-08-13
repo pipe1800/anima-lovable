@@ -14,6 +14,21 @@ interface MessageGroupData {
   showTimestamp: boolean;
 }
 
+// New: style options to control avatars and colors
+interface ChatStyleOptions {
+  aiTextColor: string;
+  userTextColor: string;
+  showCharacterAvatar: boolean;
+  showUserAvatar: boolean;
+  avatarShape: 'circle' | 'rounded';
+  avatarSize: 'sm' | 'md' | 'lg';
+  // New bubble styles
+  aiBubbleColor?: string;
+  aiBubbleOpacity?: number;
+  userBubbleColor?: string;
+  userBubbleOpacity?: number;
+}
+
 interface MessageGroupProps {
   group: MessageGroupData;
   character: Character;
@@ -28,13 +43,41 @@ interface MessageGroupProps {
   };
   // New: control font size of message content
   fontSizeClass?: string;
+  // New: per-chat style options
+  styleOptions?: ChatStyleOptions;
 }
 
+// Helper: hex + opacity -> rgba string
+const toRgba = (hex?: string, opacity?: number, fallbackHex: string = '#1f2937', fallbackOpacity: number = 1) => {
+  const color = (hex || fallbackHex).replace('#','');
+  const r = parseInt(color.substring(0,2), 16) || 0;
+  const g = parseInt(color.substring(2,4), 16) || 0;
+  const b = parseInt(color.substring(4,6), 16) || 0;
+  const a = Math.min(Math.max(opacity ?? fallbackOpacity, 0), 1);
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+};
+
 // ✅ PHASE 3: Memoized component to prevent unnecessary re-renders
-export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass }: MessageGroupProps) {
+export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
 
   const sizeClass = fontSizeClass || 'text-base';
+
+  // Compute avatar styles
+  const avatarSizeClass = styleOptions?.avatarSize === 'sm' ? 'w-6 h-6' : styleOptions?.avatarSize === 'lg' ? 'w-10 h-10' : 'w-8 h-8';
+  const avatarShapeClass = styleOptions?.avatarShape === 'rounded' ? 'rounded-lg' : 'rounded-full';
+
+  // Decide avatar visibility
+  const showLeftAvatar = !isUser && (styleOptions?.showCharacterAvatar ?? true);
+  const showRightAvatar = isUser && (styleOptions?.showUserAvatar ?? false);
+
+  // Text color per side
+  const textColor = isUser ? styleOptions?.userTextColor : styleOptions?.aiTextColor;
+
+  // Bubble background per side
+  const bubbleBg = isUser
+    ? toRgba(styleOptions?.userBubbleColor, styleOptions?.userBubbleOpacity, '#FF7A00', 1)
+    : toRgba(styleOptions?.aiBubbleColor, styleOptions?.aiBubbleOpacity, '#1f2937', 0.9);
 
   return (
     <div className="mb-6">
@@ -44,26 +87,22 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
         </div>
       )}
       
-      <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-        {!isUser && (
-          <Avatar className="w-8 h-8 flex-shrink-0">
+      <div className={`flex gap-3`}>
+        {/* Left avatar for AI messages */}
+        {(!isUser && showLeftAvatar) && (
+          <Avatar className={`${avatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
             <AvatarImage src={character.avatar} alt={character.name} />
             <AvatarFallback>{character.fallback}</AvatarFallback>
           </Avatar>
         )}
         
-        <div className={`flex flex-col gap-1 max-w-[80%] ${isUser ? 'items-end' : 'items-start'}`}>
+        <div className={`flex flex-col gap-1 max-w-[80%] ${isUser ? 'items-end ml-auto' : 'items-start'}`}>
           {messages.map((message, index) => (
             <div
               key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-              className={`px-4 py-2 ${sizeClass} ${
-                isUser
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground'
-              } ${
-                // Rounded corners based on position in group
+              className={`px-4 py-2 ${sizeClass} ${''} ${
                 index === 0 && index === messages.length - 1
-                  ? 'rounded-lg' // Single message
+                  ? 'rounded-lg'
                   : index === 0
                   ? isUser
                     ? 'rounded-t-lg rounded-bl-lg rounded-br-sm'
@@ -76,18 +115,27 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   ? 'rounded-bl-lg rounded-br-sm'
                   : 'rounded-br-lg rounded-bl-sm'
               }`}
+              style={{ backgroundColor: bubbleBg }}
             >
-              <FormattedMessage 
-                content={message.content}
-                className="whitespace-pre-wrap select-text message-content"
-              />
-              {/* Removed streaming indicator - no longer needed with simplified approach */}
+              <span style={textColor ? { color: textColor } : undefined}>
+                <FormattedMessage 
+                  content={message.content}
+                  className="whitespace-pre-wrap select-text message-content"
+                />
+              </span>
             </div>
           ))}
         </div>
         
+        {/* Right-side avatar or spacer for user messages */}
         {isUser && (
-          <div className="w-8 h-8 flex-shrink-0" />
+          showRightAvatar ? (
+            <Avatar className={`${avatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
+              <AvatarFallback>U</AvatarFallback>
+            </Avatar>
+          ) : (
+            <div className={`${avatarSizeClass} flex-shrink-0`} />
+          )
         )}
       </div>
       

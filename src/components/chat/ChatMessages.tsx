@@ -4,12 +4,8 @@ import { Loader2 } from 'lucide-react';
 import type { Message, TrackedContext } from '@/types/chat';
 import { MessageGroup } from './MessageGroup';
 import { groupMessages } from '@/utils/messageGrouping';
-import { ContextDisplay } from './ContextDisplay';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
-import OptimizedMessageFormatter from './OptimizedMessageFormatter';
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { FormattedMessage } from "@/components/ui/FormattedMessage";
-import logger from '@/utils/logger';
+import { logger } from '@/utils/logger';
 
 interface Character {
   id: string;
@@ -33,6 +29,8 @@ interface ChatMessagesProps {
   fetchNextPage?: () => void;
   isRealtimeConnected?: boolean;
   debugInfo?: string[];
+  // New: allow parent to control background rendering
+  renderBackground?: boolean;
 }
 
 const ChatMessages = ({ 
@@ -47,17 +45,31 @@ const ChatMessages = ({
   isLoadingMessages = false,
   fetchNextPage,
   isRealtimeConnected = false,
-  debugInfo = []
+  debugInfo = [],
+  renderBackground = true,
 }: ChatMessagesProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [backgroundImage, setBackgroundImage] = React.useState<string | null>(null);
   
-  // Messages should be passed from parent ChatInterface to avoid duplicate hook usage
-  
-  // Load addon settings for context filtering and accessibility
+  // Load addon and style settings from global settings
   const { data: globalSettings } = useUserGlobalChatSettings();
 
+  // Map global style settings
+  const backgroundImage = globalSettings?.background_image_url || null;
+  const styleOptions = useMemo(() => ({
+    aiTextColor: globalSettings?.ai_text_color ?? '#E5E7EB',
+    userTextColor: globalSettings?.user_text_color ?? '#FFFFFF',
+    showCharacterAvatar: globalSettings?.show_character_avatar ?? true,
+    showUserAvatar: globalSettings?.show_user_avatar ?? false,
+    avatarShape: (globalSettings?.avatar_shape ?? 'circle') as 'circle' | 'rounded',
+    avatarSize: (globalSettings?.avatar_size ?? 'md') as 'sm' | 'md' | 'lg',
+    // Bubble styles
+    aiBubbleColor: globalSettings?.ai_bubble_color ?? '#1f2937',
+    aiBubbleOpacity: globalSettings?.ai_bubble_opacity ?? 0.9,
+    userBubbleColor: globalSettings?.user_bubble_color ?? '#FF7A00',
+    userBubbleOpacity: globalSettings?.user_bubble_opacity ?? 1,
+  }), [globalSettings]);
+  
   // Compute font size class from global settings
   const fontSizeClass = useMemo(() => {
     const size = globalSettings?.font_size;
@@ -93,32 +105,6 @@ const ChatMessages = ({
       characterPosition: true,
     };
   }, [globalSettings]);
-
-  // Load background image for current chat
-  useEffect(() => {
-    if (chatId) {
-      const savedBackground = localStorage.getItem(`chat-background-${chatId}`);
-      setBackgroundImage(savedBackground);
-    } else {
-      setBackgroundImage(null);
-    }
-  }, [chatId]);
-
-  // Listen for background image updates from configuration
-  useEffect(() => {
-    const handleBackgroundUpdate = (event: CustomEvent) => {
-      const { chatId: eventChatId, backgroundImage: newBackground } = event.detail;
-      if (eventChatId === chatId) {
-        setBackgroundImage(newBackground);
-      }
-    };
-
-    window.addEventListener('background-image-updated', handleBackgroundUpdate as EventListener);
-    
-    return () => {
-      window.removeEventListener('background-image-updated', handleBackgroundUpdate as EventListener);
-    };
-  }, [chatId]);
 
   // Use tracked context as the primary source (real-time from database), fall back to message context
   const contextToUse = React.useMemo(() => {
@@ -185,11 +171,61 @@ const ChatMessages = ({
     }
   }, [hasMore, isFetchingNextPage, fetchNextPage]);
 
+  // Typewriter-rendered streaming text for smooth mode
+  const [displayedStream, setDisplayedStream] = React.useState('');
+
+  // Compute the last AI message from the current messages list
+  const lastAiMessage = useMemo(() => {
+    for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
+      const m = messages[i] as any;
+      if (m && !m.isUser) return m;
+    }
+    return null as any;
+  }, [messages]);
+
+  // Incrementally reveal streamingMessage one character at a time
+  useEffect(() => {
+    if (!isStreaming) return;
+    if (!streamingMessage) return;
+
+    const speedMs = 12; // typing speed per character
+    const interval = setInterval(() => {
+      setDisplayedStream(prev => {
+        if (!isStreaming) return prev; // keep content until final AI message arrives
+        if (prev.length >= (streamingMessage?.length || 0)) return prev;
+        return streamingMessage.slice(0, prev.length + 1);
+      });
+    }, speedMs);
+
+    return () => clearInterval(interval);
+  }, [isStreaming, streamingMessage]);
+
+  // When streaming stops, keep the streamed text until the final AI message is present
+  useEffect(() => {
+    if (isStreaming) return;
+    if (!displayedStream) return;
+    const finalContent = lastAiMessage?.content as string | undefined;
+    if (finalContent && finalContent.includes(displayedStream)) {
+      // Final AI message includes our streamed content, safe to clear
+      setDisplayedStream('');
+    }
+  }, [isStreaming, displayedStream, lastAiMessage?.content]);
+
+  // Decide if the streaming bubble should be shown to avoid flicker
+  const showStreamingBubble = useMemo(() => {
+    if (!displayedStream) return false;
+    if (isStreaming) return true;
+    // After streaming ends, keep bubble until final AI message appears
+    const finalContent = lastAiMessage?.content as string | undefined;
+    if (!finalContent) return true;
+    return !finalContent.includes(displayedStream);
+  }, [isStreaming, displayedStream, lastAiMessage?.content]);
+
   // ✅ PHASE 3: Optimized auto-scroll with better performance
   useEffect(() => {
     const shouldAutoScroll = () => {
       if (isLoadingMessages && messages.length === 0) return false;
-      return messages.length > 0 || (isStreaming && streamingMessage);
+      return messages.length > 0 || showStreamingBubble;
     };
 
     if (shouldAutoScroll()) {
@@ -200,7 +236,7 @@ const ChatMessages = ({
         });
       });
     }
-  }, [messages.length, isStreaming, streamingMessage, isLoadingMessages]);
+  }, [messages.length, showStreamingBubble, isLoadingMessages]);
 
   // Show empty state when no chat is selected
   if (!chatId) {
@@ -227,15 +263,15 @@ const ChatMessages = ({
 
   return (
     <div className="relative h-full">
-      {/* Static background layer */}
-      {backgroundImage && (
+      {/* Static background layer (can be disabled by parent) */}
+      {renderBackground && backgroundImage && (
         <div
           className="absolute inset-0 bg-center bg-cover"
           style={{ backgroundImage: `url(${backgroundImage})` }}
         />
       )}
       {/* Dark overlay for readability */}
-      {backgroundImage && (
+      {renderBackground && backgroundImage && (
         <div className="absolute inset-0 bg-black/50 pointer-events-none" />
       )}
 
@@ -255,7 +291,7 @@ const ChatMessages = ({
             >
               {isFetchingNextPage ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  <svg className="w-4 h-4 animate-spin mr-2" viewBox="0 0 24 24"></svg>
                   Loading...
                 </>
               ) : (
@@ -275,6 +311,7 @@ const ChatMessages = ({
               trackedContext={contextToUse}
               addonSettings={computedAddonSettings}
               fontSizeClass={fontSizeClass}
+              {...({ styleOptions } as any)}
             />
           ))
         ) : (
@@ -287,8 +324,8 @@ const ChatMessages = ({
           </div>
         )}
 
-        {/* Live streaming bubble for smooth mode */}
-        {isStreaming && streamingMessage && (
+        {/* Live streaming bubble for smooth mode without flicker */}
+        {showStreamingBubble && (
           <MessageGroup
             key="streaming-group"
             group={{
@@ -296,7 +333,7 @@ const ChatMessages = ({
               messages: [
                 {
                   id: 'streaming-temp',
-                  content: streamingMessage,
+                  content: displayedStream,
                   isUser: false,
                 } as any,
               ],
@@ -308,6 +345,7 @@ const ChatMessages = ({
             trackedContext={contextToUse}
             addonSettings={computedAddonSettings}
             fontSizeClass={fontSizeClass}
+            {...({ styleOptions } as any)}
           />
         )}
 

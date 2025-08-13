@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, ChevronDown, Plus, Upload, Image, X, Zap, Type, Edit, Clock } from 'lucide-react';
+import { ChevronDown, Plus, Zap, Edit, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -74,7 +74,6 @@ export const ChatConfigurationTab = ({
   const updateGlobalSettings = useUpdateGlobalChatSettings();
   
   const [saving, setSaving] = useState(false);
-  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   
   // Track pending changes
   const [pendingChanges, setPendingChanges] = useState<Partial<UserGlobalChatSettings>>({});
@@ -230,30 +229,6 @@ export const ChatConfigurationTab = ({
     setHasUnsavedChanges(true);
   };
 
-  const handleStreamingModeChange = (mode: 'instant' | 'smooth') => {
-    if (!globalSettings) return;
-    
-    const newPendingChanges = {
-      ...pendingChanges,
-      streaming_mode: mode
-    };
-    
-    setPendingChanges(newPendingChanges);
-    setHasUnsavedChanges(true);
-  };
-
-  const handleFontSizeChange = (fontSize: 'small' | 'normal' | 'large') => {
-    if (!globalSettings) return;
-    
-    const newPendingChanges = {
-      ...pendingChanges,
-      font_size: fontSize
-    };
-    
-    setPendingChanges(newPendingChanges);
-    setHasUnsavedChanges(true);
-  };
-
   const handlePersonaChange = (personaId: string | null) => {
     setPendingPersonaId(personaId);
     setHasPersonaChange(true);
@@ -319,52 +294,6 @@ export const ChatConfigurationTab = ({
     toast.info('Changes discarded');
   };
 
-  useEffect(() => {
-    // Load background image for current chat
-    if (currentChatId) {
-      const savedBackground = localStorage.getItem(`chat-background-${currentChatId}`);
-      if (savedBackground) {
-        setBackgroundImage(savedBackground);
-      }
-    }
-  }, [currentChatId]);
-
-  const handleBackgroundImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imageData = e.target?.result as string;
-        setBackgroundImage(imageData);
-        // Save to localStorage for the current chat
-        if (currentChatId) {
-          localStorage.setItem(`chat-background-${currentChatId}`, imageData);
-          // Notify listeners (ChatMessages) of the change for live update
-          window.dispatchEvent(
-            new CustomEvent('background-image-updated', {
-              detail: { chatId: currentChatId, backgroundImage: imageData },
-            })
-          );
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const clearBackgroundImage = () => {
-    setBackgroundImage(null);
-    // Remove from localStorage for the current chat
-    if (currentChatId) {
-      localStorage.removeItem(`chat-background-${currentChatId}`);
-      // Notify listeners (ChatMessages) of the change for live update
-      window.dispatchEvent(
-        new CustomEvent('background-image-updated', {
-          detail: { chatId: currentChatId, backgroundImage: null },
-        })
-      );
-    }
-  };
-
   if (settingsLoading) {
     return (
       <div className="p-4">
@@ -382,14 +311,12 @@ export const ChatConfigurationTab = ({
   }
 
   return (
-    <div className="p-4 space-y-6">
+    <div className="p-4 space-y-6 pb-16">
       {/* Persona Selection */}
       <Card data-tutorial="persona-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-medium text-sm">Persona</h3>
-          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
-            {userPlan}
-          </Badge>
+          {/* Removed subscription badge for a cleaner, uniform header */}
         </div>
         
         <div className="flex items-center gap-2">
@@ -554,7 +481,9 @@ export const ChatConfigurationTab = ({
         </div>
 
         <div className="space-y-4">
-          {Object.entries(addonCategories).map(([categoryName, addons]) => (
+          {Object.entries(addonCategories)
+            .filter(([categoryName]) => categoryName !== 'Advanced Prompting Toolkit')
+            .map(([categoryName, addons]) => (
             <div 
               key={categoryName} 
               className="space-y-3"
@@ -680,165 +609,33 @@ export const ChatConfigurationTab = ({
         </div>
       </Card>
 
-      {/* Streaming Settings */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-blue-400" />
-            <h3 className="text-white font-medium text-sm">Response Mode</h3>
-          </div>
-          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
-            Global
-          </Badge>
-        </div>
-        
-        <RadioGroup 
-          value={effectiveSettings?.streaming_mode || globalSettings?.streaming_mode} 
-          onValueChange={handleStreamingModeChange}
-          className="flex gap-6"
-        >
-          <div className="flex items-center space-x-2">
-            <RadioGroupItem value="instant" id="instant" />
-            <Label htmlFor="instant" className="cursor-pointer text-gray-300">
-              <div className="flex flex-col">
-                <span className="font-medium text-white">Instant</span>
-                <span className="text-xs text-gray-400">Complete response at once</span>
-              </div>
-            </Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <RadioGroupItem value="smooth" id="smooth" />
-            <Label htmlFor="smooth" className="cursor-pointer text-gray-300">
-              <div className="flex flex-col">
-                <span className="font-medium text-white">Smooth</span>
-                <span className="text-xs text-gray-400">Real-time streaming</span>
-              </div>
-            </Label>
-          </div>
-        </RadioGroup>
-      </Card>
-
-      {/* Font Size Settings */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Type className="h-4 w-4 text-green-400" />
-            <h3 className="text-white font-medium text-sm">Font Size</h3>
-          </div>
-          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
-            Global
-          </Badge>
-        </div>
-        
-        <RadioGroup 
-          value={effectiveSettings?.font_size || globalSettings?.font_size} 
-          onValueChange={handleFontSizeChange}
-          className="flex gap-6"
-        >
-          <div className="flex items-center space-x-2">
-            <RadioGroupItem value="small" id="small" />
-            <Label htmlFor="small" className="cursor-pointer text-gray-300">
-              <span className="font-medium text-white text-sm">Small</span>
-            </Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <RadioGroupItem value="normal" id="normal" />
-            <Label htmlFor="normal" className="cursor-pointer text-gray-300">
-              <span className="font-medium text-white">Normal</span>
-            </Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <RadioGroupItem value="large" id="large" />
-            <Label htmlFor="large" className="cursor-pointer text-gray-300">
-              <span className="font-medium text-white text-lg">Large</span>
-            </Label>
-          </div>
-        </RadioGroup>
-      </Card>
-
-      {/* Background Image */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
-        <h3 className="text-white font-medium text-sm mb-3">Chat Background</h3>
-        <p className="text-xs text-gray-400 mb-3">Recommended size: 1920x1080px for best display</p>
-        
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-gray-300 text-sm">Background Image</span>
-            {backgroundImage && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearBackgroundImage}
-                className="text-gray-400 hover:text-red-400 p-1"
-              >
-                <X className="w-4 h-4" />
-              </Button>
+      {/* Sticky footer with actions */}
+      <div className="sticky bottom-0 left-0 right-0 bg-[#0f0f0f] border-t border-gray-700/50 p-2">
+        <div className="flex gap-2 justify-end">
+          <Button
+            variant="outline"
+            onClick={handleDiscardChanges}
+            disabled={saving || !hasUnsavedChanges}
+            className="bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700 text-sm"
+          >
+            Discard
+          </Button>
+          <Button
+            onClick={handleSaveChanges}
+            disabled={saving || !hasUnsavedChanges}
+            className="bg-[#FF7A00] hover:bg-[#FF8A10] text-white shadow-lg text-sm"
+          >
+            {saving ? (
+              <>
+                <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                Saving...
+              </>
+            ) : (
+              'Save Changes'
             )}
-          </div>
-
-          <div className="relative">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleBackgroundImageUpload}
-              className="hidden"
-              id="background-upload"
-            />
-            <label
-              htmlFor="background-upload"
-              className="cursor-pointer block w-full h-20 rounded-lg border-2 border-dashed border-gray-600 hover:border-[#FF7A00] transition-colors duration-300 flex items-center justify-center overflow-hidden bg-gray-800/50"
-            >
-              {backgroundImage ? (
-                <div className="relative w-full h-full">
-                  <img 
-                    src={backgroundImage} 
-                    alt="Background preview" 
-                    className="w-full h-full object-cover rounded-lg"
-                  />
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                    <span className="text-white text-sm font-medium">Change Image</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center">
-                  <Upload className="w-6 h-6 text-gray-400 mx-auto mb-1" />
-                  <span className="text-sm text-gray-400">Upload background image</span>
-                </div>
-              )}
-            </label>
-          </div>
+          </Button>
         </div>
-      </Card>
-
-      {/* Save Button - Mobile Responsive Fixed Position */}
-      {hasUnsavedChanges && (
-        <div className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 z-50">
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleDiscardChanges}
-              disabled={saving}
-              className="bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700 text-sm"
-            >
-              Discard
-            </Button>
-            <Button
-              onClick={handleSaveChanges}
-              disabled={saving || !hasUnsavedChanges}
-              className="bg-[#FF7A00] hover:bg-[#FF8A10] text-white shadow-lg text-sm"
-            >
-              {saving ? (
-                <>
-                  <div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                'Save Changes'
-              )}
-            </Button>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 };

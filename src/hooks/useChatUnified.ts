@@ -336,6 +336,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       // ===== STREAMING MODE IMPLEMENTATION =====
       // Handle different streaming modes based on user preferences
       const streamingMode = globalSettings?.streaming_mode || 'smooth';
+      const showStreamingUpdates = streamingMode === 'smooth';
       
       const reader = response.body?.getReader();
       if (!reader) {
@@ -345,164 +346,89 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       let fullMessage = '';
       const decoder = new TextDecoder();
       
-      if (streamingMode === 'instant') {
-        // INSTANT MODE: Consume stream in background, show complete message at end
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+      // Both modes share the same parsing, only UI updates differ
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (!line) continue;
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6);
             
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-            
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6);
+            // 1) Completion envelope from our server
+            try {
+              const obj = JSON.parse(data);
+              if (obj && obj.done === true) {
+                logger.info(`${streamingMode} mode - Stream completed`);
+                isStreamingRef.current = false;
                 
-                // Check for new completion format with metadata first
-                try {
-                  const completionData = JSON.parse(data);
-                  if (completionData.done === true) {
-                    logger.info('Instant mode - Stream completed');
-                    
-                    isStreamingRef.current = false;
-                    
-                    // Check for context ceiling warning
-                    if (completionData.metadata?.contextCeilingReached) {
-                      logger.warn('Context ceiling reached, emitting warning');
-                      // Emit context ceiling event
-                      window.dispatchEvent(new CustomEvent('contextCeilingReached', {
-                        detail: {
-                          droppedMessages: completionData.metadata.droppedMessages,
-                          tokenUsage: completionData.metadata.tokenUsage
-                        }
-                      }));
-                    }
-                    
-                    finalizeStreaming(chatId);
-                    const endTime = Date.now();
-                    return { content: fullMessage };
-                  }
-                } catch (parseError) {
-                  // Not JSON or not completion format, try legacy format
+                // Emit context ceiling warning if provided
+                if (obj.metadata?.contextCeilingReached) {
+                  window.dispatchEvent(new CustomEvent('contextCeilingReached', {
+                    detail: {
+                      droppedMessages: obj.metadata.droppedMessages,
+                      tokenUsage: obj.metadata.tokenUsage,
+                    },
+                  }));
                 }
-                
-                if (data === '[DONE]') {
-                  logger.info('Instant mode - Stream completed (legacy)');
-                  
-                  isStreamingRef.current = false;
-                  
-                  finalizeStreaming(chatId);
-                  const endTime = Date.now();
-                  return { content: fullMessage };
-                }
-                
-                // Real-time streaming display
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.choices?.[0]?.delta?.content) {
-                    const content = parsed.choices[0].delta.content;
-                    fullMessage += content;
-                    dispatch({
-                      type: 'SET_STREAMING',
-                      payload: { isStreaming: true, message: fullMessage }
-                    });
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                  }
-                } catch (e) {
-                  // Not JSON or streaming content, ignore
-                }
+                finalizeStreaming(chatId);
+                const endTime = Date.now();
+                return { content: fullMessage };
               }
+              
+              // 2) Our server streams { content: string }
+              if (typeof obj?.content === 'string' && obj.content.length > 0) {
+                fullMessage += obj.content;
+                if (showStreamingUpdates) {
+                  dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: fullMessage } });
+                }
+                continue; // proceed to next line
+              }
+              
+              // 3) Fallback for OpenAI-like SSE delta format
+              if (obj?.choices?.[0]?.delta?.content) {
+                const content = obj.choices[0].delta.content as string;
+                fullMessage += content;
+                if (showStreamingUpdates) {
+                  dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: fullMessage } });
+                }
+                continue;
+              }
+            } catch (parseError) {
+              logger.error('Error parsing streaming data:', parseError);
             }
           }
-        } finally {
-          reader.releaseLock();
         }
-      } else {
-        // SMOOTH MODE: Real-time character-by-character streaming
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
-            
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6);
-                
-                // Check for new completion format with metadata first
-                try {
-                  const completionData = JSON.parse(data);
-                  if (completionData.done === true) {
-                    logger.info('Smooth mode - Stream completed');
-                    
-                    isStreamingRef.current = false;
-                    
-                    // Check for context ceiling warning
-                    if (completionData.metadata?.contextCeilingReached) {
-                      logger.warn('Context ceiling reached, emitting warning');
-                      // Emit context ceiling event
-                      window.dispatchEvent(new CustomEvent('contextCeilingReached', {
-                        detail: {
-                          droppedMessages: completionData.metadata.droppedMessages,
-                          tokenUsage: completionData.metadata.tokenUsage
-                        }
-                      }));
-                    }
-                    
-                    finalizeStreaming(chatId);
-                    const endTime = Date.now();
-                    return { content: fullMessage };
-                  }
-                } catch (parseError) {
-                  // Not JSON or not completion format, try legacy format or streaming content
-                }
-                
-                if (data === '[DONE]') {
-                  logger.info('Smooth mode - Stream completed (legacy)');
-                  
-                  isStreamingRef.current = false;
-                  
-                  finalizeStreaming(chatId);
-                  const endTime = Date.now();
-                  return { content: fullMessage };
-                }
-                
-                // Real-time streaming display
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.choices?.[0]?.delta?.content) {
-                    const content = parsed.choices[0].delta.content;
-                    fullMessage += content;
-                    dispatch({
-                      type: 'SET_STREAMING',
-                      payload: { isStreaming: true, message: fullMessage }
-                    });
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                  }
-                } catch (e) {
-                  // Skip invalid JSON chunks
-                }
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
+      } catch (streamError) {
+        logger.error('Streaming error:', streamError);
+        isStreamingRef.current = false;
+        dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
+        throw new Error('Streaming error, please try again');
       }
-      
-      return { content: fullMessage };
-      
-    } catch (error) {
+    } catch (err) {
+      logger.error('Streaming invocation error:', err);
       isStreamingRef.current = false;
-      logger.error('Streaming error:', error);
-      throw error;
+      dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
+      throw err;
     }
   };
 
-  // Send message mutation
+  // ============================================================================
+  // EFFECTS & SUBSCRIPTIONS
+  // ============================================================================
+  useEffect(() => {
+    // Log state changes for debugging
+    logger.debug('Chat state updated:', state);
+  }, [state]);
+
+  // ==========================================================================
+  // SEND MESSAGE MUTATION (restored)
+  // ==========================================================================
   const sendMessageMutation = useMutation({
     mutationFn: async ({ 
       chatId, 
@@ -522,144 +448,116 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       selectedWorldInfoId?: string | null;
     }) => {
       if (!user) throw new Error('User not authenticated');
-      
       const startTime = Date.now();
-      
-      // Add optimistic user message
-      const optimisticId = `user-optimistic-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      queryClient.setQueryData(queryKeys.chat.messages(chatId), (old: any) => {
-        let nextMessageOrder = 1;
-        if (old?.pages?.length) {
-          const allMessages = old.pages.flatMap((page: any) => page.messages);
-          const maxOrder = Math.max(...allMessages.map((msg: any) => msg.message_order || 0));
-          nextMessageOrder = maxOrder + 1;
-        }
 
-        if (!old?.pages?.length) {
-          return {
-            pages: [{
-              messages: [{
-                id: optimisticId,
-                content,
-                isUser: true,
-                timestamp: new Date(),
-                status: 'sending' as const,
-                message_order: nextMessageOrder
-              }],
-              hasMore: false,
-              oldestTimestamp: null
-            }],
-            pageParams: [undefined]
-          };
-        }
-        
-        const optimisticMessage: Message = {
-          id: optimisticId,
-          content,
-          isUser: true,
-          timestamp: new Date(),
-          status: 'sending',
-          message_order: nextMessageOrder
-        };
-        
-        const firstPage = old.pages[0];
-        const updatedFirstPage = {
-          ...firstPage,
-          messages: [...firstPage.messages, optimisticMessage]
-        };
-        
-        return {
-          ...old,
-          pages: [updatedFirstPage, ...old.pages.slice(1)]
-        };
-      });
-      
       try {
-        // Call unified chat-management function for streaming
-        const aiResult = await invokeStreamingAI(chatId, content, characterId, user.id, trackedContext, addonSettings, selectedPersonaId, selectedWorldInfoId);
-        
-        // ✅ SIMPLIFIED: Single invalidation after completion
-        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
-        
-        const endTime = Date.now();
-        return { 
-          chatId, 
+        const aiResult = await invokeStreamingAI(
+          chatId,
           content,
-          optimisticId,
-          updatedContext: aiResult,
-          metrics: { sendTime: endTime - startTime }
-        };
+          characterId,
+          user.id,
+          trackedContext,
+          addonSettings,
+          selectedPersonaId,
+          selectedWorldInfoId
+        );
         
+        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
+        const endTime = Date.now();
+        return { chatId, content, updatedContext: aiResult, metrics: { sendTime: endTime - startTime } };
       } catch (error) {
-        // ✅ SIMPLIFIED: Single invalidation on error for consistency
         invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
         throw error;
       }
     },
-    // Removed redundant onSuccess credits invalidation; handled by invalidateAfterMessage above
+    onMutate: async ({ chatId, content }) => {
+      const key = queryKeys.chat.messages(chatId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData(key);
+
+      // Build optimistic user message
+      const optimisticId = `user-optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const optimisticMessage = {
+        id: optimisticId,
+        content,
+        isUser: true,
+        timestamp: new Date(),
+        status: 'sending' as const,
+        message_order: (() => {
+          const data: any = previous as any;
+          const all = data?.pages?.flatMap((p: any) => p.messages) || [];
+          const maxOrder = all.length ? Math.max(...all.map((m: any) => m.message_order || 0)) : 0;
+          return maxOrder + 1;
+        })()
+      };
+
+      // Update cache: append to first page (most recent)
+      queryClient.setQueryData(key, (old: any) => {
+        if (!old?.pages?.length) {
+          return {
+            pages: [{ messages: [optimisticMessage], hasMore: false, oldestMessageOrder: null }],
+            pageParams: [undefined]
+          };
+        }
+        const first = old.pages[0];
+        const updatedFirst = { ...first, messages: [...first.messages, optimisticMessage] };
+        return { ...old, pages: [updatedFirst, ...old.pages.slice(1)] };
+      });
+
+      return { previous, key };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.key) {
+        queryClient.setQueryData(ctx.key, ctx.previous);
+      }
+    },
+    onSettled: (_data, _error, vars) => {
+      if (vars?.chatId && user?.id) {
+        invalidationHelpers.invalidateAfterMessage(queryClient, vars.chatId, user.id);
+      }
+    }
   });
 
-  // ============================================================================
-  // COMBINED MESSAGE LIST WITH OPTIMISTIC CLEANUP
-  // ============================================================================
+  // ==========================================================================
+  // COMBINED MESSAGE LIST WITH SORTING (restored)
+  // ==========================================================================
   const allMessages = useMemo(() => {
     const dbMessages = messagesQuery.data?.pages?.flatMap(page => page.messages) || [];
-    
-    // Simple sorting by message_order
-    const sortedMessages = dbMessages.sort((a, b) => {
-      return (a.message_order || 0) - (b.message_order || 0);
-    });
-
-    return sortedMessages;
+    return dbMessages.sort((a, b) => (a.message_order || 0) - (b.message_order || 0));
   }, [messagesQuery.data?.pages]);
 
-  // Extract context from messages
+  // Extract context from latest AI message if available (restored)
   const extractedContext = useMemo(() => {
-    if (!allMessages.length) {
-      return state.trackedContext;
-    }
-    
-    // Find most recent AI message with context
+    if (!allMessages.length) return state.trackedContext;
     for (let i = allMessages.length - 1; i >= 0; i--) {
       const message = allMessages[i];
       if (!message.isUser && message.current_context) {
-        return message.current_context;
+        return message.current_context as TrackedContext;
       }
     }
-    
     return state.trackedContext;
   }, [allMessages, state.trackedContext]);
 
-  // Update context when extracted context changes
   useEffect(() => {
     if (extractedContext !== state.trackedContext) {
-      logger.debug('useChatUnified: Updating context', {
-        from: state.trackedContext,
-        to: extractedContext
-      });
       dispatch({ type: 'UPDATE_CONTEXT', payload: extractedContext });
     }
   }, [extractedContext, state.trackedContext]);
 
-  // ============================================================================
-  // SEND MESSAGE HANDLER
-  // ============================================================================
+  // ==========================================================================
+  // PUBLIC SEND HANDLER (restored)
+  // ==========================================================================
   const handleSendMessage = useCallback(async (
     content: string, 
     addonSettings?: any,
     selectedPersonaId?: string | null,
     selectedWorldInfoId?: string | null,
-    overrideContext?: any
+    overrideContext?: TrackedContext
   ) => {
     if (!user || !chatId || !content.trim()) return;
-    
-    if (creditsBalance < 1) {
-      throw new Error('Insufficient credits');
-    }
-    
+    if (creditsBalance < 1) throw new Error('Insufficient credits');
+
     dispatch({ type: 'SET_TYPING', payload: true });
-    
     try {
       const result = await sendMessageMutation.mutateAsync({
         chatId,
@@ -670,7 +568,6 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         selectedPersonaId,
         selectedWorldInfoId
       });
-      
       return result;
     } catch (error) {
       logger.error('Send message error:', error);
@@ -681,11 +578,10 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     }
   }, [user, chatId, characterId, sendMessageMutation, state.trackedContext, creditsBalance]);
 
-  // ============================================================================
-  // RETURN UNIFIED INTERFACE
-  // ============================================================================
+  // ==========================================================================
+  // RETURN UNIFIED INTERFACE (restored)
+  // ==========================================================================
   return {
-    // State
     messages: allMessages,
     isTyping: state.isTyping,
     trackedContext: state.trackedContext,
@@ -694,26 +590,21 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     isStreaming: state.isStreaming,
     streamingMessage: state.streamingMessage,
     
-    // Actions
     sendMessage: handleSendMessage,
     
-    // Credits
     creditsBalance,
     
-    // Loading states
     isLoadingMessages: messagesQuery.isLoading,
     hasMore: messagesQuery.hasNextPage,
     isFetchingNextPage: messagesQuery.isFetchingNextPage,
-    
-    // Functions
     fetchNextPage: messagesQuery.fetchNextPage,
+    
     clearChatState: () => dispatch({ type: 'CLEAR_STATE' }),
     
-    // Performance metrics
     metrics: {
       messageCount: allMessages.length,
       connectionStatus: state.isRealtimeConnected ? 'connected' : 'disconnected',
-      lastActivity: state.lastActivity
-    }
+      lastActivity: state.lastActivity,
+    },
   };
 };

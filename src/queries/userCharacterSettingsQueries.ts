@@ -10,7 +10,7 @@ export async function getUserCharacterSettings(
     .select('*')
     .eq('user_id', userId)
     .eq('character_id', characterId)
-    .single();
+    .maybeSingle();
 
   if (error && error.code !== 'PGRST116') { // Not found error
     console.error('Error fetching user character settings:', error);

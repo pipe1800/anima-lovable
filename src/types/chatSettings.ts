@@ -23,6 +23,26 @@ export interface UserGlobalChatSettings {
   
   // ACCESSIBILITY SETTINGS (global)
   font_size: 'small' | 'normal' | 'large';
+
+  // STYLE SETTINGS (global per user)
+  ai_text_color: string; // e.g., '#E5E7EB'
+  user_text_color: string; // e.g., '#FFFFFF'
+  show_character_avatar: boolean;
+  show_user_avatar: boolean;
+  avatar_shape: 'circle' | 'rounded';
+  avatar_size: 'sm' | 'md' | 'lg';
+  background_image_url: string | null;
+  // New: Bubble colors and transparency
+  ai_bubble_color: string; // hex color
+  ai_bubble_opacity: number; // 0..1
+  user_bubble_color: string; // hex color
+  user_bubble_opacity: number; // 0..1
+  // New: Semantic highlighting controls
+  semantic_overrides_mode: 'default' | 'custom' | 'disabled';
+  speech_color?: string | null; // for quoted text
+  action_color?: string | null; // for *action*
+  emphasis_color?: string | null; // for _emphasis_
+  parenthetical_color?: string | null; // for (parenthetical)
   
   // Timestamps
   created_at: string;

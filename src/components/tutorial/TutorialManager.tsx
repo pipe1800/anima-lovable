@@ -14,39 +14,39 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
 
   useEffect(() => {
-    console.log('TutorialManager: Effect triggered with:', { 
-      shouldStart, 
-      user: !!user,
-      chatTutorialCompleted: user?.user_metadata?.chat_tutorial_completed 
-    });
-    
+    if (process.env.NODE_ENV === 'development') {
+      // Minimal debug once per mount/change
+      console.debug('TutorialManager: effect', { shouldStart, hasUser: !!user });
+    }
+
     if (!user) return;
     
     const chatTutorialCompleted = user.user_metadata?.chat_tutorial_completed;
     const fromOnboarding = shouldStart || localStorage.getItem('fromOnboarding') === 'true';
     
-    // Show tutorial if coming from onboarding and not completed
     if (fromOnboarding && !chatTutorialCompleted) {
-      console.log('TutorialManager: Starting tutorial');
       setShowWelcomeModal(true);
       localStorage.removeItem('fromOnboarding');
     }
   }, [shouldStart, user]);
 
   const handleStartTutorial = () => {
-    console.log('TutorialManager: Starting tutorial from welcome modal');
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('TutorialManager: start from modal');
+    }
     setShowWelcomeModal(false);
     startTutorial();
   };
 
   const handleSkipTutorial = () => {
-    console.log('TutorialManager: Skipping tutorial');
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('TutorialManager: skip from modal');
+    }
     setShowWelcomeModal(false);
     skipTutorial();
   };
 
-  console.log('TutorialManager: Rendering with isActive:', isActive, 'showWelcomeModal:', showWelcomeModal);
-
+  // Avoid noisy render logs
   return (
     <>
       <TutorialWelcomeModal
@@ -54,8 +54,6 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
         onStart={handleStartTutorial}
         onSkip={handleSkipTutorial}
       />
-      
-      {/* Use the correct TutorialOverlay */}
       {isActive && <TutorialOverlay />}
     </>
   );

@@ -9,7 +9,7 @@ export const globalChatSettingsKeys = {
   user: (userId: string) => [...globalChatSettingsKeys.all, userId] as const,
 };
 
-// Default global settings (includes ALL chat settings: addons, streaming, accessibility)
+// Default global settings (includes ALL chat settings: addons, streaming, accessibility, style)
 export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'user_id' | 'created_at' | 'updated_at'> = {
   // Addon settings (global defaults)
   dynamic_world_info: false,
@@ -28,6 +28,28 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
   
   // Accessibility settings
   font_size: 'normal',
+
+  // Style settings (global per user)
+  ai_text_color: '#E5E7EB',
+  user_text_color: '#FFFFFF',
+  show_character_avatar: true,
+  show_user_avatar: false,
+  avatar_shape: 'circle',
+  avatar_size: 'md',
+  background_image_url: null,
+
+  // New defaults for bubble styles
+  ai_bubble_color: '#1f2937',
+  ai_bubble_opacity: 0.9,
+  user_bubble_color: '#FF7A00',
+  user_bubble_opacity: 1,
+
+  // Semantic highlighting defaults
+  semantic_overrides_mode: 'default',
+  speech_color: null,
+  action_color: null,
+  emphasis_color: null,
+  parenthetical_color: null,
 };
 
 // Get user's global chat settings (includes ALL settings)
@@ -61,10 +83,12 @@ export const useUserGlobalChatSettings = () => {
           .single();
         
         if (insertError) throw insertError;
-        return newSettings;
+        // Ensure all fields present
+        return { ...defaultGlobalChatSettings, ...newSettings } as UserGlobalChatSettings;
       }
       
-      return data;
+      // Merge defaults to ensure new fields exist for older rows
+      return { ...defaultGlobalChatSettings, ...data } as UserGlobalChatSettings;
     },
     enabled: !!user?.id,
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -92,7 +116,8 @@ export const useUpdateGlobalChatSettings = () => {
         .single();
       
       if (error) throw error;
-      return data;
+      // Merge defaults for safety
+      return { ...defaultGlobalChatSettings, ...data } as UserGlobalChatSettings;
     },
     onSuccess: (data) => {
       // Update the cache
@@ -183,5 +208,66 @@ export const useUpdateAccessibilitySettings = () => {
     }) => {
       return updateSettings.mutateAsync(accessibility);
     },
+  });
+};
+
+// Style settings update hooks
+export const useUpdateTextColor = () => {
+  const updateSettings = useUpdateGlobalChatSettings();
+  
+  return useMutation({
+    mutationFn: (colors: { ai_text_color?: string; user_text_color?: string }) => {
+      return updateSettings.mutateAsync(colors);
+    },
+  });
+};
+
+export const useUpdateBubbleStyles = () => {
+  const updateSettings = useUpdateGlobalChatSettings();
+  return useMutation({
+    mutationFn: (bubbles: {
+      ai_bubble_color?: string;
+      ai_bubble_opacity?: number;
+      user_bubble_color?: string;
+      user_bubble_opacity?: number;
+    }) => updateSettings.mutateAsync(bubbles),
+  });
+};
+
+export const useUpdateAvatarsSettings = () => {
+  const updateSettings = useUpdateGlobalChatSettings();
+  
+  return useMutation({
+    mutationFn: (avatars: {
+      show_character_avatar?: boolean;
+      show_user_avatar?: boolean;
+      avatar_shape?: 'circle' | 'rounded';
+      avatar_size?: 'sm' | 'md' | 'lg';
+    }) => {
+      return updateSettings.mutateAsync(avatars);
+    },
+  });
+};
+
+export const useUpdateBackgroundImage = () => {
+  const updateSettings = useUpdateGlobalChatSettings();
+  
+  return useMutation({
+    mutationFn: (url: string | null) => {
+      return updateSettings.mutateAsync({ background_image_url: url });
+    },
+  });
+};
+
+export const useUpdateSemanticHighlighting = () => {
+  const updateSettings = useUpdateGlobalChatSettings();
+  return useMutation({
+    mutationFn: (opts: {
+      semantic_overrides_mode?: 'default' | 'custom' | 'disabled';
+      speech_color?: string | null;
+      action_color?: string | null;
+      emphasis_color?: string | null;
+      parenthetical_color?: string | null;
+    }) => updateSettings.mutateAsync(opts),
   });
 };

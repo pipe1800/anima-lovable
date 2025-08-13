@@ -176,6 +176,9 @@ const ChatInterface = ({
   // Use addon settings hook for real-time updates
   const { data: globalSettings } = useUserGlobalChatSettings();
   
+  // Background image for full chat area (messages + input)
+  const backgroundImage = globalSettings?.background_image_url || null;
+  
   // Fallback to default settings if loading
   const currentAddonSettings = globalSettings ? {
     dynamicWorldInfo: globalSettings.dynamic_world_info,
@@ -379,77 +382,95 @@ const ChatInterface = ({
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#121212]">
-      {/* Debug Panel - Lazy loaded for performance */}
-      <Suspense fallback={<LoadingSpinner />}>
-        <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
-      </Suspense>
-      
-      {/* Messages Area - Mobile Responsive */}
-      <div className="flex-1 overflow-hidden">
-        <ChatMessages 
-          chatId={currentChatId}
-          character={character}
-          trackedContext={effectiveTrackedContext}
-          streamingMessage={streamingMessage}
-          isStreaming={isStreaming}
-          messages={messages}
-          hasMore={hasMore}
-          isFetchingNextPage={isFetchingNextPage}
-          isLoadingMessages={isLoadingMessages}
-          fetchNextPage={fetchNextPage}
-          isRealtimeConnected={isRealtimeConnected}
-          debugInfo={debugInfo}
+    <div className="relative h-full bg-transparent">
+      {/* Static background layer spanning entire chat area */}
+      {backgroundImage && (
+        <div
+          className="absolute inset-0 bg-center bg-cover"
+          style={{ backgroundImage: `url(${backgroundImage})` }}
+        />
+      )}
+      {/* Dark overlay for readability */}
+      {backgroundImage && (
+        <div className="absolute inset-0 bg-black/50 pointer-events-none" />
+      )}
+
+      {/* Foreground content */}
+      <div className="relative z-10 flex flex-col h-full">
+        {/* Debug Panel - Lazy loaded for performance */}
+        <Suspense fallback={<LoadingSpinner />}>
+          <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
+        </Suspense>
+        
+        {/* Messages Area - Mobile Responsive */}
+        <div className="flex-1 overflow-hidden">
+          <ChatMessages 
+            chatId={currentChatId}
+            character={character}
+            trackedContext={effectiveTrackedContext}
+            streamingMessage={isStreaming ? streamingMessage : undefined}
+            isStreaming={isStreaming}
+            messages={messages}
+            hasMore={hasMore}
+            isFetchingNextPage={isFetchingNextPage}
+            isLoadingMessages={isLoadingMessages}
+            fetchNextPage={fetchNextPage}
+            isRealtimeConnected={isRealtimeConnected}
+            debugInfo={debugInfo}
+            renderBackground={false}
+          />
+        </div>
+
+        {/* Typing Indicator with Reserved Space - Mobile Responsive */}
+        <div className="px-3 sm:px-6 pb-2 min-h-[2.5rem] flex items-center">
+          <div 
+            className={`flex items-center space-x-2 text-gray-400 transition-all duration-300 ${
+              (isTyping || isStreaming) ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
+            }`}
+          >
+            <div className="flex space-x-1">
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+            </div>
+            <span className="text-xs sm:text-sm">
+              {isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`}
+            </span>
+          </div>
+        </div>
+
+        {/* Input Area - Glass over background, no separator line */}
+        <div className="p-3 sm:p-4 bg-transparent">
+          <form onSubmit={handleSendMessage} className="flex items-center gap-2 sm:gap-3">
+            <div className="flex-1 backdrop-blur-md bg-black/30 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-3 shadow-lg shadow-black/30">
+              <input
+                ref={inputRef}
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder={`Message ${character.name}...`}
+                className="w-full bg-transparent outline-none text-sm sm:text-base text-white placeholder-gray-300"
+                disabled={isTyping || !currentChatId}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!inputValue.trim() || isTyping || !currentChatId}
+              className="backdrop-blur-md bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white disabled:opacity-50 disabled:cursor-not-allowed px-3 sm:px-4 py-2 sm:py-3 rounded-xl transition-colors h-auto shadow-lg shadow-black/30"
+            >
+              <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+          </form>
+        </div>
+
+        {/* Modals */}
+        <InsufficientCreditsModal
+          isOpen={showInsufficientCreditsModal}
+          onClose={handleCloseInsufficientCreditsModal}
+          currentBalance={creditsBalance}
+          onUpgrade={handleUpgrade}
         />
       </div>
-
-      {/* Typing Indicator with Reserved Space - Mobile Responsive */}
-      <div className="px-3 sm:px-6 pb-2 min-h-[2.5rem] flex items-center">
-        <div 
-          className={`flex items-center space-x-2 text-gray-400 transition-all duration-300 ${
-            (isTyping || isStreaming) ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
-          }`}
-        >
-          <div className="flex space-x-1">
-            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-          </div>
-          <span className="text-xs sm:text-sm">
-            {isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`}
-          </span>
-        </div>
-      </div>
-
-      {/* Input Area - Mobile Responsive */}
-      <div className="border-t border-gray-700/50 bg-[#0f0f0f] p-3 sm:p-4">
-        <form onSubmit={handleSendMessage} className="flex items-center space-x-2 sm:space-x-3">
-          <input
-            ref={inputRef}
-            type="text"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder={`Message ${character.name}...`}
-            className="flex-1 bg-[#1a1a2e] border border-gray-700/50 rounded-lg px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-white placeholder-gray-400 focus:outline-none focus:border-[#FF7A00] focus:ring-1 focus:ring-[#FF7A00]/20"
-            disabled={isTyping || !currentChatId}
-          />
-          <button
-            type="submit"
-            disabled={!inputValue.trim() || isTyping || !currentChatId}
-            className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50 disabled:cursor-not-allowed px-3 sm:px-4 py-2 sm:py-3 rounded-lg transition-colors h-auto"
-          >
-            <Send className="w-4 h-4 sm:w-5 sm:h-5" />
-          </button>
-        </form>
-      </div>
-
-      {/* Modals */}
-      <InsufficientCreditsModal
-        isOpen={showInsufficientCreditsModal}
-        onClose={handleCloseInsufficientCreditsModal}
-        currentBalance={creditsBalance}
-        onUpgrade={handleUpgrade}
-      />
     </div>
   );
 };

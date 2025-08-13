@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { 
@@ -159,7 +158,7 @@ const AppSidebar = () => {
   }
 
   return (
-    <div className={`bg-[#0f0f0f] h-full text-white flex flex-col transition-all duration-300 select-none ${
+    <div className={`bg-[#0f0f0f] h-full text-white flex flex-col transition-all duration-300 select-none relative z-40 ${
       isCollapsed ? 'w-16' : 'w-64'
     }`}>
       <div className="flex flex-col h-full">
@@ -182,7 +181,7 @@ const AppSidebar = () => {
           {/* Toggle button */}
           <button
             onClick={toggleSidebar}
-            className="absolute -right-3 top-1/2 -translate-y-1/2 bg-[#1a1a2e] border border-gray-700 rounded-full p-1 hover:bg-[#FF7A00]/20 transition-colors"
+            className="absolute -right-3 top-1/2 -translate-y-1/2 bg-[#1a1a2e] border border-gray-700 rounded-full p-1 hover:bg-[#FF7A00]/20 transition-colors z-50"
           >
             {isCollapsed ? (
               <ChevronRight className="w-4 h-4 text-gray-400" />

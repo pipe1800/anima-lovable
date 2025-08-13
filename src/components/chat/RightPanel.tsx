@@ -8,6 +8,7 @@ const ChatDetailsPanel = lazy(() => import('./ChatDetailsPanel'));
 const ChatConfigurationTab = lazy(() =>
   import('./ChatConfigurationTab').then(m => ({ default: m.ChatConfigurationTab }))
 );
+const ChatStyleTab = lazy(() => import('./ChatStyleTab').then(m => ({ default: m.ChatStyleTab })));
 
 interface RightPanelProps {
   open: boolean;
@@ -105,6 +106,7 @@ export default function RightPanel(props: RightPanelProps) {
   } = props;
 
   const [activeTab, setActiveTab] = useState<'history' | 'details' | 'config'>('details');
+  const [activeConfigSubtab, setActiveConfigSubtab] = useState<'chat' | 'style'>('chat');
 
   if (!open) return null;
 
@@ -206,28 +208,60 @@ export default function RightPanel(props: RightPanelProps) {
             )}
 
             {activeTab === 'config' && currentUserId && (
-              <ChatConfigurationTab
-                characterId={character.id}
-                userId={currentUserId}
-                personas={personas}
-                selectedPersona={selectedPersona}
-                setSelectedPersona={setSelectedPersona}
-                setShowPersonaModal={setShowPersonaModal}
-                setShowEditPersonaModal={setShowEditPersonaModal}
-                setPersonaToEdit={setPersonaToEdit}
-                worldInfoDropdownVisible={worldInfoDropdownVisible}
-                onWorldInfoSelect={onWorldInfoSelect}
-                currentChatId={currentChatId}
-                selectedWorldInfoId={selectedWorldInfoId}
-                onPersonaSaved={onPersonaSaved}
-                chatMode={chatMode}
-                onChatModeChange={onChatModeChange}
-                chatModeLoading={chatModeLoading}
-                timeAwarenessEnabled={timeAwarenessEnabled}
-                onTimeAwarenessChange={onTimeAwarenessChange}
-                timeAwarenessLoading={timeAwarenessLoading}
-                userTimezone={userTimezone}
-              />
+              <div className="p-0">
+                {/* Config subtabs */}
+                <div className="px-4 pt-4">
+                  <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg">
+                    <button
+                      onClick={() => setActiveConfigSubtab('chat')}
+                      className={`flex-1 px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+                        activeConfigSubtab === 'chat' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Chat Config
+                    </button>
+                    <button
+                      onClick={() => setActiveConfigSubtab('style')}
+                      className={`flex-1 px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+                        activeConfigSubtab === 'style' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      Chat Style
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <Suspense fallback={<div className="p-4 text-gray-400">Loading...</div>}>
+                    {activeConfigSubtab === 'chat' ? (
+                      <ChatConfigurationTab
+                        characterId={character.id}
+                        userId={currentUserId}
+                        personas={personas}
+                        selectedPersona={selectedPersona}
+                        setSelectedPersona={setSelectedPersona}
+                        setShowPersonaModal={setShowPersonaModal}
+                        setShowEditPersonaModal={setShowEditPersonaModal}
+                        setPersonaToEdit={setPersonaToEdit}
+                        worldInfoDropdownVisible={worldInfoDropdownVisible}
+                        onWorldInfoSelect={onWorldInfoSelect}
+                        currentChatId={currentChatId}
+                        selectedWorldInfoId={selectedWorldInfoId}
+                        onPersonaSaved={onPersonaSaved}
+                        chatMode={chatMode}
+                        onChatModeChange={onChatModeChange}
+                        chatModeLoading={chatModeLoading}
+                        timeAwarenessEnabled={timeAwarenessEnabled}
+                        onTimeAwarenessChange={onTimeAwarenessChange}
+                        timeAwarenessLoading={timeAwarenessLoading}
+                        userTimezone={userTimezone}
+                      />
+                    ) : (
+                      <ChatStyleTab currentChatId={currentChatId} />
+                    )}
+                  </Suspense>
+                </div>
+              </div>
             )}
           </Suspense>
         </div>
