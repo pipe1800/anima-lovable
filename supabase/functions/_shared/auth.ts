@@ -8,17 +8,13 @@ import { CORS_HEADERS } from '../types/interfaces.ts';
  */
 
 export async function authenticateUser(req: Request): Promise<AuthResult> {
-  console.log('🔐 Starting authentication...');
-  
+  // Minimal logs here; callers can log request IDs
   const authHeader = req.headers.get('authorization');
   if (!authHeader) {
     console.error('❌ No authorization header found');
     throw new Error('No authorization header');
   }
-  
-  console.log('🔐 Auth header found:', authHeader.substring(0, 20) + '...');
-  
-  // Create user-scoped client for authentication and RLS
+
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -31,22 +27,12 @@ export async function authenticateUser(req: Request): Promise<AuthResult> {
     }
   );
   
-  console.log('🔐 Supabase client created, validating user...');
-  
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-  
-  console.log('🔐 Auth validation result:', {
-    hasUser: !!user,
-    userId: user?.id,
-    error: authError?.message || 'none'
-  });
-  
   if (authError || !user) {
     console.error('❌ Authentication failed:', authError);
     throw new Error('Invalid token');
   }
   
-  // Create admin client for privileged operations
   const supabaseAdmin = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!

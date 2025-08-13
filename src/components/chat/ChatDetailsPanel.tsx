@@ -113,17 +113,22 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
               Edit Character
             </Button>
           )}
-          {showMemoriesButton && (
-            <Button
-              data-tutorial="memories-button"
-              onClick={onOpenMemories}
-              variant="outline"
-              className="w-full bg-transparent border-[#FF7A00]/50 hover:bg-[#FF7A00]/10 hover:text-[#FF7A00] text-[#FF7A00] border-[#FF7A00]/30 text-sm"
-            >
-              <Brain className="w-4 h-4 mr-2" />
-              View Memories ({memoriesCount})
-            </Button>
-          )}
+          {/* Always show Memories button; disable when not enabled */}
+          <Button
+            data-tutorial="memories-button"
+            onClick={onOpenMemories}
+            variant="outline"
+            disabled={!showMemoriesButton}
+            className={`w-full border-[#FF7A00]/50 text-sm ${
+              !showMemoriesButton
+                ? 'text-gray-500 border-gray-600/50 cursor-not-allowed'
+                : 'bg-transparent hover:bg-[#FF7A00]/10 hover:text-[#FF7A00] text-[#FF7A00] border-[#FF7A00]/30'
+            }`}
+            title={showMemoriesButton ? 'View memories' : 'Enable Enhanced Memory to view'}
+          >
+            <Brain className="w-4 h-4 mr-2" />
+            View Memories ({memoriesCount})
+          </Button>
           <div className="flex space-x-3">
             <Button
               variant="outline"

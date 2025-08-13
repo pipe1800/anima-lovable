@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,9 @@ export default function PersonaCreateModal({ open, onOpenChange, currentPersona,
       <DialogContent className="bg-[#1a1a2e] border-gray-700/50 text-white max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-white">Create New Persona</DialogTitle>
+          <DialogDescription className="text-gray-300">
+            Set up a roleplay identity to use when chatting with AI characters. You can edit this later.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6">

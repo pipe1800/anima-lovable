@@ -76,9 +76,8 @@ globalThis.Deno.serve(async (req) => {
     // ============================================================================
     // AUTHENTICATION
     // ============================================================================
-    console.log('🔐 Starting user authentication...');
+    // Reduce duplicate logs: shared auth module logs details
     const { user, supabase, supabaseAdmin } = await authenticateUser(req);
-    console.log('👤 User authenticated successfully:', user.id);
 
     // ============================================================================
     // REQUEST PARSING & VALIDATION

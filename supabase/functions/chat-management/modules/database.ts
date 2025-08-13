@@ -237,39 +237,108 @@ export async function fetchUserSelectedWorldInfo(
 export async function fetchCharacterMemories(
   userId: string,
   characterId: string,
-  supabase: SupabaseClient
-): Promise<Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null> {
-  console.log('🧠 Fetching character memories for:', { userId, characterId });
+  supabase: SupabaseClient,
+  opts?: { chatId?: string; includeAutoSummaries?: boolean; limitNonAuto?: number; limitAuto?: number; crossChat?: boolean }
+): Promise<Array<{ id: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at: string; last_injected_at: string | null; injection_count: number | null; content_hash: string | null; is_auto_summary?: boolean; embedding?: number[] | null }>> {
+  console.log('🧠 Fetching character memories for:', { userId, characterId, opts });
+
+  const limitNonAuto = opts?.limitNonAuto ?? 50;
+  const limitAuto = opts?.limitAuto ?? 5;
+  // Always allow auto summaries when requested; do not require chatId
+  const includeAuto = !!opts?.includeAutoSummaries;
+  const preferChatId = opts?.chatId || null;
 
   try {
-    const { data: memories, error } = await supabase
-      .from('character_memories')
-      .select('summary_content, trigger_keywords, created_at')
-      .eq('user_id', userId)
-      .eq('character_id', characterId)
-      .order('created_at', { ascending: false });
+    const queries: Promise<any>[] = [];
 
-    if (error) {
-      console.error('❌ Error fetching character memories:', error);
-      return null;
+    // Non-auto summaries (curated/manual) across all chats for this user-character pair
+    queries.push(
+      supabase
+        .from('character_memories')
+        .select('id, summary_content, trigger_keywords, created_at, updated_at, last_injected_at, injection_count, content_hash, is_auto_summary, embedding')
+        .eq('user_id', userId)
+        .eq('character_id', characterId)
+        .eq('is_auto_summary', false)
+        .order('updated_at', { ascending: false })
+        .limit(limitNonAuto)
+    );
+
+    // Auto summaries
+    if (includeAuto) {
+      const autoQueries: Promise<any>[] = [];
+
+      // Prefer a few from the current chat if provided
+      if (preferChatId) {
+        autoQueries.push(
+          supabase
+            .from('character_memories')
+            .select('id, summary_content, trigger_keywords, created_at, updated_at, last_injected_at, injection_count, content_hash, is_auto_summary, embedding')
+            .eq('chat_id', preferChatId)
+            .eq('user_id', userId)
+            .eq('character_id', characterId)
+            .eq('is_auto_summary', true)
+            .order('created_at', { ascending: false })
+            .limit(Math.min(limitAuto, 3))
+        );
+      }
+
+      // Also fetch most recent across chats for this user-character pair
+      autoQueries.push(
+        supabase
+          .from('character_memories')
+          .select('id, summary_content, trigger_keywords, created_at, updated_at, last_injected_at, injection_count, content_hash, is_auto_summary, embedding')
+          .eq('user_id', userId)
+          .eq('character_id', characterId)
+          .eq('is_auto_summary', true)
+          .order('created_at', { ascending: false })
+          .limit(limitAuto)
+      );
+
+      queries.push(Promise.all(autoQueries).then((results) => {
+        // Flatten and dedupe by id or content_hash
+        const flat = results.map(r => (r?.data || [])).flat();
+        const seen = new Set<string>();
+        const deduped = flat.filter((m: any) => {
+          const key = m.id || m.content_hash || `${m.summary_content?.slice(0, 64)}:${m.created_at}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        // Cap to limitAuto overall
+        return { data: deduped.slice(0, limitAuto) };
+      }));
     }
 
-    console.log(`✅ Fetched ${memories?.length || 0} character memories`);
-    
-    // Log each memory for debugging
-    memories?.forEach((memory, index) => {
+    const results = await Promise.all(queries);
+
+    const nonAuto = results[0].data || [];
+    const auto = includeAuto ? (results[1]?.data || []) : [];
+
+    const memories = [...nonAuto, ...auto];
+
+    console.log(`✅ Fetched memories -> nonAuto: ${nonAuto.length}, auto: ${auto.length}`);
+
+    // Debug preview
+    memories.forEach((memory, index) => {
       console.log(`🧠 Memory ${index + 1}:`, {
+        id: memory.id,
+        isAuto: memory.is_auto_summary,
         keywords: memory.trigger_keywords,
+        hasEmbedding: Array.isArray(memory.embedding),
         contentLength: memory.summary_content?.length || 0,
         contentPreview: memory.summary_content?.substring(0, 100) + '...',
-        createdAt: memory.created_at
+        createdAt: memory.created_at,
+        updatedAt: memory.updated_at,
+        lastInjectedAt: memory.last_injected_at,
+        injectionCount: memory.injection_count,
+        contentHash: memory.content_hash?.substring(0, 8)
       });
     });
 
-    return memories || [];
+    return memories;
   } catch (error) {
     console.error('❌ Unexpected error fetching character memories:', error);
-    return null;
+    return [];
   }
 }
 
@@ -621,7 +690,6 @@ export function replaceTemplates(content: string, context: TemplateContext): str
   if (!content || typeof content !== 'string') return content || '';
   
   const { userName = 'User', charName = 'Character' } = context;
-  console.log('🔧 Template replacement - userName:', userName, 'charName:', charName);
   
   try {
     const replaced = content

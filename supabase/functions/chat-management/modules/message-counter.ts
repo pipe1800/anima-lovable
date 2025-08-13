@@ -88,12 +88,12 @@ export async function getLatestSummaryInfo(chatId: string, supabase: any): Promi
   hasSummaries: boolean;
 }> {
   try {
+    // Fetch the latest message_count across ALL summaries (manual and auto)
     const { data: summaries, error } = await supabase
       .from('character_memories')
       .select('message_count')
       .eq('chat_id', chatId)
-      .eq('is_auto_summary', true)
-      .order('created_at', { ascending: false })
+      .order('message_count', { ascending: false })
       .limit(1);
 
     if (error) {

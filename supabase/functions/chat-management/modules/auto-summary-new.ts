@@ -1,8 +1,11 @@
 import type { SupabaseClient } from '../types/streaming-interfaces.ts';
+import { normalizeKeywords, normalizeContentForHash, computeContentHash } from './memory-utils.ts';
+import { getTextEmbedding } from './embeddings.ts';
 
 /**
  * Message-Based Auto-Summary Module
  * Handles automatic conversation summarization every 15 AI responses
+ * Note: Idempotency is enforced by unique index on (user_id, character_id, chat_id, message_count) where is_auto_summary=true
  */
 
 const MISTRAL_MODEL = 'mistralai/mistral-7b-instruct';
@@ -37,9 +40,6 @@ export interface SummaryResult {
 function extractKeywordsFromMessages(messages: any[], characterName: string): string[] {
   const keywords = new Set<string>();
   
-  // Always include character name
-  keywords.add(characterName.toLowerCase());
-  
   // Extract from messages
   const allText = messages.map(m => m.content).join(' ').toLowerCase();
   
@@ -52,6 +52,8 @@ function extractKeywordsFromMessages(messages: any[], characterName: string): st
     'few', 'more', 'most', 'other', 'into', 'through', 'during', 'before', 'after', 'above',
     'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'then', 'there', 'here',
     'conversation', 'chat', 'talk', 'speaking', 'discussion', 'roleplay', 'character']);
+  // Exclude the character's own name to avoid constant triggering
+  if (characterName) stopWords.add(String(characterName).toLowerCase());
   
   // Extract meaningful words (3+ letters, not stop words)
   const words = allText.match(/\b[a-z]{3,}\b/g) || [];
@@ -111,11 +113,12 @@ CRITICAL: You MUST respond with ONLY a valid JSON object in this EXACT format (n
   "title": "Brief descriptive title (5-10 words)",
   "summary": "Your 4-paragraph summary text goes here. Write exactly 4 detailed paragraphs with at least 500 words total. First paragraph: Set the scene and introduce the main participants. Second paragraph: Describe the key events and interactions in detail. Third paragraph: Detail emotional developments and relationship dynamics. Fourth paragraph: Highlight important revelations and future implications.",
   "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
-}
+ }
 
 Keywords MUST be:
 - 5-10 specific, meaningful words from THIS conversation
-- Include character names, locations, objects, emotions, activities
+- Include locations, objects, emotions, activities
+- DO NOT include the user's name or the character's name
 - NO generic terms like: chat, roleplay, character, conversation, talk, discussion
 - Extract from the actual dialogue content
 
@@ -194,12 +197,14 @@ function parseSummaryResponse(response: string, messages: any[], characterName: 
       const cleanKeywords = parsed.keywords
         .filter((k: string) => k && k.trim().length > 0)
         .map((k: string) => k.trim().toLowerCase())
+        // Exclude character name
+        .filter((k: string) => k !== String(characterName || '').toLowerCase())
         .slice(0, 10);
       
       return {
         title: parsed.title || `${characterName} Conversation Summary`,
         content: parsed.summary, // Use the summary field, not the full JSON
-        keywords: cleanKeywords.length > 0 ? cleanKeywords : [characterName.toLowerCase(), 'conversation']
+        keywords: cleanKeywords.length > 0 ? cleanKeywords : extractKeywordsFromMessages(messages, characterName)
       };
     }
   } catch (error) {
@@ -335,83 +340,119 @@ export async function triggerMessageBasedSummary(
         throw new Error('Failed to generate summary');
       }
 
-      // Save auto-summary with correct range
+      // Normalize and hash summary content for de-duplication
+      const normalizedContent = normalizeContentForHash(summaryData.content);
+      let contentHash = await computeContentHash(normalizedContent);
+
       const fullTitle = `Conversation Summary - ${new Date().toLocaleDateString()} (AI: ${rangeString})`;
-      
-      // CRITICAL FIX: Handle unique constraint violation by updating existing summary
+
+      // Normalize keywords
+      const cleanedKeywords = normalizeKeywords(summaryData.keywords, character?.name);
+
+      // CRITICAL FIX: Upsert using unique content_hash per chat for auto-summaries
+      const insertPayload: any = {
+        user_id: userId,
+        character_id: characterId,
+        chat_id: chatId,
+        name: fullTitle,
+        summary_content: normalizedContent,
+        trigger_keywords: cleanedKeywords,
+        message_count: aiSequenceEnd,
+        input_token_cost: 0,
+        is_auto_summary: true,
+        content_hash: contentHash
+      };
+
+      // Use insert-select with ON CONFLICT emulation via two-step approach for supabase-js
       let data, saveError;
-      
       try {
-        // First try to insert new summary
-        const insertResult = await supabase
+        const result = await supabase
           .from('character_memories')
-          .insert({
-            user_id: userId,
-            character_id: characterId,
-            chat_id: chatId,
-            name: fullTitle,
-            summary_content: summaryData.content,
-            trigger_keywords: summaryData.keywords,
-            message_count: aiSequenceEnd,
-            input_token_cost: 0,
-            is_auto_summary: true
-          })
+          .insert(insertPayload)
           .select()
           .single();
-
-        data = insertResult.data;
-        saveError = insertResult.error;
-
-      } catch (error) {
-        saveError = error;
+        data = result.data;
+        saveError = result.error;
+      } catch (e) {
+        saveError = e;
       }
 
-      // If we get a unique constraint error (23505), update the existing summary
-      if (saveError && saveError.code === '23505') {
-        
-        const { data: existingMemory } = await supabase
-          .from('character_memories')
-          .select('id, name, message_count')
-          .eq('user_id', userId)
-          .eq('character_id', characterId)
-          .eq('chat_id', chatId)
-          .eq('is_auto_summary', true)
-          .single();
+      // If unique conflict (hash or range), resolve to existing row and update
+      if (saveError && (saveError.code === '23505' || ('' + saveError.message).includes('uq_auto_summary_content_hash_per_chat') || ('' + saveError.message).includes('uq_auto_summary_range') || ('' + saveError.message).includes('uq_auto_summary_range_explicit'))) {
+        // Try by content_hash first
+        let existingId: string | undefined;
+        if (contentHash) {
+          const { data: existingByHash } = await supabase
+            .from('character_memories')
+            .select('id')
+            .eq('chat_id', chatId)
+            .eq('is_auto_summary', true)
+            .eq('content_hash', contentHash)
+            .maybeSingle();
+          existingId = existingByHash?.id;
+        }
+        // Fallback by range end
+        if (!existingId) {
+          const { data: existingByRange } = await supabase
+            .from('character_memories')
+            .select('id')
+            .eq('chat_id', chatId)
+            .eq('is_auto_summary', true)
+            .eq('message_count', aiSequenceEnd)
+            .maybeSingle();
+          existingId = existingByRange?.id;
+        }
 
-        if (existingMemory) {
-          const updateResult = await supabase
+        if (existingId) {
+          const upd = await supabase
             .from('character_memories')
             .update({
               name: fullTitle,
-              summary_content: summaryData.content,
-              trigger_keywords: summaryData.keywords,
+              summary_content: normalizedContent,
+              trigger_keywords: cleanedKeywords,
               message_count: aiSequenceEnd,
               updated_at: new Date().toISOString()
             })
-            .eq('id', existingMemory.id)
+            .eq('id', existingId)
             .select()
             .single();
-
-          if (!updateResult.error) {
-            data = updateResult.data;
-            saveError = null;
-          } else {
-            saveError = updateResult.error;
-          }
+          data = upd.data;
+          saveError = upd.error;
         }
       }
 
       if (saveError) {
-        console.error('❌ Failed to save auto-summary:', saveError);
+        console.error('❌ Failed to save auto-summary (dedupe):', saveError);
         throw saveError;
+      }
+
+      // Best-effort: set explicit AI sequence range if columns exist
+      try {
+        if (data?.id) {
+          await supabase
+            .from('character_memories')
+            .update({ ai_sequence_start: aiSequenceStart as any, ai_sequence_end: aiSequenceEnd as any })
+            .eq('id', data.id);
+
+          // Optional: compute and store embedding
+          const vec = await getTextEmbedding(normalizedContent);
+          if (vec && Array.isArray(vec)) {
+            await supabase
+              .from('character_memories')
+              .update({ embedding: vec as any })
+              .eq('id', data.id);
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Optional ai_sequence_* or embedding update skipped:', e?.message || e);
       }
 
       return {
         success: true,
         summaryId: data.id,
         title: summaryData.title,
-        content: summaryData.content,
-        keywords: summaryData.keywords,
+        content: normalizedContent,
+        keywords: cleanedKeywords,
         messageCount: aiSequenceEnd,
         messageRange: rangeString
       };
@@ -451,15 +492,21 @@ export async function triggerMessageBasedSummary(
 }
 
 /**
- * Get the most recent auto-summary for building context
+ * Restore the exported helper to fetch most recent auto-summary used by message-handler.
  */
 export async function getMostRecentAutoSummary(
   chatId: string,
   characterId: string,
-  supabase: SupabaseClient
+  userOrSupabase: string | SupabaseClient,
+  maybeSupabase?: SupabaseClient
 ): Promise<any> {
+  // Backward compatibility: old signature was (chatId, characterId, supabase)
+  const userId = typeof userOrSupabase === 'string' ? userOrSupabase : undefined;
+  const supabase = (maybeSupabase || (userOrSupabase as any)) as SupabaseClient;
+
   try {
-    const { data, error } = await supabase
+    // Try current chat first (and user if provided)
+    let query = supabase
       .from('character_memories')
       .select('*')
       .eq('chat_id', chatId)
@@ -469,12 +516,45 @@ export async function getMostRecentAutoSummary(
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      console.error('Error fetching recent auto-summary:', error);
-      return null;
+    if (userId) {
+      query = supabase
+        .from('character_memories')
+        .select('*')
+        .eq('chat_id', chatId)
+        .eq('character_id', characterId)
+        .eq('user_id', userId)
+        .eq('is_auto_summary', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
     }
 
-    return data;
+    const { data: inChat, error } = await query;
+    if (error) {
+      console.error('Error fetching recent auto-summary (chat-scoped):', error);
+    }
+    if (inChat) return inChat;
+
+    // Fallback: most recent across chats for this user-character
+    if (userId) {
+      const { data: across, error: fbErr } = await supabase
+        .from('character_memories')
+        .select('*')
+        .eq('character_id', characterId)
+        .eq('user_id', userId)
+        .eq('is_auto_summary', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (fbErr) {
+        console.error('Error fetching cross-chat auto-summary (user-scoped):', fbErr);
+        return null;
+      }
+      return across || null;
+    }
+
+    // Final fallback (no userId provided): keep old behavior (none across chats to avoid leakage)
+    return null;
   } catch (error) {
     console.error('Failed to get recent auto-summary:', error);
     return null;

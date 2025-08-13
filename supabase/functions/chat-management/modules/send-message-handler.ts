@@ -109,7 +109,7 @@ export async function handleSendMessage(
       getUserPlanAndModel(user.id, supabaseAdmin),
       getNextMessageOrder(chatId, supabase),
       fetchUserSelectedWorldInfo(user.id, characterId, selectedWorldInfoId || null, supabase),
-      fetchCharacterMemories(user.id, characterId, supabase)
+      fetchCharacterMemories(user.id, characterId, supabase, { chatId, includeAutoSummaries: true, limitNonAuto: 30, limitAuto: 5 })
     ]);
 
     // Use chat's selected persona, or fallback to request persona, or fallback to null
@@ -261,7 +261,9 @@ export async function handleSendMessage(
       messageHistory,
       characterMemories,
       userCharacterSettings?.chat_mode || 'storytelling',
-      timeAwarenessData
+      timeAwarenessData,
+      chatId,
+      user.id
     );
 
     // Use new message-based budget management

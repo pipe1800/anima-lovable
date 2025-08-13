@@ -31,7 +31,6 @@ export const useCharacterMemories = (characterId: string | null, userId: string 
     try {
       console.log('🧠 Fetching memories for character:', characterId);
 
-      // Use the same pattern as the Enhanced Memory creation
       const { data, error } = await supabase.functions.invoke('get-character-memories', {
         body: {
           characterId,
@@ -72,6 +71,7 @@ export const useCharacterMemories = (characterId: string | null, userId: string 
     memories,
     loading,
     error,
-    refreshMemories
+    refreshMemories,
+    fetchMemories, // expose for opening-time fetch
   };
 };

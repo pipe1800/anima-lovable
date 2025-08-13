@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { User } from '@supabase/supabase-js';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import ChatInterface from '@/components/chat/ChatInterface';
 import { ChatLayout } from '@/components/chat/ChatLayout';
@@ -10,16 +9,27 @@ import { TutorialManager } from '@/components/tutorial/TutorialManager';
 import { useContextManagement } from '@/hooks/useContextManagement';
 import type { TrackedContext } from '@/types/chat';
 import logger from '@/utils/logger';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { queryConfigs } from '@/queries/chatQueries';
 
 const Chat = () => {
-  const [user, setUser] = useState<User | null>(null);
+  const { user: currentUser } = useAuth();
+  // Define routing hooks and derived values BEFORE state that depends on them
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { characterId, chatId } = useParams();
+  const selectedCharacter = (location.state as any)?.selectedCharacter;
+  const existingChatId = chatId || (location.state as any)?.existingChatId;
+  const fromOnboarding = (location.state as any)?.fromOnboarding;
+
   const [loading, setLoading] = useState(true);
   const [isFirstMessage, setIsFirstMessage] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const [characterData, setCharacterData] = useState<any>(null);
   const [characterLoading, setCharacterLoading] = useState(false);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(existingChatId || null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [selectedWorldInfoId, setSelectedWorldInfoId] = useState<string | null>(null);
   const [trackedContext, setTrackedContext] = useState<TrackedContext>({
@@ -30,43 +40,43 @@ const Chat = () => {
     relationshipStatus: 'No context',
     characterPosition: 'No context'
   });
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { characterId, chatId } = useParams();
   
-  const selectedCharacter = location.state?.selectedCharacter;
-  const existingChatId = chatId || location.state?.existingChatId;
-  const fromOnboarding = location.state?.fromOnboarding;
-
-  // Scoped logger (declare before any usage)
   const log = logger.scoped('ChatPage');
 
-  // Set localStorage flag for tutorial trigger when coming from onboarding
+  // React to auth changes via AuthContext (avoids duplicate subscriptions)
   useEffect(() => {
-    if (fromOnboarding && user) {
-      log.debug('🎓 Chat: Setting fromOnboarding flag for tutorial');
-      localStorage.setItem('fromOnboarding', 'true');
+    if (currentUser) {
+      // Tutorial flag when arriving from onboarding
+      if (fromOnboarding) {
+        log.debug('🎓 Chat: Setting fromOnboarding flag for tutorial');
+        localStorage.setItem('fromOnboarding', 'true');
+      }
+      const isCompleted = (currentUser as any).user_metadata?.onboarding_completed;
+      setOnboardingCompleted(!!isCompleted);
+      setShowOnboarding(!isCompleted);
+      setLoading(false);
+    } else {
+      // Not authenticated
+      setLoading(false);
+      navigate('/auth');
     }
-  }, [fromOnboarding, user, log]);
+  }, [currentUser, fromOnboarding, navigate, log]);
 
   // Load context from database and sync with local state
   const { context: loadedContext, reloadContext, isLoading: contextLoading } = useContextManagement(
     currentChatId, 
     characterId || '', 
-    user?.id || null
+    currentUser?.id || null
   );
 
-  // Define triggerInitialExtraction before it's used
   const triggerInitialExtraction = useCallback(async () => {
     log.info('🔄 Triggering initial context extraction for new chat...');
-    
     try {
-      // Get addon settings for context extraction
       log.debug('📥 Fetching user global settings...');
       const { data: globalSettings, error: settingsError } = await supabase
         .from('user_global_chat_settings')
         .select('*')
-        .eq('user_id', user?.id as string)
+        .eq('user_id', currentUser?.id as string)
         .single();
 
       log.debug('⚙️ Global settings result:', { globalSettings, settingsError });
@@ -83,8 +93,6 @@ const Chat = () => {
 
         log.debug('🎛️ Mapped addon settings:', addonSettings);
 
-        // Call extract-addon-context in INITIAL mode for character card + greeting
-        log.debug('📞 Calling extract-addon-context function...');
         const { data, error } = await supabase.functions.invoke('extract-addon-context', {
           body: {
             chat_id: chatId,
@@ -95,148 +103,63 @@ const Chat = () => {
         });
 
         log.debug('📤 Function call result:', { data, error });
-
-        if (error) {
-          log.error('❌ Initial context extraction error:', error);
-        } else if (data?.success && data?.context_summary) {
-          log.info('✅ Initial context extracted for greeting message:', data.context_summary);
-        } else {
-          log.debug('⏭️ Initial context extraction skipped or failed:', data?.message);
-        }
       } else {
         log.debug('⚠️ No global settings found - skipping context extraction');
       }
     } catch (error) {
       log.error('❌ Error in initial context extraction:', error);
     }
-  }, [characterId, chatId, user?.id, log]);
+  }, [characterId, chatId, currentUser?.id, log]);
 
-  // Add a callback to reload context after message is sent
   const handleMessageSent = useCallback(async () => {
     log.debug('🔄 Message sent, context will be extracted by backend');
-    
-    // The backend (send-message-handler) now handles context extraction
-    // Real-time subscription should pick up the changes automatically
-    // But we can add a small delay and force reload as backup
     setTimeout(() => {
       log.debug('🔄 Triggering context reload as backup');
       reloadContext();
     }, 2000);
-  }, [reloadContext, user?.id, characterId, currentChatId, log]);
+  }, [reloadContext, log]);
 
-  // Debug log the loaded context
-  useEffect(() => {
-    // Context debug information is available here if needed
-  }, [loadedContext, currentChatId, characterId, user?.id, contextLoading]);
+  // Dedupe: Prefer react-query for character details, avoid manual fetch
+  const characterDetailsQuery = useQuery({
+    ...(characterId ? queryConfigs.characterDetails(characterId) : { queryKey: ['character', 'details', 'none'], queryFn: async () => null }),
+    enabled: !!characterId && !selectedCharacter,
+  });
 
-  // Sync context from database to local state when chat changes or context loads
-  useEffect(() => {
-    if (currentChatId && characterId && user?.id) {
-      log.debug('🔄 Setting tracked context from database:', loadedContext);
-      setTrackedContext(loadedContext);
-    }
-  }, [currentChatId, characterId, user?.id, loadedContext, log]);
-
-  // ALL useEffect hooks must be at the top, before any conditional returns
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        
-        // Check if onboarding is completed
-        const isCompleted = session.user.user_metadata?.onboarding_completed;
-        log.debug('Chat: Onboarding completed status:', isCompleted);
-        
-        setOnboardingCompleted(!!isCompleted);
-        
-        // Only show onboarding if it's NOT completed
-        if (!isCompleted) {
-          setShowOnboarding(true);
-        }
-      } else {
-        navigate('/auth');
-      }
-      setLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          
-          // Update onboarding status from the latest session
-          const isCompleted = session.user.user_metadata?.onboarding_completed;
-          setOnboardingCompleted(!!isCompleted);
-          
-          // Hide onboarding if completed
-          if (isCompleted) {
-            setShowOnboarding(false);
-          }
-        } else if (!loading) {
-          navigate('/auth');
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, [navigate, loading, log]);
-
-  // Initialize currentChatId from existingChatId
-  useEffect(() => {
-    if (existingChatId && !currentChatId) {
-      setCurrentChatId(existingChatId);
-    }
-  }, [existingChatId, currentChatId]);
-
-  // Character data fetching effect - MOVED TO TOP
   useEffect(() => {
     // Skip if no user or still loading
-    if (!user || loading) return;
-    
-    // Initialize character data from selectedCharacter if available
+    if (!currentUser || loading) return;
+
+    // If a pre-selected character was passed via navigation state, use it directly
     if (selectedCharacter) {
       setCharacterData(selectedCharacter);
+      setCharacterLoading(false);
       return;
     }
-    
-    // If no selectedCharacter and no characterId, redirect to dashboard
+
+    // If no characterId, redirect to dashboard
     if (!characterId) {
       navigate('/dashboard');
       return;
     }
-    
-    // Fetch character data from the URL parameter
-    const fetchCharacter = async () => {
-      setCharacterLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('characters')
-          .select('*')
-          .eq('id', characterId)
-          .single();
-        
-        if (error || !data) {
-          log.error('Error fetching character:', error);
-          navigate('/dashboard');
-          return;
-        }
-        
-        setCharacterData(data);
-      } catch (error) {
-        log.error('Error fetching character:', error);
-        navigate('/dashboard');
-      } finally {
-        setCharacterLoading(false);
-      }
-    };
-    
-    fetchCharacter();
-  }, [user, loading, characterId, selectedCharacter, navigate, existingChatId, chatId, currentChatId, log]);
+
+    // Use character details from react-query when available
+    setCharacterLoading(true);
+    const d: any = characterDetailsQuery.data;
+    if (d && (d.data || d.name)) {
+      const details = d.data || d; // handle either wrapped or direct
+      setCharacterData({
+        id: details.id,
+        name: details.name,
+        tagline: details.tagline,
+        avatar_url: details.avatar_url,
+      });
+      setCharacterLoading(false);
+    }
+  }, [currentUser, loading, selectedCharacter, characterId, navigate, characterDetailsQuery.data]);
 
   const handleFirstMessage = () => {
     setIsFirstMessage(false);
     setOnboardingCompleted(true);
-    
     if (showOnboarding) {
       setTimeout(() => setShowOnboarding(false), 3000);
     }
@@ -251,23 +174,28 @@ const Chat = () => {
     setSelectedWorldInfoId(worldInfoId);
   }, [log]);
 
-  // Log world info changes
   useEffect(() => {
     log.debug('🌍 Chat.tsx: selectedWorldInfoId state changed to:', selectedWorldInfoId);
   }, [selectedWorldInfoId, log]);
 
   const handleChatCreated = useCallback((chatId: string) => {
     log.info('💬 Chat page: New chat created with ID:', chatId);
+    setCurrentChatId(chatId); // keep local state in sync
     log.debug('🔍 Debug - Chat created context check:', {
       chatId,
       hasLoadedContext: !!loadedContext,
     });
-    
-    // 🎯 EXTRACT INITIAL CONTEXT FROM CHARACTER CARD + GREETING
-    if (characterId && user?.id) {
+    if (characterId && currentUser?.id) {
       triggerInitialExtraction();
     }
-  }, [characterId, user?.id, triggerInitialExtraction, log, loadedContext]);
+  }, [characterId, currentUser?.id, triggerInitialExtraction, log, loadedContext]);
+
+  // Keep local state in sync with route param changes
+  useEffect(() => {
+    if (chatId && chatId !== currentChatId) {
+      setCurrentChatId(chatId);
+    }
+  }, [chatId]);
 
   // If no character data available, show error
   if (!characterData) {
@@ -293,6 +221,9 @@ const Chat = () => {
     fallback: characterData.name?.split(' ').map((n: string) => n[0]).join('') || 'C'
   };
 
+  // Provide preloaded details to ChatLayout to avoid duplicate fetching
+  const preloadedDetails: any = (characterDetailsQuery.data as any)?.data || null;
+
   return (
     <SidebarProvider>
       <div className="flex h-screen w-full">
@@ -316,6 +247,7 @@ const Chat = () => {
             onContextUpdate={setTrackedContext}
             onPersonaChange={handlePersonaChange}
             onWorldInfoChange={handleWorldInfoChange}
+            characterDetails={preloadedDetails}
           >
             <ChatInterface
               character={character}

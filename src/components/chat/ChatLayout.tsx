@@ -41,9 +41,11 @@ interface ChatLayoutProps {
   onContextUpdate?: (context: TrackedContext) => void;
   onPersonaChange?: (personaId: string | null) => void;
   onWorldInfoChange?: (worldInfoId: string | null) => void;
+  // Optional preloaded details to prevent duplicate fetching
+  characterDetails?: any;
 }
 
-export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange }: ChatLayoutProps) => {
+export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange, characterDetails: characterDetailsOverride }: ChatLayoutProps) => {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   // Removed chatHistory and filteredChatHistory local state in favor of query + memo
   const [searchQuery, setSearchQuery] = useState('');
@@ -100,7 +102,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   
   // Memories Dialog state
   const [showMemoriesDialog, setShowMemoriesDialog] = useState(false);
-  const { memories, loading: memoriesLoading, error: memoriesError, refreshMemories } = useCharacterMemories(
+  const { memories, loading: memoriesLoading, error: memoriesError, refreshMemories, fetchMemories } = useCharacterMemories(
     character.id,
     currentUser?.id
   );
@@ -162,11 +164,13 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // Character details
   const characterDetailsQuery = useQuery({
     ...queryConfigs.characterDetails(character.id),
+    enabled: !characterDetailsOverride, // skip if provided by parent
   });
   const characterDetails = useMemo(() => {
+    if (characterDetailsOverride) return characterDetailsOverride;
     const d: any = characterDetailsQuery.data;
     return d?.data ?? d ?? null;
-  }, [characterDetailsQuery.data]);
+  }, [characterDetailsOverride, characterDetailsQuery.data]);
 
   // User chats
   const { data: chats = [], isLoading: chatsLoading } = useQuery({
@@ -541,7 +545,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   };
 
   const isCharacterOwner = currentUser && characterDetails && currentUser.id === characterDetails.creator_id;
-  const loading = chatsLoading || characterDetailsQuery.isLoading;
+  const loading = chatsLoading || (!characterDetailsOverride && characterDetailsQuery.isLoading);
 
   return (
     <div className="flex flex-col md:flex-row h-full bg-[#121212] relative overflow-hidden">
@@ -610,7 +614,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
            onEditCharacter={handleEditCharacter}
            showMemoriesButton={!!(globalSettings?.enhanced_memory || (isActive && currentStep === 4))}
            memoriesCount={memories.length}
-           onOpenMemories={() => setShowMemoriesDialog(true)}
+           onOpenMemories={() => {
+             setShowMemoriesDialog(true);
+             fetchMemories();
+           }}
            isLiked={isLiked}
            onLike={handleLike}
            isFavorited={isFavorited}
@@ -686,12 +693,15 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       {/* Memories Dialog */}
       <MemoriesDialog
         open={showMemoriesDialog}
-        onOpenChange={setShowMemoriesDialog}
+        onOpenChange={(open) => {
+          setShowMemoriesDialog(open);
+          if (open) fetchMemories();
+        }}
         memories={memories}
         loading={memoriesLoading}
         error={memoriesError}
         characterName={character.name}
-        onRefresh={refreshMemories}
+        onRefresh={() => { /* no-op, manual refresh removed */ }}
       />
 
       {/* Chat Mode Mismatch Modal */}

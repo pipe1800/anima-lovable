@@ -11,6 +11,7 @@ import {
   calculateMessageTokens,
 } from './message-counter.ts';
 import { getMostRecentAutoSummary } from './auto-summary-new.ts';
+import { getTextEmbedding, cosineSimilarity } from './embeddings.ts';
 
 /**
  * Message generation and AI response handling
@@ -98,14 +99,26 @@ function getRelevantWorldInfo(
   return relevantEntries.slice(0, 3);
 }
 
+// Lightweight, process-local cache to avoid immediately re-injecting the same memories
+// Keyed by chatId, stores memory ids and last injected timestamps
+declare global {
+  var memoryInjectionCache: Map<string, Array<{ id: string; at: number }>>;
+}
+if (!globalThis.memoryInjectionCache) {
+  globalThis.memoryInjectionCache = new Map();
+}
+const memoryInjectionCache = globalThis.memoryInjectionCache;
+
 /**
- * Filter character memories based on keyword relevance to the conversation
+ * Filter character memories based on keyword relevance to the conversation with weighting
  */
-function getRelevantMemories(
-  memories: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }>,
+function getRelevantMemoriesWeighted(
+  memories: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }>,
   userMessage: string,
-  conversationHistory: any[]
-): Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> {
+  conversationHistory: any[],
+  chatId?: string,
+  characterName?: string
+): Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }>{
   if (!memories || memories.length === 0) return [];
 
   // Combine user message and recent conversation for context
@@ -115,39 +128,100 @@ function getRelevantMemories(
     ...recentMessages.map(msg => msg.content || '')
   ].join(' ').toLowerCase();
 
-  console.log('🧠 Memory Keyword Filtering:', {
-    conversationText: conversationText.substring(0, 200) + '...',
-    totalMemories: memories.length,
-    memoryKeywords: memories.map(memory => memory.trigger_keywords)
+  const charName = String(characterName || '').toLowerCase();
+  const userAliases = ['user'];
+
+  // Scoring helpers
+  const daysSince = (dateStr?: string) => {
+    if (!dateStr) return Number.POSITIVE_INFINITY;
+    const d = new Date(dateStr).getTime();
+    const now = Date.now();
+    return Math.max(0, (now - d) / (1000 * 60 * 60 * 24));
+  };
+  const recencyScore = (createdAt: string) => {
+    const days = daysSince(createdAt);
+    // 0 days -> ~1.0, 7 days -> ~0.5, 30 days -> ~0.3
+    return 1 / Math.log2(2 + Math.max(0, days));
+  };
+  const freshnessBoost = (updatedAt?: string) => {
+    const days = daysSince(updatedAt);
+    return days <= 7 ? 0.2 : 0;
+  };
+  const recentInjectionPenalty = (lastInjectedAt?: string | null, count?: number | null) => {
+    if (!lastInjectedAt) return 0;
+    const deltaMs = Date.now() - new Date(lastInjectedAt).getTime();
+    const base = deltaMs < 10 * 60 * 1000 ? 0.4 : 0; // 10-min cooldown
+    const extra = Math.min(0.3, (count || 0) * 0.05); // small accumulation
+    return base + extra;
+  };
+  const injectionPenalty = (m: any) => {
+    // Prefer persistent fields; fallback to process cache
+    const persistent = recentInjectionPenalty(m.last_injected_at, m.injection_count);
+    if (persistent > 0) return persistent;
+    if (!m.id || !chatId) return 0;
+    const entries = memoryInjectionCache.get(chatId) || [];
+    const recent = entries.find(e => e.id === m.id);
+    if (!recent) return 0;
+    const deltaMs = Date.now() - recent.at;
+    return deltaMs < 10 * 60 * 1000 ? 0.4 : 0;
+  };
+
+  const calcOverlap = (keywords: string[]) => {
+    if (!keywords || keywords.length === 0) return 0;
+    const matched = keywords
+      .map(k => (k || '').toLowerCase().trim())
+      .filter(k => k && k !== charName && !userAliases.includes(k))
+      .filter(k => conversationText.includes(k));
+    // Cap at 3 to avoid overweighting
+    return Math.min(3, matched.length);
+  };
+
+  const scored = memories.map(m => {
+    const overlap = calcOverlap(m.trigger_keywords);
+    const overlapScore = overlap / 3; // normalize 0..1
+    const r = recencyScore(m.created_at);
+    const f = freshnessBoost(m.updated_at);
+    const p = injectionPenalty(m);
+    const autoPenalty = (m as any).is_auto_summary ? 0.1 : 0; // prefer curated/manual
+    const score = 0.6 * overlapScore + 0.3 * r + 0.2 * f - p - autoPenalty;
+    return { mem: m, score, overlap };
   });
 
-  // Filter memories where at least one keyword appears in the conversation
-  const relevantMemories = memories.filter(memory => {
-    if (!memory.trigger_keywords || memory.trigger_keywords.length === 0) return false;
-    
-    const matchedKeywords = memory.trigger_keywords.filter(keyword => {
-      const normalizedKeyword = keyword.toLowerCase().trim();
-      const isMatch = conversationText.includes(normalizedKeyword);
-      
-      if (isMatch) {
-        console.log(`✅ Memory keyword match found: "${keyword}" in conversation`);
-      }
-      
-      return isMatch;
-    });
-    
-    const hasMatch = matchedKeywords.length > 0;
-    console.log(`🧠 Memory with keywords [${memory.trigger_keywords.join(', ')}]: ${hasMatch ? 'INCLUDED' : 'EXCLUDED'}`);
-    
-    return hasMatch;
-  });
+  // Keep only with minimum relevance and pick top 3
+  // Relax threshold; one solid keyword hit should be enough in many cases
+  const MIN_SCORE = 0.45; // was 0.7
+  let selected = scored
+    .filter(s => s.score >= MIN_SCORE && s.overlap > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(s => s.mem);
 
-  console.log(`🎯 Filtered ${relevantMemories.length} relevant memories from ${memories.length} total`);
+  // Fallback: if nothing passed threshold but we have at least one overlap, inject the best single match
+  if (selected.length === 0) {
+    const withOverlap = scored.filter(s => s.overlap > 0);
+    if (withOverlap.length > 0) {
+      withOverlap.sort((a, b) => (b.overlap - a.overlap) || (b.score - a.score));
+      console.log('🧠 Memory injection fallback: injecting best overlap despite low score', {
+        bestOverlapScore: withOverlap[0]?.score,
+        overlap: withOverlap[0]?.overlap
+      });
+      selected = [withOverlap[0].mem];
+    }
+  }
 
-  // Sort by date (most recent first) and limit to prevent token bloat (max 3 memories)
-  return relevantMemories
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 3);
+  // Update injection cache
+  if (chatId && selected.length > 0) {
+    const arr = memoryInjectionCache.get(chatId) || [];
+    const now = Date.now();
+    const updated = [
+      // keep only entries from last hour to cap memory
+      ...arr.filter(e => now - e.at < 60 * 60 * 1000),
+      ...selected.filter(m => !!m.id).map(m => ({ id: m.id as string, at: now }))
+    ];
+    memoryInjectionCache.set(chatId, updated);
+  }
+
+  return selected;
 }
 
 export async function buildSystemPrompt(
@@ -161,7 +235,7 @@ export async function buildSystemPrompt(
   worldInfoEntries?: Array<{ keywords: string[]; entry_text: string }> | null,
   userMessage?: string,
   conversationHistory?: any[],
-  characterMemories?: Array<{ summary_content: string; trigger_keywords: string[]; created_at: string }> | null,
+  characterMemories?: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }> | null,
   chatMode?: 'storytelling' | 'companion',
   timeAwarenessData?: {
     enabled: boolean;
@@ -170,7 +244,9 @@ export async function buildSystemPrompt(
     userLocalTime: string;
     conversationTone?: string;
     urgencyLevel?: string;
-  }
+  },
+  chatId?: string,
+  userId?: string
 ): Promise<string> {
   console.log('🎯 buildSystemPrompt called with:', {
     character: character ? 'loaded' : 'null',
@@ -413,13 +489,31 @@ Delay category: ${delayCategory}`;
     if (addonSettings.enhancedMemory && characterMemories && characterMemories.length > 0 && userMessage) {
       console.log('🧠 Processing character memories for system prompt...');
       
-      // Filter to only relevant memories
-      const relevantMemories = getRelevantMemories(characterMemories, userMessage, conversationHistory || []);
+      // Filter to only relevant memories (weighted with recency and recent-injection penalty)
+      let relevantMemories = getRelevantMemoriesWeighted(characterMemories, userMessage, conversationHistory || [], chatId, character.name)
+        .slice(0, 5); // take a slightly larger candidate pool before semantic rerank
+
+      // Optional: semantic reranking using embeddings if available
+      let semanticUsed = false;
+      let topSimScore: number | null = null;
+      try {
+        const queryVec = await getTextEmbedding(`${userMessage}\n${(conversationHistory||[]).slice(-4).map(m=>m.content).join(' ')}`);
+        const { ranked, hit, topScore } = rerankWithSemantic(relevantMemories as any, queryVec, 0.17);
+        semanticUsed = !!hit;
+        topSimScore = topScore;
+        relevantMemories = (ranked as any).slice(0, 3);
+      } catch (e) {
+        console.warn('⚠️ Semantic rerank skipped due to error:', e);
+        relevantMemories = relevantMemories.slice(0, 3);
+      }
       
       console.log('🎯 Relevant character memories:', {
         originalCount: characterMemories.length,
         filteredCount: relevantMemories.length,
+        semanticUsed,
+        topSimScore,
         relevantMemories: relevantMemories.map(memory => ({
+          id: (memory as any).id,
           keywords: memory.trigger_keywords,
           contentPreview: memory.summary_content.substring(0, 100) + '...',
           date: memory.created_at
@@ -427,6 +521,28 @@ Delay category: ${delayCategory}`;
       });
       
       if (relevantMemories.length > 0) {
+        // Persist injection timestamps and counts (best-effort)
+        try {
+          const ids = relevantMemories.map(m => m.id).filter(Boolean) as string[];
+          if (ids.length > 0) {
+            const callWithRetry = async (retries = 2) => {
+              try {
+                await supabase.rpc('mark_memories_injected', { mem_ids: ids });
+              } catch (err) {
+                if (retries > 0) {
+                  // small backoff and retry
+                  await new Promise(res => setTimeout(res, 200));
+                  return callWithRetry(retries - 1);
+                }
+                throw err;
+              }
+            };
+            await callWithRetry();
+          }
+        } catch (e) {
+          console.warn('⚠️ Failed to persist memory injection metadata (after retries):', e);
+        }
+
         systemPrompt += '\n\n[MEMORY BANK]';
         systemPrompt += '\nPrevious interactions with this user:';
         
@@ -471,9 +587,13 @@ Delay category: ${delayCategory}`;
     // Validate character.id before calling
     if (!character?.id || character.id === 'undefined') {
       console.warn('⚠️ Skipping auto-summary fetch - invalid character.id:', character?.id);
+    } else if (!chatId) {
+      console.warn('⚠️ Skipping auto-summary fetch - missing chatId');
     } else {
-      console.log('🤖 Retrieving most recent auto-summary for character:', character.id);
-      const latestSummary = await getMostRecentAutoSummary(character.id, supabase);
+      console.log('🤖 Retrieving most recent auto-summary for character and chat (with cross-chat fallback):', { characterId: character.id, chatId, hasUserId: !!userId });
+      const latestSummary = userId
+        ? await getMostRecentAutoSummary(chatId, character.id, userId, supabase)
+        : await getMostRecentAutoSummary(chatId, character.id, supabase as any);
     
       if (latestSummary) {
         systemPrompt += '\n\n[CONVERSATION SUMMARY]';
@@ -489,7 +609,9 @@ Delay category: ${delayCategory}`;
           createdAt: latestSummary.created_at
         });
       } else {
-        console.log('❌ No auto-summary found for character:', character.id);
+        console.log(userId
+          ? '❌ No auto-summary found for character (checked chat and cross-chat for this user)'
+          : '❌ No auto-summary found for character in this chat', { characterId: character.id, chatId });
       }
     }
   } catch (error) {
@@ -569,4 +691,120 @@ export async function generateAIResponse(
   });
 
   return response;
+}
+
+/**
+ * Filter character memories based on keyword relevance to the conversation with weighting
+ */
+export function getRelevantMemories(
+   userQuery: string,
+   worldInfoEntries: Array<{ keywords: string[]; entry_text: string }>,
+   memories: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }>,
+   characterName: string,
+   context: { recentInjectionIds?: Set<string> },
+ ): Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }>{
+   if (!memories || memories.length === 0) return [];
+
+   // Combine user message and recent conversation for context
+   const recentMessages = context.recentInjectionIds ? Array.from(context.recentInjectionIds) : [];
+   const conversationText = [
+     userQuery,
+     ...recentMessages.map(id => {
+       const msg = memories.find(m => m.id === id);
+       return msg ? msg.summary_content : '';
+     })
+   ].join(' ').toLowerCase();
+
+   // Scoring helpers
+   const daysSince = (dateStr?: string) => {
+     if (!dateStr) return Number.POSITIVE_INFINITY;
+     const d = new Date(dateStr).getTime();
+     const now = Date.now();
+     return Math.max(0, (now - d) / (1000 * 60 * 60 * 24));
+   };
+   const recencyScore = (createdAt: string) => {
+     const days = daysSince(createdAt);
+     // 0 days -> ~1.0, 7 days -> ~0.5, 30 days -> ~0.3
+     return 1 / Math.log2(2 + Math.max(0, days));
+   };
+   const freshnessBoost = (updatedAt?: string) => {
+     const days = daysSince(updatedAt);
+     return days <= 7 ? 0.2 : 0;
+   };
+   const recentInjectionPenalty = (lastInjectedAt?: string | null, count?: number | null) => {
+     if (!lastInjectedAt) return 0;
+     const deltaMs = Date.now() - new Date(lastInjectedAt).getTime();
+     const base = deltaMs < 10 * 60 * 1000 ? 0.4 : 0; // 10-min cooldown
+     const extra = Math.min(0.3, (count || 0) * 0.05); // small accumulation
+     return base + extra;
+   };
+  const injectionPenalty = (m: any) => recentInjectionPenalty(m.last_injected_at, m.injection_count);
+
+   const charName = String(characterName || '').toLowerCase();
+   const userAliases = ['user'];
+   // Clean user query keywords
+   const cleanedQuery = userQuery.toLowerCase();
+   
+   const calcOverlap = (keywords: string[]) => {
+     const keywordSet = new Set((keywords || [])
+       .map(k => k.toLowerCase())
+       .filter(k => k !== charName && !userAliases.includes(k))
+     );
+     let overlap = 0;
+     // Basic keyword overlap with the user query
+     for (const key of keywordSet) {
+       if (cleanedQuery.includes(key)) overlap++;
+     }
+     return Math.min(overlap, 3);
+   };
+
+   const scored = memories.map(m => {
+     const overlap = calcOverlap(m.trigger_keywords);
+     const overlapScore = overlap / 3; // normalize 0..1
+     const r = recencyScore(m.created_at);
+     const f = freshnessBoost(m.updated_at);
+     const p = injectionPenalty(m);
+     const score = 0.6 * overlapScore + 0.3 * r + 0.2 * f - p;
+     return { mem: m, score, overlap };
+   });
+
+   // Keep only with minimum relevance and pick top 3
+   const MIN_SCORE = 0.45; // was 0.7
+   let selected = scored
+     .filter(s => s.score >= MIN_SCORE && s.overlap > 0)
+     .sort((a, b) => b.score - a.score)
+     .slice(0, 3)
+     .map(s => s.mem);
+
+   // Fallback: if nothing passed threshold but we have at least one overlap, inject the best single match
+   if (selected.length === 0) {
+     const withOverlap = scored.filter(s => s.overlap > 0);
+     if (withOverlap.length > 0) {
+       withOverlap.sort((a, b) => (b.overlap - a.overlap) || (b.score - a.score));
+       console.log('🧠 Memory injection fallback (simple): injecting best overlap despite low score', {
+         bestOverlapScore: withOverlap[0]?.score,
+         overlap: withOverlap[0]?.overlap
+       });
+       selected = [withOverlap[0].mem];
+     }
+   }
+
+   return selected;
+ }
+
+function rerankWithSemantic(
+  candidates: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; embedding?: number[] }>,
+  queryVec: number[] | null,
+  threshold = 0.17
+) {
+  if (!queryVec) return { ranked: candidates, hit: false, topScore: null };
+  const scored = candidates.map(c => {
+    const score = cosineSimilarity(queryVec, (c as any).embedding || []);
+    return { c, score };
+  });
+  scored.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  const topScore = scored[0]?.score ?? null;
+  const hit = topScore !== null && topScore >= threshold;
+  const ranked = hit ? scored.map(s => s.c) : candidates;
+  return { ranked, hit, topScore };
 }

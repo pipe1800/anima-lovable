@@ -8,8 +8,20 @@ import {
 } from './billing.ts';
 import { getLatestSummaryInfo } from './message-counter.ts';
 import { generateMessageBasedSummary } from './auto-summary-new.ts';
+import { normalizeKeywords, normalizeContentForHash, computeContentHash } from './memory-utils.ts';
 
 import type { CreateMemoryRequest, ChatResponse } from '../types/index.ts';
+
+/** Simple stable hash for content de-dup */
+function hashString(input: string): string {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash) + input.charCodeAt(i); // hash * 33 + c
+    hash = hash | 0; // 32-bit
+  }
+  // Convert to unsigned hex
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
 
 /**
  * Enhanced Memory Handler - Create Manual Chat Summaries
@@ -22,6 +34,7 @@ interface MemoryData {
   trigger_keywords: string[];
   message_count: number;
   input_token_cost: number;
+  content_hash?: string;
 }
 
 /**
@@ -143,13 +156,20 @@ Respond in this exact JSON format:
           'question', 'answer', 'response', 'dialogue', 'communication',
           'today', 'yesterday', 'day', 'time', 'moment'
         ];
-        
+        // Also exclude common names: character and user
+        const charName = String(character.name || '').toLowerCase();
+        const possibleUserNames = [
+          String((character as any)?.userName || '').toLowerCase(),
+          'user'
+        ].filter(Boolean);
+         
         const filteredKeywords = parsed.keywords
           .filter((keyword: string) => {
             const lowerKeyword = keyword.toLowerCase();
-            return !genericKeywords.some(generic => 
-              lowerKeyword.includes(generic) || generic.includes(lowerKeyword)
-            );
+            const isGeneric = genericKeywords.some(generic => lowerKeyword.includes(generic) || generic.includes(lowerKeyword));
+            const isCharName = charName && (lowerKeyword === charName || lowerKeyword.includes(charName));
+            const isUserName = possibleUserNames.some(n => n && (lowerKeyword === n || lowerKeyword.includes(n)));
+            return !(isGeneric || isCharName || isUserName);
           })
           .slice(0, 5); // Ensure exactly 5 keywords max
         
@@ -203,6 +223,7 @@ async function saveCharacterMemory(
           trigger_keywords: memoryData.trigger_keywords,
           message_count: memoryData.message_count,
           input_token_cost: memoryData.input_token_cost,
+          content_hash: memoryData.content_hash,
           updated_at: new Date().toISOString()
         })
         .eq('id', existingMemory.id);
@@ -224,7 +245,8 @@ async function saveCharacterMemory(
           summary_content: memoryData.summary_content,
           trigger_keywords: memoryData.trigger_keywords,
           message_count: memoryData.message_count,
-          input_token_cost: memoryData.input_token_cost
+          input_token_cost: memoryData.input_token_cost,
+          content_hash: memoryData.content_hash
         });
 
       if (error) {
@@ -363,21 +385,28 @@ export async function handleCreateMemory(
       };
     }
 
-    // Combine AI keywords with date keywords (limit total to reasonable number)
-    const dateKeywords = createDateKeywords();
-    const allKeywords = [...summaryData.keywords, ...dateKeywords];
-    
-    console.log('🏷️ Final keywords:', allKeywords);
+    // Compute AI sequence end for message_count standardization
+    // Count AI messages in unsummarized range and add to lastSummaryEndMessage
+    const aiMessagesInRange = unsummarizedMessages
+      .filter(m => m.is_ai_message && !m.content.includes('[PLACEHOLDER]'))
+      .length;
+    const aiSequenceStart = lastSummaryEndMessage + 1;
+    const aiSequenceEnd = lastSummaryEndMessage + aiMessagesInRange;
 
-    const rangeEnd = Math.max(...unsummarizedMessages.map(m => m.message_order));
+    // Normalize content and keywords
+    const normalizedContent = normalizeContentForHash(summaryData.content);
+    const cleanedKeywords = normalizeKeywords([...summaryData.keywords, ...createDateKeywords()], character?.name);
+    const contentHash = await computeContentHash(normalizedContent);
+
     const memoryData: MemoryData = {
-      summary_content: summaryData.content,
-      trigger_keywords: allKeywords,
-      message_count: rangeEnd, // Store ending message number
-      input_token_cost: creditCost
+      summary_content: normalizedContent,
+      trigger_keywords: cleanedKeywords,
+      message_count: aiSequenceEnd, // Standardized: AI sequence end
+      input_token_cost: creditCost,
+      content_hash: (await computeContentHash(normalizedContent)) || hashString(normalizedContent)
     };
 
-    // Save to database
+    // Save to database (always insert or update same chat row per legacy logic)
     const saveSuccess = await saveCharacterMemory(
       user.id,
       characterId,
@@ -400,11 +429,11 @@ export async function handleCreateMemory(
       success: true,
       data: {
         message: 'Manual memory created successfully',
-        summary: summaryData.content,
+        summary: normalizedContent,
         title: summaryData.title,
-        keywords: allKeywords,
+        keywords: cleanedKeywords,
         messageCount: unsummarizedMessages.length,
-        messageRange: `${unsummarizedMessages[0]?.message_order || 0}-${rangeEnd}`,
+        messageRange: `${unsummarizedMessages[0]?.message_order || 0}-${aiSequenceEnd}`,
         creditCost: creditCost
       }
     };

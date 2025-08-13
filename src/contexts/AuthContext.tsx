@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { getPrivateProfile, getUserActiveSubscription } from '@/lib/supabase-queries';
@@ -34,35 +34,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [subscription, setSubscription] = useState<any | null>(null); // Using any for flexibility
   const [loading, setLoading] = useState(true);
 
+  // Dedup helpers
+  const currentUserIdRef = useRef<string | null>(null);
+  const prevUserIdEffectRef = useRef<string | null>(null);
+  const subInFlightRef = useRef<Promise<void> | null>(null);
+  const lastSubFetchAtRef = useRef<number>(0);
+  const profileInFlightRef = useRef<Promise<void> | null>(null);
+  const timezoneLoggedRef = useRef<boolean>(false);
+
   const refreshProfile = async () => {
     if (!user) {
       setProfile(null);
       return;
     }
 
-    try {
-      const { data } = await getPrivateProfile(user.id);
-      setProfile(data || null);
-    } catch (error) {
-      console.error('Profile fetch failed:', error);
-      setProfile(null);
-    }
+    if (profileInFlightRef.current) return; // prevent concurrent
+
+    const p = (async () => {
+      try {
+        const { data } = await getPrivateProfile(user.id);
+        setProfile(data || null);
+      } catch (error) {
+        console.error('Profile fetch failed:', error);
+        setProfile(null);
+      } finally {
+        profileInFlightRef.current = null;
+      }
+    })();
+    profileInFlightRef.current = p;
+    await p;
   };
 
   const updateTimezoneIfNeeded = async () => {
     if (!user?.id || !profile) return;
-    
     const browserTimezone = getBrowserTimezone();
-    console.log('🌍 Detected browser timezone:', browserTimezone);
-    
-    // Check if timezone needs updating
+    if (!timezoneLoggedRef.current) {
+      console.debug('🌍 Detected browser timezone:', browserTimezone);
+      timezoneLoggedRef.current = true;
+    }
+
     if (profile.timezone !== browserTimezone) {
-      console.log('🔄 Updating user timezone from', profile.timezone, 'to', browserTimezone);
+      console.debug('🔄 Updating user timezone from', profile.timezone, 'to', browserTimezone);
       const success = await updateUserTimezone(user.id, browserTimezone);
       if (success) {
-        // Update the profile state to reflect the change
         setProfile(prev => prev ? { ...prev, timezone: browserTimezone } : null);
-        console.log('✅ User timezone updated successfully');
+        console.debug('✅ User timezone updated successfully');
       }
     }
   };
@@ -73,53 +89,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    try {
-      console.log(`🔄 Fetching subscription for user ${user.id} (attempt ${retryCount + 1})`);
-      
-      // Use the more general getUserSubscription instead of getUserActiveSubscription
-      const { data, error } = await supabase
-        .from('subscriptions')
-        .select(`
-          *,
-          plan:plans(*)
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      if (error) {
-        console.error('❌ Subscription fetch failed:', error);
-        
-        // Retry logic with exponential backoff for non-critical errors
-        if (retryCount < 3 && !error.message?.includes('JWT')) {
-          const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
-          console.log(`⏳ Retrying subscription fetch in ${delay}ms...`);
-          setTimeout(() => refreshSubscription(retryCount + 1), delay);
+    // Throttle duplicate fetches for same user within 2s and prevent concurrency
+    const now = Date.now();
+    if (subInFlightRef.current) return await subInFlightRef.current;
+    if (now - lastSubFetchAtRef.current < 2000) return;
+
+    const p = (async () => {
+      try {
+        console.debug(`🔄 Fetching subscription for user ${user.id} (attempt ${retryCount + 1})`);
+        const { data, error } = await supabase
+          .from('subscriptions')
+          .select(`*, plan:plans(*)`)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.error('❌ Subscription fetch failed:', error);
+          if (retryCount < 3 && !error.message?.includes('JWT')) {
+            const delay = Math.pow(2, retryCount) * 1000;
+            console.debug(`⏳ Retrying subscription fetch in ${delay}ms...`);
+            await new Promise(res => setTimeout(res, delay));
+            subInFlightRef.current = null;
+            lastSubFetchAtRef.current = Date.now();
+            return refreshSubscription(retryCount + 1);
+          }
+          console.debug('🚫 All subscription fetch retries failed, defaulting to Guest Pass');
+          setSubscription(null);
           return;
         }
-        
-        // Only set to null after all retries failed
-        console.log('🚫 All subscription fetch retries failed, defaulting to Guest Pass');
+
+        console.debug('✅ Subscription fetched successfully:', data);
+        setSubscription(data || null);
+      } catch (error) {
+        console.error('❌ Subscription fetch exception:', error);
+        if (retryCount < 3) {
+          const delay = Math.pow(2, retryCount) * 1000;
+          console.debug(`⏳ Retrying subscription fetch in ${delay}ms...`);
+          await new Promise(res => setTimeout(res, delay));
+          subInFlightRef.current = null;
+          lastSubFetchAtRef.current = Date.now();
+          return refreshSubscription(retryCount + 1);
+        }
         setSubscription(null);
-        return;
+      } finally {
+        lastSubFetchAtRef.current = Date.now();
+        subInFlightRef.current = null;
       }
-      
-      console.log('✅ Subscription fetched successfully:', data);
-      setSubscription(data || null);
-    } catch (error) {
-      console.error('❌ Subscription fetch exception:', error);
-      
-      // Retry for network errors
-      if (retryCount < 3) {
-        const delay = Math.pow(2, retryCount) * 1000;
-        console.log(`⏳ Retrying subscription fetch in ${delay}ms...`);
-        setTimeout(() => refreshSubscription(retryCount + 1), delay);
-        return;
-      }
-      
-      setSubscription(null);
-    }
+    })();
+
+    subInFlightRef.current = p;
+    await p;
   };
 
   const signOut = async () => {
@@ -156,64 +177,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+      const newUser = session?.user ?? null;
+      // Only update if changed
+      if (newUser?.id !== currentUserIdRef.current) {
+        setSession(session);
+        setUser(newUser);
+        currentUserIdRef.current = newUser?.id || null;
+      }
       setLoading(false);
     });
 
     // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event, session?.user?.id);
-      
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.debug('Auth state change:', event, session?.user?.id);
+      const newUser = session?.user ?? null;
 
-      // Handle session refresh
-      if (event === 'TOKEN_REFRESHED') {
+      // Ignore duplicate events for same user id
+      if (newUser?.id === currentUserIdRef.current) {
+        // Still refresh session reference silently
+        setSession(session);
+        setLoading(false);
+        return;
       }
-      
-      // Handle auth errors
-      if (event === 'SIGNED_OUT') {
-        console.log('User signed out');
-        // Clear any cached data if needed
-      }
+
+      setSession(session);
+      setUser(newUser);
+      currentUserIdRef.current = newUser?.id || null;
+      setLoading(false);
     });
 
-    // Set up automatic token refresh monitoring
+    // Token refresh monitor
     const refreshInterval = setInterval(async () => {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
-      
       if (currentSession) {
         const expiresAt = currentSession.expires_at;
         const currentTime = Math.floor(Date.now() / 1000);
         const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
-        
-        // Refresh if token expires in less than 10 minutes
         if (timeUntilExpiry > 0 && timeUntilExpiry < 600) {
-          console.log('Proactively refreshing token...');
+          console.debug('Proactively refreshing token...');
           await supabase.auth.refreshSession();
         }
       }
-    }, 5 * 60 * 1000); // Check every 5 minutes
+    }, 5 * 60 * 1000);
 
     return () => {
-      subscription.unsubscribe();
+      authSub.unsubscribe();
       clearInterval(refreshInterval);
     };
   }, []);
 
-  // Fetch profile and subscription when user changes
+  // Fetch profile and subscription when user changes (dedup by user id)
   useEffect(() => {
-    if (user) {
-      refreshProfile();
-      refreshSubscription();
-    } else {
+    const id = user?.id || null;
+    if (!id) {
       setProfile(null);
       setSubscription(null);
+      prevUserIdEffectRef.current = null;
+      return;
     }
+    if (prevUserIdEffectRef.current === id) return; // no-op if same id
+    prevUserIdEffectRef.current = id;
+
+    (async () => {
+      await refreshProfile();
+      await refreshSubscription();
+    })();
   }, [user]);
 
   // Update timezone when profile is loaded

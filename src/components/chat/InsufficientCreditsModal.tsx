@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Zap, CreditCard, Clock } from 'lucide-react';
 
@@ -24,6 +24,9 @@ export function InsufficientCreditsModal({
             <Zap className="w-6 h-6 text-[#FF7A00]" />
             Insufficient Credits
           </DialogTitle>
+          <DialogDescription className="text-center text-gray-300">
+            You are out of credits. Choose an option below to continue chatting.
+          </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-6 py-4">
