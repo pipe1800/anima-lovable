@@ -2,12 +2,11 @@ import React from 'react';
 import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
-  getUserChats,
   getUserChatsPaginated,
   getUserCharacters, 
   getUserCredits, 
   getUserSubscription,
-  getMonthlyCreditsUsage,
+  // getMonthlyCreditsUsage, // removed: not available, we'll fallback to 0
   getUserFavorites
 } from '@/lib/supabase-queries';
 
@@ -20,11 +19,10 @@ export const useDashboardData = () => {
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
 
-      const [charactersResult, favoritesResult, creditsResult, creditsUsageResult] = await Promise.all([
+      const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId),
-        getUserCredits(userId),
-        getMonthlyCreditsUsage(userId)
+        getUserCredits(userId)
       ]);
 
       return {
@@ -32,12 +30,12 @@ export const useDashboardData = () => {
         favorites: favoritesResult.data || [],
         credits: creditsResult.data?.balance || 0,
         subscription: authSubscription, // Use subscription from AuthContext
-        creditsUsed: creditsUsageResult.data?.used || 0,
+        creditsUsed: 0, // fallback until usage endpoint implemented
         errors: {
           characters: charactersResult.error,
           favorites: favoritesResult.error,
           credits: creditsResult.error,
-          creditsUsage: creditsUsageResult.error
+          creditsUsage: null
         }
       };
     },
@@ -115,7 +113,7 @@ export const useUserChats = () => {
     queryKey: ['user', 'chats', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-      const result = await getUserChats(userId);
+      const result = await getUserChatsPaginated(userId, 1, 50);
       if (result.error) throw result.error;
       return result.data || [];
     },
@@ -187,9 +185,8 @@ export const useMonthlyCreditsUsage = () => {
     queryKey: ['user', 'monthly-credits-usage', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-      const result = await getMonthlyCreditsUsage(userId);
-      if (result.error) throw result.error;
-      return result.data?.used || 0;
+      // Fallback: return 0 until usage endpoint is implemented
+      return 0;
     },
     enabled: !!userId,
     staleTime: 5 * 60 * 1000, // 5 minutes
@@ -251,11 +248,10 @@ export const preloadDashboardData = async (userId: string, queryClient: QueryCli
   return queryClient.prefetchQuery({
     queryKey: ['dashboard', 'overview', userId],
     queryFn: async () => {
-      const [charactersResult, favoritesResult, creditsResult, creditsUsageResult] = await Promise.all([
+      const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId),
-        getUserCredits(userId),
-        getMonthlyCreditsUsage(userId)
+        getUserCredits(userId)
       ]);
 
       return {
@@ -263,12 +259,12 @@ export const preloadDashboardData = async (userId: string, queryClient: QueryCli
         favorites: favoritesResult.data || [],
         credits: creditsResult.data?.balance || 0,
         subscription: null, // Will use from AuthContext
-        creditsUsed: creditsUsageResult.data?.used || 0,
+        creditsUsed: 0, // fallback until usage endpoint implemented
         errors: {
           characters: charactersResult.error,
           favorites: favoritesResult.error,
           credits: creditsResult.error,
-          creditsUsage: creditsUsageResult.error
+          creditsUsage: null
         }
       };
     },

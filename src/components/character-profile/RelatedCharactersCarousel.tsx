@@ -24,100 +24,28 @@ interface RelatedCharacter {
   } | null;
   tags: Array<{ id: number; name: string }>;
   likes_count: number;
-  actual_chat_count: number;
+  chats_count: number;
 }
 
 const fetchRelatedCharacters = async (currentCharacterId: string, tagIds: number[]): Promise<RelatedCharacter[]> => {
-  if (tagIds.length === 0) {
-    // If no tags, just get random popular characters
-    const { data, error } = await supabase
-      .from('characters')
-      .select(`
-        id,
-        name,
-        avatar_url,
-        short_description,
-        interaction_count,
-        creator:profiles!characters_creator_id_fkey(username, avatar_url),
-        tags:character_tags(tags(id, name))
-      `)
-      .eq('visibility', 'public')
-      .neq('id', currentCharacterId)
-      .order('interaction_count', { ascending: false })
-      .limit(10);
-
-    if (error) throw error;
-    
-    // Get likes count separately
-    const charactersWithStats = await Promise.all(
-      (data || []).map(async (char) => {
-        const { count: likesCount } = await supabase
-          .from('character_likes')
-          .select('*', { count: 'exact', head: true })
-          .eq('character_id', char.id);
-          
-        return {
-          ...char,
-          likes_count: likesCount || 0,
-          actual_chat_count: char.interaction_count || 0
-        };
-      })
-    );
-    
-    return charactersWithStats as any;
-  }
-
-  // First get character IDs that share tags
-  const { data: relatedCharacterIds, error: tagError } = await supabase
-    .from('character_tags')
-    .select('character_id')
-    .in('tag_id', tagIds)
-    .neq('character_id', currentCharacterId);
-
-  if (tagError) throw tagError;
-  
-  const characterIds = relatedCharacterIds?.map(item => item.character_id) || [];
-  
-  if (characterIds.length === 0) {
-    return [];
-  }
-
-  // Get character details for those IDs
   const { data, error } = await supabase
-    .from('characters')
-    .select(`
-      id,
-      name,
-      avatar_url,
-      short_description,
-      interaction_count,
-      creator:profiles!characters_creator_id_fkey(username, avatar_url),
-      tags:character_tags(tags(id, name))
-    `)
-    .eq('visibility', 'public')
-    .in('id', characterIds)
-    .order('interaction_count', { ascending: false })
-    .limit(10);
+    .rpc('related_characters', { current_character_id: currentCharacterId, tag_ids: tagIds || [] });
 
   if (error) throw error;
-  
-  // Get likes count separately
-  const charactersWithStats = await Promise.all(
-    (data || []).map(async (char) => {
-      const { count: likesCount } = await supabase
-        .from('character_likes')
-        .select('*', { count: 'exact', head: true })
-        .eq('character_id', char.id);
-        
-      return {
-        ...char,
-        likes_count: likesCount || 0,
-        actual_chat_count: char.interaction_count || 0
-      };
-    })
-  );
-  
-  return charactersWithStats as any;
+
+  const normalize = (list: any[]): RelatedCharacter[] =>
+    (list || []).map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      avatar_url: c.avatar_url ?? null,
+      short_description: c.short_description ?? null,
+      creator: c.creator || null,
+      tags: Array.isArray(c.tags) ? c.tags : [],
+      likes_count: c.likes_count ?? 0,
+      chats_count: c.chats_count ?? 0,
+    }));
+
+  return normalize(data as any[]);
 };
 
 export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedCharactersCarouselProps) {
@@ -183,7 +111,7 @@ export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedC
                   <div className="flex items-center space-x-2">
                     <div className="flex items-center space-x-1">
                       <MessageCircle className="w-3 h-3" />
-                      <span>{formatNumberWithK(character.actual_chat_count || 0)}</span>
+                      <span>{formatNumberWithK(character.chats_count || 0)}</span>
                     </div>
                     <div className="flex items-center space-x-1">
                       <Heart className="w-3 h-3" />

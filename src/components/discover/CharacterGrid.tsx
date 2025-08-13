@@ -26,6 +26,16 @@ interface CharacterGridProps {
   onPageChange?: (page: number) => void;
 }
 
+export type CharacterCard = {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  short_description: string | null;
+  chats_count: number;
+  likes_count: number;
+  visibility: string;
+};
+
 type PublicCharacter = {
   id: string;
   name: string;
@@ -34,7 +44,7 @@ type PublicCharacter = {
   interaction_count: number;
   created_at: string;
   creator: any;
-  actual_chat_count: number;
+  chats_count: number;
   likes_count: number;
   favorites_count: number;
   tags: { id: number; name: string }[];

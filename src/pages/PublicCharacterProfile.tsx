@@ -39,7 +39,7 @@ interface CharacterData {
     avatar_url: string | null;
   };
   tags?: Array<{ id: number; name: string }>;
-  actual_chat_count?: number;
+  chats_count?: number;
   likes_count?: number;
 }
 
@@ -61,52 +61,74 @@ export default function PublicCharacterProfile() {
       try {
         setLoading(true);
 
-        // Fetch character with definitions and tags
-        const { data: characterData, error: characterError } = await supabase
-          .from('characters')
-          .select(`
-            *,
-            character_definitions(*),
-            character_tags(tag:tags(id, name))
-          `)
+        // Prefer the view for a single round-trip with normalized shape
+        const { data, error: viewError } = await supabase
+          .from('character_profile_view')
+          .select('*')
           .eq('id', characterId)
           .eq('visibility', 'public')
           .single();
 
-        if (characterError) {
-          console.error('Error fetching character:', characterError);
+        if (viewError || !data) {
           setError('Character not found or not public');
           setLoading(false);
           return;
         }
 
-        // Fetch creator profile separately
-        const { data: creatorProfile } = await supabase
-          .from('profiles')
-          .select('username, avatar_url')
-          .eq('id', characterData.creator_id)
-          .single();
+        // Normalize JSON fields from the view
+        const rawDefs = (data as any).character_definitions;
+        let character_definitions: CharacterData['character_definitions'] | undefined = undefined;
+        if (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs)) {
+          const d = rawDefs as any;
+          character_definitions = {
+            personality_summary: d.personality_summary ?? '',
+            description: d.description ?? null,
+            greeting: d.greeting ?? null,
+          } as CharacterData['character_definitions'];
+        }
 
-        // Get chat count
-        const { count: chatCount } = await supabase
-          .from('chats')
-          .select('*', { count: 'exact' })
-          .eq('character_id', characterId);
+        const rawCreator = (data as any).creator;
+        let creator: CharacterData['creator'] | undefined = undefined;
+        if (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator)) {
+          const c = rawCreator as any;
+          creator = {
+            username: c.username ?? 'Unknown',
+            avatar_url: c.avatar_url ?? null,
+          } as CharacterData['creator'];
+        } else {
+          creator = { username: 'Unknown', avatar_url: null } as CharacterData['creator'];
+        }
 
-        // Get likes count
-        const { count: likesCount } = await supabase
-          .from('character_likes')
-          .select('*', { count: 'exact' })
-          .eq('character_id', characterId);
+        const rawTags = (data as any).tags;
+        let tags: CharacterData['tags'] = [];
+        if (Array.isArray(rawTags)) {
+          tags = rawTags
+            .map((t: any) => {
+              if (t && typeof t === 'object') {
+                return { id: Number((t as any).id), name: String((t as any).name) };
+              }
+              return null;
+            })
+            .filter(Boolean) as { id: number; name: string }[];
+        }
 
-        setCharacter({
-          ...characterData,
-          creator: creatorProfile || { username: 'Unknown', avatar_url: null },
-          tags: characterData.character_tags?.map((t: any) => t.tag).filter(Boolean) || [],
-          actual_chat_count: chatCount || 0,
-          likes_count: likesCount || 0
-        });
+        const characterData: CharacterData = {
+          id: data.id,
+          name: data.name,
+          short_description: data.short_description,
+          avatar_url: data.avatar_url,
+          interaction_count: data.interaction_count,
+          created_at: data.created_at,
+          creator_id: data.creator_id,
+          visibility: data.visibility,
+          character_definitions,
+          creator,
+          tags,
+          chats_count: Number((data as any).chats_count ?? 0),
+          likes_count: Number((data as any).likes_count ?? 0),
+        };
 
+        setCharacter(characterData);
       } catch (err) {
         console.error('Error:', err);
         setError('Failed to load character');
@@ -196,7 +218,7 @@ export default function PublicCharacterProfile() {
                   <div className="flex flex-wrap justify-center lg:justify-start gap-6 mb-6">
                     <div className="flex items-center space-x-2 text-gray-300">
                       <MessageCircle className="w-5 h-5 text-[#FF7A00]" />
-                      <span className="font-semibold">{formatNumberWithK(character.actual_chat_count || 0)}</span>
+                      <span className="font-semibold">{formatNumberWithK(character.chats_count || 0)}</span>
                       <span className="text-sm">conversations</span>
                     </div>
                     <div className="flex items-center space-x-2 text-gray-300">
@@ -303,6 +325,30 @@ export default function PublicCharacterProfile() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Creator Notes (public) parsed from personality_summary JSON */}
+            {(() => {
+              let creatorNotes = '';
+              try {
+                const raw = character.character_definitions?.personality_summary;
+                if (raw) {
+                  const parsed = JSON.parse(raw as unknown as string);
+                  creatorNotes = parsed?.notes?.creator_notes || '';
+                }
+              } catch {}
+              return creatorNotes ? (
+                <Card className="bg-[#1a1a2e] border-gray-700/50">
+                  <CardHeader>
+                    <CardTitle className="text-white">Creator Notes</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">
+                      {creatorNotes}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null;
+            })()}
           </div>
 
           {/* Sidebar */}
@@ -319,7 +365,7 @@ export default function PublicCharacterProfile() {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">Conversations</span>
                   <Badge variant="secondary" className="bg-[#FF7A00]/20 text-[#FF7A00]">
-                    {formatNumberWithK(character.actual_chat_count || 0)}
+                    {formatNumberWithK(character.chats_count || 0)}
                   </Badge>
                 </div>
                 <div className="flex justify-between items-center">

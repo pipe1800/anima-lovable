@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { formatNumberWithK } from '@/lib/utils/formatting';
 import { 
   MessageCircle, 
+  MessageSquare,
   Heart,
   Star,
   Share2,
@@ -21,7 +22,6 @@ import {
   Link as LinkIcon,
   Calendar,
   TrendingUp,
-  Users,
   ArrowLeft,
   Loader2,
   Edit2,
@@ -31,10 +31,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { cn } from '@/lib/utils';
 import { TopBar } from '@/components/ui/TopBar';
+import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
+
 
 // Types
 interface CharacterFullData {
@@ -83,68 +84,81 @@ const useCharacterFullProfile = (characterId?: string) => {
     queryFn: async () => {
       if (!characterId) throw new Error('Character ID required');
 
-      // Get character data first
-      const { data: character, error: characterError } = await supabase
-        .from('characters')
-        .select(`
-          *,
-          character_definitions(*),
-          character_tags(tag:tags(id, name)),
-          character_world_info_link(world_info:world_infos(id, name, short_description))
-        `)
+      // Get character data via view for flattened, denormalized shape
+      const { data: viewData, error: viewError } = await supabase
+        .from('character_profile_view')
+        .select('*')
         .eq('id', characterId)
         .single();
 
-      if (characterError) throw characterError;
+      if (viewError || !viewData) throw viewError || new Error('Character not found');
 
-      // Get creator data separately
-      const { data: creator } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('id', character.creator_id)
-        .single();
+      // Get creator id to compute user-specific stats
+      const creatorId = (viewData as any).creator_id;
 
-      // Get stats data in parallel
-      const [chatsResult, favoritesResult, likesResult] = await Promise.all([
-        supabase.from('chats').select('id, user_id').eq('character_id', characterId),
-        supabase.from('character_favorites').select('id').eq('character_id', characterId),
-        supabase.from('character_likes').select('id').eq('character_id', characterId),
-      ]);
-      
-      // Get chat IDs for message count
-      const chatIds = chatsResult.data?.map(c => c.id) || [];
-      let messagesCount = 0;
-      
-      if (chatIds.length > 0) {
-        const { data: messagesData } = await supabase
-          .from('messages')
-          .select('id')
-          .in('chat_id', chatIds);
-        messagesCount = messagesData?.length || 0;
-      }
-      
-      const chats = chatsResult.data || [];
-      const uniqueUsers = new Set(chats.map(chat => chat.user_id)).size;
-      
-      const stats = {
-        total_chats: chats.length,
-        total_messages: messagesCount,
-        unique_users: uniqueUsers,
-        average_rating: null,
-        total_favorites: favoritesResult.data?.length || 0,
-        total_likes: likesResult.data?.length || 0
+      // Normalize JSON fields from the view
+      const rawDefs = (viewData as any).character_definitions;
+      const character_definitions: CharacterFullData['character_definitions'] = {
+        personality_summary: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).personality_summary) || '',
+        description: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).description) ?? undefined,
+        greeting: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).greeting) ?? undefined,
+        scenario: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).scenario) ?? undefined,
+        model_id: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).model_id) ?? undefined,
       };
 
-      return {
-        ...character,
-        creator: creator || { id: character.creator_id, username: 'Unknown', avatar_url: null },
-        tags: character.character_tags?.map((t: any) => t.tag).filter(Boolean) || [],
-        world_infos: character.character_world_info_link?.map((w: any) => w.world_info).filter(Boolean) || [],
-        stats
-      } as CharacterFullData;
+      const rawCreator = (viewData as any).creator;
+      const creator: CharacterFullData['creator'] = {
+        id: (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator) && (rawCreator as any).id) || creatorId,
+        username: (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator) && (rawCreator as any).username) || 'Unknown',
+        avatar_url: (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator) && (rawCreator as any).avatar_url) ?? null,
+      };
+
+      const rawTags = (viewData as any).tags;
+      const tags: CharacterFullData['tags'] = Array.isArray(rawTags)
+        ? (rawTags as any[])
+            .map((t: any) => (t && typeof t === 'object' ? { id: Number(t.id), name: String(t.name) } : null))
+            .filter(Boolean) as { id: number; name: string }[]
+        : [];
+
+      const rawWorldInfos = (viewData as any).world_infos;
+      const world_infos: CharacterFullData['world_infos'] = Array.isArray(rawWorldInfos)
+        ? (rawWorldInfos as any[])
+            .map((w: any) => (w && typeof w === 'object' ? { id: String(w.id), name: String(w.name), short_description: (w.short_description as string) ?? undefined } : null))
+            .filter(Boolean) as { id: string; name: string; short_description?: string }[]
+        : [];
+
+      // Build result using counters from the character
+      const stats = {
+        total_chats: (viewData as any).chats_count || 0,
+        total_messages: (viewData as any).messages_count || 0,
+        unique_users: 0,
+        average_rating: null,
+        total_favorites: (viewData as any).favorites_count || 0,
+        total_likes: (viewData as any).likes_count || 0,
+      };
+
+      const result: CharacterFullData = {
+        id: (viewData as any).id,
+        name: (viewData as any).name,
+        tagline: (viewData as any).tagline ?? undefined,
+        short_description: (viewData as any).short_description ?? undefined,
+        avatar_url: (viewData as any).avatar_url ?? undefined,
+        visibility: ((viewData as any).visibility as any) || 'public',
+        interaction_count: (viewData as any).interaction_count,
+        created_at: (viewData as any).created_at,
+        updated_at: (viewData as any).updated_at ?? (viewData as any).created_at,
+        creator_id: creatorId,
+        character_definitions,
+        creator,
+        tags,
+        world_infos,
+        stats,
+      };
+
+      return result;
     },
     enabled: !!characterId,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 5,
   });
 };
 
@@ -163,19 +177,21 @@ const useUserCharacterInteractions = (characterId?: string) => {
           .select('id')
           .eq('character_id', characterId)
           .eq('user_id', user.id)
-          .single(),
+          .limit(1)
+          .maybeSingle(),
         
         supabase
           .from('character_likes')
           .select('id')
           .eq('character_id', characterId)
           .eq('user_id', user.id)
-          .single()
+          .limit(1)
+          .maybeSingle()
       ]);
 
       return {
-        isFavorited: !favoriteResult.error && !!favoriteResult.data,
-        isLiked: !likeResult.error && !!likeResult.data
+        isFavorited: !!favoriteResult?.data,
+        isLiked: !!likeResult?.data
       };
     },
     enabled: !!characterId && !!user,
@@ -220,8 +236,51 @@ export default function CharacterProfile() {
         if (error) throw error;
       }
     },
-    onSuccess: () => {
+    onMutate: async () => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ['character-full-profile', characterId] }),
+        queryClient.cancelQueries({ queryKey: ['user-character-interactions', characterId, user?.id] }),
+      ]);
+
+      const prevCharacter = queryClient.getQueryData<CharacterFullData>(['character-full-profile', characterId]);
+      const prevInteractions = queryClient.getQueryData<{ isFavorited: boolean; isLiked: boolean }>([
+        'user-character-interactions',
+        characterId,
+        user?.id,
+      ]);
+
+      // Optimistically update favorites count and interaction flag
+      if (prevCharacter) {
+        const delta = prevInteractions?.isFavorited ? -1 : 1;
+        queryClient.setQueryData<CharacterFullData>(['character-full-profile', characterId], {
+          ...prevCharacter,
+          stats: {
+            ...prevCharacter.stats,
+            total_favorites: Math.max(0, (prevCharacter.stats.total_favorites || 0) + delta),
+          },
+        });
+      }
+      if (prevInteractions) {
+        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], {
+          ...prevInteractions,
+          isFavorited: !prevInteractions.isFavorited,
+        });
+      }
+
+      return { prevCharacter, prevInteractions } as const;
+    },
+    onError: (_err, _vars, ctx) => {
+      if (!ctx) return;
+      if (ctx.prevCharacter) {
+        queryClient.setQueryData(['character-full-profile', characterId], ctx.prevCharacter);
+      }
+      if (ctx.prevInteractions) {
+        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], ctx.prevInteractions);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['user-character-interactions', characterId] });
+      queryClient.invalidateQueries({ queryKey: ['character-full-profile', characterId] });
       toast({
         title: interactions?.isFavorited ? 'Removed from favorites' : 'Added to favorites',
       });
@@ -246,7 +305,49 @@ export default function CharacterProfile() {
         if (error) throw error;
       }
     },
-    onSuccess: () => {
+    onMutate: async () => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ['character-full-profile', characterId] }),
+        queryClient.cancelQueries({ queryKey: ['user-character-interactions', characterId, user?.id] }),
+      ]);
+
+      const prevCharacter = queryClient.getQueryData<CharacterFullData>(['character-full-profile', characterId]);
+      const prevInteractions = queryClient.getQueryData<{ isFavorited: boolean; isLiked: boolean }>([
+        'user-character-interactions',
+        characterId,
+        user?.id,
+      ]);
+
+      // Optimistically update likes count and interaction flag
+      if (prevCharacter) {
+        const delta = prevInteractions?.isLiked ? -1 : 1;
+        queryClient.setQueryData<CharacterFullData>(['character-full-profile', characterId], {
+          ...prevCharacter,
+          stats: {
+            ...prevCharacter.stats,
+            total_likes: Math.max(0, (prevCharacter.stats.total_likes || 0) + delta),
+          },
+        });
+      }
+      if (prevInteractions) {
+        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], {
+          ...prevInteractions,
+          isLiked: !prevInteractions.isLiked,
+        });
+      }
+
+      return { prevCharacter, prevInteractions } as const;
+    },
+    onError: (_err, _vars, ctx) => {
+      if (!ctx) return;
+      if (ctx.prevCharacter) {
+        queryClient.setQueryData(['character-full-profile', characterId], ctx.prevCharacter);
+      }
+      if (ctx.prevInteractions) {
+        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], ctx.prevInteractions);
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['user-character-interactions', characterId] });
       queryClient.invalidateQueries({ queryKey: ['character-full-profile', characterId] });
     },
@@ -591,9 +692,9 @@ export default function CharacterProfile() {
                 </div>
 
                 <div className="bg-primary/5 rounded-lg p-3 text-center hover:bg-primary/10 transition-colors">
-                  <Users className="w-6 h-6 mx-auto mb-1 text-primary" />
-                  <div className="text-lg font-bold">{formatNumberWithK(character.stats.unique_users)}</div>
-                  <div className="text-xs text-muted-foreground">Users</div>
+                  <MessageSquare className="w-6 h-6 mx-auto mb-1 text-primary" />
+                  <div className="text-lg font-bold">{formatNumberWithK(character.stats.total_messages)}</div>
+                  <div className="text-xs text-muted-foreground">Messages</div>
                 </div>
 
                 <div className="bg-primary/5 rounded-lg p-3 text-center hover:bg-primary/10 transition-colors">

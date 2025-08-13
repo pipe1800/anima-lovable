@@ -10,16 +10,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { getUserActiveSubscription } from '@/lib/supabase-queries';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Tables } from '@/integrations/supabase/types';
+import type { CharacterFormData } from '@/hooks/useCharacterCreation';
 
-// Define the Tag type
-interface Tag {
-  id: number;
-  name: string;
-}
+// Use shared Tag type from supabase Tables
+type Tag = Tables<'tags'>;
 
 interface PersonalityStepProps {
-  data: any;
-  onUpdate: (data: any) => void;
+  data: CharacterFormData;
+  onUpdate: (data: Partial<CharacterFormData>) => void;
   onNext: () => void;
   onPrevious: () => void;
   selectedTags: Tag[];

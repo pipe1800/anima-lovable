@@ -11,3 +11,9 @@ verify_jwt = true
 
 [functions.admin-utilities]
 verify_jwt = false
+
+[functions.parse-character-card]
+verify_jwt = true
+
+[functions.get-character-memories]
+verify_jwt = true

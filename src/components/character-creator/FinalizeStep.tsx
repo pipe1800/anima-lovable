@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -9,10 +8,12 @@ import { User, MessageCircle, Heart, Sparkles, Globe, Link, Lock, Loader2 } from
 import { getUserActiveSubscription } from '@/lib/supabase-queries';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { CharacterFormData } from '@/hooks/useCharacterCreation';
+import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
 
 interface FinalizeStepProps {
-  data: any;
-  onUpdate: (data: any) => void;
+  data: CharacterFormData;
+  onUpdate: (data: Partial<CharacterFormData>) => void;
   onFinalize: () => void;
   onPrevious: () => void;
   isCreating?: boolean;
@@ -25,9 +26,14 @@ type VisibilityType = 'public' | 'unlisted' | 'private';
 
 const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = false, isEditing = false, selectedTags, setSelectedTags }: FinalizeStepProps) => {
   const [visibility, setVisibility] = useState<VisibilityType>(data.visibility || 'public');
-  const [enableNSFW, setEnableNSFW] = useState(data.nsfw_enabled || false);
+  const [enableNSFW, setEnableNSFW] = useState<boolean>(!!data.nsfw_enabled);
   const [userPlan, setUserPlan] = useState<string>('Guest Pass');
   const [nsfwTag, setNsfwTag] = useState<{ id: number; name: string } | null>(null);
+
+  // New local states for version & notes
+  const [version, setVersion] = useState<string>(data.version || '1.0.0');
+  const [characterNotes, setCharacterNotes] = useState<string>(data.notes?.character_notes || '');
+  const [creatorNotes, setCreatorNotes] = useState<string>(data.notes?.creator_notes || '');
 
   const { user } = useAuth();
 
@@ -73,12 +79,12 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   useEffect(() => {
     if (data) {
       setVisibility(data.visibility || 'public');
-      
-      // Check if NSFW tag exists in selected tags to determine initial NSFW state
-      const hasNSFWTag = selectedTags.some(tag => tag?.name?.toLowerCase() === 'nsfw');
-      setEnableNSFW(data.nsfw_enabled || hasNSFWTag);
+      setEnableNSFW(!!data.nsfw_enabled);
+      setVersion(data.version || version || '1.0.0');
+      setCharacterNotes(data.notes?.character_notes || '');
+      setCreatorNotes(data.notes?.creator_notes || '');
     }
-  }, [data, selectedTags]);
+  }, [data]);
 
   const visibilityOptions = [
     {
@@ -86,12 +92,6 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
       title: 'Public',
       description: 'Visible to everyone on the Discover page.',
       icon: Globe,
-    },
-    {
-      id: 'unlisted' as VisibilityType,
-      title: 'Unlisted',
-      description: 'Only accessible with a direct link.',
-      icon: Link,
     },
     {
       id: 'private' as VisibilityType,
@@ -121,124 +121,93 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   const handleFinalize = () => {
     onUpdate({
       visibility,
-      nsfw_enabled: enableNSFW
+      nsfw_enabled: enableNSFW,
+      version,
+      notes: { character_notes: characterNotes, creator_notes: creatorNotes }
     });
     onFinalize();
   };
 
+  const tokenInfo = estimateCreatorTokenUsage(data, userPlan);
+
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 lg:p-8">
-      <div className="mb-6 md:mb-8">
+      <div className="mb-6 md:mb-8 text-center">
         <h2 className="text-2xl md:text-3xl font-bold text-white mb-2 md:mb-4">
           {isEditing ? 'Update Your Character' : 'Unleash Your Creation'}
         </h2>
-        <p className="text-gray-400 text-base md:text-lg">
+        <p className="text-gray-400 text-base md:text-lg max-w-2xl mx-auto">
           {isEditing 
-            ? 'Review your changes and update your character!'
-            : 'Configure your character\'s visibility and launch them into the world!'
+            ? 'Review your settings and add notes.'
+            : 'Set visibility, version, and notes before launching.'
           }
         </p>
       </div>
 
-      {/* Character Summary Card */}
-      <div className="bg-gradient-to-br from-[#1a1a2e] to-[#16213e] rounded-2xl border border-[#FF7A00]/20 overflow-hidden mb-6 md:mb-8">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-[#FF7A00]/20 to-transparent p-4 md:p-6 border-b border-[#FF7A00]/20">
-          <div className="flex items-center space-x-3 md:space-x-4">
-            <Avatar className="w-16 h-16 md:w-20 md:h-20 border-4 border-[#FF7A00]/50 flex-shrink-0">
-              <AvatarImage src={data.avatar} />
-              <AvatarFallback className="bg-gray-800 text-gray-400">
-                <User className="w-6 h-6 md:w-8 md:h-8" />
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-xl md:text-2xl font-bold text-white mb-1 md:mb-2 truncate">{data.name}</h3>
-              <p className="text-gray-300 text-sm md:text-base line-clamp-2">{data.description}</p>
-            </div>
+      {/* Token Budget Meter */}
+      <div className="mb-6 md:mb-8 p-3 md:p-4 rounded-xl border border-gray-700/50 bg-gray-800/30">
+        <div className="flex items-center justify-between text-xs md:text-sm text-gray-300">
+          <span>Token budget preview</span>
+          <span>
+            {tokenInfo.totals.totalUsed.toLocaleString()} / {tokenInfo.totals.contextBudget.toLocaleString()} tokens
+          </span>
+        </div>
+        <div className="mt-2 h-2 rounded bg-gray-700 overflow-hidden">
+          <div
+            className={`h-full ${tokenInfo.totals.overTotal ? 'bg-red-500' : 'bg-[#FF7A00]'}`}
+            style={{ width: `${Math.min(100, (tokenInfo.totals.totalUsed / Math.max(1, tokenInfo.totals.contextBudget)) * 100)}%` }}
+          />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] md:text-xs text-gray-400">
+          <div>
+            Permanent: {tokenInfo.totals.permanentUsed.toLocaleString()} / {tokenInfo.totals.permanentBudget.toLocaleString()}
+            {tokenInfo.totals.overPermanent && <span className="text-red-400 ml-1">(over)</span>}
+          </div>
+          <div>
+            Reserved for reply: {tokenInfo.totals.reservedForResponse.toLocaleString()} tokens
           </div>
         </div>
+        {(tokenInfo.totals.overTotal || tokenInfo.totals.overPermanent) && (
+          <p className="mt-2 text-red-400 text-xs md:text-sm">Reduce description/personality/notes or greeting to fit within the limits for your plan.</p>
+        )}
+      </div>
 
-        {/* Content Sections */}
-        <div className="p-4 md:p-6 space-y-6 md:space-y-8">
-          {/* Personality Section */}
-          <div>
-            <div className="flex items-center space-x-2 mb-3 md:mb-4">
-              <Heart className="w-4 h-4 md:w-5 md:h-5 text-[#FF7A00]" />
-              <h4 className="text-lg md:text-xl font-semibold text-white">Personality</h4>
-            </div>
-            
-            <div className="space-y-3 md:space-y-4">
-              {/* Tags Display */}
-              {(selectedTags.length > 0 || data.personality?.tags?.length > 0) && (
-                <div>
-                  <Label className="text-gray-400 text-xs md:text-sm mb-2 block">Personality Tags</Label>
-                  <div className="flex flex-wrap gap-1.5 md:gap-2">
-                    {/* Display selectedTags if available (tag objects), otherwise display data.personality.tags (strings) */}
-                    {selectedTags.length > 0 ? (
-                      selectedTags.map((tag) => (
-                        <Badge key={`finalize-tag-${tag.id}`} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
-                          {tag.name}
-                        </Badge>
-                      ))
-                    ) : (
-                      data.personality?.tags?.map((tag: string, index: number) => (
-                        <Badge key={`personality-tag-${index}`} className="bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/30 text-xs">
-                          {tag}
-                        </Badge>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              {data.personality?.core_personality && (
-                <div>
-                  <Label className="text-gray-400 text-xs md:text-sm mb-2 block">Core Personality</Label>
-                  <p className="text-white text-xs md:text-sm bg-gray-800/30 rounded-lg p-3 leading-relaxed">
-                    {data.personality.core_personality.substring(0, 150)}
-                    {data.personality.core_personality.length > 150 && '...'}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+      {/* Version & Notes */}
+      <div className="grid grid-cols-1 gap-6 md:gap-8 mb-6 md:mb-8">
+        <div className="space-y-2">
+          <Label className="text-white">Version</Label>
+          <input
+            type="text"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            placeholder="1.0.0"
+          />
+          <p className="text-xs text-gray-500">Use semantic versioning to track changes to this character.</p>
+        </div>
 
-          {/* Dialogue Section */}
-          <div>
-            <div className="flex items-center space-x-2 mb-3 md:mb-4">
-              <MessageCircle className="w-4 h-4 md:w-5 md:h-5 text-[#FF7A00]" />
-              <h4 className="text-lg md:text-xl font-semibold text-white">Dialogue & Voice</h4>
-            </div>
-            
-            <div className="space-y-3 md:space-y-4">
-              <div>
-                <Label className="text-gray-400 text-xs md:text-sm mb-2 block">Opening Greeting</Label>
-                <div className="bg-gray-800/30 rounded-lg p-3 md:p-4 border-l-4 border-[#FF7A00]">
-                  <p className="text-white italic text-xs md:text-sm leading-relaxed">"{data.dialogue?.greeting}"</p>
-                </div>
-              </div>
-              
-              {data.dialogue?.example_dialogues?.length > 0 && (
-                <div>
-                  <Label className="text-gray-400 text-xs md:text-sm mb-2 block">Example Dialogues</Label>
-                  <div className="space-y-3">
-                    {data.dialogue.example_dialogues.slice(0, 1).map((dialogue: any, index: number) => (
-                      <div key={index} className="space-y-2">
-                        <div className="bg-blue-500/10 rounded-lg p-2.5 md:p-3 border border-blue-500/20">
-                          <p className="text-blue-400 text-xs font-medium mb-1">User:</p>
-                          <p className="text-white text-xs md:text-sm">"{dialogue.user}"</p>
-                        </div>
-                        <div className="bg-[#FF7A00]/10 rounded-lg p-2.5 md:p-3 border border-[#FF7A00]/20">
-                          <p className="text-[#FF7A00] text-xs font-medium mb-1">Character:</p>
-                          <p className="text-white text-xs md:text-sm">"{dialogue.character}"</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+        <div className="space-y-2">
+          <Label className="text-white">Character Notes (sent to model)</Label>
+          <textarea
+            value={characterNotes}
+            onChange={(e) => setCharacterNotes(e.target.value)}
+            rows={4}
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            placeholder="Internal notes to guide the model's behavior."
+          />
+          <p className="text-xs text-gray-500">These are injected into the prompt context for this character.</p>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-white">Creator Notes (public)</Label>
+          <textarea
+            value={creatorNotes}
+            onChange={(e) => setCreatorNotes(e.target.value)}
+            rows={4}
+            className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-white"
+            placeholder="Public notes shown on the character profile."
+          />
+          <p className="text-xs text-gray-500">Visible to everyone on the character's public profile.</p>
         </div>
       </div>
 
@@ -315,23 +284,6 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Success Message */}
-      <div className="text-center mb-6 md:mb-8">
-        <div className="inline-flex items-center space-x-2 text-[#FF7A00] mb-3 md:mb-4">
-          <Sparkles className="w-5 h-5 md:w-6 md:h-6" />
-          <span className="text-lg md:text-xl font-semibold">
-            {isEditing ? 'Ready to Update!' : 'Ready to Launch!'}
-          </span>
-          <Sparkles className="w-5 h-5 md:w-6 md:h-6" />
-        </div>
-        <p className="text-gray-400 text-sm md:text-base">
-          {isEditing 
-            ? 'Your character updates are ready to be saved!'
-            : 'Your character is complete and ready to interact with users. Launch when you\'re ready!'
-          }
-        </p>
       </div>
 
       {/* Navigation */}

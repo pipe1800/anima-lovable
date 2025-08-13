@@ -1,4 +1,3 @@
-
 // Database type definitions for our schema
 export interface Profile {
   id: string;
@@ -26,8 +25,10 @@ export interface Character {
   updated_at: string;
   // Extended properties for dashboard
   tagline?: string;
-  actual_chat_count?: number;
+  chats_count?: number; // replaced actual_chat_count
   likes_count?: number;
+  favorites_count?: number;
+  messages_count?: number;
 }
 
 export interface CharacterDefinition {

@@ -5,7 +5,6 @@
  * and complete chat creation with greeting functionality.
  */
 
-import { extractInitialContext, saveContextUpdates } from './context-extractor.ts';
 import { fetchCharacterData } from './character-fetcher.ts';
 import type { AddonSettings } from '../types/streaming-interfaces.ts';
 import type { CreateWithGreetingRequest, ChatResponse } from '../types/index.ts';
@@ -48,6 +47,27 @@ export function createTemplateReplacer(
 }
 
 /**
+ * Safely parse personality_summary JSON and return alternate greetings, if any
+ */
+function getAlternateGreetingsFromDefinition(character: any): string[] {
+  try {
+    const raw = character?.character_definitions?.personality_summary;
+    if (!raw) return [];
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const alts: unknown = parsed?.dialogue?.alternate_greetings;
+    if (Array.isArray(alts)) {
+      return alts
+        .map((g) => (typeof g === 'string' ? g.trim() : ''))
+        .filter((g) => !!g);
+    }
+    return [];
+  } catch (e) {
+    console.warn('⚠️ Failed to parse personality_summary for alternate greetings:', e);
+    return [];
+  }
+}
+
+/**
  * Generate processed greeting from character definitions
  */
 export function generateGreeting(
@@ -57,10 +77,22 @@ export function generateGreeting(
 ): string {
   console.log('🎭 Generating greeting...');
   
-  const rawGreeting = character.character_definitions?.greeting || 
+  const baseGreeting =
+    character.character_definitions?.greeting ||
     `Hello! I'm ${characterName}. It's great to meet you. What would you like to talk about?`;
+
+  // Include alternates if present in personality_summary JSON
+  const alternates = getAlternateGreetingsFromDefinition(character);
+  const candidates = [baseGreeting, ...alternates]
+    .map((g) => (typeof g === 'string' ? g.trim() : ''))
+    .filter((g) => !!g);
+
+  // Pick random greeting from candidates
+  const chosen = candidates.length > 0
+    ? candidates[Math.floor(Math.random() * candidates.length)]
+    : baseGreeting;
   
-  const processedGreeting = templateReplacer(rawGreeting);
+  const processedGreeting = templateReplacer(chosen);
   
   console.log('✅ Processed greeting:', processedGreeting);
   return processedGreeting;
@@ -81,7 +113,7 @@ export function buildMessageContext(
         // Map context fields to addon setting keys
         const contextKey = mapContextFieldToAddonKey(field);
         
-        if (contextKey && addonSettings[contextKey]) {
+        if (contextKey && (addonSettings as any)[contextKey]) {
           messageContext[contextKey] = value;
         }
       }
@@ -307,7 +339,7 @@ export async function handleCreateWithGreeting(
     // Create template replacer
     const templateReplacer = createTemplateReplacer(userPersona, userProfile, character_name);
 
-    // Generate greeting
+    // Generate greeting (randomized from alternates if no explicit greeting provided)
     const greetingText = greeting || generateGreeting(characterData, character_name, templateReplacer);
     
     // Process the greeting
@@ -343,7 +375,7 @@ export async function handleCreateWithGreeting(
       }
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in handleCreateWithGreeting:', error);
     return {
       success: false,

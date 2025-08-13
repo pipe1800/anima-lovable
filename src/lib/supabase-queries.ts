@@ -1,4 +1,4 @@
-                                    import { supabase } from '@/integrations/supabase/client'
+import { supabase } from '@/integrations/supabase/client'
 import type { Profile, Character, Plan, Subscription, Credits, Chat, Message, OnboardingChecklistItem, UserOnboardingProgress } from '@/types/database'
 
 // =============================================================================
@@ -217,7 +217,7 @@ export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = 
       return {
         ...character,
         creator: creatorData,
-        actual_chat_count: chatCount || 0,
+        chats_count: chatCount || 0,
         likes_count: likesCount || 0,
         favorites_count: favoritesCount || 0,
         tags: tagsData?.map(t => t.tag) || []
@@ -371,7 +371,7 @@ export const searchPublicCharacters = async (params: SearchParams): Promise<Sear
       return {
         ...character,
         creator: creatorData,
-        actual_chat_count: chatCount || 0,
+        chats_count: chatCount || 0,
         likes_count: likesCount || 0,
         favorites_count: favoritesCount || 0,
         tags: tagsData?.map(t => t.tag).filter(Boolean) || []
@@ -381,7 +381,7 @@ export const searchPublicCharacters = async (params: SearchParams): Promise<Sear
 
   // Apply conversations sorting if specified (now that we have chat counts)
   if (sortBy === 'conversations') {
-    charactersWithDetails.sort((a, b) => b.actual_chat_count - a.actual_chat_count);
+    charactersWithDetails.sort((a, b) => (b.chats_count || 0) - (a.chats_count || 0));
   }
 
   const total = count || 0;
@@ -439,7 +439,7 @@ export const getUserCharacters = async (userId: string) => {
 
       return {
         ...character,
-        actual_chat_count: chatCount || 0,
+        chats_count: chatCount || 0,
         likes_count: likesCount || 0,
         tagline: (() => {
           try {
@@ -1067,7 +1067,7 @@ export const getPublicWorldInfos = async (limit = 20, offset = 0) => {
         .eq('world_info_id', worldInfo.id)
 
       // Get favorites count
-      const { count: favoritesCount } = await supabase
+      const { count: favoritesCount } = await (supabase as any)
         .from('world_info_favorites')
         .select('id', { count: 'exact' })
         .eq('world_info_id', worldInfo.id)
@@ -1208,7 +1208,7 @@ export const searchPublicWorldInfos = async (params: SearchParams): Promise<Sear
         .eq('world_info_id', worldInfo.id);
 
       // Get favorites count
-      const { count: favoritesCount } = await supabase
+      const { count: favoritesCount } = await (supabase as any)
         .from('world_info_favorites')
         .select('id', { count: 'exact' })
         .eq('world_info_id', worldInfo.id);
@@ -1300,6 +1300,41 @@ export const isCharacterFavorited = async (userId: string, characterId: string) 
     .maybeSingle()
 
   return { data: !!data, error }
+}
+
+/**
+ * Get user's favorite characters (public ones), ordered by most recently favorited
+ */
+export const getUserFavorites = async (userId: string) => {
+  // Fetch favorite character IDs
+  const { data: favorites, error } = await supabase
+    .from('character_favorites')
+    .select('character_id, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) return { data: [], error };
+
+  const ids = (favorites || []).map((f) => f.character_id).filter(Boolean);
+  if (ids.length === 0) return { data: [], error: null };
+
+  // Fetch character data from the flattened view
+  const { data: rows, error: viewError } = await supabase
+    .from('character_profile_view')
+    .select('*')
+    .in('id', ids)
+    .eq('visibility', 'public');
+
+  if (viewError || !rows) return { data: [], error: viewError };
+
+  // Preserve the favorite order
+  const orderMap = new Map(ids.map((id, idx) => [id, idx]));
+  const sorted = [...rows].sort(
+    (a: any, b: any) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0)
+  );
+
+  // Return as-is (view already provides creator, tags, and counters)
+  return { data: sorted, error: null };
 }
 
 /**
@@ -1412,122 +1447,7 @@ export const getRecommendedCharacters = async (tags: string[], limit = 4) => {
     console.error('Error getting recommended characters:', error)
     return { data: [], error }
   }
-}
-
-/**
- * Get user's favorite characters
- */
-
-/**
- * Get user's favorite characters
- */
-export const getUserFavorites = async (userId: string) => {
-  console.log('Fetching favorites for user:', userId);
-  
-  const { data, error } = await supabase
-    .from('character_favorites')
-    .select(`
-      id,
-      created_at,
-      character:characters(
-        id,
-        name,
-        short_description,
-        avatar_url,
-        interaction_count,
-        created_at,
-        creator_id,
-        character_definitions!inner(
-          personality_summary,
-          scenario
-        )
-      )
-    `)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
-
-  console.log('Favorites query result:', { data, error });
-
-  if (error) {
-    console.error('Error fetching favorites:', error);
-    return { data: [], error };
-  }
-
-  // Filter out any null characters and map to character data
-  const characters = data?.map(fav => fav.character).filter(Boolean) || [];
-  
-  // Get creator info, actual chat counts and likes for each character
-  const charactersWithDetails = await Promise.all(
-    characters.map(async (character) => {
-      // Get creator profile
-      console.log('Fetching creator profile for creator_id:', character.creator_id);
-      const { data: creatorData, error: creatorError } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('id', character.creator_id)
-        .maybeSingle()
-      
-      console.log('Creator profile result:', { creatorData, creatorError });
-
-      // Get actual chat count
-      const { count: chatCount } = await supabase
-        .from('chats')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id)
-
-      // Get likes count
-      const { count: likesCount } = await supabase
-        .from('character_likes')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id)
-
-      return {
-        ...character,
-        creator: creatorData,
-        actual_chat_count: chatCount || 0,
-        likes_count: likesCount || 0,
-        tagline: (() => {
-          // First try to get title from personality_summary JSON
-          const personalitySummary = character.character_definitions?.personality_summary;
-          if (personalitySummary && typeof personalitySummary === 'object') {
-            const parsedPersonality = personalitySummary as any;
-            if (parsedPersonality.title) {
-              return parsedPersonality.title;
-            }
-          }
-          
-          // Then try personality_summary as string (JSON)
-          if (personalitySummary && typeof personalitySummary === 'string') {
-            try {
-              const parsed = JSON.parse(personalitySummary);
-              if (parsed.title) {
-                return parsed.title;
-              }
-            } catch (e) {
-              // Not valid JSON, ignore
-            }
-          }
-          
-          // Then try scenario title
-          const scenario = character.character_definitions?.scenario;
-          if (scenario && typeof scenario === 'object') {
-            const parsedScenario = scenario as any;
-            if (parsedScenario.title) {
-              return parsedScenario.title;
-            }
-          }
-          
-          // Finally fallback to short_description
-          return character.short_description || '';
-        })()
-      }
-    })
-  )
-
-  console.log('Processed favorite characters:', charactersWithDetails);
-  
-  return { data: charactersWithDetails, error: null };
-}
+};
 
 // =============================================================================
 // CHAT DELETION QUERIES
@@ -1538,47 +1458,31 @@ export const getUserFavorites = async (userId: string) => {
  */
 export const deleteChat = async (chatId: string, userId: string) => {
   try {
-    console.log(`Starting deleteChat for chat ${chatId} by user ${userId}`);
-    
-    // Use the database function that properly handles all foreign key constraints
-    // Based on the schema review, this function deletes in the correct order:
-    // 1. character_memories (references chat_id)
-    // 2. chat_context (references chat_id with UNIQUE constraint) 
-    // 3. messages (references chat_id)
-    // 4. chats (main table)
-    const { data, error } = await (supabase as any)
-      .rpc('delete_chat_complete', {
-        p_chat_id: chatId,
-        p_user_id: userId
-      });
-
-    if (error) {
-      console.error(`Failed to delete chat ${chatId}:`, error);
-    } else {
-      console.log(`Successfully deleted chat ${chatId}`);
-    }
-
+    const { data, error } = await (supabase as any).rpc('delete_chat_complete', {
+      p_chat_id: chatId,
+      p_user_id: userId,
+    });
     return { data, error };
   } catch (err) {
     console.error('Error in deleteChat:', err);
     return { data: null, error: err };
   }
-}
+};
 
 /**
  * Delete multiple chats in batch with proper error handling
  */
 export const deleteMultipleChats = async (chatIds: string[], userId: string) => {
   console.log(`Starting deletion of ${chatIds.length} chats:`, chatIds);
-  const results = [];
-  
+  const results: Array<{ data: any; error: any }> = [];
+
   // Process deletions in smaller batches to avoid overwhelming the database
   const batchSize = 3; // Process 3 at a time
-  
+
   for (let i = 0; i < chatIds.length; i += batchSize) {
     const batch = chatIds.slice(i, i + batchSize);
-    console.log(`Processing batch ${Math.floor(i/batchSize) + 1}:`, batch);
-    
+    console.log(`Processing batch ${Math.floor(i / batchSize) + 1}:`, batch);
+
     // Process current batch in parallel
     const batchPromises = batch.map(async (chatId) => {
       try {
@@ -1595,67 +1499,67 @@ export const deleteMultipleChats = async (chatIds: string[], userId: string) => 
         return { data: null, error };
       }
     });
-    
+
     const batchResults = await Promise.all(batchPromises);
     results.push(...batchResults);
-    
+
     // Small delay between batches to prevent rate limiting
     if (i + batchSize < chatIds.length) {
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
     }
   }
-  
-  const successCount = results.filter(r => !r.error).length;
-  const errorCount = results.filter(r => r.error).length;
+
+  const successCount = results.filter((r) => !r.error).length;
+  const errorCount = results.filter((r) => r.error).length;
   console.log(`Deletion complete: ${successCount} successful, ${errorCount} failed`);
-  
+
   return results;
-}
+};
 
 /**
  * Delete ALL chats for a user (DEV ONLY - DANGEROUS!)
  */
 export const deleteAllUserChats = async (userId: string) => {
   console.log(`⚠️ DELETING ALL CHATS for user ${userId}`);
-  
+
   try {
     // Get all chat IDs for the user
     const { data: allChats, error: fetchError } = await supabase
       .from('chats')
       .select('id')
       .eq('user_id', userId);
-    
+
     if (fetchError) {
       console.error('Error fetching chats:', fetchError);
       return { success: false, error: fetchError, deletedCount: 0 };
     }
-    
+
     if (!allChats || allChats.length === 0) {
       console.log('No chats to delete');
       return { success: true, error: null, deletedCount: 0 };
     }
-    
-    const chatIds = allChats.map(chat => chat.id);
+
+    const chatIds = allChats.map((chat) => chat.id);
     console.log(`Found ${chatIds.length} chats to delete`);
-    
+
     // Delete them using the existing batch delete function
     const results = await deleteMultipleChats(chatIds, userId);
-    
-    const successCount = results.filter(r => !r.error).length;
-    const errorCount = results.filter(r => r.error).length;
-    
+
+    const successCount = results.filter((r) => !r.error).length;
+    const errorCount = results.filter((r) => r.error).length;
+
     console.log(`✅ Deleted ${successCount} chats, ❌ Failed: ${errorCount}`);
-    
-    return { 
-      success: errorCount === 0, 
+
+    return {
+      success: errorCount === 0,
       error: errorCount > 0 ? `Failed to delete ${errorCount} chats` : null,
-      deletedCount: successCount 
+      deletedCount: successCount,
     };
   } catch (err) {
     console.error('Error in deleteAllUserChats:', err);
     return { success: false, error: err, deletedCount: 0 };
   }
-}
+};
 
 // =============================================================================
 // PERSONA QUERIES

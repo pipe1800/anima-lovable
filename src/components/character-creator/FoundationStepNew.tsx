@@ -1,0 +1,1 @@
+// DEPRECATED/UNUSED: Placeholder component file. Not used by CharacterCreator. Safe to remove.

@@ -216,7 +216,7 @@ export const ProfileView = () => {
             <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <MessageCircle className="w-3 h-3" />
-                {character.actual_chat_count || 0}
+                {character.chats_count || 0}
               </span>
               <span className="flex items-center gap-1">
                 <Heart className="w-3 h-3" />

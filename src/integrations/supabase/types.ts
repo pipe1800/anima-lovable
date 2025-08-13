@@ -1,3 +1,4 @@
+
 export type Json =
   | string
   | number
@@ -11,6 +12,31 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "12.2.3 (519615d)"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          operationName?: string
+          query?: string
+          variables?: Json
+          extensions?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -44,6 +70,13 @@ export type Database = {
             foreignKeyName: "character_definitions_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: true
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_definitions_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: true
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -73,6 +106,13 @@ export type Database = {
             foreignKeyName: "character_favorites_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_favorites_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -98,6 +138,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "character_likes_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "character_likes_character_id_fkey"
             columns: ["character_id"]
@@ -155,6 +202,13 @@ export type Database = {
             foreignKeyName: "character_memories_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_memories_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -181,6 +235,13 @@ export type Database = {
           tag_id?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "character_tags_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "character_tags_character_id_fkey"
             columns: ["character_id"]
@@ -221,6 +282,13 @@ export type Database = {
             foreignKeyName: "character_world_info_link_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_world_info_link_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -236,10 +304,14 @@ export type Database = {
       characters: {
         Row: {
           avatar_url: string | null
+          chats_count: number
           created_at: string
           creator_id: string
+          favorites_count: number
           id: string
           interaction_count: number
+          likes_count: number
+          messages_count: number
           name: string
           short_description: string | null
           tagline: string | null
@@ -248,10 +320,14 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
+          chats_count?: number
           created_at?: string
           creator_id: string
+          favorites_count?: number
           id?: string
           interaction_count?: number
+          likes_count?: number
+          messages_count?: number
           name: string
           short_description?: string | null
           tagline?: string | null
@@ -260,10 +336,14 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
+          chats_count?: number
           created_at?: string
           creator_id?: string
+          favorites_count?: number
           id?: string
           interaction_count?: number
+          likes_count?: number
+          messages_count?: number
           name?: string
           short_description?: string | null
           tagline?: string | null
@@ -304,6 +384,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "chat_context_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "chat_context_character_id_fkey"
             columns: ["character_id"]
@@ -365,6 +452,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "chats_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "chats_character_id_fkey"
             columns: ["character_id"]
@@ -528,7 +622,9 @@ export type Database = {
           id: string
           is_active: boolean
           is_nsfw_compatible: boolean
+          max_context_tokens: number
           min_plan_id: string | null
+          model_identifier: string
           tier_name: string
         }
         Insert: {
@@ -538,7 +634,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_nsfw_compatible?: boolean
+          max_context_tokens?: number
           min_plan_id?: string | null
+          model_identifier?: string
           tier_name: string
         }
         Update: {
@@ -548,7 +646,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_nsfw_compatible?: boolean
+          max_context_tokens?: number
           min_plan_id?: string | null
+          model_identifier?: string
           tier_name?: string
         }
         Relationships: [
@@ -651,8 +751,8 @@ export type Database = {
       profiles: {
         Row: {
           avatar_url: string | null
-          banner_url: string | null
           banner_updated_at: string | null
+          banner_url: string | null
           bio: string | null
           created_at: string
           default_persona_id: string | null
@@ -665,8 +765,8 @@ export type Database = {
         }
         Insert: {
           avatar_url?: string | null
-          banner_url?: string | null
           banner_updated_at?: string | null
+          banner_url?: string | null
           bio?: string | null
           created_at?: string
           default_persona_id?: string | null
@@ -679,8 +779,8 @@ export type Database = {
         }
         Update: {
           avatar_url?: string | null
-          banner_url?: string | null
           banner_updated_at?: string | null
+          banner_url?: string | null
           bio?: string | null
           created_at?: string
           default_persona_id?: string | null
@@ -769,30 +869,24 @@ export type Database = {
         }
         Relationships: []
       }
-      user_character_addons_backup: {
+      user_age_verification: {
         Row: {
-          addon_settings: Json | null
-          character_id: string | null
-          created_at: string | null
-          id: string | null
-          updated_at: string | null
-          user_id: string | null
+          created_at: string
+          id: string
+          user_id: string
+          verified_at: string
         }
         Insert: {
-          addon_settings?: Json | null
-          character_id?: string | null
-          created_at?: string | null
-          id?: string | null
-          updated_at?: string | null
-          user_id?: string | null
+          created_at?: string
+          id?: string
+          user_id: string
+          verified_at?: string
         }
         Update: {
-          addon_settings?: Json | null
-          character_id?: string | null
-          created_at?: string | null
-          id?: string | null
-          updated_at?: string | null
-          user_id?: string | null
+          created_at?: string
+          id?: string
+          user_id?: string
+          verified_at?: string
         }
         Relationships: []
       }
@@ -829,14 +923,14 @@ export type Database = {
             foreignKeyName: "user_character_settings_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "characters"
+            referencedRelation: "character_profile_view"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "user_character_settings_user_id_fkey"
-            columns: ["user_id"]
+            foreignKeyName: "user_character_settings_character_id_fkey"
+            columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "users"
+            referencedRelation: "characters"
             referencedColumns: ["id"]
           },
         ]
@@ -871,6 +965,13 @@ export type Database = {
             foreignKeyName: "user_character_world_info_settings_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_character_world_info_settings_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -882,33 +983,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      user_character_world_info_settings_backup: {
-        Row: {
-          character_id: string | null
-          created_at: string | null
-          id: string | null
-          updated_at: string | null
-          user_id: string | null
-          world_info_id: string | null
-        }
-        Insert: {
-          character_id?: string | null
-          created_at?: string | null
-          id?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-          world_info_id?: string | null
-        }
-        Update: {
-          character_id?: string | null
-          created_at?: string | null
-          id?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-          world_info_id?: string | null
-        }
-        Relationships: []
       }
       user_global_chat_settings: {
         Row: {
@@ -923,6 +997,7 @@ export type Database = {
           id: string
           location_tracking: boolean | null
           mood_tracking: boolean | null
+          nsfw_enabled: boolean | null
           relationship_status: boolean | null
           streaming_mode: string | null
           time_and_weather: boolean | null
@@ -941,6 +1016,7 @@ export type Database = {
           id?: string
           location_tracking?: boolean | null
           mood_tracking?: boolean | null
+          nsfw_enabled?: boolean | null
           relationship_status?: boolean | null
           streaming_mode?: string | null
           time_and_weather?: boolean | null
@@ -959,6 +1035,7 @@ export type Database = {
           id?: string
           location_tracking?: boolean | null
           mood_tracking?: boolean | null
+          nsfw_enabled?: boolean | null
           relationship_status?: boolean | null
           streaming_mode?: string | null
           time_and_weather?: boolean | null
@@ -1028,64 +1105,6 @@ export type Database = {
           },
         ]
       }
-      world_info_favorites: {
-        Row: {
-          created_at: string
-          id: string
-          user_id: string
-          world_info_id: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          user_id: string
-          world_info_id: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          user_id?: string
-          world_info_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "world_info_favorites_world_info_id_fkey"
-            columns: ["world_info_id"]
-            isOneToOne: false
-            referencedRelation: "world_infos"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      world_info_user_likes: {
-        Row: {
-          created_at: string
-          id: string
-          user_id: string
-          world_info_id: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          user_id: string
-          world_info_id: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          user_id?: string
-          world_info_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "world_info_likes_world_info_id_fkey"
-            columns: ["world_info_id"]
-            isOneToOne: false
-            referencedRelation: "world_infos"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       world_info_tags: {
         Row: {
           tag_id: number
@@ -1109,6 +1128,32 @@ export type Database = {
           },
           {
             foreignKeyName: "world_info_tags_world_info_id_fkey"
+            columns: ["world_info_id"]
+            isOneToOne: false
+            referencedRelation: "world_infos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      world_info_user_likes: {
+        Row: {
+          created_at: string | null
+          user_id: string
+          world_info_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          user_id: string
+          world_info_id: string
+        }
+        Update: {
+          created_at?: string | null
+          user_id?: string
+          world_info_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "world_info_user_likes_world_info_id_fkey"
             columns: ["world_info_id"]
             isOneToOne: false
             referencedRelation: "world_infos"
@@ -1183,7 +1228,29 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      character_profile_view: {
+        Row: {
+          avatar_url: string | null
+          character_definitions: Json | null
+          chats_count: number | null
+          created_at: string | null
+          creator: Json | null
+          creator_id: string | null
+          favorites_count: number | null
+          id: string | null
+          interaction_count: number | null
+          likes_count: number | null
+          messages_count: number | null
+          name: string | null
+          short_description: string | null
+          tagline: string | null
+          tags: Json | null
+          updated_at: string | null
+          visibility: string | null
+          world_infos: Json | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       add_monthly_credits: {
@@ -1210,6 +1277,25 @@ export type Database = {
         Args: { p_character_id: string; p_user_id: string }
         Returns: string
       }
+      decrement_world_info_interaction_count: {
+        Args: { world_info_id: string }
+        Returns: undefined
+      }
+      delete_chat_complete: {
+        Args: { p_chat_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      get_character_stats: {
+        Args: { character_id: string }
+        Returns: {
+          total_chats: number
+          total_messages: number
+          unique_users: number
+          average_rating: number
+          total_favorites: number
+          total_likes: number
+        }[]
+      }
       get_chat_context: {
         Args: { p_chat_id: string; p_user_id: string; p_character_id: string }
         Returns: {
@@ -1219,6 +1305,31 @@ export type Database = {
       get_user_role: {
         Args: Record<PropertyKey, never>
         Returns: string
+      }
+      increment_world_info_interaction: {
+        Args: { p_world_info_id: string }
+        Returns: undefined
+      }
+      increment_world_info_interaction_count: {
+        Args: { world_info_id: string }
+        Returns: undefined
+      }
+      related_characters: {
+        Args: { current_character_id: string; tag_ids: number[] }
+        Returns: {
+          id: string
+          name: string
+          avatar_url: string
+          short_description: string
+          likes_count: number
+          chats_count: number
+          creator: Json
+          tags: Json
+        }[]
+      }
+      toggle_world_info_like: {
+        Args: { p_world_info_id: string }
+        Returns: Json
       }
     }
     Enums: {
@@ -1348,6 +1459,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },

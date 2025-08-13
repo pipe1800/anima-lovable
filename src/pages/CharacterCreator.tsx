@@ -5,7 +5,6 @@ import { useCharacterCreation } from '@/hooks/useCharacterCreation';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { getUserCredits } from '@/lib/supabase-queries';
 import { useToast } from '@/hooks/use-toast';
-import { parseCharacterCard, parseExampleDialogue } from '@/lib/utils/characterCard';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -16,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Tables } from '@/integrations/supabase/types';
+import { supabase, SUPABASE_API_URL } from '@/integrations/supabase/client';
 
 // Lazy load heavy components for better performance
 const FoundationStep = lazy(() => import('@/components/character-creator/FoundationStep'));
@@ -65,6 +65,8 @@ const CharacterCreator = () => {
   const [isParsingCard, setIsParsingCard] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [exitDestination, setExitDestination] = useState<string>('/dashboard');
+  const [nsfwWarnings, setNsfwWarnings] = useState<string[]>([]);
+  const [nsfwDetected, setNsfwDetected] = useState(false);
 
   // Fetch user credits for mobile nav
   useEffect(() => {
@@ -95,78 +97,93 @@ const CharacterCreator = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
-  // Helper function to extract avatar from PNG
-  const extractAvatarFromPNG = async (file: File): Promise<string | null> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        resolve(dataUrl);
-      };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
-  };
-
   const handleFileChange = async (file: File) => {
     if (!file || file.type !== 'image/png') {
-      toast({
-        title: "Invalid File",
-        description: "Please select a PNG character card file.",
-        variant: "destructive",
-      });
+      toast({ title: 'Invalid File', description: 'Please select a PNG character card file.', variant: 'destructive' });
       return;
     }
 
     setIsParsingCard(true);
-    
     try {
-      const cardData = await parseCharacterCard(file);
-      
-      if (!cardData) {
-        toast({
-          title: "Failed to parse",
-          description: "Could not read character data from the PNG file.",
-          variant: "destructive",
-        });
-        return;
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('store_avatar', 'true');
+      fd.append('bypass_cache', 'true'); // ensure fresh parse during testing to avoid stale cache
+
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token;
+      if (!token) throw new Error('Not authenticated');
+
+      const resp = await fetch(`${SUPABASE_API_URL}/functions/v1/parse-character-card`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `Parser error: ${resp.status}`);
       }
 
-      // Extract avatar from the PNG file
-      const avatarUrl = await extractAvatarFromPNG(file);
+      const payload = await resp.json();
+      const { formData: parsed, meta } = payload || {};
+      if (!parsed) throw new Error('No data returned from parser');
 
-      // Map card data to form structure with corrected field mapping
-      const exampleDialogues = cardData.example_dialogues || 
-        (cardData.mes_example ? parseExampleDialogue(cardData.mes_example) : []);
+      updateCharacterData({ ...parsed, version: payload?.version || '', nsfw_enabled: !!meta?.flags?.nsfwDetected });
+      setNsfwDetected(!!meta?.flags?.nsfwDetected);
+      setNsfwWarnings(Array.isArray(meta?.warnings) ? meta.warnings : []);
 
-      updateCharacterData({
-        name: cardData.name || '',
-        avatar: avatarUrl || '', // Set the avatar from the PNG
-        title: cardData.description || '', // Short description goes to title
-        description: cardData.personality || '', // Main personality goes to description  
-        personality: {
-          core_personality: cardData.personality || '',
-          tags: cardData.tags || [],
-          knowledge_base: cardData.creator_notes || '',
-          scenario_definition: cardData.scenario || ''
-        },
-        dialogue: {
-          greeting: cardData.greeting || cardData.first_mes || '',
-          example_dialogues: exampleDialogues
+      // Seed selectedTags from parsed tags for UI chips
+      const parsedTagNames: string[] = Array.isArray(parsed?.personality?.tags) ? parsed.personality.tags : [];
+      if (parsedTagNames.length > 0) {
+        const { data: tagRows, error: tagErr } = await supabase
+          .from('tags')
+          .select('id, name')
+          .in('name', parsedTagNames);
+        if (!tagErr && Array.isArray(tagRows)) {
+          setSelectedTags(tagRows as Tag[]);
         }
-      });
+      } else {
+        setSelectedTags([]);
+      }
 
-      toast({
-        title: "Character Imported",
-        description: "Character data has been imported successfully.",
-      });
-    } catch (error) {
-      console.error('Error parsing character card:', error);
-      toast({
-        title: "Import Failed",
-        description: "Failed to import character data.",
-        variant: "destructive",
-      });
+      if (meta?.flags?.nsfwDetected) {
+        toast({ title: 'NSFW content detected', description: 'This character may contain NSFW content. Review and adjust visibility if needed.' });
+      } else {
+        toast({ title: 'Character Imported', description: 'Character data has been imported successfully.' });
+      }
+    } catch (err) {
+      console.error('Error invoking parse-character-card, attempting fallback...', err);
+      try {
+        const mod = await import('@/utils/fallbackCharacterCard');
+        const localForm = await mod.parseCharacterCardToForm(file);
+        if (localForm) {
+          updateCharacterData(localForm);
+          setNsfwDetected(false);
+          setNsfwWarnings([]);
+
+          // Seed tags from fallback as well
+          const parsedTagNames: string[] = Array.isArray(localForm?.personality?.tags) ? localForm.personality.tags : [];
+          if (parsedTagNames.length > 0) {
+            const { data: tagRows } = await supabase
+              .from('tags')
+              .select('id, name')
+              .in('name', parsedTagNames);
+            if (Array.isArray(tagRows)) {
+              setSelectedTags(tagRows as Tag[]);
+            }
+          } else {
+            setSelectedTags([]);
+          }
+
+          toast({ title: 'Imported Locally', description: 'Edge parsing failed; used local parser successfully.' });
+        } else {
+          toast({ title: 'Import Failed', description: err instanceof Error ? err.message : 'Failed to import character data.', variant: 'destructive' });
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback parser failed:', fallbackErr);
+        toast({ title: 'Import Failed', description: err instanceof Error ? err.message : 'Failed to import character data.', variant: 'destructive' });
+      }
     } finally {
       setIsParsingCard(false);
     }
@@ -227,6 +244,8 @@ const CharacterCreator = () => {
             {...stepProps}
             onFileChange={handleFileChange}
             isParsingCard={isParsingCard}
+            nsfwDetected={nsfwDetected}
+            nsfwWarnings={nsfwWarnings}
           />
         );
       case 2:

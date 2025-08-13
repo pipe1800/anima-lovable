@@ -1,7 +1,6 @@
-
 import { supabase } from '@/integrations/supabase/client';
 import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
-import { parseExampleDialogue } from '@/lib/utils/characterCard';
+import { parseExampleDialogue } from '@/lib/dialogue';
 
 export interface CharacterCreationData {
   name: string;
@@ -36,6 +35,12 @@ export interface CharacterCreationData {
   nsfw_enabled?: boolean;
   default_persona_id?: string | null;
   time_awareness_enabled?: boolean;
+  // New optional fields
+  version?: string;
+  notes?: {
+    character_notes?: string;
+    creator_notes?: string;
+  };
 }
 
 export const createCharacter = async (characterData: CharacterCreationData) => {
@@ -82,6 +87,17 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
       dialogue: processedDialogue,
       title: characterData.title
     };
+
+    // Include version and notes when provided
+    if (characterData.version) {
+      definition.version = characterData.version;
+    }
+    if (characterData.notes) {
+      definition.notes = {
+        character_notes: characterData.notes.character_notes || '',
+        creator_notes: characterData.notes.creator_notes || ''
+      };
+    }
 
     // Only include addons if any are enabled (master switch is ON)
     const hasEnabledAddons = characterData.addons && Object.values(characterData.addons).some(value => value === true);
@@ -275,6 +291,17 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       dialogue: processedDialogue,
       title: characterData.title
     };
+
+    // Include version and notes when provided
+    if (characterData.version) {
+      definition.version = characterData.version;
+    }
+    if (characterData.notes) {
+      definition.notes = {
+        character_notes: characterData.notes.character_notes || '',
+        creator_notes: characterData.notes.creator_notes || ''
+      };
+    }
 
     // Only include addons if any are enabled (master switch is ON)
     const hasEnabledAddons = characterData.addons && Object.values(characterData.addons).some(value => value === true);

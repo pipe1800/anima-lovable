@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 
+const sbAny: any = supabase;
+
 interface CharacterProfileData {
   id: string;
   name: string;
@@ -20,8 +22,10 @@ interface CharacterProfileData {
     username: string;
     avatar_url: string | null;
   };
-  actual_chat_count?: number;
+  chats_count?: number;
   likes_count?: number;
+  favorites_count?: number;
+  messages_count?: number;
   tags?: Array<{ id: number; name: string }>;
 }
 
@@ -31,53 +35,90 @@ export const useCharacterProfile = (characterId: string | undefined) => {
     queryFn: async (): Promise<CharacterProfileData> => {
       if (!characterId) throw new Error('Character ID not provided');
 
-      // Single optimized query with all character data
-      const { data: characterData, error: characterError } = await supabase
+      // 1) Core character fields (use any-cast until DB types are regenerated)
+      const { data: character, error: characterError } = await sbAny
         .from('characters')
-        .select(`
-          *,
-          character_definitions(*),
-          character_tags(tag_id, tags(id, name))
-        `)
+        .select(
+          [
+            'id',
+            'name',
+            'short_description',
+            'avatar_url',
+            'interaction_count',
+            'created_at',
+            'creator_id',
+            'visibility',
+            'chats_count',
+            'likes_count',
+            'favorites_count',
+            'messages_count',
+          ].join(', ')
+        )
         .eq('id', characterId)
-        .eq('visibility', 'public')
         .single();
 
-      if (characterError) {
+      if (characterError || !character) {
         throw new Error('Character not found or not public');
       }
 
-      // Get additional data in parallel
-      const [creatorResult, chatCountResult, likesCountResult] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('username, avatar_url')
-          .eq('id', characterData.creator_id)
-          .single(),
-        supabase
-          .from('chats')
-          .select('*', { count: 'exact' })
-          .eq('character_id', characterId),
-        supabase
-          .from('character_likes')
-          .select('*', { count: 'exact' })
-          .eq('character_id', characterId)
-      ]);
+      if (character.visibility !== 'public') {
+        throw new Error('Character not public');
+      }
+
+      // 2) Definitions
+      const { data: defs } = await supabase
+        .from('character_definitions')
+        .select('personality_summary, description, greeting')
+        .eq('character_id', characterId)
+        .single();
+
+      // 3) Creator profile
+      const { data: creator } = await supabase
+        .from('profiles')
+        .select('username, avatar_url')
+        .eq('id', character.creator_id)
+        .single();
+
+      // 4) Tags
+      const { data: charTags } = await supabase
+        .from('character_tags')
+        .select('tag_id')
+        .eq('character_id', characterId);
+
+      let tags: Array<{ id: number; name: string }> = [];
+      const tagIds = (charTags || []).map((t: any) => t.tag_id);
+      if (tagIds.length > 0) {
+        const { data: tagRows } = await supabase
+          .from('tags')
+          .select('id, name')
+          .in('id', tagIds);
+        tags = (tagRows || []) as Array<{ id: number; name: string }>;
+      }
 
       return {
-        ...characterData,
-        creator: creatorResult.data || { username: 'Unknown', avatar_url: null },
-        actual_chat_count: chatCountResult.count || 0,
-        likes_count: likesCountResult.count || 0,
-        tags: characterData.character_tags?.map((ct: any) => ct.tags).filter(Boolean) || []
-      };
+        id: character.id,
+        name: character.name,
+        short_description: character.short_description,
+        avatar_url: character.avatar_url,
+        interaction_count: character.interaction_count,
+        created_at: character.created_at,
+        creator_id: character.creator_id,
+        visibility: character.visibility,
+        character_definitions: defs || undefined,
+        creator: creator || { username: 'Unknown', avatar_url: null },
+        chats_count: character.chats_count ?? 0,
+        likes_count: character.likes_count ?? 0,
+        favorites_count: character.favorites_count ?? 0,
+        messages_count: character.messages_count ?? 0,
+        tags,
+      } as CharacterProfileData;
     },
     enabled: !!characterId,
     staleTime: 10 * 60 * 1000, // 10 minutes - character profiles don't change frequently
     gcTime: 30 * 60 * 1000, // 30 minutes
     retry: (failureCount, error) => {
-      // Don't retry if character not found
-      if (error?.message?.includes('not found')) return false;
+      const msg = (error as any)?.message || '';
+      if (msg.includes('not found') || msg.includes('not public')) return false;
       return failureCount < 3;
     },
   });
@@ -90,18 +131,16 @@ export const useCharacterLikeStatus = (characterId: string | undefined) => {
     queryKey: ['character', 'like-status', characterId, user?.id],
     queryFn: async () => {
       if (!user || !characterId) return false;
-      
       const { data } = await supabase
         .from('character_likes')
         .select('id')
         .eq('character_id', characterId)
         .eq('user_id', user.id)
         .single();
-      
       return !!data;
     },
     enabled: !!user && !!characterId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 };
@@ -115,51 +154,42 @@ export const useToggleCharacterLike = () => {
       if (!user) throw new Error('User not authenticated');
 
       if (isLiked) {
-        // Remove like
         const { error } = await supabase
           .from('character_likes')
           .delete()
           .eq('character_id', characterId)
           .eq('user_id', user.id);
-        
         if (error) throw error;
         return false;
       } else {
-        // Add like
         const { error } = await supabase
           .from('character_likes')
           .insert([{ character_id: characterId, user_id: user.id }]);
-        
         if (error) throw error;
         return true;
       }
     },
     onMutate: async ({ characterId, isLiked }) => {
-      // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: ['character', 'like-status', characterId, user?.id] });
       await queryClient.cancelQueries({ queryKey: ['character', 'profile', characterId] });
 
-      // Snapshot previous values
       const previousLikeStatus = queryClient.getQueryData(['character', 'like-status', characterId, user?.id]);
       const previousProfile = queryClient.getQueryData<CharacterProfileData>(['character', 'profile', characterId]);
 
-      // Optimistically update like status
       queryClient.setQueryData(['character', 'like-status', characterId, user?.id], !isLiked);
 
-      // Optimistically update likes count in profile
       if (previousProfile) {
         queryClient.setQueryData(['character', 'profile', characterId], {
           ...previousProfile,
           likes_count: isLiked 
             ? Math.max(0, (previousProfile.likes_count || 0) - 1)
             : (previousProfile.likes_count || 0) + 1
-        });
+        } as CharacterProfileData);
       }
 
-      return { previousLikeStatus, previousProfile };
+      return { previousLikeStatus, previousProfile } as const;
     },
     onError: (err, { characterId }, context) => {
-      // Revert optimistic updates on error
       if (context?.previousLikeStatus !== undefined) {
         queryClient.setQueryData(['character', 'like-status', characterId, user?.id], context.previousLikeStatus);
       }
@@ -168,10 +198,7 @@ export const useToggleCharacterLike = () => {
       }
     },
     onSuccess: (newLikeStatus, { characterId }) => {
-      // Update cache with final values
       queryClient.setQueryData(['character', 'like-status', characterId, user?.id], newLikeStatus);
-
-      // Invalidate related queries to ensure consistency
       queryClient.invalidateQueries({ queryKey: ['characters', 'public'] });
       queryClient.invalidateQueries({ queryKey: ['user', 'favorites'] });
     },
@@ -185,25 +212,23 @@ export const useCharacterStats = (characterId: string | undefined) => {
     queryFn: async () => {
       if (!characterId) throw new Error('Character ID not provided');
 
-      const [chatCountResult, likesCountResult] = await Promise.all([
-        supabase
-          .from('chats')
-          .select('*', { count: 'exact' })
-          .eq('character_id', characterId),
-        supabase
-          .from('character_likes')
-          .select('*', { count: 'exact' })
-          .eq('character_id', characterId)
-      ]);
+      const { data, error } = await sbAny
+        .from('characters')
+        .select('chats_count, likes_count, messages_count, favorites_count')
+        .eq('id', characterId)
+        .single();
 
+      if (error) throw error;
       return {
-        chatCount: chatCountResult.count || 0,
-        likesCount: likesCountResult.count || 0
+        chatCount: data?.chats_count || 0,
+        likesCount: data?.likes_count || 0,
+        favoritesCount: data?.favorites_count || 0,
+        messagesCount: data?.messages_count || 0,
       };
     },
     enabled: !!characterId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 

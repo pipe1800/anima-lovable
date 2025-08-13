@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   getUserCredits, 
-  getMonthlyCreditsUsage,
   getUserCharacters,
   getUserFavorites
 } from '@/lib/supabase-queries';
@@ -21,18 +20,17 @@ export const useDashboardStats = () => {
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
 
-      const [creditsResult, creditsUsageResult] = await Promise.all([
-        getUserCredits(userId),
-        getMonthlyCreditsUsage(userId)
+      const [creditsResult] = await Promise.all([
+        getUserCredits(userId)
       ]);
 
       return {
         credits: creditsResult.data?.balance || 0,
         subscription: authSubscription,
-        creditsUsed: creditsUsageResult.data?.used || 0,
+        creditsUsed: 0,
         errors: {
           credits: creditsResult.error,
-          creditsUsage: creditsUsageResult.error
+          creditsUsage: null
         }
       };
     },
@@ -68,6 +66,8 @@ export const useDashboardCharacters = () => {
           created_at,
           updated_at,
           creator_id,
+          chats_count,
+          likes_count,
           character_definitions!inner(
             personality_summary,
             scenario
@@ -78,29 +78,13 @@ export const useDashboardCharacters = () => {
 
       if (charError) throw charError;
 
-      // Get actual chat counts and likes for each character
-      const charactersWithCounts = await Promise.all(
-        (characters || []).map(async (character) => {
-          const [chatCountResult, likesCountResult] = await Promise.all([
-            supabase
-              .from('chats')
-              .select('id', { count: 'exact', head: true })
-              .eq('character_id', character.id),
-            supabase
-              .from('character_likes')
-              .select('id', { count: 'exact', head: true })
-              .eq('character_id', character.id)
-          ]);
-
-          return {
-            ...character,
-            actual_chat_count: chatCountResult.count || 0,
-            likes_count: likesCountResult.count || 0,
-            tagline: character.short_description || '',
-            creator: { username: 'You' } // Since these are user's own characters
-          };
-        })
-      );
+      const charactersWithCounts = (characters || []).map((character: any) => ({
+        ...character,
+        chats_count: character.chats_count ?? 0,
+        likes_count: character.likes_count ?? 0,
+        tagline: character.short_description || '',
+        creator: { username: 'You' }
+      }));
 
       // Get favorites
       const { data: favoritesData, error: favError } = await supabase
@@ -111,9 +95,12 @@ export const useDashboardCharacters = () => {
             name,
             short_description,
             avatar_url,
+            visibility,
             interaction_count,
             created_at,
             creator_id,
+            chats_count,
+            likes_count,
             character_definitions!inner(
               personality_summary,
               scenario
@@ -125,36 +112,16 @@ export const useDashboardCharacters = () => {
 
       if (favError) throw favError;
 
-      // Get counts for favorite characters
-      const favoritesWithCounts = await Promise.all(
-        (favoritesData || []).map(async (fav) => {
-          if (!fav.character) return null;
-          
-          const [chatCountResult, likesCountResult, creatorResult] = await Promise.all([
-            supabase
-              .from('chats')
-              .select('id', { count: 'exact', head: true })
-              .eq('character_id', fav.character.id),
-            supabase
-              .from('character_likes')
-              .select('id', { count: 'exact', head: true })
-              .eq('character_id', fav.character.id),
-            supabase
-              .from('profiles')
-              .select('username')
-              .eq('id', fav.character.creator_id)
-              .single()
-          ]);
-
-          return {
-            ...fav.character,
-            actual_chat_count: chatCountResult.count || 0,
-            likes_count: likesCountResult.count || 0,
-            tagline: fav.character.short_description || '',
-            creator: creatorResult.data || { username: 'Unknown' }
-          };
-        })
-      );
+      const favoritesWithCounts = (favoritesData || []).map((fav: any) => {
+        if (!fav.character) return null;
+        const c = fav.character as any;
+        return {
+          ...c,
+          chats_count: c.chats_count ?? 0,
+          likes_count: c.likes_count ?? 0,
+          tagline: c.short_description || '',
+        };
+      });
 
       return { 
         characters: charactersWithCounts,

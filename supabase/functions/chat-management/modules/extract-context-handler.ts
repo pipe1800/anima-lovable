@@ -1,5 +1,6 @@
 import { extractInitialContext } from './context-extractor.ts';
 import type { ExtractContextRequest, ChatResponse } from '../types/index.ts';
+import { getUserPlanAndModel } from './billing.ts';
 
 export async function handleExtractContext(
   request: ExtractContextRequest,
@@ -24,12 +25,15 @@ export async function handleExtractContext(
       throw new Error('Chat not found or access denied');
     }
 
-    // Extract context
+    // Determine plan-specific token budget
+    const { maxContextTokens } = await getUserPlanAndModel(user.id, supabaseAdmin);
+
+    // Extract context with budget
     const contextData = await extractInitialContext(
       charactersData,
       worldInfos || [],
       chatId,
-      4000  // maxTokens
+      maxContextTokens // model/plan-derived max
     );
 
     console.log('✅ Context extracted successfully');
@@ -46,7 +50,7 @@ export async function handleExtractContext(
       }
     };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error in handleExtractContext:', error);
     return {
       success: false,

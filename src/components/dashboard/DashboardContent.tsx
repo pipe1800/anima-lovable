@@ -179,10 +179,10 @@ export function DashboardContent() {
       avatar: character.name?.charAt(0) || 'C',
       image: character.avatar_url || "/placeholder.svg",
       isPublic: character.visibility === 'public',
-      chatCount: character.actual_chat_count || 0,  // Use actual_chat_count
+      chatCount: character.chats_count || 0,  // Use chats_count
       likeCount: character.likes_count || 0,        // Use likes_count
       tagline: character.tagline || character.short_description || '',
-      totalChats: character.actual_chat_count || 0, // Use actual_chat_count
+      totalChats: character.chats_count || 0, // Use chats_count
       likesCount: character.likes_count || 0,       // Use likes_count
       originalCharacter: character
     })), [myCharacters]
@@ -195,7 +195,7 @@ export function DashboardContent() {
       tagline: character.tagline || '',
       avatar: character.name.charAt(0),
       image: character.avatar_url || "/placeholder.svg",
-      totalChats: character.actual_chat_count || character.interaction_count || 0,
+      totalChats: character.chats_count || character.interaction_count || 0,
       likesCount: character.likes_count || 0,
       creatorUsername: character.creator?.username || 'Unknown',
       originalCharacter: character

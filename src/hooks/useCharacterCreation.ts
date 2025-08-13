@@ -18,6 +18,13 @@ export interface CharacterFormData {
   description: string;
   chatMode: 'storytelling' | 'companion';
   
+  // Versioning and notes
+  version?: string;
+  notes?: {
+    character_notes: string; // injected into model context
+    creator_notes: string;   // public on profile
+  };
+  
   // Personality
   personality: {
     core_personality: string;
@@ -30,6 +37,8 @@ export interface CharacterFormData {
   dialogue: {
     greeting: string;
     example_dialogues: Array<{ user: string; character: string; }>;
+    // Support multiple greetings parsed from cards (e.g., Tavern v2 alternate_greetings)
+    alternate_greetings?: string[];
   };
   
   // Settings
@@ -47,6 +56,8 @@ const INITIAL_CHARACTER_DATA: CharacterFormData = {
   title: '',
   description: '',
   chatMode: 'storytelling',
+  version: '',
+  notes: { character_notes: '', creator_notes: '' },
   personality: {
     core_personality: '',
     tags: [],
@@ -55,7 +66,8 @@ const INITIAL_CHARACTER_DATA: CharacterFormData = {
   },
   dialogue: {
     greeting: '',
-    example_dialogues: []
+    example_dialogues: [],
+    alternate_greetings: []
   },
   visibility: 'public',
   nsfw_enabled: false,
@@ -136,6 +148,11 @@ export function useCharacterCreation() {
         title: character.tagline || '', // ✅ Keep mapping tagline to title
         description: character.short_description || '', // ✅ Map short_description to description
         chatMode: (userSettings?.chat_mode as 'storytelling' | 'companion') || 'storytelling', // ✅ Use user settings
+        version: definitionData?.version || (character as any).version || '',
+        notes: {
+          character_notes: character.definition?.[0]?.character_notes || definitionData?.notes?.character_notes || '',
+          creator_notes: (character as any).creator_notes || definitionData?.notes?.creator_notes || ''
+        },
         personality: {
           core_personality: character.definition?.[0]?.description || '',
           tags: definitionData.personality?.tags || character.tags?.map((t: any) => t.name) || [],
@@ -144,7 +161,8 @@ export function useCharacterCreation() {
         },
         dialogue: {
           greeting: character.definition?.[0]?.greeting || '',
-          example_dialogues: definitionData.dialogue?.example_dialogues || []
+          example_dialogues: definitionData.dialogue?.example_dialogues || [],
+          alternate_greetings: definitionData.dialogue?.alternate_greetings || []
         },
         visibility: character.visibility || 'public',
         nsfw_enabled: character.nsfw_enabled || false,
@@ -266,7 +284,7 @@ export function useCharacterCreation() {
           time_awareness_enabled: characterData.timeAwarenessEnabled, // ✅ Map from camelCase to snake_case
           personality: {
             ...characterData.personality,
-            tags: selectedTags.map(tag => tag.name)
+            tags: selectedTags.length > 0 ? selectedTags.map(tag => tag.name) : characterData.personality.tags
           }
         };
         
@@ -320,7 +338,7 @@ export function useCharacterCreation() {
           time_awareness_enabled: characterData.timeAwarenessEnabled, // ✅ Map from camelCase to snake_case
           personality: {
             ...characterData.personality,
-            tags: selectedTags.map(tag => tag.name)
+            tags: selectedTags.length > 0 ? selectedTags.map(tag => tag.name) : characterData.personality.tags
           }
         };
         

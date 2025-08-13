@@ -4,23 +4,25 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Upload, User, Loader2, Clock, Info, MessageSquare, Image as ImageIcon } from 'lucide-react';
+import { Upload, User, Loader2, Clock, MessageSquare, Image as ImageIcon } from 'lucide-react';
 import { uploadAvatar } from '@/lib/avatar-upload';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import type { CharacterFormData } from '@/hooks/useCharacterCreation';
 
 interface FoundationStepProps {
-  data: any;
-  onUpdate: (data: any) => void;
+  data: CharacterFormData;
+  onUpdate: (data: Partial<CharacterFormData>) => void;
   onNext: () => void;
   onFileChange?: (file: File) => Promise<void>;
   isParsingCard?: boolean;
+  nsfwDetected?: boolean;
+  nsfwWarnings?: string[];
 }
 
-const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = false }: FoundationStepProps) => {
+const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = false, nsfwDetected = false, nsfwWarnings = [] }: FoundationStepProps) => {
   const [formData, setFormData] = useState({
     name: data.name || '',
     avatar: data.avatar || '',
@@ -56,12 +58,8 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
       [field]: value
     }));
     
-    // Immediately update parent with trimmed values for name and description
-    if (field === 'name' || field === 'description') {
-      onUpdate({ [field]: typeof value === 'string' ? value.trim() : value });
-    } else {
-      onUpdate({ [field]: value });
-    }
+    // Update parent without trimming; validation trims where needed
+    onUpdate({ [field]: value } as Partial<CharacterFormData>);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,31 +118,11 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // If it's a PNG character card, handle it differently
+    // If it's a PNG character card, handle it via parent only to avoid duplication
     if (file.type === 'image/png' && onFileChange) {
-      onFileChange(file);
-      
-      // Also set it as avatar directly without cropping
       try {
-        setIsUploading(true);
-        const avatarUrl = await uploadAvatar(file, user!.id);
-        
-        if (avatarUrl) {
-          handleInputChange('avatar', avatarUrl);
-          toast({
-            title: "Upload Successful",
-            description: "Avatar uploaded successfully!",
-          });
-        }
-      } catch (error) {
-        console.error('Upload error:', error);
-        toast({
-          title: "Upload Failed",
-          description: "Failed to upload avatar. Please try again.",
-          variant: "destructive",
-        });
+        await onFileChange(file);
       } finally {
-        setIsUploading(false);
         resetFileInput();
       }
     }
@@ -172,6 +150,14 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
   return (
     <div className="flex-1 overflow-auto bg-[#121212]">
       <div className="max-w-6xl mx-auto p-4 md:p-6 lg:p-8">
+        {/* NSFW warning banner */}
+        {nsfwDetected && (
+          <Alert className="mb-4 bg-red-500/10 border-red-500/30">
+            <AlertDescription className="text-red-300 text-sm">
+              This character may contain NSFW content. {nsfwWarnings?.length ? `(${nsfwWarnings.join(' ')})` : ''}
+            </AlertDescription>
+          </Alert>
+        )}
         {/* Mobile: Stack vertically, Desktop: Side by side */}
         <div className="flex flex-col lg:grid lg:grid-cols-2 gap-6 lg:gap-12 min-h-[calc(100vh-200px)]">
           
@@ -360,7 +346,6 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
               
               {formData.timeAwarenessEnabled && (
                 <Alert className="bg-blue-500/10 border-blue-500/30">
-                  <Info className="h-4 w-4" />
                   <AlertDescription className="text-sm">
                     Time awareness works best in <strong>Companion Mode</strong>. The character will react to how long you take to respond based on their personality.
                   </AlertDescription>
@@ -406,28 +391,6 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
             </div>
           </div>
         </div>
-
-        {/* Greeting Preview Section */}
-        {data.greeting && (
-          <div className="mt-6 p-4 rounded-lg bg-gray-800/30 border border-gray-700/50">
-            <div className="flex justify-between items-center mb-3">
-              <Label className="text-white font-medium">Greeting Preview ({formData.chatMode} mode)</Label>
-              {formData.chatMode === 'companion' && data.greeting.includes('*') && (
-                <span className="text-xs text-orange-400 bg-orange-400/10 px-2 py-1 rounded">
-                  ⚠️ Contains narrative elements
-                </span>
-              )}
-            </div>
-            <div className="p-3 rounded bg-gray-900/50 border border-gray-600/30">
-              <p className="text-gray-300 text-sm whitespace-pre-wrap">{data.greeting}</p>
-            </div>
-            {formData.chatMode === 'companion' && data.greeting.includes('*') && (
-              <p className="text-xs text-orange-400 mt-2">
-                Your greeting contains narrative elements (*actions*) that may appear in companion mode responses
-              </p>
-            )}
-          </div>
-        )}
 
         {/* Navigation - Responsive positioning */}
         <div className="flex justify-end mt-6 md:mt-8 pt-4 md:pt-6 border-t border-gray-700/50">

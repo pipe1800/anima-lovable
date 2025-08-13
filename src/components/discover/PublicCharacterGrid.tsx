@@ -26,7 +26,7 @@ type PublicCharacter = {
   interaction_count: number;
   created_at: string;
   creator: any;
-  actual_chat_count: number;
+  chats_count: number;
   likes_count: number;
 };
 
@@ -64,9 +64,9 @@ export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCha
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       case 'popularity':
       case 'conversations':
-        return b.actual_chat_count - a.actual_chat_count;
+        return (b.chats_count || 0) - (a.chats_count || 0);
       default:
-        return b.actual_chat_count - a.actual_chat_count;
+        return (b.chats_count || 0) - (a.chats_count || 0);
     }
   });
 
@@ -161,6 +161,15 @@ export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCha
                 <p className="text-gray-300 text-sm line-clamp-3 leading-relaxed">
                   {character.short_description || "No description available"}
                 </p>
+              </div>
+
+              {/* Chats count badge - bottom right */}
+              <div className="absolute bottom-4 right-4">
+                <div className="flex items-center space-x-2 text-gray-300">
+                  <MessageCircle className="w-5 h-5 text-[#FF7A00]" />
+                  <span className="font-semibold">{character.chats_count || 0}</span>
+                  <span className="text-sm">conversations</span>
+                </div>
               </div>
             </CardContent>
           </Card>

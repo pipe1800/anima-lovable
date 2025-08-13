@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Heart, MessageCircle } from 'lucide-react';
-import { getRecommendedCharacters, toggleCharacterFavorite, isCharacterFavorited } from '@/lib/supabase-queries';
+import { getRecommendedCharacters, isCharacterFavorited, toggleCharacterFavorite } from '@/lib/supabase-queries';
 import { useCurrentUser } from '@/hooks/useProfile';
 import { toast } from 'sonner';
 import type { Character as BaseCharacter } from '@/types/chat';
