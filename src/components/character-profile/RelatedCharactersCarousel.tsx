@@ -129,7 +129,7 @@ export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedC
               
               <div className="flex items-center space-x-1 mb-2">
                 <Avatar className="w-4 h-4">
-                  <AvatarImage src={character.creator?.avatar_url || "/placeholder.svg"} />
+                  <AvatarImage src={character.creator?.avatar_url || "/placeholder.svg"} className="object-cover" />
                   <AvatarFallback className="text-xs">
                     {character.creator?.username?.charAt(0).toUpperCase() || 'U'}
                   </AvatarFallback>

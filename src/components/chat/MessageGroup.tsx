@@ -5,6 +5,7 @@ import { ContextDisplay } from "./ContextDisplay";
 import { FormattedMessage } from "@/components/ui/FormattedMessage";
 import OptimizedMessageFormatter from "./OptimizedMessageFormatter";
 import type { TrackedContext, Message, Character } from '@/types/chat';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface MessageGroupData {
   id: string;
@@ -20,13 +21,17 @@ interface ChatStyleOptions {
   userTextColor: string;
   showCharacterAvatar: boolean;
   showUserAvatar: boolean;
-  avatarShape: 'circle' | 'rounded';
-  avatarSize: 'sm' | 'md' | 'lg';
   // New bubble styles
   aiBubbleColor?: string;
   aiBubbleOpacity?: number;
   userBubbleColor?: string;
   userBubbleOpacity?: number;
+  // New avatar styles
+  avatarStyle?: 'classic' | 'bubble-bg' | 'portrait' | 'side-banner';
+  portraitFrameStyle?: 'clean' | 'polaroid' | 'foil';
+  portraitFrameColor?: string;
+  bannerWidth?: 'sm' | 'md' | 'lg';
+  bannerTintFromAvatar?: boolean;
 }
 
 interface MessageGroupProps {
@@ -45,6 +50,8 @@ interface MessageGroupProps {
   fontSizeClass?: string;
   // New: per-chat style options
   styleOptions?: ChatStyleOptions;
+  // New: persona > profile > default precedence for user avatar
+  userAvatarUrlOverride?: string;
 }
 
 // Helper: hex + opacity -> rgba string
@@ -57,27 +64,55 @@ const toRgba = (hex?: string, opacity?: number, fallbackHex: string = '#1f2937',
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 };
 
+// Default avatar path for missing images
+const DEFAULT_AVATAR = '/default_avatar.jpg';
+
 // ✅ PHASE 3: Memoized component to prevent unnecessary re-renders
-export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions }: MessageGroupProps) {
+export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions, userAvatarUrlOverride }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
 
   const sizeClass = fontSizeClass || 'text-base';
 
-  // Compute avatar styles
-  const avatarSizeClass = styleOptions?.avatarSize === 'sm' ? 'w-6 h-6' : styleOptions?.avatarSize === 'lg' ? 'w-10 h-10' : 'w-8 h-8';
-  const avatarShapeClass = styleOptions?.avatarShape === 'rounded' ? 'rounded-lg' : 'rounded-full';
+  // Access user profile for avatar
+  const { profile } = useAuth();
+  // Persona > profile > default precedence
+  const resolvedUserAvatarUrl = userAvatarUrlOverride || profile?.avatar_url || DEFAULT_AVATAR;
 
-  // Decide avatar visibility
-  const showLeftAvatar = !isUser && (styleOptions?.showCharacterAvatar ?? true);
-  const showRightAvatar = isUser && (styleOptions?.showUserAvatar ?? false);
+  // Get avatar style settings
+  const avatarStyle = styleOptions?.avatarStyle || 'classic';
+  
+  // Compute avatar styles - doubled size for classic style
+  const avatarSizeClass = 'w-16 h-16'; // Doubled from w-8 h-8
+  const avatarShapeClass = 'rounded-full'; // Fixed to circular
+
+  // Decide avatar visibility based on style
+  let showLeftAvatar = false;
+  let showRightAvatar = false;
+  
+  if (avatarStyle === 'classic') {
+    showLeftAvatar = !isUser && (styleOptions?.showCharacterAvatar ?? true);
+    showRightAvatar = isUser && (styleOptions?.showUserAvatar ?? false);
+  } else if (avatarStyle === 'bubble-bg') {
+    // Avatar becomes bubble background, no separate avatar for classic display
+    showLeftAvatar = false;
+    showRightAvatar = false;
+  }
 
   // Text color per side
   const textColor = isUser ? styleOptions?.userTextColor : styleOptions?.aiTextColor;
 
-  // Bubble background per side
-  const bubbleBg = isUser
-    ? toRgba(styleOptions?.userBubbleColor, styleOptions?.userBubbleOpacity, '#FF7A00', 1)
-    : toRgba(styleOptions?.aiBubbleColor, styleOptions?.aiBubbleOpacity, '#1f2937', 0.9);
+  // Bubble background per side - modified for avatar-as-bubble-bg style
+  let bubbleBg: string;
+  let bubbleStyle: React.CSSProperties = {};
+  
+  if (avatarStyle === 'bubble-bg' && ((isUser && resolvedUserAvatarUrl) || (!isUser && character.avatar))) {
+    // For bubble-bg style, we'll use color background and handle the avatar section separately
+    bubbleBg = 'transparent';
+  } else {
+    bubbleBg = isUser
+      ? toRgba(styleOptions?.userBubbleColor, styleOptions?.userBubbleOpacity, '#FF7A00', 1)
+      : toRgba(styleOptions?.aiBubbleColor, styleOptions?.aiBubbleOpacity, '#1f2937', 0.9);
+  }
 
   return (
     <div className="mb-6">
@@ -88,54 +123,129 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
       )}
       
       <div className={`flex gap-3`}>
-        {/* Left avatar for AI messages */}
-        {(!isUser && showLeftAvatar) && (
+        {/* Left avatar for AI messages (classic style only) */}
+        {(!isUser && showLeftAvatar && avatarStyle === 'classic') && (
           <Avatar className={`${avatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
-            <AvatarImage src={character.avatar} alt={character.name} />
+            <AvatarImage src={character.avatar} alt={character.name} className="object-cover" />
             <AvatarFallback>{character.fallback}</AvatarFallback>
           </Avatar>
         )}
         
         <div className={`flex flex-col gap-1 max-w-[80%] ${isUser ? 'items-end ml-auto' : 'items-start'}`}>
-          {messages.map((message, index) => (
-            <div
-              key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-              className={`px-4 py-2 ${sizeClass} ${''} ${
-                index === 0 && index === messages.length - 1
-                  ? 'rounded-lg'
-                  : index === 0
-                  ? isUser
-                    ? 'rounded-t-lg rounded-bl-lg rounded-br-sm'
-                    : 'rounded-t-lg rounded-br-lg rounded-bl-sm'
-                  : index === messages.length - 1
-                  ? isUser
-                    ? 'rounded-b-lg rounded-bl-lg rounded-br-sm'
-                    : 'rounded-b-lg rounded-br-lg rounded-bl-sm'
-                  : isUser
-                  ? 'rounded-bl-lg rounded-br-sm'
-                  : 'rounded-br-lg rounded-bl-sm'
-              }`}
-              style={{ backgroundColor: bubbleBg }}
-            >
-              <span style={textColor ? { color: textColor } : undefined}>
-                <FormattedMessage 
-                  content={message.content}
-                  className="whitespace-pre-wrap select-text message-content"
-                />
-              </span>
-            </div>
-          ))}
+          {messages.map((message, index) => {
+            // Special handling for bubble-bg style
+            if (avatarStyle === 'bubble-bg') {
+              const hasAvatar = isUser ? !!resolvedUserAvatarUrl : !!character.avatar;
+              if (hasAvatar) {
+                const bgColor = isUser
+                  ? toRgba(styleOptions?.userBubbleColor, styleOptions?.userBubbleOpacity, '#FF7A00', 1)
+                  : toRgba(styleOptions?.aiBubbleColor, styleOptions?.aiBubbleOpacity, '#1f2937', 0.9);
+                const imageUrl = isUser ? (resolvedUserAvatarUrl as string) : (character.avatar as string);
+
+                // Build avatar slice and text section, flip order and mask for user side
+                const avatarMask = isUser
+                  ? 'linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%)'
+                  : 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%)';
+
+                const AvatarSlice = (
+                  <div 
+                    className="relative flex-shrink-0"
+                    style={{
+                      width: '6.4rem', // 20% smaller than 8rem (w-32)
+                      height: '8rem',  // 20% smaller than 10rem (h-40)
+                      backgroundImage: `url(${imageUrl})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      backgroundRepeat: 'no-repeat',
+                      maskImage: avatarMask as any,
+                      WebkitMaskImage: avatarMask as any,
+                    }}
+                  />
+                );
+
+                const TextSection = (
+                  <div className="flex-1 px-4 py-2 flex flex-col items-start">
+                    {!isUser && (
+                      <div className="text-[16px] font-bold text-white/85 leading-none mb-1">
+                        {character.name}
+                      </div>
+                    )}
+                    <span style={textColor ? { color: textColor } : undefined}>
+                      <FormattedMessage 
+                        content={message.content}
+                        className="whitespace-pre-wrap select-text message-content"
+                      />
+                    </span>
+                  </div>
+                );
+
+                return (
+                  <div
+                    key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
+                    className={`relative flex overflow-hidden ${sizeClass} ${
+                      index === 0 && index === messages.length - 1
+                        ? 'rounded-lg'
+                        : index === 0
+                        ? 'rounded-t-lg rounded-br-lg rounded-bl-sm'
+                        : index === messages.length - 1
+                        ? 'rounded-b-lg rounded-br-lg rounded-bl-sm'
+                        : 'rounded-br-lg rounded-bl-sm'
+                    }`}
+                    style={{ backgroundColor: bgColor }}
+                  >
+                    {isUser ? (<>{TextSection}{AvatarSlice}</>) : (<>{AvatarSlice}{TextSection}</>)}
+                  </div>
+                );
+              }
+            }
+            
+            // Default rendering for other styles
+            return (
+              <div
+                key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
+                className={`relative px-4 py-2 ${sizeClass} ${
+                  index === 0 && index === messages.length - 1
+                    ? 'rounded-lg'
+                    : index === 0
+                    ? isUser
+                      ? 'rounded-t-lg rounded-bl-lg rounded-br-sm'
+                      : 'rounded-t-lg rounded-br-lg rounded-bl-sm'
+                    : index === messages.length - 1
+                    ? isUser
+                      ? 'rounded-b-lg rounded-bl-lg rounded-br-sm'
+                      : 'rounded-b-lg rounded-br-lg rounded-bl-sm'
+                    : isUser
+                    ? 'rounded-bl-lg rounded-br-sm'
+                    : 'rounded-br-lg rounded-bl-sm'
+                }`}
+                style={{ backgroundColor: bubbleBg, ...bubbleStyle }}
+              >
+                {!isUser && (
+                  <div className="text-[11px] font-semibold text-white/85 leading-none mb-1">
+                    {character.name}
+                  </div>
+                )}
+                <span style={textColor ? { color: textColor } : undefined}>
+                  <FormattedMessage 
+                    content={message.content}
+                    className="whitespace-pre-wrap select-text message-content"
+                  />
+                </span>
+              </div>
+            );
+          })}
         </div>
         
-        {/* Right-side avatar or spacer for user messages */}
-        {isUser && (
-          showRightAvatar ? (
+        {/* Right-side avatar or spacer for user messages (classic style only) */}
+        {isUser && avatarStyle === 'classic' && (
+          (showRightAvatar ? (
             <Avatar className={`${avatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
+              <AvatarImage src={resolvedUserAvatarUrl} alt="User" className="object-cover" />
               <AvatarFallback>U</AvatarFallback>
             </Avatar>
           ) : (
             <div className={`${avatarSizeClass} flex-shrink-0`} />
-          )
+          ))
         )}
       </div>
       

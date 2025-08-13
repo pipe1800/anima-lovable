@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import custom avatar styles */
+@import './styles/avatar-styles.css';
+
 /* Utility classes */
 @layer utilities {
   .line-clamp-3 {

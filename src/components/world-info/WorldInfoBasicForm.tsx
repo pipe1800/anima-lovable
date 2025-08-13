@@ -94,6 +94,7 @@ export default function WorldInfoBasicForm({
               <AvatarImage 
                 src={previewUrl || formData.avatar_url} 
                 alt={formData.name}
+                className="object-cover"
               />
               <AvatarFallback className="bg-gradient-to-br from-[#FF7A00]/20 to-transparent">
                 <BookOpen className="w-8 h-8 sm:w-10 sm:h-10 text-[#FF7A00]/60" />

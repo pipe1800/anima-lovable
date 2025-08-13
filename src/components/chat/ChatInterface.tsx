@@ -9,9 +9,9 @@ import { useChatPerformance } from '@/hooks/useChatPerformance';
 import type { TrackedContext } from '@/types/chat';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { supabase } from '@/integrations/supabase/client';
-import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import logger from '@/utils/logger';
+import { getPersonaById, type Persona } from '@/lib/persona-operations';
 
 // Debug components - Only load when needed
 const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
@@ -60,6 +60,7 @@ const ChatInterface = ({
   const [isFirstMessage, setIsFirstMessage] = useState(true);
   const [currentChatId, setCurrentChatId] = useState<string | null>(existingChatId || null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(propSelectedPersonaId || null);
+  const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   
@@ -132,7 +133,7 @@ const ChatInterface = ({
     }
   }, [currentChatId, user, character, propSelectedPersonaId, onChatCreated, isCreatingChat, log, toast]);
 
-  // Use new orchestrator hook
+  // Unified chat hook
   const {
     messages,
     isTyping,
@@ -147,16 +148,10 @@ const ChatInterface = ({
     debugInfo,
     isStreaming,
     streamingMessage
-  } = useChatUnified(currentChatId, character.id); // ✅ PHASE 2: Single unified hook
+  } = useChatUnified(currentChatId, character.id);
 
-  // Use the prop context (from useContextManagement) as the primary source
-  // Fall back to unified hook context if prop context is not available
+  // Use the prop context as primary; fallback to unified hook context
   const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
-  
-  // Debug log to show which context is being used
-  useEffect(() => {
-    // Context selection debug information is available here if needed
-  }, [parentTrackedContext, unifiedTrackedContext, effectiveTrackedContext]);
 
   // ✅ FIX: Safety cleanup for stuck streaming states
   useEffect(() => {
@@ -164,22 +159,18 @@ const ChatInterface = ({
       const timeoutId = setTimeout(() => {
         log.warn('⚠️ Streaming timeout detected, clearing stuck state');
         // Force clear streaming state if it's been too long
-      }, 30000); // 30 second timeout
+      }, 30000);
       
       return () => clearTimeout(timeoutId);
     }
   }, [isStreaming, log]);
 
-  // Use performance monitoring
-  const { metrics, updateMetrics } = useChatPerformance(currentChatId);
+  // Performance monitoring
+  const { updateMetrics } = useChatPerformance(currentChatId);
 
-  // Use addon settings hook for real-time updates
+  // Addon settings
   const { data: globalSettings } = useUserGlobalChatSettings();
-  
-  // Background image for full chat area (messages + input)
   const backgroundImage = globalSettings?.background_image_url || null;
-  
-  // Fallback to default settings if loading
   const currentAddonSettings = globalSettings ? {
     dynamicWorldInfo: globalSettings.dynamic_world_info,
     enhancedMemory: globalSettings.enhanced_memory,
@@ -204,7 +195,7 @@ const ChatInterface = ({
     fewShotExamples: false,
   };
 
-  // Sync tracked context with parent - only sync when there are meaningful differences
+  // Sync tracked context with parent
   useEffect(() => {
     if (effectiveTrackedContext && onContextUpdate) {
       const hasValidParentContext = Object.values(parentTrackedContext).some(value => value !== 'No context');
@@ -242,15 +233,12 @@ const ChatInterface = ({
     if (existingChatId) {
       setCurrentChatId(existingChatId);
       setIsFirstMessage(false);
-      // Removed redundant setTimeout invalidation; realtime + unified hook already keep messages fresh
     }
   }, [existingChatId]);
 
-  // Focus input when component mounts
+  // Focus input on mount
   useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
+    inputRef.current?.focus();
   }, []);
 
   // Sync selected persona when prop changes
@@ -261,21 +249,27 @@ const ChatInterface = ({
     }
   }, [propSelectedPersonaId, log]);
 
-  // Fetch user's best persona for template replacement (only if no persona prop provided)
+  // Fetch selected persona data (persona > profile > default precedence in chat)
   useEffect(() => {
-    if (!user || propSelectedPersonaId !== undefined) return;
-    
-    const fetchBestPersona = async () => {
-      const bestPersonaId = await getBestPersonaForNewChat(user.id);
-      if (bestPersonaId) {
-        setSelectedPersonaId(bestPersonaId);
+    let active = true;
+    const loadPersona = async () => {
+      try {
+        if (selectedPersonaId) {
+          const persona = await getPersonaById(selectedPersonaId);
+          if (active) setSelectedPersonaData(persona as Persona);
+        } else {
+          if (active) setSelectedPersonaData(null);
+        }
+      } catch (e) {
+        if (active) setSelectedPersonaData(null);
+        log.warn('Failed to load selected persona for avatar override:', e);
       }
     };
-    
-    fetchBestPersona();
-  }, [user]);
+    loadPersona();
+    return () => { active = false; };
+  }, [selectedPersonaId, log]);
 
-  // Memoize send handler
+  // Send message
   const handleSendMessage = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || !user || !currentChatId) return;
@@ -296,19 +290,15 @@ const ChatInterface = ({
         currentAddonSettings,
         selectedPersonaId,
         selectedWorldInfoId,
-        effectiveTrackedContext // Pass the database context
+        effectiveTrackedContext
       );
 
-      // Call the parent's callback to reload context
-      if (onMessageSent) {
-        await onMessageSent();
-      }
+      if (onMessageSent) await onMessageSent();
 
       // Update metrics
       const endTime = Date.now();
       updateMetrics(endTime - startTime);
 
-      // Handle first message achievement if needed
       if (isFirstMessage) {
         setIsFirstMessage(false);
         onFirstMessage();
@@ -323,45 +313,27 @@ const ChatInterface = ({
       console.error('Error sending message:', error);
       updateMetrics(Date.now() - startTime, true);
       
-      // Handle specific error types with better messaging
       if (error.message?.includes('Authentication failed') || error.message?.includes('401')) {
         toast({
           title: "Authentication Error",
           description: "Your session has expired. Please refresh the page and sign in again.",
           variant: "destructive",
         });
-        
-        // Auto-refresh after a delay
-        setTimeout(() => {
-          window.location.reload();
-        }, 3000);
+        setTimeout(() => { window.location.reload(); }, 3000);
       } else if (error.message?.includes('Insufficient credits')) {
         setShowInsufficientCreditsModal(true);
       } else if (error.message?.includes('Server error')) {
-        toast({
-          title: "Service Temporarily Unavailable", 
-          description: "Our servers are experiencing high load. Please try again in a moment.",
-          variant: "destructive"
-        });
+        toast({ title: "Service Temporarily Unavailable", description: "Our servers are experiencing high load. Please try again in a moment.", variant: "destructive" });
       } else if (error.message?.includes('Chat service not found')) {
-        toast({
-          title: "Service Unavailable",
-          description: "The chat service is temporarily unavailable. Please try again later.",
-          variant: "destructive"
-        });
+        toast({ title: "Service Unavailable", description: "The chat service is temporarily unavailable. Please try again later.", variant: "destructive" });
       } else {
         const chatError = handleChatError(error, 'sending message', false);
-        toast({
-          title: "Error",
-          description: chatError.message,
-          variant: "destructive"
-        });
+        toast({ title: "Error", description: chatError.message, variant: "destructive" });
       }
     }
-  }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, isFirstMessage, onFirstMessage, toast, updateMetrics, onMessageSent]);
+  }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, isFirstMessage, onFirstMessage, toast, updateMetrics, onMessageSent]);
 
   const handleUpgrade = () => {
-    // Navigate to upgrade page or show upgrade modal
     log.info('Navigate to upgrade page');
   };
 
@@ -418,11 +390,12 @@ const ChatInterface = ({
             isRealtimeConnected={isRealtimeConnected}
             debugInfo={debugInfo}
             renderBackground={false}
+            userAvatarUrlOverride={selectedPersonaData?.avatar_url || undefined}
           />
         </div>
 
-        {/* Typing Indicator with Reserved Space - Mobile Responsive */}
-        <div className="px-3 sm:px-6 pb-2 min-h-[2.5rem] flex items-center">
+        {/* Typing Indicator (thin) */}
+        <div className="px-2 sm:px-3 py-1 flex items-center">
           <div 
             className={`flex items-center space-x-2 text-gray-400 transition-all duration-300 ${
               (isTyping || isStreaming) ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
@@ -439,7 +412,7 @@ const ChatInterface = ({
           </div>
         </div>
 
-        {/* Input Area - Glass over background, no separator line */}
+        {/* Input Area */}
         <div className="p-3 sm:p-4 bg-transparent">
           <form onSubmit={handleSendMessage} className="flex items-center gap-2 sm:gap-3">
             <div className="flex-1 backdrop-blur-md bg-black/30 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-3 shadow-lg shadow-black/30">

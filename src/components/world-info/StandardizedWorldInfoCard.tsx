@@ -153,7 +153,7 @@ export default function StandardizedWorldInfoCard({
           <div className="relative h-32 bg-gradient-to-br from-[#FF7A00]/10 to-[#FF7A00]/5 flex items-center justify-center">
             <Avatar className="w-24 h-24 ring-4 ring-[#FF7A00]/30 group-hover:ring-[#FF7A00]/60 transition-all duration-300">
               {avatar_url ? (
-                <AvatarImage src={avatar_url} alt={name} />
+                <AvatarImage src={avatar_url} alt={name} className="object-cover" />
               ) : (
                 <AvatarFallback className="bg-gradient-to-br from-[#FF7A00] to-[#FF7A00]/70 text-white font-bold text-2xl">
                   <BookOpen className="w-8 h-8" />
@@ -293,7 +293,7 @@ export default function StandardizedWorldInfoCard({
                   <div className="pt-2 border-t border-gray-700/50 flex items-center gap-1.5">
                     <Avatar className="w-4 h-4">
                       {creatorAvatar ? (
-                        <AvatarImage src={creatorAvatar} />
+                        <AvatarImage src={creatorAvatar} className="object-cover" />
                       ) : (
                         <AvatarFallback className="bg-gray-700 text-[10px]">
                           {creatorName[0]?.toUpperCase()}

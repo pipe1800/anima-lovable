@@ -29,8 +29,6 @@ export interface UserGlobalChatSettings {
   user_text_color: string; // e.g., '#FFFFFF'
   show_character_avatar: boolean;
   show_user_avatar: boolean;
-  avatar_shape: 'circle' | 'rounded';
-  avatar_size: 'sm' | 'md' | 'lg';
   background_image_url: string | null;
   // New: Bubble colors and transparency
   ai_bubble_color: string; // hex color
@@ -43,6 +41,17 @@ export interface UserGlobalChatSettings {
   action_color?: string | null; // for *action*
   emphasis_color?: string | null; // for _emphasis_
   parenthetical_color?: string | null; // for (parenthetical)
+  
+  // New: Advanced Avatar Styles
+  avatar_style: 'classic' | 'bubble-bg' | 'portrait' | 'side-banner';
+  
+  // Portrait style settings
+  portrait_frame_style: 'clean' | 'polaroid' | 'foil'; // frame appearance
+  portrait_frame_color: string; // hex color for frame
+  
+  // Side Banner settings
+  banner_width: 'sm' | 'md' | 'lg'; // width of the banner strip
+  banner_tint_from_avatar: boolean; // extract color from avatar for tint
   
   // Timestamps
   created_at: string;

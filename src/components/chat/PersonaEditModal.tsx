@@ -33,7 +33,7 @@ export default function PersonaEditModal({ open, onOpenChange, personaToEdit, se
               <label className="block text-sm font-medium text-gray-300 mb-3">Persona Avatar</label>
               <div className="relative">
                 <Avatar className="w-20 h-20 mx-auto">
-                  <AvatarImage src={personaToEdit?.avatar_url || undefined} alt="Persona" />
+                  <AvatarImage src={personaToEdit?.avatar_url || undefined} alt="Persona" className="object-cover" />
                   <AvatarFallback className="bg-[#FF7A00] text-white text-lg">
                     {personaToEdit?.name?.split(' ').map((n: string) => n[0]).join('') || 'P'}
                   </AvatarFallback>

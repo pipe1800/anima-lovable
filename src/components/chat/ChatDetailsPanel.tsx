@@ -49,7 +49,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
         <div className="space-y-4">
           <div className="flex items-start space-x-3">
             <Avatar className="w-12 h-12 sm:w-16 sm:h-16 flex-shrink-0">
-              <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
+              <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} className="object-cover" />
               <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-sm sm:text-base">
                 {character.fallback}
               </AvatarFallback>

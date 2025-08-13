@@ -42,7 +42,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
           <Avatar className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0">
-            <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} />
+            <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} className="object-cover" />
             <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-sm sm:text-base">
               {character.fallback}
             </AvatarFallback>

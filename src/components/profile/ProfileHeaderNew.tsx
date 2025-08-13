@@ -54,7 +54,7 @@ export const ProfileHeader = () => {
             {/* Avatar */}
             <div className="flex-shrink-0 relative">
               <Avatar className="w-32 h-32 border-4 border-white/20 shadow-2xl">
-                <AvatarImage src={profile.avatar_url} alt={profile.username} />
+                <AvatarImage src={profile.avatar_url} alt={profile.username} className="object-cover" />
                 <AvatarFallback className="text-3xl">
                   {profile.username?.[0]?.toUpperCase() || 'U'}
                 </AvatarFallback>

@@ -60,7 +60,7 @@ const ChatHistoryListComponent: React.FC<ChatHistoryListProps> = ({
                 >
                   <div className="flex items-center space-x-3">
                     <Avatar className="w-8 h-8">
-                      <AvatarImage src={chat.character?.avatar_url} alt={chat.character?.name} />
+                      <AvatarImage src={chat.character?.avatar_url} alt={chat.character?.name} className="object-cover" />
                       <AvatarFallback className="bg-[#FF7A00] text-white text-xs">
                         {chat.character?.name?.charAt(0) || 'C'}
                       </AvatarFallback>

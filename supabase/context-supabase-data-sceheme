@@ -41,9 +41,9 @@ CREATE TABLE public.character_memories (
   is_auto_summary boolean DEFAULT false,
   name text,
   CONSTRAINT character_memories_pkey PRIMARY KEY (id),
-  CONSTRAINT character_memories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT character_memories_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT character_memories_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
-  CONSTRAINT character_memories_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
+  CONSTRAINT character_memories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.character_tags (
   character_id uuid NOT NULL,
@@ -89,9 +89,9 @@ CREATE TABLE public.chat_context (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT chat_context_pkey PRIMARY KEY (id),
+  CONSTRAINT chat_context_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
   CONSTRAINT chat_context_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT chat_context_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT chat_context_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
   CONSTRAINT chat_context_last_updated_by_message_id_fkey FOREIGN KEY (last_updated_by_message_id) REFERENCES public.messages(id)
 );
 CREATE TABLE public.chats (
@@ -178,6 +178,15 @@ CREATE TABLE public.onboarding_checklist_items (
   reward_credits integer NOT NULL DEFAULT 0,
   CONSTRAINT onboarding_checklist_items_pkey PRIMARY KEY (id)
 );
+CREATE TABLE public.parsed_character_cards (
+  hash text NOT NULL,
+  vendor text,
+  version text,
+  normalized jsonb NOT NULL,
+  avatar_public_url text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT parsed_character_cards_pkey PRIMARY KEY (hash)
+);
 CREATE TABLE public.personas (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
@@ -230,8 +239,8 @@ CREATE TABLE public.subscriptions (
   paypal_subscription_id text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
-  CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.plans(id)
+  CONSTRAINT subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.plans(id),
+  CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.tags (
   id integer NOT NULL DEFAULT nextval('tags_id_seq'::regclass),
@@ -267,8 +276,8 @@ CREATE TABLE public.user_character_world_info_settings (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_character_world_info_settings_pkey PRIMARY KEY (id),
   CONSTRAINT user_character_world_info_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT user_character_world_info_settings_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT user_character_world_info_settings_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
+  CONSTRAINT user_character_world_info_settings_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id),
+  CONSTRAINT user_character_world_info_settings_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
 );
 CREATE TABLE public.user_global_chat_settings (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -288,6 +297,30 @@ CREATE TABLE public.user_global_chat_settings (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   nsfw_enabled boolean DEFAULT false,
+  ai_text_color text NOT NULL DEFAULT '#E5E7EB'::text,
+  user_text_color text NOT NULL DEFAULT '#FFFFFF'::text,
+  show_character_avatar boolean NOT NULL DEFAULT true,
+  show_user_avatar boolean NOT NULL DEFAULT false,
+  avatar_shape text NOT NULL DEFAULT 'circle'::text CHECK (avatar_shape = ANY (ARRAY['circle'::text, 'rounded'::text])),
+  avatar_size text NOT NULL DEFAULT 'md'::text CHECK (avatar_size = ANY (ARRAY['sm'::text, 'md'::text, 'lg'::text])),
+  background_image_url text,
+  ai_bubble_color text NOT NULL DEFAULT '#1f2937'::text,
+  ai_bubble_opacity numeric NOT NULL DEFAULT 0.9 CHECK (ai_bubble_opacity >= 0::numeric AND ai_bubble_opacity <= 1::numeric),
+  user_bubble_color text NOT NULL DEFAULT '#FF7A00'::text,
+  user_bubble_opacity numeric NOT NULL DEFAULT 1 CHECK (user_bubble_opacity >= 0::numeric AND user_bubble_opacity <= 1::numeric),
+  semantic_overrides_mode text NOT NULL DEFAULT 'default'::text CHECK (semantic_overrides_mode = ANY (ARRAY['default'::text, 'custom'::text, 'disabled'::text])),
+  speech_color text,
+  action_color text,
+  emphasis_color text,
+  parenthetical_color text,
+  avatar_style text NOT NULL DEFAULT 'classic'::text CHECK (avatar_style = ANY (ARRAY['classic'::text, 'bubble-bg'::text, 'portrait'::text, 'side-banner'::text])),
+  avatar_overlay_opacity numeric DEFAULT 0.6 CHECK (avatar_overlay_opacity >= 0::numeric AND avatar_overlay_opacity <= 1::numeric),
+  avatar_overlay_color text DEFAULT '#000000'::text,
+  avatar_blur_nsfw boolean DEFAULT true,
+  portrait_frame_style text DEFAULT 'clean'::text CHECK (portrait_frame_style = ANY (ARRAY['clean'::text, 'polaroid'::text, 'foil'::text])),
+  portrait_frame_color text DEFAULT '#4B5563'::text,
+  banner_width text DEFAULT 'md'::text CHECK (banner_width = ANY (ARRAY['sm'::text, 'md'::text, 'lg'::text])),
+  banner_tint_from_avatar boolean DEFAULT false,
   CONSTRAINT user_global_chat_settings_pkey PRIMARY KEY (id),
   CONSTRAINT user_global_chat_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
@@ -296,8 +329,8 @@ CREATE TABLE public.user_onboarding_progress (
   task_id integer NOT NULL,
   completed_at timestamp with time zone,
   CONSTRAINT user_onboarding_progress_pkey PRIMARY KEY (user_id, task_id),
-  CONSTRAINT user_onboarding_progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT user_onboarding_progress_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.onboarding_checklist_items(id)
+  CONSTRAINT user_onboarding_progress_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.onboarding_checklist_items(id),
+  CONSTRAINT user_onboarding_progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.world_info_entries (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -312,8 +345,8 @@ CREATE TABLE public.world_info_entries (
 CREATE TABLE public.world_info_tags (
   world_info_id uuid NOT NULL,
   tag_id integer NOT NULL,
-  CONSTRAINT world_info_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id),
-  CONSTRAINT world_info_tags_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
+  CONSTRAINT world_info_tags_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id),
+  CONSTRAINT world_info_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id)
 );
 CREATE TABLE public.world_info_user_likes (
   user_id uuid NOT NULL,
@@ -329,8 +362,8 @@ CREATE TABLE public.world_info_users (
   world_info_id uuid NOT NULL,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT world_info_users_pkey PRIMARY KEY (id),
-  CONSTRAINT world_info_users_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id),
-  CONSTRAINT world_info_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+  CONSTRAINT world_info_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT world_info_users_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
 );
 CREATE TABLE public.world_infos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

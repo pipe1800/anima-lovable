@@ -512,6 +512,7 @@ export function DashboardContent() {
                 <AvatarImage 
                   src={profile?.avatar_url || "https://images.unsplash.com/photo-1649972904349-6e44c42644a7?w=150&h=150&fit=crop&crop=face"} 
                   alt={profile?.username || "User"} 
+                  className="object-cover"
                 />
                 <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-xs sm:text-base">
                   {profile?.username?.substring(0, 2).toUpperCase() || user.email?.substring(0, 2).toUpperCase() || 'U'}

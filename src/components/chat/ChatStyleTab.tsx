@@ -26,8 +26,6 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
     user_text_color: string;
     show_character_avatar: boolean;
     show_user_avatar: boolean;
-    avatar_shape: 'circle' | 'rounded';
-    avatar_size: 'sm' | 'md' | 'lg';
     background_image_url: string | null;
     ai_bubble_color: string;
     ai_bubble_opacity: number;
@@ -39,6 +37,12 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
     action_color: string | null;
     emphasis_color: string | null;
     parenthetical_color: string | null;
+    // New avatar style controls
+    avatar_style: 'classic' | 'bubble-bg' | 'portrait' | 'side-banner';
+    portrait_frame_style: 'clean' | 'polaroid' | 'foil';
+    portrait_frame_color: string;
+    banner_width: 'sm' | 'md' | 'lg';
+    banner_tint_from_avatar: boolean;
   }>>({});
 
   const effective = {
@@ -48,8 +52,6 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
     user_text_color: pending.user_text_color ?? settings?.user_text_color ?? '#FFFFFF',
     show_character_avatar: pending.show_character_avatar ?? settings?.show_character_avatar ?? true,
     show_user_avatar: pending.show_user_avatar ?? settings?.show_user_avatar ?? false,
-    avatar_shape: pending.avatar_shape ?? settings?.avatar_shape ?? 'circle',
-    avatar_size: pending.avatar_size ?? settings?.avatar_size ?? 'md',
     background_image_url: pending.background_image_url ?? settings?.background_image_url ?? null,
     ai_bubble_color: pending.ai_bubble_color ?? settings?.ai_bubble_color ?? '#1f2937',
     ai_bubble_opacity: pending.ai_bubble_opacity ?? settings?.ai_bubble_opacity ?? 0.9,
@@ -60,6 +62,12 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
     action_color: (pending.action_color ?? settings?.action_color ?? null) as string | null,
     emphasis_color: (pending.emphasis_color ?? settings?.emphasis_color ?? null) as string | null,
     parenthetical_color: (pending.parenthetical_color ?? settings?.parenthetical_color ?? null) as string | null,
+    // New avatar style fields
+    avatar_style: pending.avatar_style ?? settings?.avatar_style ?? 'classic',
+    portrait_frame_style: pending.portrait_frame_style ?? settings?.portrait_frame_style ?? 'clean',
+    portrait_frame_color: pending.portrait_frame_color ?? settings?.portrait_frame_color ?? '#4B5563',
+    banner_width: pending.banner_width ?? settings?.banner_width ?? 'md',
+    banner_tint_from_avatar: pending.banner_tint_from_avatar ?? settings?.banner_tint_from_avatar ?? false,
   };
 
   const setField = <K extends keyof typeof effective>(key: K, value: (typeof effective)[K]) => {
@@ -396,6 +404,31 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
           <h3 className="text-white font-medium text-sm">Avatar Options</h3>
         </div>
         <div className="space-y-4">
+          {/* Avatar Style Selector */}
+          <div>
+            <Label className="text-gray-300 text-sm mb-3 block">Avatar Style</Label>
+            <RadioGroup value={effective.avatar_style} onValueChange={(v) => setField('avatar_style', v as any)} className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem id="style-classic" value="classic" />
+                <Label htmlFor="style-classic" className="text-gray-300 cursor-pointer">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-white">Classic</span>
+                    <span className="text-xs text-gray-400">Traditional avatar display</span>
+                  </div>
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem id="style-bubble-bg" value="bubble-bg" />
+                <Label htmlFor="style-bubble-bg" className="text-gray-300 cursor-pointer">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-white">Bubble Background</span>
+                    <span className="text-xs text-gray-400">Avatar becomes chat bubble background</span>
+                  </div>
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
+          
           <div className="flex items-center justify-between">
             <span className="text-gray-300 text-sm">Show Character Avatar</span>
             <Switch checked={effective.show_character_avatar} onCheckedChange={(v) => setField('show_character_avatar', v as any)} className="data-[state=checked]:bg-[#FF7A00]" />
@@ -403,38 +436,6 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
           <div className="flex items-center justify-between">
             <span className="text-gray-300 text-sm">Show Your Avatar</span>
             <Switch checked={effective.show_user_avatar} onCheckedChange={(v) => setField('show_user_avatar', v as any)} className="data-[state=checked]:bg-[#FF7A00]" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-gray-300 text-sm">Avatar Shape</Label>
-              <RadioGroup value={effective.avatar_shape} onValueChange={(v) => setField('avatar_shape', v as any)} className="mt-2 flex gap-6">
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem id="shape-circle" value="circle" />
-                  <Label htmlFor="shape-circle" className="text-gray-300 cursor-pointer">Circle</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem id="shape-rounded" value="rounded" />
-                  <Label htmlFor="shape-rounded" className="text-gray-300 cursor-pointer">Rounded</Label>
-                </div>
-              </RadioGroup>
-            </div>
-            <div>
-              <Label className="text-gray-300 text-sm">Avatar Size</Label>
-              <RadioGroup value={effective.avatar_size} onValueChange={(v) => setField('avatar_size', v as any)} className="mt-2 flex gap-6">
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem id="size-sm" value="sm" />
-                  <Label htmlFor="size-sm" className="text-gray-300 cursor-pointer">Small</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem id="size-md" value="md" />
-                  <Label htmlFor="size-md" className="text-gray-300 cursor-pointer">Medium</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem id="size-lg" value="lg" />
-                  <Label htmlFor="size-lg" className="text-gray-300 cursor-pointer">Large</Label>
-                </div>
-              </RadioGroup>
-            </div>
           </div>
         </div>
       </Card>

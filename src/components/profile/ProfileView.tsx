@@ -203,7 +203,7 @@ export const ProfileView = () => {
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
           <Avatar className="w-16 h-16 ring-2 ring-border group-hover:ring-primary transition-all">
-            <AvatarImage src={character.avatar_url} alt={character.name} />
+            <AvatarImage src={character.avatar_url} alt={character.name} className="object-cover" />
             <AvatarFallback>{character.name[0]}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
@@ -237,7 +237,7 @@ export const ProfileView = () => {
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
           <Avatar className="w-12 h-12">
-            <AvatarImage src={persona.avatar_url} />
+            <AvatarImage src={persona.avatar_url} className="object-cover" />
             <AvatarFallback>
               <User className="w-6 h-6" />
             </AvatarFallback>
@@ -314,7 +314,7 @@ export const ProfileView = () => {
               ) : (
                 <>
                   <Avatar className="w-24 h-24 ring-4 ring-primary/20">
-                    <AvatarImage src={data?.profile?.avatar_url} alt={data?.profile?.username} />
+                    <AvatarImage src={data?.profile?.avatar_url} alt={data?.profile?.username} className="object-cover" />
                     <AvatarFallback className="text-2xl">
                       {data?.profile?.username?.[0]?.toUpperCase() || 'U'}
                     </AvatarFallback>

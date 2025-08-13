@@ -384,7 +384,7 @@ export default function PublicWorldInfoProfile() {
                     <div className="relative">
                       <Avatar className="h-24 w-24">
                         {worldInfo.avatar_url ? (
-                          <AvatarImage src={worldInfo.avatar_url} alt="World Info Avatar" />
+                          <AvatarImage src={worldInfo.avatar_url} alt="World Info Avatar" className="object-cover" />
                         ) : (
                           <AvatarFallback className="bg-gray-700 text-gray-300">
                             <BookOpen className="w-8 h-8" />

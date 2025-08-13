@@ -34,8 +34,6 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
   user_text_color: '#FFFFFF',
   show_character_avatar: true,
   show_user_avatar: false,
-  avatar_shape: 'circle',
-  avatar_size: 'md',
   background_image_url: null,
 
   // New defaults for bubble styles
@@ -50,6 +48,13 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
   action_color: null,
   emphasis_color: null,
   parenthetical_color: null,
+
+  // Advanced Avatar Style defaults
+  avatar_style: 'classic',
+  portrait_frame_style: 'clean',
+  portrait_frame_color: '#4B5563',
+  banner_width: 'md',
+  banner_tint_from_avatar: false,
 };
 
 // Get user's global chat settings (includes ALL settings)
@@ -241,8 +246,6 @@ export const useUpdateAvatarsSettings = () => {
     mutationFn: (avatars: {
       show_character_avatar?: boolean;
       show_user_avatar?: boolean;
-      avatar_shape?: 'circle' | 'rounded';
-      avatar_size?: 'sm' | 'md' | 'lg';
     }) => {
       return updateSettings.mutateAsync(avatars);
     },

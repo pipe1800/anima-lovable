@@ -244,7 +244,7 @@ export const ModerationContentQueue = () => {
             <div className="bg-[#0A0B0F] border border-gray-700/50 rounded-lg p-4">
               <div className="flex items-start gap-4 mb-4">
                 <Avatar className="w-16 h-16">
-                  <AvatarImage src={item.characterProfile?.avatar} />
+                  <AvatarImage src={item.characterProfile?.avatar} className="object-cover" />
                   <AvatarFallback>{item.characterProfile?.name?.[0]}</AvatarFallback>
                 </Avatar>
                 <div>

@@ -31,6 +31,8 @@ interface ChatMessagesProps {
   debugInfo?: string[];
   // New: allow parent to control background rendering
   renderBackground?: boolean;
+  // New: allow parent to override user avatar (persona > profile > default)
+  userAvatarUrlOverride?: string;
 }
 
 const ChatMessages = ({ 
@@ -47,6 +49,7 @@ const ChatMessages = ({
   isRealtimeConnected = false,
   debugInfo = [],
   renderBackground = true,
+  userAvatarUrlOverride,
 }: ChatMessagesProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -61,13 +64,17 @@ const ChatMessages = ({
     userTextColor: globalSettings?.user_text_color ?? '#FFFFFF',
     showCharacterAvatar: globalSettings?.show_character_avatar ?? true,
     showUserAvatar: globalSettings?.show_user_avatar ?? false,
-    avatarShape: (globalSettings?.avatar_shape ?? 'circle') as 'circle' | 'rounded',
-    avatarSize: (globalSettings?.avatar_size ?? 'md') as 'sm' | 'md' | 'lg',
     // Bubble styles
     aiBubbleColor: globalSettings?.ai_bubble_color ?? '#1f2937',
     aiBubbleOpacity: globalSettings?.ai_bubble_opacity ?? 0.9,
     userBubbleColor: globalSettings?.user_bubble_color ?? '#FF7A00',
     userBubbleOpacity: globalSettings?.user_bubble_opacity ?? 1,
+    // Advanced avatar styles
+    avatarStyle: (globalSettings?.avatar_style ?? 'classic') as 'classic' | 'bubble-bg' | 'portrait' | 'side-banner',
+    portraitFrameStyle: (globalSettings?.portrait_frame_style ?? 'clean') as 'clean' | 'polaroid' | 'foil',
+    portraitFrameColor: globalSettings?.portrait_frame_color ?? '#4B5563',
+    bannerWidth: (globalSettings?.banner_width ?? 'md') as 'sm' | 'md' | 'lg',
+    bannerTintFromAvatar: globalSettings?.banner_tint_from_avatar ?? false,
   }), [globalSettings]);
   
   // Compute font size class from global settings
@@ -311,6 +318,7 @@ const ChatMessages = ({
               trackedContext={contextToUse}
               addonSettings={computedAddonSettings}
               fontSizeClass={fontSizeClass}
+              userAvatarUrlOverride={userAvatarUrlOverride}
               {...({ styleOptions } as any)}
             />
           ))
@@ -345,6 +353,7 @@ const ChatMessages = ({
             trackedContext={contextToUse}
             addonSettings={computedAddonSettings}
             fontSizeClass={fontSizeClass}
+            userAvatarUrlOverride={userAvatarUrlOverride}
             {...({ styleOptions } as any)}
           />
         )}

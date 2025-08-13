@@ -197,7 +197,7 @@ export default function PublicCharacterProfile() {
                 {/* Avatar */}
                 <div className="flex justify-center lg:justify-start">
                   <Avatar className="w-32 h-32 ring-4 ring-[#FF7A00]/50">
-                    <AvatarImage src={character.avatar_url || "/placeholder.svg"} alt={character.name} />
+                    <AvatarImage src={character.avatar_url || "/placeholder.svg"} alt={character.name} className="object-cover" />
                     <AvatarFallback className="bg-gradient-to-br from-[#FF7A00] to-[#FF7A00]/70 text-white font-bold text-4xl">
                       {character.name.charAt(0).toUpperCase()}
                     </AvatarFallback>
@@ -238,7 +238,7 @@ export default function PublicCharacterProfile() {
                     <span className="text-gray-400">Created by</span>
                     <div className="flex items-center space-x-2">
                       <Avatar className="w-6 h-6">
-                        <AvatarImage src={character.creator?.avatar_url || "/placeholder.svg"} />
+                        <AvatarImage src={character.creator?.avatar_url || "/placeholder.svg"} className="object-cover" />
                         <AvatarFallback className="bg-[#FF7A00] text-white text-xs">
                           {character.creator?.username?.charAt(0).toUpperCase() || 'U'}
                         </AvatarFallback>

@@ -5,6 +5,8 @@ export type Persona = Tables<'personas'>;
 export type PersonaInsert = TablesInsert<'personas'>;
 export type PersonaUpdate = TablesUpdate<'personas'>;
 
+const DEFAULT_AVATAR = '/default_avatar.jpg';
+
 export async function createPersona(persona: Omit<PersonaInsert, 'user_id'>) {
   const { data: { user } } = await supabase.auth.getUser();
   
@@ -16,6 +18,7 @@ export async function createPersona(persona: Omit<PersonaInsert, 'user_id'>) {
     .from('personas')
     .insert([{
       ...persona,
+      avatar_url: (persona as any).avatar_url || DEFAULT_AVATAR,
       user_id: user.id
     }])
     .select()

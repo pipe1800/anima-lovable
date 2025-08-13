@@ -329,7 +329,7 @@ export const ChatConfigurationTab = ({
               >
                 <div className="flex items-center space-x-2">
                   <Avatar className="w-6 h-6">
-                    <AvatarImage src={displayPersona?.avatar_url || undefined} alt={displayPersona?.name} />
+                    <AvatarImage src={displayPersona?.avatar_url || undefined} alt={displayPersona?.name} className="object-cover" />
                     <AvatarFallback className="bg-[#FF7A00] text-white text-xs">
                       {displayPersona?.name?.split(' ').map(n => n[0]).join('') || '-'}
                     </AvatarFallback>
@@ -365,7 +365,7 @@ export const ChatConfigurationTab = ({
                 className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer"
               >
                 <Avatar className="w-8 h-8">
-                  <AvatarImage src={persona.avatar_url || undefined} alt={persona.name} />
+                  <AvatarImage src={persona.avatar_url || undefined} alt={persona.name} className="object-cover" />
                   <AvatarFallback className="bg-[#FF7A00] text-white text-xs">
                     {persona.name?.split(' ').map(n => n[0]).join('') || 'P'}
                   </AvatarFallback>

@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -176,7 +175,7 @@ export const AccountSettings = () => {
       const { error } = await updateProfile(user.id, {
         username: formData.username,
         bio: formData.bio,
-        avatar_url: formData.avatar_url,
+        avatar_url: formData.avatar_url || '/default_avatar.jpg',
         banner_url: formData.banner_url
       });
 
@@ -317,7 +316,7 @@ export const AccountSettings = () => {
             <Label className="text-gray-300 mb-2 block">Profile Picture</Label>
             <div className="flex items-center gap-4">
               <Avatar className="w-20 h-20">
-                <AvatarImage src={formData.avatar_url} alt={formData.username} />
+                <AvatarImage src={formData.avatar_url} alt={formData.username} className="object-cover" />
                 <AvatarFallback>
                   {formData.username?.[0]?.toUpperCase() || 'U'}
                 </AvatarFallback>

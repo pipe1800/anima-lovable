@@ -54,6 +54,7 @@ export const MobileHeader = ({
             <AvatarImage 
               src={profile?.avatar_url} 
               alt={profile?.username || username} 
+              className="object-cover"
             />
             <AvatarFallback className="bg-[#FF7A00] text-white text-xs sm:text-sm">
               {(profile?.username || username).charAt(0).toUpperCase()}

@@ -125,11 +125,12 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
     try {
       // For now, we'll just save the bio. In a real app, you'd upload the avatar to storage first
       const avatarUrl = avatarPreview || profile?.avatar_url || '';
+      const resolvedAvatar = avatarUrl || '/default_avatar.jpg';
       
       const { error } = await updateProfile(user.id, {
         username: username.trim() || undefined,
         bio: bio.trim() || undefined,
-        avatar_url: avatarUrl || undefined
+        avatar_url: resolvedAvatar || undefined
       });
 
       if (error) {
