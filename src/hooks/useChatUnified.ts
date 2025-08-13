@@ -155,11 +155,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           
           // ✅ SIMPLIFIED: Single invalidation with minimal delay
           setTimeout(() => {
-            queryClient.invalidateQueries({ 
-              queryKey: queryKeys.chat.messages(chatId),
-              exact: true 
-            });
-            addDebugInfo('Real-time query invalidated');
+            invalidationHelpers.invalidateChatData(queryClient, chatId);
+            addDebugInfo('Real-time chat data invalidated');
           }, 100); // Single, consistent delay
         }
       )
@@ -182,11 +179,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           
           // Invalidate to pick up context updates
           setTimeout(() => {
-            queryClient.invalidateQueries({ 
-              queryKey: queryKeys.chat.messages(chatId),
-              exact: true 
-            });
-            addDebugInfo('Real-time context update invalidated');
+            invalidationHelpers.invalidateChatData(queryClient, chatId);
+            addDebugInfo('Real-time context invalidated');
           }, 100);
         }
       )
@@ -343,10 +337,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                     });
                     
                     // Refresh messages to show final result
-                    queryClient.invalidateQueries({ 
-                      queryKey: queryKeys.chat.messages(chatId),
-                      exact: true 
-                    });
+                    invalidationHelpers.invalidateChatData(queryClient, chatId);
                     
                     // Context fetching logic...
                     setTimeout(async () => {
@@ -399,10 +390,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                   });
                   
                   // Refresh messages to show final result
-                  queryClient.invalidateQueries({ 
-                    queryKey: queryKeys.chat.messages(chatId),
-                    exact: true 
-                  });
+                  invalidationHelpers.invalidateChatData(queryClient, chatId);
                   
                   // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
                   console.log('🔄 AI message completed, fetching fresh context...');
@@ -502,10 +490,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                     });
                     
                     // Refresh messages to get the final database message
-                    queryClient.invalidateQueries({ 
-                      queryKey: queryKeys.chat.messages(chatId),
-                      exact: true 
-                    });
+                    invalidationHelpers.invalidateChatData(queryClient, chatId);
                     
                     // Context fetching logic...
                     setTimeout(async () => {
@@ -558,10 +543,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
                   });
                   
                   // Refresh messages to get the final database message
-                  queryClient.invalidateQueries({ 
-                    queryKey: queryKeys.chat.messages(chatId),
-                    exact: true 
-                  });
+                  invalidationHelpers.invalidateChatData(queryClient, chatId);
                   
                   // 🎯 SIMPLE CONTEXT FETCH - AI message completed, get fresh context
                   console.log('🔄 AI message completed (smooth mode), fetching fresh context...');
@@ -755,10 +737,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         const aiResult = await invokeStreamingAI(chatId, content, characterId, user.id, trackedContext, addonSettings, selectedPersonaId, selectedWorldInfoId);
         
         // ✅ SIMPLIFIED: Single invalidation after completion
-        queryClient.invalidateQueries({ 
-          queryKey: queryKeys.chat.messages(chatId),
-          exact: true 
-        });
+        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
         
         const endTime = Date.now();
         return { 
@@ -771,18 +750,11 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         
       } catch (error) {
         // ✅ SIMPLIFIED: Single invalidation on error for consistency
-        queryClient.invalidateQueries({ 
-          queryKey: queryKeys.chat.messages(chatId),
-          exact: true 
-        });
+        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
         throw error;
       }
     },
-    onSuccess: () => {
-      if (user) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
-      }
-    },
+    // Removed redundant onSuccess credits invalidation; handled by invalidateAfterMessage above
   });
 
   // ============================================================================

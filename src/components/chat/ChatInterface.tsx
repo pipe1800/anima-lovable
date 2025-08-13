@@ -11,7 +11,6 @@ import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { supabase } from '@/integrations/supabase/client';
 import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 import { handleChatError } from '@/utils/chatErrorHandling';
-import { useQueryClient } from '@tanstack/react-query';
 
 // Debug components - Only load when needed
 const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
@@ -68,7 +67,6 @@ const ChatInterface = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
-  const queryClient = useQueryClient();
 
   // Listen for auto-summary success events and show notification
   useEffect(() => {
@@ -255,15 +253,9 @@ const ChatInterface = ({
     if (existingChatId) {
       setCurrentChatId(existingChatId);
       setIsFirstMessage(false);
-      
-      // Single invalidation for greeting messages with longer delay
-      setTimeout(() => {
-        queryClient.invalidateQueries({ 
-          queryKey: ['chat', 'messages', existingChatId] 
-        });
-      }, 1000); // Single invalidation with 1s delay
+      // Removed redundant setTimeout invalidation; realtime + unified hook already keep messages fresh
     }
-  }, [existingChatId, queryClient]);
+  }, [existingChatId]);
 
   // Focus input when component mounts
   useEffect(() => {

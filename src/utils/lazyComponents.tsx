@@ -100,8 +100,7 @@ export const componentSizes = {
   contextDisplay: '~2KB',
   addonDebugPanel: '~5KB', 
   performanceMonitor: '~3KB',
-  databaseBatchOperations: '~4KB',
   
   // Total savings from lazy loading
-  totalSavings: '~14KB',
+  totalSavings: '~10KB',
 } as const;
