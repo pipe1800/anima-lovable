@@ -12,9 +12,10 @@ interface ChatStyleTabProps {
   currentChatId?: string | null;
   onUnsavedChange?: (has: boolean) => void;
   discardSignal?: number;
+  onSaved?: () => void;
 }
 
-export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUnsavedChange, discardSignal }) => {
+export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUnsavedChange, discardSignal, onSaved }) => {
   const { data: settings } = useUserGlobalChatSettings();
   const updateGlobalSettings = useUpdateGlobalChatSettings();
   const updateBackground = useUpdateBackgroundImage();
@@ -129,6 +130,8 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUns
         }
       }
       setPending({});
+      // Notify parent after successful save
+      onSaved?.();
     } catch (e) {
       console.error('Failed to save style settings', e);
     } finally {

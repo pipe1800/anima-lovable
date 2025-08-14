@@ -280,10 +280,8 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
 
                 const AvatarSlice = (
                   <div 
-                    className="relative flex-shrink-0"
+                    className="relative flex-shrink-0 w-[5.6rem] h-[7rem] md:w-32 md:h-40"
                     style={{
-                      width: '6.4rem', // 20% smaller than 8rem (w-32)
-                      height: '8rem',  // 20% smaller than 10rem (h-40)
                       backgroundImage: `url(${imageUrl})`,
                       backgroundSize: 'cover',
                       backgroundPosition: 'center',

@@ -558,7 +558,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const loading = chatsLoading || (!characterDetailsOverride && characterDetailsQuery.isLoading);
 
   return (
-    <div className="flex flex-col md:flex-row h-full bg-[#121212] relative overflow-hidden">
+    <div className="flex flex-col md:flex-row min-h-[100dvh] md:h-full bg-[#121212] relative overflow-hidden">
       {/* Mobile Header - Only visible on mobile */}
       <div className="md:hidden">
         <MobileHeader 

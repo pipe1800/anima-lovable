@@ -255,6 +255,11 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatIdParam), exact: true });
     // Fetch context shortly after backend finishes
     setTimeout(() => fetchAndUpdateContext(chatIdParam), 1000);
+    // Notify UI that AI response is done
+    try {
+      const ev = new CustomEvent('chat-ai-response-finished');
+      window.dispatchEvent(ev);
+    } catch {}
   }, [queryClient, fetchAndUpdateContext, user?.id]);
 
   const invokeStreamingAI = async (

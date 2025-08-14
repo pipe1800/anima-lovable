@@ -580,7 +580,6 @@ export function DashboardContent() {
         </div>
 
 
-        {/* Your Dashboard sections - moved above Daily Quest */}
         <Card className="bg-[#1a1a2e] border-gray-700/50 md:mx-0 -mx-3 md:rounded-lg rounded-none border-x-0 md:border-x" style={{ minHeight: 'calc(100vh - 250px)' }}>
           <CardHeader className="pb-2 sm:pb-4 px-3 sm:px-6">
             <div className="flex items-center justify-between">

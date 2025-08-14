@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -7,7 +6,6 @@ import { Button } from '@/components/ui/button';
 export const NotificationSettings = () => {
   const [notifications, setNotifications] = useState({
     emailFeaturesAnnouncements: true,
-    emailDailyQuests: false,
     inAppCharacterUpdates: true,
     inAppFollowers: false
   });
@@ -44,17 +42,6 @@ export const NotificationSettings = () => {
           <Switch 
             checked={notifications.emailFeaturesAnnouncements}
             onCheckedChange={(checked) => handleToggleChange('emailFeaturesAnnouncements', checked)}
-          />
-        </div>
-
-        {/* Email Notifications: Daily Quest Reminders */}
-        <div className="flex items-center justify-between py-4 px-6 bg-gray-800/30 rounded-lg border border-gray-700">
-          <div className="flex-1">
-            <Label className="text-white font-medium">Email Notifications: Daily Quest Reminders</Label>
-          </div>
-          <Switch 
-            checked={notifications.emailDailyQuests}
-            onCheckedChange={(checked) => handleToggleChange('emailDailyQuests', checked)}
           />
         </div>
 

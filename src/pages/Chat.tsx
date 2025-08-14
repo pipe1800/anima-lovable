@@ -4,7 +4,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import ChatInterface from '@/components/chat/ChatInterface';
 import { ChatLayout } from '@/components/chat/ChatLayout';
-import OnboardingChecklist from '@/components/OnboardingChecklist';
 import { TutorialManager } from '@/components/tutorial/TutorialManager';
 import { useContextManagement } from '@/hooks/useContextManagement';
 import type { TrackedContext } from '@/types/chat';
@@ -53,7 +52,7 @@ const Chat = () => {
       }
       const isCompleted = (currentUser as any).user_metadata?.onboarding_completed;
       setOnboardingCompleted(!!isCompleted);
-      setShowOnboarding(!isCompleted);
+      setShowOnboarding(false);
       setLoading(false);
     } else {
       // Not authenticated
@@ -232,18 +231,7 @@ const Chat = () => {
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen w-full">
-        {/* Onboarding Checklist - Mobile Responsive */}
-        {showOnboarding && !onboardingCompleted && (
-          <div className="fixed inset-0 z-50 md:relative md:inset-auto">
-            <OnboardingChecklist
-              currentStep={isFirstMessage ? 2 : 3}
-              isVisible={true}
-              isCompleting={!isFirstMessage}
-            />
-          </div>
-        )}
-
+      <div className="flex h-[100dvh] w-full md:h-screen">
         {/* Main Chat Layout */}
         <div className="flex-1 flex flex-col h-full">
           <ChatLayout 

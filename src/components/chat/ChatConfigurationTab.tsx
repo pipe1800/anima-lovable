@@ -44,6 +44,7 @@ interface ChatConfigurationTabProps {
   userTimezone: string;
   onUnsavedChange?: (has: boolean) => void;
   discardSignal?: number;
+  onSaved?: () => void;
 }
 
 export const ChatConfigurationTab = ({
@@ -69,6 +70,7 @@ export const ChatConfigurationTab = ({
   userTimezone,
   onUnsavedChange,
   discardSignal,
+  onSaved,
 }: ChatConfigurationTabProps) => {
   const { subscription } = useAuth();
   const queryClient = useQueryClient();
@@ -321,6 +323,8 @@ export const ChatConfigurationTab = ({
       setHasPersonaChange(false);
       setHasUnsavedChanges(false);
       setPendingWorldInfo(null);
+      // Notify parent after successful save
+      onSaved?.();
     } catch (error) {
       console.error('Error saving settings:', error);
       toast.error('Failed to save settings');

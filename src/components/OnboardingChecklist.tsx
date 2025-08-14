@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Check } from 'lucide-react';
 
@@ -25,7 +24,7 @@ const OnboardingChecklist = ({ currentStep, isVisible, isCompleting = false }: O
       isCompleting ? 'animate-pulse' : ''
     }`}>
       <h3 className="text-[#FF7A00] font-bold text-lg mb-3">
-        {isCompleting ? 'Quest Complete! 🎉' : 'Your First Quest'}
+        {isCompleting ? 'Setup Complete! 🎉' : 'Getting Started'}
       </h3>
       
       <div className="space-y-3">
@@ -73,7 +72,7 @@ const OnboardingChecklist = ({ currentStep, isVisible, isCompleting = false }: O
 
       {isCompleting && (
         <p className="text-center text-green-400 text-sm mt-3 animate-fade-in">
-          Welcome to your adventure! 🚀
+          Welcome! 🚀
         </p>
       )}
     </div>

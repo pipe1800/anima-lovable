@@ -125,6 +125,15 @@ export default function RightPanel(props: RightPanelProps) {
 
   const hasUnsaved = configHasUnsaved || styleHasUnsaved;
 
+  // Close panel on mobile after successful save in child tabs
+  const handleChildSaved = () => {
+    try {
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        onClose();
+      }
+    } catch {}
+  };
+
   // Unsaved changes dialog state
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   type PendingAction =
@@ -349,12 +358,14 @@ export default function RightPanel(props: RightPanelProps) {
                         userTimezone={userTimezone}
                         onUnsavedChange={setConfigHasUnsaved}
                         discardSignal={discardSignal}
+                        onSaved={handleChildSaved}
                       />
                     ) : (
                       <ChatStyleTab
                         currentChatId={currentChatId}
                         onUnsavedChange={setStyleHasUnsaved}
                         discardSignal={discardSignal}
+                        onSaved={handleChildSaved}
                       />
                     )}
                   </Suspense>

@@ -601,7 +601,7 @@ export default function CharacterProfile() {
                   <Button
                     onClick={handleStartChat}
                     disabled={isCreating}
-                    className="flex-1 sm:flex-initial"
+                    className="flex-1 sm:flex-initial h-14 sm:h-11 text-base sm:text-sm"
                     size="lg"
                   >
                     {isCreating ? (

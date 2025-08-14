@@ -250,6 +250,16 @@ const ChatInterface = ({
     inputRef.current?.focus();
   }, []);
 
+  // Refocus input when AI finishes responding to keep flow fluent
+  useEffect(() => {
+    const onAiFinished = () => {
+      // Delay a tick to ensure DOM settles
+      setTimeout(() => inputRef.current?.focus(), 50);
+    };
+    window.addEventListener('chat-ai-response-finished', onAiFinished as any);
+    return () => window.removeEventListener('chat-ai-response-finished', onAiFinished as any);
+  }, []);
+
   // Sync selected persona when prop changes
   useEffect(() => {
     if (propSelectedPersonaId !== undefined) {
@@ -302,6 +312,9 @@ const ChatInterface = ({
         effectiveTrackedContext
       );
 
+      // Immediately refocus after sending
+      requestAnimationFrame(() => inputRef.current?.focus());
+
       if (onMessageSent) await onMessageSent();
 
       // Update metrics
@@ -311,11 +324,6 @@ const ChatInterface = ({
       if (isFirstMessage) {
         setIsFirstMessage(false);
         onFirstMessage();
-        toast({
-          title: "🏆 Achievement Unlocked: First Contact!",
-          description: "You've earned 100 free credits for completing your first quest. Use them to unlock premium features!",
-          duration: 5000
-        });
       }
 
     } catch (error: any) {

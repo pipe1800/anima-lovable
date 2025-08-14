@@ -101,10 +101,12 @@ export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCha
         {sortedCharacters.map((character, index) => (
           <Card
             key={character.id}
-            className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-80 group"
+            className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-80 group cursor-pointer"
             style={{
               animation: `fade-in 0.6s ease-out ${index * 0.1}s both`
-            }}
+            }
+            }
+            onClick={() => { if (window.innerWidth < 768) handleViewCharacter(character); }}
           >
             <CardContent className="p-0 relative h-full">
               <img 

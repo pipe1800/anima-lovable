@@ -5,7 +5,6 @@ import { User } from '@supabase/supabase-js';
 import VibeSelection from '@/components/onboarding/VibeSelection';
 import ProfileSetup from '@/components/onboarding/ProfileSetup';
 import PersonaCreation from '@/components/onboarding/PersonaCreation';
-import WelcomeModal from '@/components/WelcomeModal';
 import CharacterSelection from '@/components/onboarding/CharacterSelection';
 import OnboardingProgressBar from '@/components/onboarding/OnboardingProgressBar';
 
@@ -14,7 +13,6 @@ const Onboarding = () => {
   const [user, setUser] = useState<User | null>(null);
   const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showWelcome, setShowWelcome] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const navigate = useNavigate();
 
@@ -64,16 +62,6 @@ const Onboarding = () => {
 
     return () => subscription.unsubscribe();
   }, [navigate, loading, onboardingCompleted]);
-
-  const handleWelcomeClose = () => {
-    setShowWelcome(false);
-  };
-
-  const handleBeginQuest = () => {
-    console.log('Begin Quest clicked - closing modal and starting onboarding');
-    setShowWelcome(false);
-    // Start the onboarding flow immediately
-  };
 
   const handleNext = () => {
     if (currentStep === 0 && selectedVibes.length === 0) return;
@@ -203,40 +191,38 @@ const Onboarding = () => {
   return (
     <div className="min-h-screen bg-[#121212] flex flex-col">
       {/* Progress Bar */}
-      {!showWelcome && (
-        <OnboardingProgressBar
-          currentStep={currentStep}
-          totalSteps={4}
-          onNext={handleNext}
-          onBack={handleBack}
-          canGoNext={getCanGoNext()}
-        />
-      )}
+      <OnboardingProgressBar
+        currentStep={currentStep}
+        totalSteps={4}
+        onNext={handleNext}
+        onBack={handleBack}
+        canGoNext={getCanGoNext()}
+      />
 
       {/* Main Content */}
       <div className="flex-1 flex items-center justify-center p-2 sm:p-4 overflow-x-hidden">
-        {!showWelcome && currentStep === 0 && (
+        {currentStep === 0 && (
           <VibeSelection 
             selectedVibes={selectedVibes}
             setSelectedVibes={setSelectedVibes}
           />
         )}
         
-        {!showWelcome && currentStep === 1 && (
+        {currentStep === 1 && (
           <ProfileSetup
             onComplete={handleProfileComplete}
             onSkip={handleSkipProfile}
           />
         )}
 
-        {!showWelcome && currentStep === 2 && (
+        {currentStep === 2 && (
           <PersonaCreation
             onComplete={handlePersonaComplete}
             onSkip={handleSkipPersona}
           />
         )}
 
-        {!showWelcome && currentStep === 3 && (
+        {currentStep === 3 && (
           <CharacterSelection
             selectedVibes={selectedVibes}
             onCharacterSelect={handleCharacterSelect}

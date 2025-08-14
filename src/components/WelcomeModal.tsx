@@ -1,17 +1,14 @@
-
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
 
 interface WelcomeModalProps {
   isOpen: boolean;
   onClose: () => void;
   username: string;
-  onBeginQuest: () => void;
 }
 
-const WelcomeModal = ({ isOpen, onClose, username, onBeginQuest }: WelcomeModalProps) => {
+const WelcomeModal = ({ isOpen, onClose, username }: WelcomeModalProps) => {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent 
@@ -61,20 +58,8 @@ const WelcomeModal = ({ isOpen, onClose, username, onBeginQuest }: WelcomeModalP
 
             {/* Supporting text */}
             <p className="text-xl text-gray-300 mb-12 leading-relaxed max-w-xl mx-auto">
-              Your journey begins now. Complete your first quest to personalize your experience 
-              and meet your first AI companion.
+              Your journey begins now. Personalize your experience and meet your first AI companion.
             </p>
-
-            {/* CTA Button */}
-            <Button
-              onClick={onBeginQuest}
-              className="bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white font-bold text-xl px-12 py-6 rounded-xl shadow-2xl transition-all duration-300 transform hover:-translate-y-1 hover:shadow-[#FF7A00]/50"
-              style={{
-                boxShadow: '0 0 30px rgba(255, 122, 0, 0.3)',
-              }}
-            >
-              Begin Quest
-            </Button>
           </div>
 
           {/* Glitch effect overlay */}
