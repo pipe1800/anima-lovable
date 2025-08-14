@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import type { CharacterFormData } from '@/hooks/useCharacterCreation';
 import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface FinalizeStepProps {
   data: CharacterFormData;
@@ -25,7 +26,7 @@ interface FinalizeStepProps {
 type VisibilityType = 'public' | 'unlisted' | 'private';
 
 const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = false, isEditing = false, selectedTags, setSelectedTags }: FinalizeStepProps) => {
-  const [visibility, setVisibility] = useState<VisibilityType>(data.visibility || 'public');
+  const [visibility, setVisibility] = useState<VisibilityType>(data.visibility || 'private');
   const [enableNSFW, setEnableNSFW] = useState<boolean>(!!data.nsfw_enabled);
   const [userPlan, setUserPlan] = useState<string>('Guest Pass');
   const [nsfwTag, setNsfwTag] = useState<{ id: number; name: string } | null>(null);
@@ -34,6 +35,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   const [version, setVersion] = useState<string>(data.version || '1.0.0');
   const [characterNotes, setCharacterNotes] = useState<string>(data.notes?.character_notes || '');
   const [creatorNotes, setCreatorNotes] = useState<string>(data.notes?.creator_notes || '');
+  const [showPublishWarning, setShowPublishWarning] = useState(false);
 
   const { user } = useAuth();
 
@@ -78,7 +80,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   // Update form data when character data is loaded
   useEffect(() => {
     if (data) {
-      setVisibility(data.visibility || 'public');
+      setVisibility(data.visibility || 'private');
       setEnableNSFW(!!data.nsfw_enabled);
       setVersion(data.version || version || '1.0.0');
       setCharacterNotes(data.notes?.character_notes || '');
@@ -88,16 +90,16 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
   const visibilityOptions = [
     {
-      id: 'public' as VisibilityType,
-      title: 'Public',
-      description: 'Visible to everyone on the Discover page.',
-      icon: Globe,
-    },
-    {
       id: 'private' as VisibilityType,
       title: 'Private',
       description: 'Only you can chat with this character.',
       icon: Lock,
+    },
+    {
+      id: 'public' as VisibilityType,
+      title: 'Public',
+      description: 'Visible to everyone on the Discover page.',
+      icon: Globe,
     },
   ];
 
@@ -129,6 +131,13 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   };
 
   const tokenInfo = estimateCreatorTokenUsage(data, userPlan);
+
+  // Publish handling: confirm switching to public
+  const confirmPublish = () => {
+    setShowPublishWarning(false);
+    setVisibility('public');
+    onUpdate({ visibility: 'public' });
+  };
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 lg:p-8">
@@ -219,16 +228,26 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
           {visibilityOptions.map((option) => {
             const Icon = option.icon;
             const isSelected = visibility === option.id;
+            const isDisabled = isEditing && data.visibility === 'public';
             
             return (
               <button
                 key={option.id}
-                onClick={() => setVisibility(option.id)}
+                onClick={() => {
+                  if (isDisabled) return;
+                  if (option.id === 'public' && visibility !== 'public') {
+                    setShowPublishWarning(true);
+                  } else {
+                    setVisibility(option.id);
+                    onUpdate({ visibility: option.id });
+                  }
+                }}
                 className={`p-4 md:p-6 rounded-2xl border-2 transition-all duration-200 text-left hover:bg-gray-800/30 ${
                   isSelected 
                     ? 'border-[#FF7A00] bg-[#FF7A00]/10' 
                     : 'border-gray-600 bg-gray-800/20'
                 }`}
+                disabled={isDisabled}
               >
                 <div className="flex flex-col items-center text-center space-y-3 md:space-y-4">
                   <div className={`p-3 md:p-4 rounded-full ${
@@ -248,12 +267,30 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
                     <p className="text-gray-400 text-xs md:text-sm">
                       {option.description}
                     </p>
+                    {isDisabled && option.id === 'public' && (
+                      <p className="text-xs text-gray-500 mt-1">Public status is permanent.</p>
+                    )}
                   </div>
                 </div>
               </button>
             );
           })}
         </div>
+        {/* Publish warning dialog */}
+        <Dialog open={showPublishWarning} onOpenChange={setShowPublishWarning}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Make character public?</DialogTitle>
+            </DialogHeader>
+            <p>Publishing is irreversible: once public, this character cannot be made private or deleted.</p>
+            <div className="flex gap-2 justify-end mt-4">
+              <Button onClick={() => setShowPublishWarning(false)} variant="outline">Cancel</Button>
+              <Button onClick={confirmPublish} className="bg-gradient-to-r from-[#FF7A00] to-[#FF7A00]/80 hover:from-[#FF7A00]/90 hover:to-[#FF7A00]/70 text-white">
+                Publish
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* NSFW Toggle */}
         <div className="bg-gray-800/30 rounded-xl p-4 md:p-6 border border-gray-700/50">

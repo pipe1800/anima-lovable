@@ -463,7 +463,6 @@ export const getCharacterDetails = async (characterId: string) => {
     .eq('id', characterId)
     .maybeSingle()
 
-
   if (error || !data) {
     console.error('❌ Failed to fetch character:', error)
     return { data: null, error }
@@ -509,6 +508,20 @@ export const getCharacterDetails = async (characterId: string) => {
 
   return { data: characterWithDetails, error: null }
 }
+
+// Helper: fetch sticky publish flag without strict typing constraints
+export const getCharacterWasPublic = async (characterId: string): Promise<boolean> => {
+  try {
+    const { data } = await (supabase as any)
+      .from('characters')
+      .select('was_public')
+      .eq('id', characterId)
+      .maybeSingle();
+    return !!data?.was_public;
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Create a new character
@@ -1631,3 +1644,23 @@ export const getUserPersonasForProfile = async (userId: string) => {
 
   return { data: data || [], error }
 }
+
+// =============================================================================
+// CHARACTER DELETION (private-only)
+// =============================================================================
+
+/**
+ * Delete a character that has never been public. Also deletes the user's chats with it.
+ * Server enforces ownership and visibility rules.
+ */
+export const deletePrivateCharacter = async (characterId: string) => {
+  try {
+    const { data, error } = await (supabase as any).rpc('delete_private_character', {
+      p_character_id: characterId,
+    });
+    return { data, error };
+  } catch (err) {
+    console.error('Error in deletePrivateCharacter:', err);
+    return { data: null, error: err };
+  }
+};

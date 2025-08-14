@@ -1,4 +1,3 @@
-
 export type Json =
   | string
   | number
@@ -1285,6 +1284,10 @@ export type Database = {
         Args: { p_chat_id: string; p_user_id: string }
         Returns: undefined
       }
+      delete_private_character: {
+        Args: { p_character_id: string }
+        Returns: undefined
+      }
       get_character_stats: {
         Args: { character_id: string }
         Returns: {
@@ -1354,7 +1357,7 @@ export type Tables<
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

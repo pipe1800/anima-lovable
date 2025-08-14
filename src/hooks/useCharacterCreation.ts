@@ -7,8 +7,7 @@ import { getCharacterDetails } from '@/lib/supabase-queries';
 import { upsertUserCharacterSettings, getUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
 import type { CharacterCreationData } from '@/lib/character-operations';
 import type { Tables } from '@/integrations/supabase/types';
-
-type Tag = Tables<'tags'>;
+type Tag = { id: number; name: string };
 
 export interface CharacterFormData {
   // Foundation
@@ -69,7 +68,7 @@ const INITIAL_CHARACTER_DATA: CharacterFormData = {
     example_dialogues: [],
     alternate_greetings: []
   },
-  visibility: 'public',
+  visibility: 'private',
   nsfw_enabled: false,
   default_persona_id: null,
   timeAwarenessEnabled: false
@@ -88,6 +87,7 @@ export function useCharacterCreation() {
   const [isEditing, setIsEditing] = useState(false);
   const [editingCharacterId, setEditingCharacterId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
+  const [originallyPublic, setOriginallyPublic] = useState(false);
 
   // Load character for editing
   useEffect(() => {
@@ -164,7 +164,7 @@ export function useCharacterCreation() {
           example_dialogues: definitionData.dialogue?.example_dialogues || [],
           alternate_greetings: definitionData.dialogue?.alternate_greetings || []
         },
-        visibility: character.visibility || 'public',
+        visibility: character.visibility || 'private',
         nsfw_enabled: character.nsfw_enabled || false,
         default_persona_id: character.default_persona_id,
         // ✅ Include user-specific settings
@@ -186,7 +186,8 @@ export function useCharacterCreation() {
       });
 
       setCharacterData(formData);
-      // Set selectedTags with the proper tag objects from the character's tags
+      setOriginallyPublic(formData.visibility === 'public');
+       // Set selectedTags with the proper tag objects from the character's tags
       if (character.tags && Array.isArray(character.tags)) {
         console.log('🏷️ Setting character tags:', character.tags);
         setSelectedTags(character.tags);
@@ -236,14 +237,19 @@ export function useCharacterCreation() {
     }
   }, [characterData]);
 
-  const saveCharacter = async () => {
-    console.log('🔄 Starting character save process:', {
-      isEditing,
-      editingCharacterId,
-      characterData: JSON.stringify(characterData, null, 2)
-    });
+  const saveCharacter = async (overrides?: Partial<CharacterFormData>) => {
+     console.log('🔄 Starting character save process:', {
+       isEditing,
+       editingCharacterId,
+       characterData: JSON.stringify(characterData, null, 2),
+       overrides
+     });
+    const effective: CharacterFormData = { ...characterData, ...(overrides || {}) } as CharacterFormData;
+    if (originallyPublic) {
+      effective.visibility = 'public';
+    }
 
-    if (!user) {
+     if (!user) {
       toast({
         title: "Authentication Required",
         description: "Please log in to save your character.",
@@ -253,8 +259,8 @@ export function useCharacterCreation() {
     }
 
     // Validate required fields
-    if (!characterData.name || 
-        !characterData.personality?.core_personality || !characterData.dialogue?.greeting) {
+    if (!effective.name || 
+        !effective.personality?.core_personality || !effective.dialogue?.greeting) {
       toast({
         title: "Missing Information",
         description: "Please fill in all required fields.",
@@ -270,92 +276,92 @@ export function useCharacterCreation() {
       if (isEditing && editingCharacterId) {
         console.log('📝 Updating existing character:', {
           characterId: editingCharacterId,
-          title: characterData.title, // ✅ Add this to see if title is present
-          tagline_will_be: characterData.title || '', // ✅ Show what tagline will be set to
-          timeAwareness: characterData.timeAwarenessEnabled, // ✅ Log the time awareness value
-          updateData: characterData,
-          selectedTags: selectedTags.map(t => t.name)
-        });
-        
-        // Ensure tags are included in the character data before updating
-        const updatedCharacterData = {
-          ...characterData,
-          title: characterData.title || '', // ✅ Explicitly ensure title is included
-          time_awareness_enabled: characterData.timeAwarenessEnabled, // ✅ Map from camelCase to snake_case
-          personality: {
-            ...characterData.personality,
-            tags: selectedTags.length > 0 ? selectedTags.map(tag => tag.name) : characterData.personality.tags
-          }
-        };
-        
-        console.log('📝 Final update data being sent:', {
-          title: updatedCharacterData.title,
-          name: updatedCharacterData.name,
-          description: updatedCharacterData.description,
-          visibility: updatedCharacterData.visibility,
-          time_awareness_enabled: updatedCharacterData.time_awareness_enabled, // ✅ Log it
-          user_settings_to_save: {
-            chat_mode: characterData.chatMode,
-            time_awareness_enabled: updatedCharacterData.time_awareness_enabled
-          }
-        });
-        
-        character = await updateCharacter(editingCharacterId, updatedCharacterData as CharacterCreationData);
-        
-        console.log('✅ Character updated successfully:', character);
-        
-        // Save chat mode settings (time awareness is now handled in updateCharacter)
-        if (characterData.chatMode) {
-          console.log('💾 Saving chat mode settings:', {
-            chat_mode: characterData.chatMode
-          });
-          
-          await upsertUserCharacterSettings(user.id, editingCharacterId, {
-            chat_mode: characterData.chatMode
-          });
-        }
-        
-        // Ensure selectedTags are properly included in characterData
-        if (selectedTags.length > 0) {
-          console.log('🏷️ Tags already included in update data:', selectedTags.map(t => t.name));
-        } else {
-          console.log('📝 No tags selected for this character');
-        }
-        
-        toast({
-          title: "Character Updated!",
-          description: `${character.name} has been successfully updated.`,
-        });
-      } else {
-        console.log('🆕 Creating new character:', {
-          characterData,
-          selectedTags: selectedTags.map(t => t.name)
-        });
-        
-        // Ensure tags are included in the character data before creating
-        const updatedCharacterData = {
-          ...characterData,
-          time_awareness_enabled: characterData.timeAwarenessEnabled, // ✅ Map from camelCase to snake_case
-          personality: {
-            ...characterData.personality,
-            tags: selectedTags.length > 0 ? selectedTags.map(tag => tag.name) : characterData.personality.tags
-          }
-        };
-        
-        character = await createCharacter(updatedCharacterData as CharacterCreationData);
-        
-        // Save chat mode for new character (time awareness is now handled in createCharacter)
-        if (character.id && characterData.chatMode) {
-          await upsertUserCharacterSettings(user.id, character.id, {
-            chat_mode: characterData.chatMode
-          });
-        }
-        
-        toast({
-          title: "Character Created!",
-          description: `${character.name} has been successfully created.`,
-        });
-      }
+          title: effective.title,
+          tagline_will_be: effective.title || '',
+          timeAwareness: effective.timeAwarenessEnabled,
+          updateData: effective,
+           selectedTags: selectedTags.map(t => t.name)
+         });
+         
+         // Ensure tags are included in the character data before updating
+         const updatedCharacterData = {
+          ...effective,
+          title: effective.title || '',
+          time_awareness_enabled: effective.timeAwarenessEnabled,
+           personality: {
+            ...effective.personality,
+            tags: selectedTags.length > 0 ? selectedTags.map(tag => tag.name) : effective.personality.tags
+           }
+         };
+         
+         console.log('📝 Final update data being sent:', {
+           title: updatedCharacterData.title,
+           name: updatedCharacterData.name,
+           description: updatedCharacterData.description,
+           visibility: updatedCharacterData.visibility,
+           time_awareness_enabled: updatedCharacterData.time_awareness_enabled,
+           user_settings_to_save: {
+            chat_mode: effective.chatMode,
+             time_awareness_enabled: updatedCharacterData.time_awareness_enabled
+           }
+         });
+         
+         character = await updateCharacter(editingCharacterId, updatedCharacterData as CharacterCreationData);
+         
+         console.log('✅ Character updated successfully:', character);
+         
+         // Save chat mode settings (time awareness is now handled in updateCharacter)
+        if (effective.chatMode) {
+           console.log('💾 Saving chat mode settings:', {
+            chat_mode: effective.chatMode
+           });
+           
+           await upsertUserCharacterSettings(user.id, editingCharacterId, {
+            chat_mode: effective.chatMode
+           });
+         }
+         
+         // Ensure selectedTags are properly included in characterData
+         if (selectedTags.length > 0) {
+           console.log('🏷️ Tags already included in update data:', selectedTags.map(t => t.name));
+         } else {
+           console.log('📝 No tags selected for this character');
+         }
+         
+         toast({
+           title: "Character Updated!",
+           description: `${character.name} has been successfully updated.`,
+         });
+       } else {
+         console.log('🆕 Creating new character:', {
+          characterData: effective,
+           selectedTags: selectedTags.map(t => t.name)
+         });
+         
+         // Ensure tags are included in the character data before creating
+         const updatedCharacterData = {
+          ...effective,
+          time_awareness_enabled: effective.timeAwarenessEnabled,
+           personality: {
+            ...effective.personality,
+            tags: selectedTags.length > 0 ? selectedTags.map(tag => tag.name) : effective.personality.tags
+           }
+         };
+         
+         character = await createCharacter(updatedCharacterData as CharacterCreationData);
+         
+         // Save chat mode for new character (time awareness is now handled in createCharacter)
+        if (character.id && effective.chatMode) {
+           await upsertUserCharacterSettings(user.id, character.id, {
+            chat_mode: effective.chatMode
+           });
+         }
+         
+         toast({
+           title: "Character Created!",
+           description: `${character.name} has been successfully created.`,
+         });
+       }
       
       setIsDirty(false);
       navigate('/dashboard');

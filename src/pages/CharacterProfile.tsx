@@ -35,6 +35,7 @@ import { TopBar } from '@/components/ui/TopBar';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 
 // Types
@@ -49,6 +50,7 @@ interface CharacterFullData {
   created_at: string;
   updated_at: string;
   creator_id: string;
+  was_public?: boolean; // allow delete only if false
   character_definitions: {
     greeting?: string;
     description?: string;
@@ -144,6 +146,7 @@ const useCharacterFullProfile = (characterId?: string) => {
         short_description: (viewData as any).short_description ?? undefined,
         avatar_url: (viewData as any).avatar_url ?? undefined,
         visibility: ((viewData as any).visibility as any) || 'public',
+        was_public: (viewData as any).was_public ?? false,
         interaction_count: (viewData as any).interaction_count,
         created_at: (viewData as any).created_at,
         updated_at: (viewData as any).updated_at ?? (viewData as any).created_at,
@@ -204,9 +207,11 @@ export default function CharacterProfile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { startChat, isCreating } = useChatCreation();
-
-  // Add state for text expansion
-  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+ 
+   // Add state for text expansion
+   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+   const [isDeleting, setIsDeleting] = useState(false);
 
   // Data fetching
   const { 
@@ -353,6 +358,28 @@ export default function CharacterProfile() {
     },
   });
 
+  const isOwner = user && character && character.creator_id === user.id;
+  const canDelete = isOwner && character.visibility === 'private' && character.was_public !== true;
+
+  const handleDeleteCharacter = async () => {
+    if (!characterId) return;
+    if (!canDelete) return;
+    try {
+      setIsDeleting(true);
+      const { deletePrivateCharacter } = await import('@/lib/supabase-queries');
+      const { error } = await deletePrivateCharacter(characterId);
+      if (error) throw error;
+      toast({ title: 'Character deleted' });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'characters', user?.id] });
+      setShowDeleteDialog(false);
+      navigate('/characters');
+    } catch (e: any) {
+      toast({ title: 'Delete failed', description: e?.message || String(e), variant: 'destructive' });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Handlers
   const handleStartChat = async () => {
     if (!user) {
@@ -381,8 +408,6 @@ export default function CharacterProfile() {
       description: "Character profile link copied to clipboard",
     });
   };
-
-  const isOwner = user && character && character.creator_id === user.id;
 
   // Loading state
   if (isLoading) {
@@ -471,16 +496,23 @@ export default function CharacterProfile() {
         }
         rightContent={
           isOwner && (
-            <Button
-              onClick={() => navigate('/character-creator', { 
-                state: { editingCharacter: character, isEditing: true } 
-              })}
-              variant="outline"
-              size="sm"
-            >
-              <Edit2 className="w-4 h-4 mr-2" />
-              Edit
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => navigate('/character-creator', { 
+                  state: { editingCharacter: character, isEditing: true } 
+                })}
+                variant="outline"
+                size="sm"
+              >
+                <Edit2 className="w-4 h-4 mr-2" />
+                Edit
+              </Button>
+              {canDelete && (
+                <Button variant="destructive" size="sm" onClick={() => setShowDeleteDialog(true)}>
+                   Delete
+                 </Button>
+               )}
+            </div>
           )
         }
       />
@@ -779,6 +811,32 @@ export default function CharacterProfile() {
           </div>
         )}
       </div>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this character?</DialogTitle>
+          </DialogHeader>
+          <p>
+            This action will permanently delete this character and also remove your chats with them.
+            This cannot be undone.
+          </p>
+          <div className="flex gap-2 justify-end mt-4">
+            <Button onClick={() => setShowDeleteDialog(false)} variant="outline" disabled={isDeleting}>Cancel</Button>
+            <Button onClick={handleDeleteCharacter} variant="destructive" disabled={isDeleting}>
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
