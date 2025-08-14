@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { Button } from '@/components/ui/button';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import logger from '@/utils/logger';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export const TutorialOverlay: React.FC = () => {
   const log = logger.scoped('TutorialOverlay');
@@ -22,9 +24,46 @@ export const TutorialOverlay: React.FC = () => {
   const [highlightedRect, setHighlightedRect] = useState<DOMRect | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  // Track the currently observed element and its ResizeObserver so we can swap when DOM nodes re-mount
+  const observedElRef = useRef<HTMLElement | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const prevFocusedElRef = useRef<HTMLElement | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
   const titleId = 'tutorial-tooltip-title';
+  const descId = 'tutorial-tooltip-desc';
+  const isMobile = useIsMobile();
+  const [waitingForTarget, setWaitingForTarget] = useState(false);
+  const highlightedDomRef = useRef<HTMLElement | null>(null);
+  const highlightClass = 'tutorial-highlight-target';
+  // Allow programmatic UI automation (e.g., clicking sidebar trigger) to bypass interaction blocking
+  const automationBypassRef = useRef(false);
+
+  // Prefer visible target; on mobile, prefer elements inside the mobile nav sheet
+  const pickVisibleTarget = (selector: string): HTMLElement | null => {
+    if (!selector) return null;
+    const list = Array.from(document.querySelectorAll(selector)) as HTMLElement[];
+    if (!list.length) return null;
+    const isNonZero = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const mobileSheet = document.querySelector('[data-tutorial="mobile-nav-sheet"]') as HTMLElement | null;
+    const candidates = list.filter(isNonZero);
+    if (!candidates.length) return null;
+    if (mobileSheet) {
+      const inSheet = candidates.filter(el => mobileSheet.contains(el));
+      if (inSheet.length) return inSheet[0];
+    }
+    // Fallback: pick the largest visible area
+    let best: HTMLElement = candidates[0];
+    let bestArea = 0;
+    for (const el of candidates) {
+      const r = el.getBoundingClientRect();
+      const area = r.width * r.height;
+      if (area > bestArea) { best = el; bestArea = area; }
+    }
+    return best;
+  };
 
   useEffect(() => {
     // Track prefers-reduced-motion
@@ -80,59 +119,332 @@ export const TutorialOverlay: React.FC = () => {
 
   // FIX 1: PROPERLY clear highlight when step has no target
   useEffect(() => {
-    if (currentStepData) {
-      if (currentStepData.target) {
-        log.debug('🎓 Setting highlight to:', currentStepData.target);
+    if (!currentStepData) return;
 
-        // Ensure correct right panel subtab is active based on target
-        const needsChatSubtab = /persona-section|world-info-section|global-addons-section/.test(currentStepData.target);
-        const needsStyleSubtab = /chat-style-subtab/.test(currentStepData.target);
-        if (needsChatSubtab) {
-          const btn = document.querySelector('[data-tutorial="chat-config-subtab"]') as HTMLElement | null;
-          // Only click if not already active (check class)
-          if (btn && !btn.className.includes('bg-[#FF7A00]')) {
-            setTimeout(() => btn.click(), 50);
-          }
-        } else if (needsStyleSubtab) {
-          const btn = document.querySelector('[data-tutorial="chat-style-subtab"]') as HTMLElement | null;
-          if (btn && !btn.className.includes('bg-[#FF7A00]')) {
-            setTimeout(() => btn.click(), 50);
-          }
-        }
+    // Reset waiting flag on step change
+    setWaitingForTarget(false);
 
-        setHighlight(currentStepData.target);
-        
-        if (currentStepData.scrollTo) {
-          // Scroll within right panel if target is inside it
-          const targetEl = document.querySelector(currentStepData.target) as HTMLElement | null;
-          const rightPanel = document.querySelector('[data-tutorial="right-panel"]') as HTMLElement | null;
-          const scrollContainer = rightPanel?.querySelector('.overflow-y-auto') as HTMLElement | null;
-          const container = scrollContainer ?? document.scrollingElement ?? document.documentElement;
-          if (targetEl) {
-            const top = (scrollContainer ? targetEl.offsetTop : targetEl.getBoundingClientRect().top + window.scrollY) - 100;
-            (container as any).scrollTo?.({ top, behavior: 'smooth' });
-          }
-        }
-        
-        if (currentStepData.target?.includes('right-panel-tabs') || currentStepData.target?.includes('config-tab')) {
-          setTimeout(() => {
-            const element = document.querySelector(currentStepData.target!);
-            element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }, 400);
-        }
-      } else {
-        log.debug('🎓 Clearing highlight - step has no target');
-        setHighlight(null);
-        setHighlightedRect(null);
-      }
+    if (!currentStepData.target) {
+      log.debug('🎓 Clearing highlight - step has no target');
+      setHighlight(null);
+      setHighlightedRect(null);
+      return;
     }
+
+    const targetSelector = currentStepData.target;
+
+    let cancelled = false;
+
+    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+    const waitFor = async <T,>(fn: () => T | null | undefined, { timeoutMs = 2500, intervalMs = 50 }: { timeoutMs?: number; intervalMs?: number } = {}): Promise<T | null> => {
+      const start = Date.now();
+      while (!cancelled && Date.now() - start < timeoutMs) {
+        const v = fn();
+        if (v) return v as T;
+        await sleep(intervalMs);
+      }
+      return null;
+    };
+
+    (async () => {
+      try {
+        setWaitingForTarget(true);
+        // Enable automation bypass while we manipulate UI (open/close panels, switch tabs)
+        automationBypassRef.current = true;
+
+        // Mobile-only: For nav steps (12–14), ensure the right panel is closed and mobile nav is open
+        const isNavStepMobile = isMobile && /create-character-nav|discover-nav|world-info-nav/.test(targetSelector);
+        let restoreRightPanel = false;
+        if (isNavStepMobile) {
+          // Close right panel if open
+          const panel = document.querySelector('[data-tutorial="right-panel"]') as HTMLElement | null;
+          if (panel) {
+            const closeBtn = panel.querySelector('button[aria-label="Close panel"]') as HTMLElement | null;
+            if (closeBtn) {
+              restoreRightPanel = true;
+              closeBtn.click();
+              await sleep(150);
+            }
+          }
+          // Request mobile nav to open and lock
+          const sheet = document.querySelector('[data-tutorial="mobile-nav-sheet"]') as HTMLElement | null;
+          if (!sheet) {
+            window.dispatchEvent(new Event('tutorial:mobileNav:open'));
+            // Wait for it to mount
+            await waitFor(() => document.querySelector('[data-tutorial="mobile-nav-sheet"]'), { timeoutMs: 1500, intervalMs: 50 });
+            await sleep(120);
+          }
+         }
+
+         // Ensure right panel is open if this target belongs inside it
+        const needsPanel = /persona-section|world-info-section|global-addons-section|core-enhancements|character-tracking|chat-(config|style)-subtab|right-panel-tabs|config-tab/.test(targetSelector);
+        if (!isNavStepMobile && needsPanel) {
+          let panel = document.querySelector('[data-tutorial="right-panel"]') as HTMLElement | null;
+          if (!panel) {
+            const toggleBtn = document.querySelector('[data-tutorial="right-panel-toggle"]') as HTMLElement | null;
+            toggleBtn?.click();
+            panel = await waitFor<HTMLElement>(() => document.querySelector('[data-tutorial="right-panel"]') as HTMLElement | null, { timeoutMs: 2000 });
+          }
+
+          // Switch to Config tab ONLY if this step needs Config content
+          const needsConfigContent = /persona-section|world-info-section|global-addons-section|core-enhancements|character-tracking|chat-(config|style)-subtab/.test(targetSelector);
+          const isConfigTabStep = targetSelector === '[data-tutorial="config-tab"]' && !!currentStepData.requiredInteraction;
+          if (needsConfigContent && !isConfigTabStep) {
+            const configTabBtn = document.querySelector('[data-tutorial="config-tab"]') as HTMLElement | null;
+            if (configTabBtn && !configTabBtn.className.includes('bg-[#FF7A00]')) {
+              configTabBtn.click();
+              await sleep(120);
+            }
+          }
+
+          // If the step needs Chat Config content (personas/world/addons), ensure that subtab
+          const needsChatSubtab = /persona-section|world-info-section|global-addons-section|core-enhancements|character-tracking/.test(targetSelector);
+          if (needsChatSubtab) {
+            const chatSubtabBtn = document.querySelector('[data-tutorial="chat-config-subtab"]') as HTMLElement | null;
+            if (chatSubtabBtn && !chatSubtabBtn.className.includes('bg-[#FF7A00]')) {
+              chatSubtabBtn.click();
+              await sleep(120);
+            }
+          }
+        }
+
+        // Now wait for the target element to exist and have a non-zero rect (prefer visible/mobile one)
+        const dynamicTimeout = /core-enhancements|character-tracking/.test(targetSelector) ? 6000 : 3000;
+        const targetEl = await waitFor<HTMLElement>(() => pickVisibleTarget(targetSelector), { timeoutMs: dynamicTimeout, intervalMs: 50 });
+
+        if (cancelled) return;
+
+        if (targetEl) {
+          // Set the highlight only after the element is ready
+          setHighlight(targetSelector);
+
+          // Scroll behavior only for panel content; nav items need no scroll
+          if (!isNavStepMobile) {
+            const rightPanel = document.querySelector('[data-tutorial="right-panel"]') as HTMLElement | null;
+            const scrollContainer = rightPanel?.querySelector('.overflow-y-auto') as HTMLElement | null;
+            if (scrollContainer && (scrollContainer.contains(targetEl))) {
+              const centerTargetInContainer = async () => {
+                const containerRect = scrollContainer.getBoundingClientRect();
+                const targetRect = targetEl.getBoundingClientRect();
+                const currentScrollTop = scrollContainer.scrollTop;
+                const targetTopInContainer = (targetRect.top - containerRect.top) + currentScrollTop;
+                const desiredTop = Math.max(0, targetTopInContainer - (scrollContainer.clientHeight - targetRect.height) / 2);
+                const clampedTop = Math.min(
+                  Math.max(0, desiredTop),
+                  Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight)
+                );
+                scrollContainer.scrollTo({ top: clampedTop, behavior: 'smooth' });
+              };
+
+              await centerTargetInContainer();
+              await sleep(220);
+              await centerTargetInContainer();
+              await sleep(120);
+            }
+          }
+        } else {
+          log.warn('🎓 Target not found in time for selector:', targetSelector);
+        }
+
+        // Restore right panel after nav steps if it was open before
+        if (isNavStepMobile && restoreRightPanel) {
+          const toggleBtn = document.querySelector('[data-tutorial="right-panel-toggle"]') as HTMLElement | null;
+          toggleBtn?.click();
+          await sleep(150);
+        }
+      } finally {
+        automationBypassRef.current = false;
+        if (!cancelled) setWaitingForTarget(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [currentStepData, setHighlight, log]);
+
+  // Track rect of highlighted element and position tooltip
+  useEffect(() => {
+    if (!isActive) return;
+
+    let rafId: number | null = null;
+
+    const schedule = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(update);
+    };
+
+    const attachResizeObserver = (el: HTMLElement | null) => {
+      // Disconnect previous
+      if (resizeObserverRef.current) {
+        try { resizeObserverRef.current.disconnect(); } catch {}
+        resizeObserverRef.current = null;
+      }
+      if (el) {
+        const ro = new ResizeObserver(() => schedule());
+        ro.observe(el);
+        resizeObserverRef.current = ro;
+      }
+      observedElRef.current = el;
+    };
+
+    const update = () => {
+      const selector = currentStepData?.target || '';
+      const latestEl = selector ? pickVisibleTarget(selector) : null;
+
+      // If the target node was replaced, re-attach the observer
+      if (latestEl !== observedElRef.current) {
+        attachResizeObserver(latestEl);
+      }
+
+      if (!latestEl) {
+        setHighlightedRect(null);
+        return;
+      }
+
+      const rect = latestEl.getBoundingClientRect();
+      // Ignore zero-sized rects
+      if (rect.width === 0 && rect.height === 0) {
+        setHighlightedRect(null);
+      } else {
+        setHighlightedRect(rect);
+      }
+    };
+
+    // Initial run
+    update();
+
+    const mo = new MutationObserver(() => schedule());
+    mo.observe(document.body, { attributes: true, childList: true, subtree: true });
+
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      // Cleanup observers
+      if (resizeObserverRef.current) {
+        try { resizeObserverRef.current.disconnect(); } catch {}
+        resizeObserverRef.current = null;
+      }
+      observedElRef.current = null;
+      mo.disconnect();
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+    };
+  }, [isActive, currentStepData]);
+
+  // Block interactions outside tooltip and highlighted target (only when requiredInteraction)
+  useEffect(() => {
+    if (!isActive || !currentStepData) return;
+
+    const tooltipEl = tooltipRef.current;
+
+    const shouldBlockOutside = !!currentStepData.requiredInteraction;
+    const shouldBlockTarget = !!currentStepData.preventTargetInteraction;
+
+    const getCurrentTargetEl = () => {
+      const selector = currentStepData?.target || '';
+      return selector ? pickVisibleTarget(selector) : null;
+    };
+
+    // When we are focusing nav steps on mobile, allow the mobile sheet area to receive events
+    const mobileSheetEl = document.querySelector('[data-tutorial="mobile-nav-sheet"]') as HTMLElement | null;
+
+    const allow = (node: EventTarget | null) => {
+      if (!node) return false;
+      // If we are running automation, do not block any events
+      if (automationBypassRef.current) return true;
+      const n = node as Node;
+      const targetElNow = getCurrentTargetEl(); // query live each event to avoid stale nodes
+      // If target clicks are disabled, do NOT allow inside target
+      if (shouldBlockTarget && targetElNow && targetElNow.contains(n)) return false;
+      if (tooltipEl && tooltipEl.contains(n)) return true;
+      if (mobileSheetEl && mobileSheetEl.contains(n)) return true;
+      if (targetElNow && targetElNow.contains(n)) return true;
+      return !shouldBlockOutside; // if not blocking outside, allow others
+    };
+
+    const block = (e: Event) => {
+      if (allow(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const events: Array<keyof DocumentEventMap> = [
+      'click',
+      'mousedown',
+      'mouseup',
+      'pointerdown',
+      'pointerup',
+      'touchstart',
+      'touchend',
+      'contextmenu'
+    ];
+
+    events.forEach(evt => document.addEventListener(evt, block, true));
+    return () => {
+      events.forEach(evt => document.removeEventListener(evt, block, true));
+    };
+  }, [isActive, currentStepData]);
+
+  // Auto-advance on target click for requiredInteraction steps (robust across re-renders/back navigation)
+  useEffect(() => {
+    if (!isActive || !currentStepData?.requiredInteraction || !currentStepData.target || currentStepData.preventTargetInteraction) return;
+
+    const stepIndexAtBind = currentStep; // capture to avoid double-advance
+    const selectorAtBind = currentStepData.target;
+
+    const handleCaptureClick = (e: MouseEvent | TouchEvent) => {
+      const targetEl = pickVisibleTarget(selectorAtBind);
+      if (!targetEl) return;
+      const node = e.target as Node | null;
+      if (node && targetEl.contains(node)) {
+        // Let the app handle the click, then advance if still on the same step
+        setTimeout(() => {
+          if (!isActive) return;
+          // Only advance if we are still on the same step and it still requires interaction
+          if (currentStep === stepIndexAtBind && currentStepData?.requiredInteraction) {
+            try { nextStep(); } catch {}
+          }
+        }, 120);
+      }
+    };
+
+    document.addEventListener('click', handleCaptureClick, true);
+    document.addEventListener('touchend', handleCaptureClick, true);
+    return () => {
+      document.removeEventListener('click', handleCaptureClick, true);
+      document.removeEventListener('touchend', handleCaptureClick, true);
+    };
+  }, [isActive, currentStepData, nextStep, currentStep]);
+
+  // Keyboard navigation: Esc to skip, ← to back, → to next (unless action required)
+  useEffect(() => {
+    if (!isActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        skipTutorial();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        previousStep();
+      } else if (e.key === 'ArrowRight') {
+        if (!currentStepData?.requiredInteraction) {
+          e.preventDefault();
+          nextStep();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [isActive, currentStepData?.requiredInteraction, nextStep, previousStep, skipTutorial]);
 
   // Ensure sidebar is visible for navigation steps
   useEffect(() => {
     if (!isActive) return;
 
-    const isNavStep = !!currentStepData?.target && /-(nav)"\]$/.test(currentStepData.target);
+    const t = currentStepData?.target || '';
+    const isNavStep = t.includes('-nav"]');
     if (isNavStep) {
       const sidebarCollapsed = localStorage.getItem('sidebarCollapsed');
       if (sidebarCollapsed === 'true') {
@@ -148,264 +460,134 @@ export const TutorialOverlay: React.FC = () => {
     }
   }, [isActive, currentStepData]);
 
-  useEffect(() => {
-    if (!highlightedElement) {
-      setHighlightedRect(null);
-      return;
-    }
-
-    let raf = 0;
-    const updateRect = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const element = document.querySelector(highlightedElement);
-        if (element) {
-          setHighlightedRect(element.getBoundingClientRect());
-        } else {
-          setHighlightedRect(null);
-        }
-      });
-    };
-
-    // Initial
-    updateRect();
-
-    // Observe size/position changes without causing thrash
-    const element = document.querySelector(highlightedElement) as HTMLElement | null;
-    const ro = element ? new ResizeObserver(updateRect) : null;
-    ro?.observe(element!);
-
-    window.addEventListener('scroll', updateRect, true);
-    window.addEventListener('resize', updateRect);
-    const mo = new MutationObserver(updateRect);
-    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
-    document.addEventListener('transitionend', updateRect);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', updateRect, true);
-      window.removeEventListener('resize', updateRect);
-      document.removeEventListener('transitionend', updateRect);
-      mo.disconnect();
-      ro?.disconnect();
-    };
-  }, [highlightedElement]);
-
-  // Handle clicks globally
+  // Lock/unlock the mobile nav sheet during mobile nav steps to prevent flicker/auto-close
   useEffect(() => {
     if (!isActive) return;
-
-    const handleGlobalClick = (e: MouseEvent) => {
-      // Check if click is on highlighted element or its children
-      if (highlightedElement) {
-        const targetElement = document.querySelector(highlightedElement);
-        if (targetElement) {
-          // Check if the clicked element is the target or any of its descendants
-          let clickedElement = e.target as Node;
-          while (clickedElement) {
-            if (clickedElement === targetElement) {
-              log.debug('🎓 Tutorial: Click on highlighted element - allowing through');
-              // Don't prevent default - let the click go through
-              
-              // If this step requires interaction, advance after a delay
-              if (currentStepData?.requiredInteraction) {
-                setTimeout(() => {
-                  log.debug('🎓 Tutorial: Advancing to next step after interaction');
-                  nextStep();
-                }, 500);
-              }
-              return;
-            }
-            clickedElement = clickedElement.parentNode as Node;
-          }
-        }
-      }
-
-      // Check if click is on the tutorial tooltip itself
-      const tooltipElement = document.querySelector('.tutorial-tooltip');
-      if (tooltipElement && tooltipElement.contains(e.target as Node)) {
-        log.debug('🎓 Tutorial: Click on tooltip, allowing interaction');
-        return;
-      }
-
-      // Check if click is on "Finish Tour" button in completion screen
-      const finishTourButton = (e.target as Element).closest('button');
-      if (finishTourButton && finishTourButton.textContent?.includes('Finish Tour')) {
-        log.debug('🎓 Tutorial: Click on Finish Tour button, allowing interaction');
-        return;
-      }
-
-      // Block all other clicks
-      log.debug('🎓 Tutorial: Blocking click outside highlighted area');
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-    };
-
-    // Add listener in capture phase to intercept all clicks
-    document.addEventListener('click', handleGlobalClick, true);
-    document.addEventListener('mousedown', handleGlobalClick, true);
-
+    const targetSelector = currentStepData?.target || '';
+    const isNavStepMobile = isMobile && /create-character-nav|discover-nav|world-info-nav/.test(targetSelector);
+    if (isNavStepMobile) {
+      // Request open and lock
+      window.dispatchEvent(new Event('tutorial:mobileNav:open'));
+    } else {
+      // Allow closing when not on a nav step
+      window.dispatchEvent(new Event('tutorial:mobileNav:unlock'));
+    }
     return () => {
-      document.removeEventListener('click', handleGlobalClick, true);
-      document.removeEventListener('mousedown', handleGlobalClick, true);
-    };
-  }, [isActive, highlightedElement, currentStepData, nextStep, log]);
-
-  // Add keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        skipTutorial();
-        return;
-      }
-      // Trap focus within tooltip
-      if (e.key === 'Tab' && tooltipRef.current) {
-        const focusables = tooltipRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        const active = document.activeElement as HTMLElement | null;
-        if (!e.shiftKey && active === last) {
-          e.preventDefault();
-          first.focus();
-          return;
-        }
-        if (e.shiftKey && active === first) {
-          e.preventDefault();
-          last.focus();
-          return;
-        }
-      }
-      // Arrow navigation only when interaction not required
-      if (e.key === 'ArrowRight' && !currentStepData?.requiredInteraction) {
-        nextStep();
-      } else if (e.key === 'ArrowLeft' && currentStep > 0) {
-        previousStep();
+      // On unmount or step change, if leaving a nav step, ensure unlock
+      if (!isNavStepMobile) {
+        window.dispatchEvent(new Event('tutorial:mobileNav:unlock'));
       }
     };
-
-    if (isActive) {
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [isActive, currentStep, currentStepData, nextStep, previousStep, skipTutorial]);
-
-  // Apply styles to highlighted elements to ensure they're clickable
-  useEffect(() => {
-    if (highlightedElement && isActive) {
-      const element = document.querySelector(highlightedElement) as HTMLElement;
-      if (element) {
-        // Store original values
-        const originalZIndex = element.style.zIndex;
-        const originalPosition = element.style.position;
-        const originalPointerEvents = element.style.pointerEvents;
-        
-        // Ensure element is above overlay and clickable
-        element.style.position = 'relative';
-        element.style.zIndex = '50003'; // Well above everything
-        element.style.pointerEvents = 'auto'; // Ensure it can receive clicks
-        
-        // Also ensure any child elements are clickable
-        const children = element.querySelectorAll('*');
-        children.forEach((child: Element) => {
-          const childEl = child as HTMLElement;
-          childEl.style.pointerEvents = 'auto';
-        });
-        
-        log.debug('🎓 Applied high z-index to highlighted element:', highlightedElement);
-        
-        return () => {
-          // Restore original values
-          element.style.zIndex = originalZIndex;
-          element.style.position = originalPosition;
-          element.style.pointerEvents = originalPointerEvents;
-          
-          // Restore children
-          children.forEach((child: Element) => {
-            const childEl = child as HTMLElement;
-            childEl.style.pointerEvents = '';
-          });
-        };
-      }
-    }
-  }, [highlightedElement, isActive]);
-
-  // Then check for currentStepData
-  if (!currentStepData) {
-    log.debug('🎓 TutorialOverlay: No step data');
-    return null;
-  }
-
-  const isLastStep = currentStep === tutorialSteps.length - 1;
-  const isMobile = window.innerWidth < 768;
+  }, [isActive, isMobile, currentStepData?.target]);
 
   const getTooltipPosition = () => {
-    if (!highlightedRect || !currentStepData.position) {
-      return {
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)'
-      };
+    const center = {
+      top: '50%',
+      left: '50%',
+      right: 'auto',
+      bottom: 'auto',
+      transform: 'translate(-50%, -50%)'
+    } as const;
+
+    // Force center when no target or no rect
+    if (!currentStepData.target || !highlightedRect) {
+      return center as any;
     }
 
-    const tooltipWidth = isMobile ? 300 : 400;
-    const tooltipHeight = 320; // Increased for better content fit
-    const margin = 20;
+    // Mobile-safe placement: avoid overlapping the highlighted element
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
+    const margin = 12;
+    const tooltipWidth = isMobile ? Math.min(Math.floor(viewportWidth * 0.92), 360) : 400;
+    const estTooltipHeight = isMobile ? 280 : 320;
 
-    let position: any = { top: 0, left: 0 };
+    if (isMobile) {
+      const spaceTop = Math.max(0, highlightedRect.top - margin);
+      const spaceBottom = Math.max(0, viewportHeight - highlightedRect.bottom - margin);
+
+      // Prefer placing below if enough space, else above
+      if (spaceBottom >= estTooltipHeight) {
+        return {
+          top: highlightedRect.bottom + margin,
+          left: Math.max(margin, Math.min(highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2, viewportWidth - tooltipWidth - margin)),
+          right: 'auto',
+          bottom: 'auto',
+          transform: 'none',
+          maxHeight: spaceBottom,
+        } as const;
+      }
+      if (spaceTop >= estTooltipHeight) {
+        return {
+          top: Math.max(margin, highlightedRect.top - estTooltipHeight - margin),
+          left: Math.max(margin, Math.min(highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2, viewportWidth - tooltipWidth - margin)),
+          right: 'auto',
+          bottom: 'auto',
+          transform: 'none',
+          maxHeight: spaceTop,
+        } as const;
+      }
+      // Not enough space either side: choose the larger side and clamp height
+      if (spaceBottom >= spaceTop) {
+        return {
+          top: highlightedRect.bottom + margin,
+          left: Math.max(margin, Math.min(highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2, viewportWidth - tooltipWidth - margin)),
+          right: 'auto',
+          bottom: 'auto',
+          transform: 'none',
+          maxHeight: Math.max(160, spaceBottom),
+        } as const;
+      }
+      return {
+        top: Math.max(margin, highlightedRect.top - Math.max(160, Math.min(estTooltipHeight, spaceTop)) - margin),
+        left: Math.max(margin, Math.min(highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2, viewportWidth - tooltipWidth - margin)),
+        right: 'auto',
+        bottom: 'auto',
+        transform: 'none',
+        maxHeight: Math.max(160, spaceTop),
+      } as const;
+    }
+
+    if (!currentStepData.position) {
+      return center as any;
+    }
+
+    let top = 0;
+    let left = 0;
 
     switch (currentStepData.position) {
       case 'left':
-        position.top = highlightedRect.top + highlightedRect.height / 2 - tooltipHeight / 2;
-        position.left = highlightedRect.left - tooltipWidth - margin;
-        
-        // If would go off screen, flip to right
-        if (position.left < margin) {
-          position.left = highlightedRect.right + margin;
-        }
+        top = highlightedRect.top + highlightedRect.height / 2 - estTooltipHeight / 2;
+        left = highlightedRect.left - tooltipWidth - margin;
+        if (left < margin) left = highlightedRect.right + margin;
         break;
-        
       case 'right':
-        position.top = highlightedRect.top + highlightedRect.height / 2 - tooltipHeight / 2;
-        position.left = highlightedRect.right + margin;
-        
-        // If would go off screen, flip to left
-        if (position.left + tooltipWidth > viewportWidth - margin) {
-          position.left = highlightedRect.left - tooltipWidth - margin;
-        }
+        top = highlightedRect.top + highlightedRect.height / 2 - estTooltipHeight / 2;
+        left = highlightedRect.right + margin;
+        if (left + tooltipWidth > viewportWidth - margin) left = highlightedRect.left - tooltipWidth - margin;
         break;
-        
       case 'top':
-        position.top = highlightedRect.top - tooltipHeight - margin;
-        position.left = highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2;
-        
-        // If too high, switch to bottom
-        if (position.top < margin) {
-          position.top = highlightedRect.bottom + margin;
-        }
+        top = highlightedRect.top - estTooltipHeight - margin;
+        left = highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2;
+        if (top < margin) top = highlightedRect.bottom + margin;
         break;
-        
       case 'bottom':
-        position.top = highlightedRect.bottom + margin;
-        position.left = highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2;
-        
-        // If too low, switch to top
-        if (position.top + tooltipHeight > viewportHeight - margin) {
-          position.top = highlightedRect.top - tooltipHeight - margin;
-        }
+      default:
+        top = highlightedRect.bottom + margin;
+        left = highlightedRect.left + highlightedRect.width / 2 - tooltipWidth / 2;
+        if (top + estTooltipHeight > viewportHeight - margin) top = highlightedRect.top - estTooltipHeight - margin;
         break;
     }
 
-    // Final boundary checks
-    position.left = Math.max(margin, Math.min(position.left, viewportWidth - tooltipWidth - margin));
-    position.top = Math.max(margin, Math.min(position.top, viewportHeight - tooltipHeight - margin));
+    // Guard invalid numbers
+    if (!Number.isFinite(top) || !Number.isFinite(left)) {
+      return center as any;
+    }
 
-    return position;
+    // Final clamp
+    left = Math.max(margin, Math.min(left, viewportWidth - tooltipWidth - margin));
+    top = Math.max(margin, Math.min(top, viewportHeight - estTooltipHeight - margin));
+
+    return { top, left, right: 'auto', bottom: 'auto', transform: 'none' } as const;
   };
 
   // Check if this is the final step
@@ -418,8 +600,8 @@ export const TutorialOverlay: React.FC = () => {
   
   // THEN check for final step (without isActive check)
   if (currentStep === tutorialSteps.length - 1) {
-    return (
-      <div className="tutorial-overlay" ref={overlayRef}>
+    return createPortal(
+      <div className="tutorial-overlay" ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 50000 }}>
         {/* Dark overlay */}
         <div 
           className="fixed inset-0 bg-black/80 z-[50000]"
@@ -428,9 +610,8 @@ export const TutorialOverlay: React.FC = () => {
             e.stopPropagation();
           }}
         />
-        
         {/* Centered completion message */}
-        <div className="fixed inset-0 flex items-center justify-center z-[50002]">
+        <div className="fixed inset-0 flex items-center justify-center z-[50002]" style={{ pointerEvents: 'auto' }}>
           <div className="bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-8 max-w-md text-center">
             <div className="mb-6">
               <div className="w-20 h-20 bg-[#FF7A00]/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -456,42 +637,60 @@ export const TutorialOverlay: React.FC = () => {
             </Button>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
-  return (
-    <div className="tutorial-overlay" ref={overlayRef}>
-      {/* Dark overlay with proper cutout */}
-      <div 
-        className="fixed inset-0" 
-        style={{
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          clipPath: highlightedRect 
-            ? `polygon(
-                0% 0%, 
-                0% 100%, 
-                ${highlightedRect.left - 8}px 100%,
-                ${highlightedRect.left - 8}px ${highlightedRect.top - 8}px,
-                ${highlightedRect.right + 8}px ${highlightedRect.top - 8}px,
-                ${highlightedRect.right + 8}px ${highlightedRect.bottom + 8}px,
-                ${highlightedRect.left - 8}px ${highlightedRect.bottom + 8}px,
-                ${highlightedRect.left - 8}px 100%,
-                100% 100%,
-                100% 0%
-              )`
-            : 'none',
-          pointerEvents: 'auto',
-          zIndex: 50000,
-        }}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-      />
+  // Dark overlay: render four-quadrant shields with asymmetric padding to avoid exposing adjacent borders above the target
+  return createPortal(
+    <div className="tutorial-overlay" ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 50000 }}>
+      {!highlightedRect ? (
+        <div className="fixed inset-0 bg-black/80 pointer-events-none z-[50000]" />
+      ) : (
+        <>
+          {(() => {
+            const padTop = 0; // no gutter — cutout is flush with target
+            const padBottom = 0;
+            const padLeft = 0;
+            const padRight = 0;
 
-      {/* DELETE the "Highlighted area cutout" div - REMOVED */}
-      
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            // Clamp padded rect to viewport with integer rounding to avoid subpixel bleed
+            const top = Math.max(0, Math.floor(highlightedRect.top - padTop));
+            const left = Math.max(0, Math.floor(highlightedRect.left - padLeft));
+            const bottom = Math.min(vh, Math.ceil(highlightedRect.bottom + padBottom));
+            const right = Math.min(vw, Math.ceil(highlightedRect.right + padRight));
+
+            return (
+              <>
+                {/* Top mask */}
+                <div
+                  className="fixed bg-black/80 z-[50000] pointer-events-none"
+                  style={{ top: 0, left: 0, right: 0, height: top, transform: 'translateZ(0)' }}
+                />
+                {/* Bottom mask */}
+                <div
+                  className="fixed bg-black/80 z-[50000] pointer-events-none"
+                  style={{ top: bottom, left: 0, right: 0, bottom: 0, transform: 'translateZ(0)' }}
+                />
+                {/* Left mask */}
+                <div
+                  className="fixed bg-black/80 z-[50000] pointer-events-none"
+                  style={{ top, left: 0, width: left, height: bottom - top, transform: 'translateZ(0)' }}
+                />
+                {/* Right mask */}
+                <div
+                  className="fixed bg-black/80 z-[50000] pointer-events-none"
+                  style={{ top, left: right, right: 0, height: bottom - top, transform: 'translateZ(0)' }}
+                />
+              </>
+            );
+          })()}
+        </>
+      )}
+
       {/* Highlight box with glow effect */}
       {highlightedRect && (
         <div
@@ -521,20 +720,30 @@ export const TutorialOverlay: React.FC = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={descId}
         tabIndex={-1}
-        className="tutorial-tooltip fixed z-[50002] bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-6"
+        className="tutorial-tooltip bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-6"
         style={{
+          position: 'fixed',
           ...getTooltipPosition(),
-          minWidth: isMobile ? '300px' : '400px',
-          maxWidth: isMobile ? '90vw' : '400px',
+          width: isMobile ? 'min(92vw, 360px)' : '400px',
+          maxHeight: isMobile ? '45vh' : undefined,
+          overflowY: 'auto',
           transition: reduceMotion ? 'none' : 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
-          opacity: highlightedRect || !currentStepData.target ? 1 : 0
+          opacity: (waitingForTarget || highlightedRect || !currentStepData.target) ? 1 : 0,
+          pointerEvents: 'auto',
+          zIndex: 50002
         }}
       >
+        {/* Live region for screen readers */}
+        <div className="sr-only" aria-live="polite">
+          Step {currentStep + 1} of {tutorialSteps.length}: {currentStepData.title}
+        </div>
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h3 id={titleId} className="text-white font-bold text-lg pr-4">{currentStepData.title}</h3>
           <Button
+            aria-label="Skip tutorial"
             variant="ghost"
             size="icon"
             onClick={skipTutorial}
@@ -546,7 +755,7 @@ export const TutorialOverlay: React.FC = () => {
 
         {/* Content */}
         <div className="mb-6">
-          <p className="text-gray-300 mb-3">{currentStepData.description}</p>
+          <p id={descId} className="text-gray-300 mb-3">{currentStepData.description}</p>
           {currentStepData.requiredInteraction && (
             <div className="bg-[#FF7A00]/10 border border-[#FF7A00]/30 rounded-lg p-3 mt-3">
               <p className="text-[#FF7A00] text-sm font-medium flex items-center gap-2">
@@ -560,7 +769,8 @@ export const TutorialOverlay: React.FC = () => {
         {/* Footer */}
         <div className="flex items-center justify-between">
           <div className="text-sm text-gray-500">
-            Step {currentStep + 1} of {tutorialSteps.length}
+            <div>Step {currentStep + 1} of {tutorialSteps.length}</div>
+
           </div>
           
           <div className="flex space-x-2">
@@ -575,8 +785,7 @@ export const TutorialOverlay: React.FC = () => {
                 Back
               </Button>
             )}
-            
-            {!isLastStep ? (
+            {currentStep < tutorialSteps.length - 1 ? (
               <Button
                 size="sm"
                 onClick={nextStep}
@@ -605,8 +814,11 @@ export const TutorialOverlay: React.FC = () => {
         {/* Progress bar */}
         <div className="mt-4 h-1 bg-gray-700 rounded-full overflow-hidden">
           <div 
-            className="h-full bg-[#FF7A00] transition-all duration-300"
-            style={{ width: `${((currentStep + 1) / tutorialSteps.length) * 100}%` }}
+            className="h-full bg-[#FF7A00]"
+            style={{ 
+              width: `${((currentStep + 1) / tutorialSteps.length) * 100}%`,
+              transition: reduceMotion ? 'none' : 'width 300ms ease'
+            }}
           />
         </div>
       </div>
@@ -638,8 +850,10 @@ export const TutorialOverlay: React.FC = () => {
         /* Reduced motion: disable animations */
         @media (prefers-reduced-motion: reduce) {
           .animate-pulse-glow { animation: none !important; }
+          .animate-pulse { animation: none !important; }
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -330,15 +330,16 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   const handleRightPanelToggle = useCallback(() => {
     logger.debug('🔧 Right panel toggle clicked:', { isActive, currentStep, rightPanelOpen });
-    setRightPanelOpen(prev => {
-      const newState = !prev;
-      if (newState && currentStep === 1 && isActive) {
-        logger.debug('🔧 Notifying tutorial of right panel toggle');
-        handleStepAction('right-panel-toggled');
-      }
-      return newState;
-    });
-  }, [currentStep, isActive, handleStepAction]);
+    setRightPanelOpen(prev => !prev);
+  }, [isActive, currentStep]);
+
+  // Advance tutorial after panel actually opens (Step 3 -> 4)
+  useEffect(() => {
+    if (isActive && currentStep === 2 && rightPanelOpen) {
+      logger.debug('🎓 Right panel opened, advancing tutorial from step 3 to 4');
+      handleStepAction('right-panel-toggled');
+    }
+  }, [isActive, currentStep, rightPanelOpen, handleStepAction]);
 
   // World Info selection handler -> use hook
   const handleWorldInfoSelect = (worldInfo: { id: string; name: string } | null) => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Menu, Home, Compass, MessageSquare, User, Settings, Crown, Zap, Users, Plus, LogOut, Star, ChevronLeft } from 'lucide-react';
@@ -24,6 +24,23 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = React.useState(false);
+  const lockedByTutorialRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const onOpen = () => {
+      lockedByTutorialRef.current = true;
+      setOpen(true);
+    };
+    const onUnlock = () => {
+      lockedByTutorialRef.current = false;
+    };
+    window.addEventListener('tutorial:mobileNav:open', onOpen as EventListener);
+    window.addEventListener('tutorial:mobileNav:unlock', onUnlock as EventListener);
+    return () => {
+      window.removeEventListener('tutorial:mobileNav:open', onOpen as EventListener);
+      window.removeEventListener('tutorial:mobileNav:unlock', onUnlock as EventListener);
+    };
+  }, []);
 
   const handleLogout = async () => {
     await signOut();
@@ -50,7 +67,11 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
 
   return (
     <div className="flex items-center space-x-3">
-      <Sheet open={open} onOpenChange={setOpen}>
+      <Sheet open={open} onOpenChange={(next) => {
+        // Ignore attempts to close when locked by the tutorial
+        if (lockedByTutorialRef.current && !next) return;
+        setOpen(next);
+      }}>
         <SheetTrigger asChild>
           <Button 
             data-tutorial="sidebar-trigger" 
@@ -61,7 +82,10 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
             <Menu className="h-7 w-7" />
           </Button>
         </SheetTrigger>
-      <SheetContent side="left" className="w-2/3 md:w-80 bg-[#121212] border-gray-700 p-0 [&>button]:hidden">
+      <SheetContent side="left" className="w-2/3 md:w-80 bg-[#121212] border-gray-700 p-0 [&>button]:hidden" data-tutorial="mobile-nav-sheet">
+        {/* A11y: Provide title and description for the dialog */}
+        <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+        <SheetDescription className="sr-only">Choose a destination from the list of links.</SheetDescription>
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="p-6 border-b border-gray-700 relative">
@@ -77,7 +101,7 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
             
             {/* Toggle button - matching desktop style */}
             <button
-              onClick={() => setOpen(false)}
+              onClick={() => { if (lockedByTutorialRef.current) return; setOpen(false); }}
               className="absolute -right-3 top-1/2 -translate-y-1/2 bg-[#1a1a2e] border border-gray-700 rounded-full p-1 hover:bg-[#FF7A00]/20 transition-colors"
             >
               <ChevronLeft className="w-4 h-4 text-gray-400" />
@@ -89,11 +113,20 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
             <nav className="space-y-2">
               {navigationItems.map((item) => {
                 const IconComponent = item.icon;
+                const tutorialAttr =
+                  item.title === 'Create Character'
+                    ? 'create-character-nav'
+                    : item.title === 'Discover'
+                    ? 'discover-nav'
+                    : item.title === 'World Info'
+                    ? 'world-info-nav'
+                    : undefined;
                 return (
                   <NavLink
                     key={item.title}
                     to={item.url}
                     onClick={(e) => handleNavClick(e, item.url)}
+                    data-tutorial={tutorialAttr}
                     className={({ isActive }) =>
                       `flex items-center space-x-3 w-full px-4 py-3 rounded-lg text-left transition-colors ${
                         isActive

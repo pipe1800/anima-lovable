@@ -12,6 +12,7 @@ interface TutorialStep {
   requiredInteraction?: boolean;
   forceOpen?: string; // Element to force open (like dropdown)
   scrollTo?: boolean; // Whether to scroll to element
+  preventTargetInteraction?: boolean; // When true, clicks on the target are disabled during this step
 }
 
 interface TutorialContextType {
@@ -48,6 +49,16 @@ const tutorialSteps: TutorialStep[] = [
   },
   {
     id: 2,
+    title: 'Create Memory - Long-term Context',
+    description: 'Create a memory from this conversation. Memories help characters remember important details and don\'t cost credits to reference later.',
+    target: '[data-tutorial="create-memory"]',
+    action: 'none',
+    position: 'left',
+    requiredInteraction: false,
+    preventTargetInteraction: true
+  },
+  {
+    id: 3,
     title: 'Character Settings Panel',
     description: 'Click here to open the character panel where you can access chat history, character details, and configuration settings.',
     target: '[data-tutorial="right-panel-toggle"]',
@@ -56,7 +67,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: true
   },
   {
-    id: 3,
+    id: 4,
     title: 'Panel Navigation',
     description: 'Use these tabs to switch between Chat History, Character Details, and Configuration settings.',
     target: '[data-tutorial="right-panel-tabs"]',
@@ -65,7 +76,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 4,
+    id: 5,
     title: 'Configuration Tab',
     description: 'Click on the Config tab to access advanced settings and features.',
     target: '[data-tutorial="config-tab"]',
@@ -74,7 +85,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: true
   },
   {
-    id: 5,
+    id: 6,
     title: 'Chat Config',
     description: 'This subtab controls behavior and logic: personas, world info, time awareness, and addons.',
     target: '[data-tutorial="chat-config-subtab"]',
@@ -83,21 +94,12 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 6,
+    id: 7,
     title: 'Chat Style',
     description: 'This subtab customizes visuals: bubbles, fonts, avatars, and backgrounds.',
     target: '[data-tutorial="chat-style-subtab"]',
     action: 'none',
     position: 'bottom',
-    requiredInteraction: false
-  },
-  {
-    id: 7,
-    title: 'Memories - Long-term Context',
-    description: 'Memories are automatically generated every 15 responses from the character to create a long-term memory effect. These memories are shared between chats and don\'t cost credits.',
-    target: '[data-tutorial="create-memory"]',
-    action: 'none',
-    position: 'left',
     requiredInteraction: false
   },
   {
@@ -120,9 +122,9 @@ const tutorialSteps: TutorialStep[] = [
   },
   {
     id: 10,
-    title: 'Global Addons',
-    description: 'Addons enhance your conversations with features like mood tracking and relationship dynamics. They use additional credits but create more immersive experiences.',
-    target: '[data-tutorial="global-addons-section"]',
+    title: 'Core Enhancements',
+    description: 'Enable global features that enhance reasoning, safety, and output quality.',
+    target: '[data-tutorial="core-enhancements"]',
     action: 'none',
     position: 'left',
     requiredInteraction: false,
@@ -130,6 +132,16 @@ const tutorialSteps: TutorialStep[] = [
   },
   {
     id: 11,
+    title: 'Character Tracking',
+    description: 'Configure memory, mood, and relationship tracking that persist across chats.',
+    target: '[data-tutorial="character-tracking"]',
+    action: 'none',
+    position: 'left',
+    requiredInteraction: false,
+    scrollTo: true
+  },
+  {
+    id: 12,
     title: 'Create Characters',
     description: 'Build your own AI characters with unique personalities, backgrounds, and traits. Share them with the community or keep them private.',
     target: '[data-tutorial="create-character-nav"]',
@@ -138,7 +150,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 12,
+    id: 13,
     title: 'Discover Characters',
     description: 'Browse and chat with thousands of characters created by the community. Find your perfect AI companion, mentor, or adventure partner.',
     target: '[data-tutorial="discover-nav"]',
@@ -147,7 +159,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 13,
+    id: 14,
     title: 'World Info Library',
     description: 'Access and manage world building elements like locations, factions, and lore to create rich, consistent story worlds.',
     target: '[data-tutorial="world-info-nav"]',
@@ -156,7 +168,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 14,
+    id: 15,
     title: 'Welcome to Anima!',
     description: 'You\'ve completed the tour! Now you\'re ready to create amazing AI conversations with all the powerful features at your fingertips.',
     target: null,
@@ -331,14 +343,13 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
 
   const handleStepAction = useCallback((action: string) => {
     console.log('🎯 Tutorial action received:', action);
-    
-    // Simple action handling - just advance to next step when actions complete
-    if (action === 'right-panel-toggled' && currentStep === 1) {
+
+    if (action === 'right-panel-toggled' && currentStepData?.target === '[data-tutorial="right-panel-toggle"]') {
       nextStep();
-    } else if (action === 'config-tab-clicked' && currentStep === 3) {
+    } else if (action === 'config-tab-clicked' && currentStepData?.target === '[data-tutorial="config-tab"]') {
       nextStep();
     }
-  }, [currentStep, nextStep]);
+  }, [currentStepData, nextStep]);
 
   const setHighlight = useCallback((element: string | null) => {
     setHighlightedElement(element);

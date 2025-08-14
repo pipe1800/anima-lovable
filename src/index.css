@@ -345,9 +345,8 @@ All colors MUST be HSL.
 
   /* Tutorial system - ensure highlighted elements are ALWAYS visible */
   body.tutorial-active [data-tutorial] {
-    position: relative !important;
-    z-index: 50003 !important; /* Above overlay (50000), border (50001), and tooltip (50002) */
-    pointer-events: auto !important;
+    /* Removed position and pointer-events overrides to avoid breaking layouts (e.g., fixed panels) */
+    /* z-index removed as it has no effect on static elements and can cause stacking issues */
     will-change: transform, opacity, top, left, width, height;
   }
 
@@ -386,4 +385,24 @@ All colors MUST be HSL.
     -webkit-overflow-scrolling: touch;
     will-change: scroll-position;
   }
+}
+
+/* Tutorial: neutralize inherent top borders/shadows on highlighted targets */
+.tutorial-highlight-target {
+  /* Remove top border/shadow lines that can look like overlay bleed */
+  box-shadow: none !important;
+  border-top-color: transparent !important;
+}
+
+/* More precise: if the component has a standard border class, soften it while highlighted */
+.tutorial-highlight-target.border, 
+.tutorial-highlight-target[class*="border-t"],
+.tutorial-highlight-target[class*="border-gray"],
+.tutorial-highlight-target[class*="border-gray-700"] {
+  border-top-color: transparent !important;
+}
+
+/* If the element has an ::before hairline divider, hide it */
+.tutorial-highlight-target::before {
+  content: none !important;
 }

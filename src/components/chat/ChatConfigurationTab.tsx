@@ -534,7 +534,7 @@ export const ChatConfigurationTab = ({
           {/* Removed Applies to all chats pill */}
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4" data-tutorial="global-addons-scroll-section">
           {Object.entries(addonCategories)
             .filter(([categoryName]) => categoryName !== 'Advanced Prompting Toolkit')
             .map(([categoryName, addons]) => (

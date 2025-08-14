@@ -217,7 +217,7 @@ export default function RightPanel(props: RightPanelProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Panel Header */}
-        <div className="p-4 border-b border-gray-700/50 relative">
+        <div className="px-4 pt-4 border-b border-gray-700/50 relative">
           {/* Close button */}
           <button
             aria-label="Close panel"
