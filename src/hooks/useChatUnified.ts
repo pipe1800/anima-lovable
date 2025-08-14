@@ -1,13 +1,14 @@
 import { useReducer, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useMutation, useQueryClient, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, SUPABASE_API_URL } from '@/integrations/supabase/client';
 import { getCharacterDetails } from '@/lib/supabase-queries';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import { queryConfigs, infiniteQueryConfigs, invalidationHelpers, queryKeys } from '@/queries/chatQueries';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import type { Message, TrackedContext, ChatState, ChatAction } from '@/types/chat';
 import logger from '@/utils/logger';
+import { StreamingMessageParser, parseSSEMessage } from '@/lib/streaming-utils';
 
 /**
  * Unified Chat Hook - Replaces 4 separate hooks
@@ -305,14 +306,12 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       });
       
       // Make streaming request to unified chat-management function
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://rclpyipeytqbamiwcuih.supabase.co';
-      
-      const response = await fetch(`${supabaseUrl}/functions/v1/chat-management`, {
+      const response = await fetch(`${SUPABASE_API_URL}/functions/v1/chat-management`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjbHB5aXBleXRxYmFtaXdjdWloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE3NDY0MjAsImV4cCI6MjA2NzMyMjQyMH0.D6IvUZBtLF5MdBGA2Re-1UMEc6bGaT2JhP0V1JuU_KU',
+          'apikey': SUPABASE_API_URL ? (supabase as any).rest.headers['apikey'] || (import.meta.env?.VITE_SUPABASE_ANON_KEY as string) : (import.meta.env?.VITE_SUPABASE_ANON_KEY as string),
         },
         body: JSON.stringify(requestPayload),
       });
@@ -345,6 +344,24 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       
       let fullMessage = '';
       const decoder = new TextDecoder();
+      const parser = new StreamingMessageParser();
+      let pendingAppend: Promise<void> = Promise.resolve();
+
+      const scheduleAppend = async (text: string) => {
+        if (!text) return;
+        if (!showStreamingUpdates) {
+          fullMessage += text;
+          return;
+        }
+        const sliceSize = 24; // small slices to keep UI feeling streaming
+        for (let i = 0; i < text.length; i += sliceSize) {
+          const part = text.slice(i, i + sliceSize);
+          fullMessage += part;
+          dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: fullMessage } });
+          // Yield to UI so updates paint progressively
+          await new Promise<void>(r => setTimeout(r, 16));
+        }
+      };
       
       // Both modes share the same parsing, only UI updates differ
       try {
@@ -352,58 +369,39 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           const { done, value } = await reader.read();
           if (done) break;
           
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-          
-          for (const line of lines) {
-            if (!line) continue;
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6);
-            
-            // 1) Completion envelope from our server
-            try {
-              const obj = JSON.parse(data);
-              if (obj && obj.done === true) {
-                logger.info(`${streamingMode} mode - Stream completed`);
-                isStreamingRef.current = false;
-                
-                // Emit context ceiling warning if provided
-                if (obj.metadata?.contextCeilingReached) {
-                  window.dispatchEvent(new CustomEvent('contextCeilingReached', {
-                    detail: {
-                      droppedMessages: obj.metadata.droppedMessages,
-                      tokenUsage: obj.metadata.tokenUsage,
-                    },
-                  }));
-                }
-                finalizeStreaming(chatId);
-                const endTime = Date.now();
-                return { content: fullMessage };
-              }
-              
-              // 2) Our server streams { content: string }
-              if (typeof obj?.content === 'string' && obj.content.length > 0) {
-                fullMessage += obj.content;
-                if (showStreamingUpdates) {
-                  dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: fullMessage } });
-                }
-                continue; // proceed to next line
-              }
-              
-              // 3) Fallback for OpenAI-like SSE delta format
-              if (obj?.choices?.[0]?.delta?.content) {
-                const content = obj.choices[0].delta.content as string;
-                fullMessage += content;
-                if (showStreamingUpdates) {
-                  dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: fullMessage } });
-                }
-                continue;
-              }
-            } catch (parseError) {
-              logger.error('Error parsing streaming data:', parseError);
+          // Accumulate SSE buffer and extract complete data lines
+          const dataLines = parser.parseChunk(value);
+          for (const data of dataLines) {
+            const obj = parseSSEMessage(data);
+            if (!obj) continue;
+
+            if (obj.done === true) {
+              logger.info(`${streamingMode} mode - Stream completed`);
+              isStreamingRef.current = false;
+              // Ensure all pending UI appends are flushed before finalizing
+              await pendingAppend;
+              finalizeStreaming(chatId);
+              const endTime = Date.now();
+              return { content: fullMessage };
+            }
+
+            if (typeof obj?.content === 'string' && obj.content.length > 0) {
+              pendingAppend = pendingAppend.then(() => scheduleAppend(obj.content));
+              continue;
+            }
+
+            if (obj?.choices?.[0]?.delta?.content) {
+              const content = obj.choices[0].delta.content as string;
+              pendingAppend = pendingAppend.then(() => scheduleAppend(content));
+              continue;
             }
           }
         }
+        // Stream ended without explicit done flag; flush and finalize
+        await pendingAppend;
+        isStreamingRef.current = false;
+        finalizeStreaming(chatId);
+        return { content: fullMessage };
       } catch (streamError) {
         logger.error('Streaming error:', streamError);
         isStreamingRef.current = false;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, Plus, Zap, Edit, Clock } from 'lucide-react';
+import { ChevronDown, Plus, Edit, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +42,8 @@ interface ChatConfigurationTabProps {
   onTimeAwarenessChange: (enabled: boolean) => void;
   timeAwarenessLoading: boolean;
   userTimezone: string;
+  onUnsavedChange?: (has: boolean) => void;
+  discardSignal?: number;
 }
 
 export const ChatConfigurationTab = ({
@@ -65,6 +67,8 @@ export const ChatConfigurationTab = ({
   onTimeAwarenessChange,
   timeAwarenessLoading,
   userTimezone,
+  onUnsavedChange,
+  discardSignal,
 }: ChatConfigurationTabProps) => {
   const { subscription } = useAuth();
   const queryClient = useQueryClient();
@@ -104,27 +108,6 @@ export const ChatConfigurationTab = ({
     'character_position',
   ];
 
-  // Calculate total addon cost percentage
-  const calculateTotalAddonCost = () => {
-    if (!effectiveSettings) return 0;
-    
-    let totalCost = 0;
-    if (effectiveSettings.dynamic_world_info) totalCost += 10;
-    // Enhanced Memory is 0% for True Fan/Whale, not included in cost calculation
-    if (effectiveSettings.mood_tracking) totalCost += 5;
-    if (effectiveSettings.clothing_inventory) totalCost += 5;
-    if (effectiveSettings.location_tracking) totalCost += 5;
-    if (effectiveSettings.time_and_weather) totalCost += 5;
-    if (effectiveSettings.relationship_status) totalCost += 5;
-    if (effectiveSettings.character_position) totalCost += 5;
-    if (effectiveSettings.chain_of_thought) totalCost += 30;
-    if (effectiveSettings.few_shot_examples) totalCost += 7;
-    
-    return totalCost;
-  };
-  
-  const totalAddonCost = calculateTotalAddonCost();
-  
   // Display persona shows pending selection or current selection
   const displayPersona = hasPersonaChange
     ? personas.find(p => p.id === pendingPersonaId) || null
@@ -193,7 +176,7 @@ export const ChatConfigurationTab = ({
       character_position: { 
         name: 'Character Position', 
         cost: 5, 
-        description: 'Track character\'s physical position and body language',
+        description: "Track character's physical position and body language",
         available: isTrueFanOrWhale || effectiveSettings?.character_position || activeStatefulAddons < 2,
         dynamicCost: null
       },
@@ -203,17 +186,17 @@ export const ChatConfigurationTab = ({
         name: 'Chain of Thought', 
         cost: 30, 
         description: 'Advanced reasoning capabilities - Coming Soon',
-        available: false, // Disabled for now
+        available: false, 
         dynamicCost: null,
-        comingSoon: true // New property to indicate coming soon status
+        comingSoon: true 
       },
       few_shot_examples: { 
         name: 'Few Shot Examples', 
         cost: 7, 
         description: 'Better response quality through examples - Coming Soon',
-        available: false, // Disabled for now
+        available: false, 
         dynamicCost: null,
-        comingSoon: true // New property to indicate coming soon status
+        comingSoon: true 
       },
     }
   };
@@ -255,9 +238,36 @@ export const ChatConfigurationTab = ({
     setHasUnsavedChanges(true);
   };
 
+  // Pending local-only settings for per-chat values and world info
+  const [pendingChatMode, setPendingChatMode] = useState<typeof chatMode>(chatMode);
+  const [pendingTimeAwareness, setPendingTimeAwareness] = useState<boolean>(timeAwarenessEnabled);
+  const [pendingWorldInfo, setPendingWorldInfo] = useState<any | null>(null);
+
+  useEffect(() => setPendingChatMode(chatMode), [chatMode]);
+  useEffect(() => setPendingTimeAwareness(timeAwarenessEnabled), [timeAwarenessEnabled]);
+
+  // Whenever unsaved state changes, notify parent (for navigation guards)
+  useEffect(() => {
+    onUnsavedChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onUnsavedChange]);
+
+  // Support external discard from parent via signal counter
+  useEffect(() => {
+    if (discardSignal !== undefined) {
+      // noop: on change, discard
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discardSignal]);
+
+  // Override to actually discard when signal changes
+  useEffect(() => {
+    // If parent increments signal, discard local changes
+    // We track last seen value in a ref-less simple state
+  }, []);
+
   // Save all pending changes
   const handleSaveChanges = async () => {
-    if (!hasUnsavedChanges || (Object.keys(pendingChanges).length === 0 && !hasPersonaChange)) return;
+    if (!hasUnsavedChanges || (Object.keys(pendingChanges).length === 0 && !hasPersonaChange && pendingWorldInfo === null && pendingChatMode === chatMode && pendingTimeAwareness === timeAwarenessEnabled)) return;
     
     try {
       setSaving(true);
@@ -291,12 +301,26 @@ export const ChatConfigurationTab = ({
           }
         }
       }
+
+      // Apply world info selection if changed (pending set)
+      if (pendingWorldInfo !== null) {
+        onWorldInfoSelect(pendingWorldInfo);
+      }
+
+      // Apply per-chat settings (chat mode, time awareness) if changed
+      if (pendingChatMode !== chatMode) {
+        onChatModeChange(pendingChatMode);
+      }
+      if (pendingTimeAwareness !== timeAwarenessEnabled) {
+        onTimeAwarenessChange(pendingTimeAwareness);
+      }
       
       toast.success('Settings saved successfully');
       setPendingChanges({});
       setPendingPersonaId(null);
       setHasPersonaChange(false);
       setHasUnsavedChanges(false);
+      setPendingWorldInfo(null);
     } catch (error) {
       console.error('Error saving settings:', error);
       toast.error('Failed to save settings');
@@ -311,8 +335,21 @@ export const ChatConfigurationTab = ({
     setPendingPersonaId(null);
     setHasPersonaChange(false);
     setHasUnsavedChanges(false);
+    setPendingWorldInfo(null);
+    setPendingChatMode(chatMode);
+    setPendingTimeAwareness(timeAwarenessEnabled);
     toast.info('Changes discarded');
   };
+
+  // React to discardSignal increment to discard locally
+  const [lastDiscardSignal, setLastDiscardSignal] = useState<number | undefined>(discardSignal);
+  useEffect(() => {
+    if (discardSignal !== undefined && discardSignal !== lastDiscardSignal) {
+      setLastDiscardSignal(discardSignal);
+      handleDiscardChanges();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discardSignal]);
 
   if (settingsLoading) {
     return (
@@ -436,16 +473,17 @@ export const ChatConfigurationTab = ({
       <Card data-tutorial="world-info-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-medium text-sm">World Info</h3>
-          <Badge variant="outline" className="border-[#FF7A00] text-[#FF7A00] text-xs">
-            Dynamic
-          </Badge>
+          {/* Removed Dynamic badge */}
         </div>
         
         <WorldInfoDropdown 
           isVisible={true}
-          onWorldInfoSelect={onWorldInfoSelect}
+          onWorldInfoSelect={(wi) => {
+            setPendingWorldInfo(wi);
+            setHasUnsavedChanges(true);
+          }}
           disabled={!effectiveSettings?.dynamic_world_info}
-          selectedWorldInfoId={selectedWorldInfoId}
+          selectedWorldInfoId={(pendingWorldInfo?.id) || selectedWorldInfoId}
         />
       </Card>
 
@@ -453,14 +491,12 @@ export const ChatConfigurationTab = ({
       <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-white font-medium text-sm">Chat Settings</h3>
-          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
-            Chat
-          </Badge>
+          {/* Removed Chat pill */}
         </div>
         <div className="space-y-4">
           <CharacterChatModeToggle
-            chatMode={chatMode}
-            onChange={onChatModeChange}
+            chatMode={pendingChatMode}
+            onChange={(m) => { setPendingChatMode(m); setHasUnsavedChanges(true); }}
             showWarning={false}
             disabled={chatModeLoading}
           />
@@ -471,8 +507,8 @@ export const ChatConfigurationTab = ({
                 <span className="text-white text-xs sm:text-sm font-medium">Time Awareness</span>
               </div>
               <Switch
-                checked={timeAwarenessEnabled}
-                onCheckedChange={onTimeAwarenessChange}
+                checked={pendingTimeAwareness}
+                onCheckedChange={(v) => { setPendingTimeAwareness(v); setHasUnsavedChanges(true); }}
                 disabled={timeAwarenessLoading}
                 className="data-[state=checked]:bg-[#FF7A00]"
               />
@@ -481,7 +517,7 @@ export const ChatConfigurationTab = ({
               When enabled, the character will react to how long you take to respond based on their personality. 
               Patient characters stay calm with delays, while impatient ones may show frustration.
             </p>
-            {timeAwarenessEnabled && (
+            {pendingTimeAwareness && (
               <p className="text-gray-400 text-xs mt-2">
                 <Clock className="w-3 h-3 inline mr-1" />
                 Your timezone: {userTimezone}
@@ -495,9 +531,7 @@ export const ChatConfigurationTab = ({
       <Card data-tutorial="global-addons-section" className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-white font-medium text-sm">Global Addon Settings</h3>
-          <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs">
-            Applies to all chats
-          </Badge>
+          {/* Removed Applies to all chats pill */}
         </div>
 
         <div className="space-y-4">
@@ -538,7 +572,6 @@ export const ChatConfigurationTab = ({
                                 </span>
                               </div>
                             </div>
-                            {/* Subtle shimmer effect */}
                             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer"></div>
                           </div>
                         ) : (
@@ -555,21 +588,8 @@ export const ChatConfigurationTab = ({
                       }`}>
                         {details.description}
                       </p>
-                      <div className="flex items-center justify-end">
-                        {!isComingSoon && (
-                          <>
-                            {details.dynamicCost ? (
-                              <Badge variant="outline" className="text-xs border-blue-400 text-blue-400 h-5">
-                                Dynamic
-                              </Badge>
-                            ) : details.cost > 0 && (
-                              <Badge variant="outline" className="text-xs border-[#FF7A00] text-[#FF7A00] h-5">
-                                +{details.cost}%
-                              </Badge>
-                            )}
-                          </>
-                        )}
-                      </div>
+                      {/* Hide per-addon cost badges */}
+                      <div className="flex items-center justify-end h-5"></div>
                     </div>
                   );
                 })}
@@ -591,41 +611,6 @@ export const ChatConfigurationTab = ({
               )}
             </div>
           ))}
-        </div>
-      </Card>
-
-      {/* Total Cost Indicator */}
-      <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-[#FF7A00]" />
-            <h3 className="text-white font-medium text-sm">Message Cost</h3>
-          </div>
-          <Badge 
-            variant="outline" 
-            className={`border-gray-600 text-xs ${
-              totalAddonCost > 0 ? 'text-[#FF7A00] border-[#FF7A00]' : 'text-gray-400'
-            }`}
-          >
-            Total: +{totalAddonCost}%
-          </Badge>
-        </div>
-        
-        <div className="text-sm text-gray-300">
-          <p className="mb-2">
-            Base message cost varies by subscription plan
-          </p>
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-400">Addon increase:</span>
-            <span className={`font-medium ${totalAddonCost > 0 ? 'text-[#FF7A00]' : 'text-gray-400'}`}>
-              {totalAddonCost > 0 ? `+${totalAddonCost}%` : 'None'}
-            </span>
-          </div>
-          {totalAddonCost > 0 && (
-            <div className="mt-2 p-2 bg-[#FF7A00]/10 border border-[#FF7A00]/20 rounded text-xs text-[#FF7A00]">
-              💡 Active addons will increase your message costs
-            </div>
-          )}
         </div>
       </Card>
 

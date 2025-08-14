@@ -40,6 +40,8 @@ interface ContextDisplayProps {
     characterPosition?: boolean;
   };
   className?: string;
+  // New: optional right-aligned actions to render on the same line as the toggle
+  rightActions?: React.ReactNode;
 }
 
 interface ContextItem {
@@ -50,7 +52,7 @@ interface ContextItem {
   isHistorical: boolean;
 }
 
-export const ContextDisplay = ({ context, contextUpdates, currentContext, addonSettings, className = '' }: ContextDisplayProps) => {
+export const ContextDisplay = ({ context, contextUpdates, currentContext, addonSettings, className = '', rightActions }: ContextDisplayProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Use the most relevant context source
@@ -101,7 +103,7 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
         if ('moodTracking' in workingContext) {
           const trackedContext = workingContext as TrackedContext;
           // Use the key directly since allAddonItems keys match TrackedContext properties
-          contextValue = trackedContext[item.key as keyof TrackedContext];
+          contextValue = (trackedContext as any)[item.key];
         } else {
           // Fallback to raw database format (shouldn't happen after conversion but just in case)
           const dbContext = workingContext as any;
@@ -132,14 +134,14 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
           isHistorical: false
         };
       }
-      return null;
-    }).filter(Boolean);
+      return null as any;
+    }).filter(Boolean) as ContextItem[];
   }
   // Handle contextUpdates (from historical messages) - PRIORITY 2
   else if (contextUpdates && Object.keys(contextUpdates).length > 0) {
     contextItems = allAddonItems.map(item => {
       const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
-      const updateData = contextUpdates[item.addonKey];
+      const updateData = (contextUpdates as any)[item.addonKey];
       
       if (updateData && updateData.current !== 'No context' && isCharacterRelevantContext(item.addonKey, updateData.current)) {
         return {
@@ -158,14 +160,14 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
           isHistorical: false
         };
       }
-      return null;
-    }).filter(Boolean);
+      return null as any;
+    }).filter(Boolean) as ContextItem[];
   }
   // Handle legacy context format - PRIORITY 3
   else if (context) {
     contextItems = allAddonItems.map(item => {
       const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
-      const contextValue = context[item.addonKey];
+      const contextValue = (context as any)[item.addonKey];
       
       if (contextValue && contextValue !== 'No context' && isCharacterRelevantContext(item.addonKey, contextValue)) {
         return {
@@ -184,8 +186,8 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
           isHistorical: false
         };
       }
-      return null;
-    }).filter(Boolean);
+      return null as any;
+    }).filter(Boolean) as ContextItem[];
   }
   // If no context data but addons are enabled, show all enabled addons with "No context yet"
   else {
@@ -198,10 +200,10 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
           key: item.key,
           isEnabled: true,
           isHistorical: false
-        };
+        } as ContextItem;
       }
-      return null;
-    }).filter(Boolean);
+      return null as any;
+    }).filter(Boolean) as ContextItem[];
   }
 
   // Check if any stateful addons are enabled (default to true if settings not loaded yet)
@@ -227,17 +229,22 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
 
   return (
     <div className={`${className}`}>
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <span>Context</span>
-        {isExpanded ? (
-          <ChevronUp className="w-4 h-4" />
-        ) : (
-          <ChevronDown className="w-4 h-4" />
+      <div className="inline-flex items-center gap-2">
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <span>Context</span>
+          {isExpanded ? (
+            <ChevronUp className="w-4 h-4" />
+          ) : (
+            <ChevronDown className="w-4 h-4" />
+          )}
+        </button>
+        {rightActions && (
+          <div className="flex items-center gap-1">{rightActions}</div>
         )}
-      </button>
+      </div>
 
       {isExpanded && (
         <div className="mt-2 space-y-1">

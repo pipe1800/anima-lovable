@@ -1,19 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
-import { Upload, X, Zap, Type, Image as ImageIcon } from 'lucide-react';
+import { Upload, X, Type, Image as ImageIcon } from 'lucide-react';
 import { useUserGlobalChatSettings, useUpdateGlobalChatSettings, useUpdateBackgroundImage } from '@/queries/chatSettingsQueries';
 import { supabase } from '@/integrations/supabase/client';
 
 interface ChatStyleTabProps {
   currentChatId?: string | null;
+  onUnsavedChange?: (has: boolean) => void;
+  discardSignal?: number;
 }
 
-export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => {
+export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUnsavedChange, discardSignal }) => {
   const { data: settings } = useUserGlobalChatSettings();
   const updateGlobalSettings = useUpdateGlobalChatSettings();
   const updateBackground = useUpdateBackgroundImage();
@@ -45,6 +46,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
     banner_tint_from_avatar: boolean;
   }>>({});
 
+  // Rebuild effective using current settings + pending
   const effective = {
     streaming_mode: pending.streaming_mode ?? settings?.streaming_mode ?? 'smooth',
     font_size: pending.font_size ?? settings?.font_size ?? 'normal',
@@ -68,17 +70,32 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
     portrait_frame_color: pending.portrait_frame_color ?? settings?.portrait_frame_color ?? '#4B5563',
     banner_width: pending.banner_width ?? settings?.banner_width ?? 'md',
     banner_tint_from_avatar: pending.banner_tint_from_avatar ?? settings?.banner_tint_from_avatar ?? false,
+  } as any;
+
+  const setField = (key: keyof typeof effective, value: any) => {
+    setPending(prev => ({ ...prev, [key]: value }));
   };
 
-  const setField = <K extends keyof typeof effective>(key: K, value: (typeof effective)[K]) => {
-    setPending(prev => ({ ...prev, [key]: value } as any));
-  };
+  // Report unsaved changes up
+  useEffect(() => {
+    onUnsavedChange?.(Object.keys(pending).length > 0);
+  }, [pending, onUnsavedChange]);
+
+  // Discard hook from parent
+  const [lastDiscard, setLastDiscard] = useState<number | undefined>(discardSignal);
+  useEffect(() => {
+    if (discardSignal !== undefined && discardSignal !== lastDiscard) {
+      setLastDiscard(discardSignal);
+      setPending({});
+    }
+  }, [discardSignal, lastDiscard]);
 
   const handleBackgroundUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
       setSaving(true);
+      // Upload to storage now so preview works, but do not persist DB setting until Save
       const ext = file.name.split('.').pop() || 'png';
       const { data: auth } = await supabase.auth.getUser();
       const userId = auth.user?.id;
@@ -87,8 +104,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
       const uploadRes = await supabase.storage.from('user-style').upload(path, file, { upsert: true, contentType: file.type });
       if (uploadRes.error) throw uploadRes.error;
       const { data: pub } = supabase.storage.from('user-style').getPublicUrl(path);
-      await updateBackground.mutateAsync(pub.publicUrl);
-      setField('background_image_url', pub.publicUrl as any);
+      setField('background_image_url', pub.publicUrl);
     } catch (e) {
       console.error('Background upload failed', e);
     } finally {
@@ -97,22 +113,20 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
   };
 
   const clearBackground = async () => {
-    try {
-      setSaving(true);
-      await updateBackground.mutateAsync(null);
-      setField('background_image_url', null as any);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSaving(false);
-    }
+    // Only mark pending change; persist on Save
+    setField('background_image_url', null);
   };
 
   const handleSave = async () => {
     try {
       setSaving(true);
       if (Object.keys(pending).length > 0) {
+        // Persist all pending style settings
         await updateGlobalSettings.mutateAsync(pending as any);
+        // Persist background image if present/cleared via dedicated endpoint
+        if ('background_image_url' in pending) {
+          await updateBackground.mutateAsync(pending.background_image_url ?? null);
+        }
       }
       setPending({});
     } catch (e) {
@@ -195,11 +209,11 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
       <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-blue-400" />
+          
             <h3 className="text-white font-medium text-sm">Response Mode</h3>
           </div>
         </div>
-        <RadioGroup value={effective.streaming_mode} onValueChange={(v) => setField('streaming_mode', v as any)} className="flex gap-6">
+        <RadioGroup value={effective.streaming_mode} onValueChange={(v) => setField('streaming_mode', v)} className="flex gap-6">
           <div className="flex items-center space-x-2">
             <RadioGroupItem value="instant" id="instant" />
             <Label htmlFor="instant" className="cursor-pointer text-gray-300">
@@ -225,7 +239,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
       <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <Type className="h-4 w-4 text-green-400" />
+  
             <h3 className="text-white font-medium text-sm">Text Style</h3>
           </div>
         </div>
@@ -233,7 +247,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
         {/* Font Size */}
         <div className="mb-4">
           <Label className="text-gray-300 text-sm">Font Size</Label>
-          <RadioGroup value={effective.font_size} onValueChange={(v) => setField('font_size', v as any)} className="mt-2 flex gap-6">
+          <RadioGroup value={effective.font_size} onValueChange={(v) => setField('font_size', v)} className="mt-2 flex gap-6">
             <div className="flex items-center space-x-2">
               <RadioGroupItem value="small" id="ts-small" />
               <Label htmlFor="ts-small" className="cursor-pointer text-gray-300"><span className="font-medium text-white text-sm">Small</span></Label>
@@ -257,11 +271,11 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
           <div className="grid grid-cols-2 gap-4 mt-2">
             <div className="space-y-2">
               <Label className="text-gray-300 text-xs">Character Text</Label>
-              <input type="color" value={effective.ai_text_color} onChange={(e) => setField('ai_text_color', e.target.value as any)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
+              <input type="color" value={effective.ai_text_color} onChange={(e) => setField('ai_text_color', e.target.value)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
             </div>
             <div className="space-y-2">
               <Label className="text-gray-300 text-xs">Your Text</Label>
-              <input type="color" value={effective.user_text_color} onChange={(e) => setField('user_text_color', e.target.value as any)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
+              <input type="color" value={effective.user_text_color} onChange={(e) => setField('user_text_color', e.target.value)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
             </div>
           </div>
         </div>
@@ -272,7 +286,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
         <div className="space-y-3">
           <div>
             <Label className="text-gray-300 text-sm">Semantic Highlighting</Label>
-            <RadioGroup value={effective.semantic_overrides_mode} onValueChange={(v) => setField('semantic_overrides_mode', v as any)} className="mt-2 flex gap-6">
+            <RadioGroup value={effective.semantic_overrides_mode} onValueChange={(v) => setField('semantic_overrides_mode', v)} className="mt-2 flex gap-6">
               <div className="flex items-center space-x-2">
                 <RadioGroupItem id="sem-default" value="default" />
                 <Label htmlFor="sem-default" className="text-gray-300 cursor-pointer">Default</Label>
@@ -292,19 +306,19 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-gray-300 text-xs">Quoted Speech</Label>
-                <input type="color" value={effective.speech_color ?? '#93C5FD'} onChange={(e) => setField('speech_color', e.target.value as any)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
+                <input type="color" value={effective.speech_color ?? '#93C5FD'} onChange={(e) => setField('speech_color', e.target.value)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
               </div>
               <div className="space-y-2">
                 <Label className="text-gray-300 text-xs">Action (*...*)</Label>
-                <input type="color" value={effective.action_color ?? '#D8B4FE'} onChange={(e) => setField('action_color', e.target.value as any)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
+                <input type="color" value={effective.action_color ?? '#D8B4FE'} onChange={(e) => setField('action_color', e.target.value)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
               </div>
               <div className="space-y-2">
                 <Label className="text-gray-300 text-xs">Emphasis (_..._)</Label>
-                <input type="color" value={effective.emphasis_color ?? '#FDE68A'} onChange={(e) => setField('emphasis_color', e.target.value as any)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
+                <input type="color" value={effective.emphasis_color ?? '#FDE68A'} onChange={(e) => setField('emphasis_color', e.target.value)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
               </div>
               <div className="space-y-2">
                 <Label className="text-gray-300 text-xs">Parenthetical (...)</Label>
-                <input type="color" value={effective.parenthetical_color ?? '#9CA3AF'} onChange={(e) => setField('parenthetical_color', e.target.value as any)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
+                <input type="color" value={effective.parenthetical_color ?? '#9CA3AF'} onChange={(e) => setField('parenthetical_color', e.target.value)} className="w-full h-9 p-1 rounded bg-gray-800 border border-gray-700" />
               </div>
             </div>
           )}
@@ -323,7 +337,6 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
       <Card className="bg-[#1a1a2e] border-gray-700/50 p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <ImageIcon className="h-4 w-4 text-purple-400" />
             <h3 className="text-white font-medium text-sm">Chat Background</h3>
           </div>
         </div>
@@ -372,7 +385,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
             </div>
             <div className="grid grid-cols-3 gap-3 items-center">
               <span className="text-xs text-gray-400 col-span-1">Color</span>
-              <input type="color" value={effective.ai_bubble_color} onChange={(e) => setField('ai_bubble_color', e.target.value as any)} className="h-9 p-1 rounded bg-gray-800 border border-gray-700 col-span-2" />
+              <input type="color" value={effective.ai_bubble_color} onChange={(e) => setField('ai_bubble_color', e.target.value)} className="h-9 p-1 rounded bg-gray-800 border border-gray-700 col-span-2" />
             </div>
             <div className="grid grid-cols-3 gap-3 items-center">
               <span className="text-xs text-gray-400 col-span-1">Opacity</span>
@@ -387,7 +400,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
             </div>
             <div className="grid grid-cols-3 gap-3 items-center">
               <span className="text-xs text-gray-400 col-span-1">Color</span>
-              <input type="color" value={effective.user_bubble_color} onChange={(e) => setField('user_bubble_color', e.target.value as any)} className="h-9 p-1 rounded bg-gray-800 border border-gray-700 col-span-2" />
+              <input type="color" value={effective.user_bubble_color} onChange={(e) => setField('user_bubble_color', e.target.value)} className="h-9 p-1 rounded bg-gray-800 border border-gray-700 col-span-2" />
             </div>
             <div className="grid grid-cols-3 gap-3 items-center">
               <span className="text-xs text-gray-400 col-span-1">Opacity</span>
@@ -407,7 +420,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
           {/* Avatar Style Selector */}
           <div>
             <Label className="text-gray-300 text-sm mb-3 block">Avatar Style</Label>
-            <RadioGroup value={effective.avatar_style} onValueChange={(v) => setField('avatar_style', v as any)} className="space-y-3">
+            <RadioGroup value={effective.avatar_style} onValueChange={(v) => setField('avatar_style', v)} className="space-y-3">
               <div className="flex items-center space-x-2">
                 <RadioGroupItem id="style-classic" value="classic" />
                 <Label htmlFor="style-classic" className="text-gray-300 cursor-pointer">
@@ -431,11 +444,11 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
           
           <div className="flex items-center justify-between">
             <span className="text-gray-300 text-sm">Show Character Avatar</span>
-            <Switch checked={effective.show_character_avatar} onCheckedChange={(v) => setField('show_character_avatar', v as any)} className="data-[state=checked]:bg-[#FF7A00]" />
+            <Switch checked={effective.show_character_avatar} onCheckedChange={(v) => setField('show_character_avatar', v)} className="data-[state=checked]:bg-[#FF7A00]" />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-gray-300 text-sm">Show Your Avatar</span>
-            <Switch checked={effective.show_user_avatar} onCheckedChange={(v) => setField('show_user_avatar', v as any)} className="data-[state=checked]:bg-[#FF7A00]" />
+            <Switch checked={effective.show_user_avatar} onCheckedChange={(v) => setField('show_user_avatar', v)} className="data-[state=checked]:bg-[#FF7A00]" />
           </div>
         </div>
       </Card>
@@ -444,7 +457,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId }) => 
       <div className="sticky bottom-0 left-0 right-0 bg-[#0f0f0f] border-t border-gray-700/50 p-2 mt-2">
         <div className="flex gap-2 justify-end">
           <Button variant="outline" onClick={handleDiscard} disabled={saving} className="bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700 text-sm">Discard</Button>
-          <Button onClick={handleSave} disabled={saving} className="bg-[#FF7A00] hover:bg-[#FF8A10] text-white shadow-lg text-sm">
+          <Button onClick={handleSave} disabled={saving || Object.keys(pending).length === 0} className="bg-[#FF7A00] hover:bg-[#FF8A10] text-white shadow-lg text-sm">
             {saving ? (<><div className="w-3 h-3 sm:w-4 sm:h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />Saving...</>) : 'Save Changes'}
           </Button>
         </div>

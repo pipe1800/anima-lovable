@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Upload } from 'lucide-react';
 
 interface PersonaEditModalProps {
   open: boolean;
@@ -15,6 +16,17 @@ interface PersonaEditModalProps {
 }
 
 export default function PersonaEditModal({ open, onOpenChange, personaToEdit, setPersonaToEdit, isSaving, onSave }: PersonaEditModalProps) {
+  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPersonaToEdit(personaToEdit ? { ...personaToEdit, avatar_url: e.target?.result as string } : null);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-[#1a1a2e] border-gray-700/50 text-white max-w-2xl">
@@ -23,22 +35,45 @@ export default function PersonaEditModal({ open, onOpenChange, personaToEdit, se
         </DialogHeader>
 
         <div className="space-y-6">
-          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-            <p className="text-blue-200 text-sm text-center">Edit your persona details. Changes will apply to future conversations.</p>
-          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Avatar */}
             <div className="text-center">
-              <label className="block text-sm font-medium text-gray-300 mb-3">Persona Avatar</label>
+              <label className="block text-sm font-medium text-gray-300 mb-3 mt-[25px]" >Persona Avatar</label>
               <div className="relative">
-                <Avatar className="w-20 h-20 mx-auto">
-                  <AvatarImage src={personaToEdit?.avatar_url || undefined} alt="Persona" className="object-cover" />
-                  <AvatarFallback className="bg-[#FF7A00] text-white text-lg">
-                    {personaToEdit?.name?.split(' ').map((n: string) => n[0]).join('') || 'P'}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="mt-2 text-xs text-gray-400">Avatar upload coming soon</div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarChange}
+                  className="hidden"
+                  id="persona-avatar-upload-edit"
+                />
+                <label
+                  htmlFor="persona-avatar-upload-edit"
+                  className="cursor-pointer block w-20 h-20 mx-auto rounded-full border-2 border-dashed border-gray-600 hover:border-[#FF7A00] transition-colors duration-300 flex items-center justify-center overflow-hidden"
+                >
+                  {personaToEdit?.avatar_url ? (
+                    <img
+                      src={personaToEdit.avatar_url}
+                      alt="Persona avatar preview"
+                      className="w-full h-full object-cover rounded-full"
+                    />
+                  ) : (
+                    <div className="text-center">
+                      <Upload className="w-5 h-5 text-gray-400 mx-auto mb-1" />
+                      <span className="text-xs text-gray-400">Upload</span>
+                    </div>
+                  )}
+                </label>
+                {/* Fallback initials under the upload UI if no image yet (for a11y/SSR) */}
+                <div className="sr-only">
+                  <Avatar className="w-20 h-20 mx-auto">
+                    <AvatarImage src={personaToEdit?.avatar_url || undefined} alt="Persona" className="object-cover" />
+                    <AvatarFallback className="bg-[#FF7A00] text-white text-lg">
+                      {personaToEdit?.name?.split(' ').map((n: string) => n[0]).join('') || 'P'}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
               </div>
             </div>
 

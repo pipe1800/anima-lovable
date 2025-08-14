@@ -12,6 +12,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import logger from '@/utils/logger';
 import { getPersonaById, type Persona } from '@/lib/persona-operations';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/queries/chatQueries';
+import { useNavigate } from 'react-router-dom';
 
 // Debug components - Only load when needed
 const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
@@ -68,6 +71,11 @@ const ChatInterface = ({
   const { toast } = useToast();
   const { user } = useAuth();
   const log = logger.scoped('ChatInterface');
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  // Variant navigation state per AI message id
+  const [variantIndexByMessage, setVariantIndexByMessage] = useState<Record<string, number>>({});
 
   // Listen for auto-summary success events and show notification
   useEffect(() => {
@@ -333,8 +341,152 @@ const ChatInterface = ({
     }
   }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, isFirstMessage, onFirstMessage, toast, updateMetrics, onMessageSent]);
 
+  // Helper to trigger a variant generation (keeps previous AI message)
+  const regenerateLastAI = useCallback(async (keepPrevious: boolean) => {
+    if (!user || !currentChatId) {
+      throw new Error('No active chat');
+    }
+    if (creditsBalance < 1) throw new Error('Insufficient credits');
+
+    // Fetch last user message content to resend
+    const { data: lastUserMsg, error: lastMsgErr } = await supabase
+      .from('messages')
+      .select('content')
+      .eq('chat_id', currentChatId)
+      .eq('is_ai_message', false)
+      .order('message_order', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (lastMsgErr || !lastUserMsg?.content) {
+      console.warn('No last user message found to regenerate', { lastMsgErr });
+      throw new Error('No previous user message to regenerate');
+    }
+
+    const payload = {
+      operation: 'send-message',
+      // IDs (both cases)
+      chatId: currentChatId,
+      chat_id: currentChatId,
+      characterId: character.id,
+      character_id: character.id,
+      // Use the previous user message to trigger a new AI response
+      message: lastUserMsg.content as string,
+      // settings (both cases to be safe)
+      addonSettings: currentAddonSettings,
+      addon_settings: currentAddonSettings,
+      selectedPersonaId: selectedPersonaId ?? null,
+      selected_persona_id: selectedPersonaId ?? null,
+      selectedWorldInfoId: selectedWorldInfoId ?? null,
+      selected_world_info_id: selectedWorldInfoId ?? null,
+      // regenerate hints (optional for backend; harmless if ignored)
+      regenerate: true,
+      regenerateLast: true,
+      regenerate_last: true,
+      keepPrevious: keepPrevious,
+      keep_previous: keepPrevious,
+    } as any;
+
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData?.session?.access_token) {
+        throw new Error('Authentication failed');
+      }
+      const token = sessionData.session.access_token;
+
+      // Use direct fetch like the streaming path to avoid any differences in payload handling
+      const { SUPABASE_API_URL } = await import('@/integrations/supabase/client');
+      const resp = await fetch(`${SUPABASE_API_URL}/functions/v1/chat-management`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'apikey': process.env.SUPABASE_ANON_KEY as any,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        console.warn('regenerateLastAI request failed', { status: resp.status, text, payload });
+        if (resp.status === 402) throw new Error('Insufficient credits');
+        throw new Error(text || `Request failed: ${resp.status}`);
+      }
+      return;
+    } catch (err) {
+      throw err;
+    }
+  }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId]);
+
+  // Keep latest regenerate function in a ref to avoid stale closures in global event listeners
+  const regenerateLastAIRef = useRef(regenerateLastAI);
+  useEffect(() => {
+    regenerateLastAIRef.current = regenerateLastAI;
+  }, [regenerateLastAI]);
+
+  // Variant navigation handlers
+  useEffect(() => {
+    const onEdit = async (e: any) => {
+      const messageId = e?.detail?.messageId as string | undefined;
+      if (!messageId) return;
+      try {
+        const { data, error } = await supabase
+          .from('messages')
+          .select('content, is_ai_message')
+          .eq('id', messageId)
+          .single();
+        if (error || !data?.is_ai_message) return;
+        const current = data.content as string;
+        const edited = window.prompt('Edit AI response:', current);
+        if (edited == null || edited === current) return;
+        const { error: updErr } = await supabase
+          .from('messages')
+          .update({ content: edited })
+          .eq('id', messageId);
+        if (updErr) throw updErr;
+        // Refresh chat
+        if (currentChatId) {
+          queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
+        }
+      } catch (err) {
+        console.error('Edit failed:', err);
+        toast({ title: 'Error', description: 'Failed to edit message', variant: 'destructive' });
+      }
+    };
+    const onRegenerate = async (e: any) => {
+      const messageId = e?.detail?.messageId as string | undefined;
+      if (!messageId || !currentChatId) return;
+      try {
+        await regenerateLastAIRef.current?.(false);
+      } catch (err: any) {
+        if (err?.message?.includes('credits')) setShowInsufficientCreditsModal(true);
+      }
+    };
+    const onVariantNext = async (_e: any) => {
+      try {
+        await regenerateLastAIRef.current?.(true);
+      } catch (err: any) {
+        if (err?.message?.includes('credits')) setShowInsufficientCreditsModal(true);
+      }
+    };
+    const onVariantPrev = (_e: any) => {
+      setVariantIndexByMessage((prev) => prev);
+    };
+
+    window.addEventListener('chat-ai-edit' as any, onEdit as any);
+    window.addEventListener('chat-ai-regenerate' as any, onRegenerate as any);
+    window.addEventListener('chat-ai-variant-next' as any, onVariantNext as any);
+    window.addEventListener('chat-ai-variant-prev' as any, onVariantPrev as any);
+    return () => {
+      window.removeEventListener('chat-ai-edit' as any, onEdit as any);
+      window.removeEventListener('chat-ai-regenerate' as any, onRegenerate as any);
+      window.removeEventListener('chat-ai-variant-next' as any, onVariantNext as any);
+      window.removeEventListener('chat-ai-variant-prev' as any, onVariantPrev as any);
+    };
+  }, [currentChatId, queryClient, toast]);
+
   const handleUpgrade = () => {
-    log.info('Navigate to upgrade page');
+    navigate('/subscription');
   };
 
   const handleCloseInsufficientCreditsModal = () => {

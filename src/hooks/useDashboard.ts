@@ -50,14 +50,18 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
   const userId = user?.id;
   const queryClient = useQueryClient();
 
-  // Prefetch next/prev pages (unchanged)
+  // Prefetch next/prev pages (unchanged) – but avoid throwing on errors
   React.useEffect(() => {
     if (userId) {
       queryClient.prefetchQuery({
         queryKey: ['user', 'chats', 'paginated', userId, page + 1, limit],
         queryFn: async () => {
-          const result = await getUserChatsPaginated(userId, page + 1, limit);
-          if (result.error) throw result.error;
+          const nextPage = page + 1;
+          const result = await getUserChatsPaginated(userId, nextPage, limit);
+          if (result.error) {
+            console.warn('Prefetch chats failed (next):', result.error);
+            return { data: [], totalCount: 0, currentPage: nextPage, totalPages: 0, error: null } as any;
+          }
           return result;
         },
         staleTime: 60 * 1000,
@@ -65,8 +69,12 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
       queryClient.prefetchQuery({
         queryKey: ['user', 'chats', 'paginated', userId, page + 2, limit],
         queryFn: async () => {
-          const result = await getUserChatsPaginated(userId, page + 2, limit);
-          if (result.error) throw result.error;
+          const nextNextPage = page + 2;
+          const result = await getUserChatsPaginated(userId, nextNextPage, limit);
+          if (result.error) {
+            console.warn('Prefetch chats failed (+2):', result.error);
+            return { data: [], totalCount: 0, currentPage: nextNextPage, totalPages: 0, error: null } as any;
+          }
           return result;
         },
         staleTime: 60 * 1000,
@@ -75,8 +83,12 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
         queryClient.prefetchQuery({
           queryKey: ['user', 'chats', 'paginated', userId, page - 1, limit],
           queryFn: async () => {
-            const result = await getUserChatsPaginated(userId, page - 1, limit);
-            if (result.error) throw result.error;
+            const prevPage = page - 1;
+            const result = await getUserChatsPaginated(userId, prevPage, limit);
+            if (result.error) {
+              console.warn('Prefetch chats failed (prev):', result.error);
+              return { data: [], totalCount: 0, currentPage: prevPage, totalPages: 0, error: null } as any;
+            }
             return result;
           },
           staleTime: 60 * 1000,
@@ -88,9 +100,13 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
   return useQuery({
     queryKey: ['user', 'chats', 'paginated', userId, page, limit],
     queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
+      if (!userId) return { data: [], totalCount: 0, currentPage: page, totalPages: 0 } as any;
       const result = await getUserChatsPaginated(userId, page, limit);
-      if (result.error) throw result.error;
+      if (result.error) {
+        console.error('Load chats failed:', result.error);
+        // Return safe fallback to keep UI alive
+        return { data: [], totalCount: 0, currentPage: page, totalPages: 0, error: null } as any;
+      }
       return result;
     },
     enabled: !!userId,
@@ -108,9 +124,12 @@ export const useUserChats = () => {
   return useQuery({
     queryKey: ['user', 'chats', userId],
     queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
+      if (!userId) return [] as any[];
       const result = await getUserChatsPaginated(userId, 1, 50);
-      if (result.error) throw result.error;
+      if (result.error) {
+        console.error('Load chats (non-paginated) failed:', result.error);
+        return [] as any[];
+      }
       return result.data || [];
     },
     enabled: !!userId,

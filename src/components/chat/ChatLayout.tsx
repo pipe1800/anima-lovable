@@ -681,7 +681,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
               name: personaToEdit.name,
               bio: personaToEdit.bio,
               lore: personaToEdit.lore,
-            });
+              avatar_url: personaToEdit.avatar_url,
+            } as any);
             // Update personas list cache
             queryClient.setQueryData(personaKeys.all(currentUser?.id), (old: Persona[] = []) => old.map(p => p.id === updatedPersona.id ? updatedPersona : p));
             if (selectedPersona?.id === updatedPersona.id) {

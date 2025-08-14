@@ -91,7 +91,35 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
     }
   }, [isVisible, user]);
 
-  // Sync selectedWorldInfoId prop with internal state
+  // If we have a selectedWorldInfoId but it's not yet in the list, fetch it directly to avoid label flicker
+  useEffect(() => {
+    const ensureSelectedWorldInfo = async () => {
+      if (!selectedWorldInfoId) return;
+      if (selectedWorldInfo?.id === selectedWorldInfoId) return;
+
+      // If it's already in loaded list, use it
+      const inList = worldInfos.find(w => w.id === selectedWorldInfoId);
+      if (inList) {
+        setSelectedWorldInfo(inList);
+        return;
+      }
+
+      try {
+        const { data } = await supabase
+          .from('world_infos')
+          .select('id, name, short_description, visibility, creator_id')
+          .eq('id', selectedWorldInfoId)
+          .maybeSingle();
+        if (data) setSelectedWorldInfo(data as WorldInfo);
+      } catch (e) {
+        console.warn('Failed to fetch selected world info by id:', e);
+      }
+    };
+
+    ensureSelectedWorldInfo();
+  }, [selectedWorldInfoId, worldInfos, selectedWorldInfo]);
+
+  // Sync selectedWorldInfoId prop with internal state when list changes
   useEffect(() => {
     if (selectedWorldInfoId && worldInfos.length > 0) {
       const worldInfo = worldInfos.find(w => w.id === selectedWorldInfoId);
@@ -148,7 +176,9 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
           <div className="flex items-center space-x-2">
             <BookOpen className="w-4 h-4" />
             <span className="text-sm">
-              {disabled ? 'World Info (Disabled)' : (selectedWorldInfo?.name || 'Select World Info')}
+              {disabled
+                ? 'World Info (Disabled)'
+                : (selectedWorldInfo?.name || (selectedWorldInfoId ? 'Loading…' : 'Select World Info'))}
             </span>
             <ChevronDown className="w-4 h-4" />
           </div>

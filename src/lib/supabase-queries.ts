@@ -700,12 +700,17 @@ export const getUserChatsPaginated = async (
   const chatIds = chats.map((c) => c.id);
   const characterIds = chats.map((c) => c.character_id).filter(Boolean);
 
-  // Batch fetch last messages for all chats
-  const { data: lastMsgsData } = await supabase
-    .from('messages')
-    .select('chat_id, content, is_ai_message, created_at')
-    .in('chat_id', chatIds as string[])
-    .order('created_at', { ascending: false });
+  // Batch fetch last messages for all chats (guard empty arrays to avoid PostgREST in() error)
+  let lastMsgsData: Array<{ chat_id: string; content: string; is_ai_message: boolean; created_at: string }> | undefined = [];
+  if (chatIds.length > 0) {
+    const { data } = await supabase
+      .from('messages')
+      .select('chat_id, content, is_ai_message, created_at')
+      .in('chat_id', chatIds as string[])
+      .eq('is_placeholder', false)
+      .order('created_at', { ascending: false });
+    lastMsgsData = data || [];
+  }
 
   const lastMessageMap = new Map<string, { content: string; is_ai_message: boolean }>();
   lastMsgsData?.forEach((m) => {
@@ -717,15 +722,25 @@ export const getUserChatsPaginated = async (
   // Batch fetch message counts per chat (exclude placeholders)
   const messageCounts = new Map<string, number>();
   if (chatIds.length > 0) {
-    const { data: countsData } = await (supabase as any)
-      .from('messages')
-      .select('chat_id, count:count()', { head: false })
-      .in('chat_id', chatIds as string[])
-      .not('content', 'ilike', '%[PLACEHOLDER]%')
-      .group('chat_id');
-    countsData?.forEach((row: any) => {
-      if (row.chat_id) messageCounts.set(row.chat_id, Number(row.count) || 0);
-    });
+    try {
+      const results = await Promise.all(
+        chatIds.map(async (id) => {
+          const { count, error } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('chat_id', id)
+            .eq('is_placeholder', false);
+          if (error) {
+            console.warn('Per-chat count failed for', id, error);
+            return { id, count: 0 };
+          }
+          return { id, count: count || 0 };
+        })
+      );
+      results.forEach(({ id, count }) => messageCounts.set(id, count));
+    } catch (e) {
+      console.error('Per-chat count failed (paginated):', e);
+    }
   }
 
   // Batch fetch user character settings
@@ -801,12 +816,17 @@ export const getUserChats = async (userId: string) => {
   const chatIds = chats.map((c) => c.id);
   const characterIds = chats.map((c) => c.character_id).filter(Boolean);
 
-  // Batch fetch last messages for all chats
-  const { data: lastMsgsData } = await supabase
-    .from('messages')
-    .select('chat_id, content, is_ai_message, created_at')
-    .in('chat_id', chatIds as string[])
-    .order('created_at', { ascending: false });
+  // Batch fetch last messages for all chats (guard empty arrays to avoid PostgREST in() error)
+  let lastMsgsData: Array<{ chat_id: string; content: string; is_ai_message: boolean; created_at: string }> | undefined = [];
+  if (chatIds.length > 0) {
+    const { data } = await supabase
+      .from('messages')
+      .select('chat_id, content, is_ai_message, created_at')
+      .in('chat_id', chatIds as string[])
+      .eq('is_placeholder', false)
+      .order('created_at', { ascending: false });
+    lastMsgsData = data || [];
+  }
 
   const lastMessageMap = new Map<string, { content: string; is_ai_message: boolean }>();
   lastMsgsData?.forEach((m) => {
@@ -818,15 +838,25 @@ export const getUserChats = async (userId: string) => {
   // Batch fetch message counts per chat (exclude placeholders)
   const messageCounts = new Map<string, number>();
   if (chatIds.length > 0) {
-    const { data: countsData } = await (supabase as any)
-      .from('messages')
-      .select('chat_id, count:count()', { head: false })
-      .in('chat_id', chatIds as string[])
-      .not('content', 'ilike', '%[PLACEHOLDER]%')
-      .group('chat_id');
-    countsData?.forEach((row: any) => {
-      if (row.chat_id) messageCounts.set(row.chat_id, Number(row.count) || 0);
-    });
+    try {
+      const results = await Promise.all(
+        chatIds.map(async (id) => {
+          const { count, error } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('chat_id', id)
+            .eq('is_placeholder', false);
+          if (error) {
+            console.warn('Per-chat count failed for', id, error);
+            return { id, count: 0 };
+          }
+          return { id, count: count || 0 };
+        })
+      );
+      results.forEach(({ id, count }) => messageCounts.set(id, count));
+    } catch (e) {
+      console.error('Per-chat count failed (legacy):', e);
+    }
   }
 
   // Batch fetch user character settings

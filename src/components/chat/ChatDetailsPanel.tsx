@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MessageCircle, Edit, Brain, Heart, Star, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Separator } from '@/components/ui/separator';
 
 interface ChatDetailsPanelProps {
   loading: boolean;
@@ -71,70 +72,125 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
   // Greeting
   const greetingText: string | null = defs?.greeting || null;
 
+  // Read more toggles
+  const [expandSummary, setExpandSummary] = useState(false);
+  const [expandScenario, setExpandScenario] = useState(false);
+  const [expandGreeting, setExpandGreeting] = useState(false);
+  const shouldClamp = (text?: string | null, limit = 240) => !!text && text.length > limit;
+
   return (
     <div className="p-4 space-y-6">
-      {/* Character Info */}
-      <div>
-        <h3 className="text-white font-semibold mb-3 text-sm sm:text-base">Character Info</h3>
-        <div className="space-y-4">
-          <div className="flex items-start space-x-3">
-            <Avatar className="w-12 h-12 sm:w-16 sm:h-16 flex-shrink-0">
-              <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} className="object-cover" />
-              <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-sm sm:text-base">
-                {character.fallback}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <h4 className="text-white font-medium text-sm sm:text-base truncate">{character.name}</h4>
-              <p className="text-gray-400 text-xs sm:text-sm line-clamp-2">{character.tagline}</p>
-            </div>
-          </div>
-          {characterDetails?.tags && characterDetails.tags.length > 0 && (
-            <div>
-              <h4 className="text-white font-medium mb-2 text-sm">Tags</h4>
-              <div className="flex flex-wrap gap-2">
-                {characterDetails.tags.map((tagItem: any, index: number) => (
-                  <Badge
-                    key={index}
-                    variant="secondary"
-                    className="bg-[#1a1a2e] text-gray-300 border border-gray-600/50 text-xs"
-                  >
-                    {tagItem.tag?.name || tagItem.name}
-                  </Badge>
-                ))}
+      {/* Character Header Card */}
+      <div className="relative overflow-hidden rounded-xl border border-gray-700/50 bg-gradient-to-br from-[#141414] via-[#101018] to-[#0b0b10]">
+        <div className="p-4 sm:p-5 flex items-start gap-3">
+          <Avatar className="w-14 h-14 sm:w-16 sm:h-16 ring-1 ring-gray-700/60">
+            <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} className="object-cover" />
+            <AvatarFallback className="bg-[#FF7A00] text-white font-bold">
+              {character.fallback}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-white font-semibold text-base sm:text-lg truncate">{character.name}</h2>
+                <p className="text-gray-300/90 text-xs sm:text-sm line-clamp-2">
+                  {character.tagline}
+                </p>
+              </div>
+              <div className="hidden sm:flex gap-2">
+                <Badge className="bg-[#1a1a2e] text-gray-200 border border-gray-700/50">Chat</Badge>
+                <Badge variant="secondary" className="bg-gray-800/70 text-gray-300 border border-gray-700/50">Details</Badge>
               </div>
             </div>
-          )}
-          <div>
-            <h4 className="text-white font-medium mb-1 text-sm">Creator</h4>
-            <p className="text-gray-400 text-xs sm:text-sm">
-              @{characterDetails?.profiles?.username || characterDetails?.creator?.username || 'Unknown'}
-            </p>
+            <div className="mt-3 flex items-center gap-2 text-[11px] text-gray-400">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-black/20 border border-gray-800/60">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Active
+              </span>
+              {characterDetails?.creator && (
+                <span className="inline-flex items-center gap-2 px-2 py-1 rounded-md bg-black/20 border border-gray-800/60">
+                  <span className="text-gray-500">by</span> @{characterDetails.creator.username}
+                </span>
+              )}
+            </div>
           </div>
         </div>
+        <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[#FF7A00]/10 blur-2xl" />
       </div>
 
-      {/* Definition Details */}
-      {(shortSummary || scenarioText || greetingText) && (
+      {/* Tags */}
+      {characterDetails?.tags && characterDetails.tags.length > 0 && (
         <div>
-          <h3 className="text-white font-semibold mb-3 text-sm sm:text-base">About</h3>
-          <div className="space-y-3">
+          <h3 className="text-white font-semibold mb-2 text-sm">Tags</h3>
+          <div className="flex flex-wrap gap-2">
+            {characterDetails.tags.map((tagItem: any, index: number) => (
+              <span
+                key={index}
+                className="px-2.5 py-1 rounded-md text-xs bg-[#11111a] text-gray-200 border border-gray-700/60 hover:border-gray-600/60 transition-colors"
+              >
+                {tagItem.tag?.name || tagItem.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* About Section */}
+      {(shortSummary || scenarioText || greetingText) && (
+        <div className="rounded-xl border border-gray-700/50 bg-[#0f0f12] overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-700/50 flex items-center justify-between">
+            <h3 className="text-white font-semibold text-sm sm:text-base">About</h3>
+          </div>
+          <div className="p-4 space-y-4">
             {shortSummary && (
-              <div>
-                <h4 className="text-white font-medium text-xs sm:text-sm mb-1">Short Summary</h4>
-                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{shortSummary}</p>
+              <div className="rounded-lg border border-gray-700/50 bg-[#0b0b10] p-3">
+                <h4 className="text-white/90 font-medium text-xs sm:text-sm mb-1">Short Summary</h4>
+                <p className={`text-gray-300 text-sm leading-relaxed whitespace-pre-wrap ${!expandSummary && shouldClamp(shortSummary, 280) ? 'line-clamp-4' : ''}`}>
+                  {shortSummary}
+                </p>
+                {shouldClamp(shortSummary, 280) && (
+                  <button
+                    type="button"
+                    onClick={() => setExpandSummary((v) => !v)}
+                    className="mt-1 text-xs text-[#FF7A00] hover:underline"
+                  >
+                    {expandSummary ? 'Show less' : 'Read more'}
+                  </button>
+                )}
               </div>
             )}
             {scenarioText && (
-              <div>
-                <h4 className="text-white font-medium text-xs sm:text-sm mb-1">Scenario</h4>
-                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{scenarioText}</p>
+              <div className="rounded-lg border border-gray-700/50 bg-[#0b0b10] p-3">
+                <h4 className="text-white/90 font-medium text-xs sm:text-sm mb-1">Scenario</h4>
+                <p className={`text-gray-300 text-sm leading-relaxed whitespace-pre-wrap ${!expandScenario && shouldClamp(scenarioText, 280) ? 'line-clamp-4' : ''}`}>
+                  {scenarioText}
+                </p>
+                {shouldClamp(scenarioText, 280) && (
+                  <button
+                    type="button"
+                    onClick={() => setExpandScenario((v) => !v)}
+                    className="mt-1 text-xs text-[#FF7A00] hover:underline"
+                  >
+                    {expandScenario ? 'Show less' : 'Read more'}
+                  </button>
+                )}
               </div>
             )}
             {greetingText && (
-              <div>
-                <h4 className="text-white font-medium text-xs sm:text-sm mb-1">Greeting</h4>
-                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{greetingText}</p>
+              <div className="rounded-lg border border-gray-700/50 bg-[#0b0b10] p-3">
+                <h4 className="text-white/90 font-medium text-xs sm:text-sm mb-1">Greeting</h4>
+                <p className={`text-gray-300 text-sm leading-relaxed whitespace-pre-wrap ${!expandGreeting && shouldClamp(greetingText, 200) ? 'line-clamp-4' : ''}`}>
+                  {greetingText}
+                </p>
+                {shouldClamp(greetingText, 200) && (
+                  <button
+                    type="button"
+                    onClick={() => setExpandGreeting((v) => !v)}
+                    className="mt-1 text-xs text-[#FF7A00] hover:underline"
+                  >
+                    {expandGreeting ? 'Show less' : 'Read more'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -142,9 +198,11 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
       )}
 
       {/* Actions */}
-      <div>
-        <h3 className="text-white font-semibold mb-3 text-sm sm:text-base">Actions</h3>
-        <div className="space-y-3">
+      <div className="rounded-xl border border-gray-700/50 bg-[#0f0f12] overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-700/50">
+          <h3 className="text-white font-semibold text-sm sm:text-base">Actions</h3>
+        </div>
+        <div className="p-4 space-y-3">
           <Button
             onClick={onStartNewChat}
             disabled={isCreatingNewChat}
@@ -171,7 +229,6 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
               Edit Character
             </Button>
           )}
-          {/* Always show Memories button; disable when not enabled */}
           <Button
             data-tutorial="memories-button"
             onClick={onOpenMemories}

@@ -193,7 +193,7 @@ export function DashboardContent() {
       id: character.id,
       name: character.name,
       tagline: character.tagline || '',
-      avatar: character.name.charAt(0),
+      avatar: character.name?.charAt(0) || 'C',
       image: character.avatar_url || "/placeholder.svg",
       totalChats: character.chats_count || character.interaction_count || 0,
       likesCount: character.likes_count || 0,
@@ -467,6 +467,15 @@ export function DashboardContent() {
     }
   }, [totalChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
 
+  // Ensure currentPage stays within valid bounds whenever totalPages changes
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages || 1);
+    } else if (currentPage < 1 && totalPages > 0) {
+      setCurrentPage(1);
+    }
+  }, [currentPage, totalPages]);
+
   if (authLoading || statsLoading) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
@@ -483,15 +492,10 @@ export function DashboardContent() {
     );
   }
 
+  // Soft-handle data errors without crashing the page
   if (statsError || charactersError || chatsError) {
-    return (
-      <div className="min-h-screen bg-[#121212] flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-red-400 text-lg mb-2">Failed to load dashboard data</div>
-          <div className="text-gray-400 text-sm">Please refresh the page to try again</div>
-        </div>
-      </div>
-    );
+    console.error('Dashboard data load issues:', { statsError, charactersError, chatsError });
+    // Proceed to render with safe fallbacks already applied above
   }
 
   return (

@@ -6,6 +6,7 @@ import { FormattedMessage } from "@/components/ui/FormattedMessage";
 import OptimizedMessageFormatter from "./OptimizedMessageFormatter";
 import type { TrackedContext, Message, Character } from '@/types/chat';
 import { useAuth } from '@/contexts/AuthContext';
+import { Pencil, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface MessageGroupData {
   id: string;
@@ -114,6 +115,60 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
       : toRgba(styleOptions?.aiBubbleColor, styleOptions?.aiBubbleOpacity, '#1f2937', 0.9);
   }
 
+  // Navigation: keep all messages visible but track a highlighted one (AI only)
+  const [activeIndex, setActiveIndex] = React.useState(Math.max(messages.length - 1, 0));
+  const messageRefs = React.useRef<Array<HTMLDivElement | null>>([]);
+  React.useEffect(() => {
+    setActiveIndex(Math.max(messages.length - 1, 0));
+    // Ensure newest is visible
+    const el = messageRefs.current[Math.max(messages.length - 1, 0)];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, group.id]);
+
+  // Action handlers: dispatch CustomEvents upward, parent can listen on window/document
+  const handleEdit = () => {
+    const current = messages[Math.min(Math.max(activeIndex, 0), Math.max(messages.length - 1, 0))];
+    if (!current || isUser) return;
+    const ev = new CustomEvent('chat-ai-edit', { detail: { messageId: current.id } });
+    window.dispatchEvent(ev);
+  };
+  const handleRegenerate = () => {
+    const current = messages[Math.min(Math.max(activeIndex, 0), Math.max(messages.length - 1, 0))];
+    if (!current || isUser) return;
+    const ev = new CustomEvent('chat-ai-regenerate', { detail: { messageId: current.id } });
+    window.dispatchEvent(ev);
+  };
+  const handleNextVariant = () => {
+    if (isUser) return;
+    if (activeIndex < messages.length - 1) {
+      const next = activeIndex + 1;
+      setActiveIndex(next);
+      const el = messageRefs.current[next];
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    } else {
+      // At the end: request a new variant (keep previous)
+      const current = messages[Math.min(Math.max(activeIndex, 0), Math.max(messages.length - 1, 0))];
+      const ev = new CustomEvent('chat-ai-variant-next', { detail: { messageId: current?.id } });
+      window.dispatchEvent(ev);
+    }
+  };
+  const handlePrevVariant = () => {
+    if (isUser) return;
+    if (activeIndex > 0) {
+      const prev = activeIndex - 1;
+      setActiveIndex(prev);
+      const el = messageRefs.current[prev];
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  };
+
+  // Subtle icon styles
+  const iconClass = "w-4 h-4 text-white/60 hover:text-white transition-colors";
+  const iconButtonClass = "p-1 rounded hover:bg-white/5 active:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed";
+
   return (
     <div className="mb-6">
       {showTimestamp && (
@@ -181,8 +236,9 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
 
                 return (
                   <div
+                    ref={(el) => { messageRefs.current[index] = el; }}
                     key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-                    className={`relative flex overflow-hidden ${sizeClass} ${
+                    className={`relative flex overflow-hidden ${sizeClass} ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
                       index === 0 && index === messages.length - 1
                         ? 'rounded-lg'
                         : index === 0
@@ -202,8 +258,9 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
             // Default rendering for other styles
             return (
               <div
+                ref={(el) => { messageRefs.current[index] = el; }}
                 key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-                className={`relative px-4 py-2 ${sizeClass} ${
+                className={`relative px-4 py-2 ${sizeClass} ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
                   index === 0 && index === messages.length - 1
                     ? 'rounded-lg'
                     : index === 0
@@ -249,11 +306,10 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
         )}
       </div>
       
-      {/* Show context display for AI messages when addons are enabled - ONCE PER GROUP */}
+      {/* Show context display for AI messages with action icons */}
       {!isUser && (
         <div className="mt-3 ml-11">
           {(() => {
-            // Get the most recent message in the group for context
             const latestMessage = messages[messages.length - 1];
             
             const hasContextUpdates = latestMessage.contextUpdates && Object.keys(latestMessage.contextUpdates).length > 0;
@@ -267,6 +323,25 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
               addonSettings.characterPosition
             );
             
+            const rightActions = (
+              <div className="flex items-center gap-1">
+                <button title="Edit response" onClick={handleEdit} className={`${iconButtonClass}`}>
+                  <Pencil className={`${iconClass}`} />
+                </button>
+                <button title="Regenerate" onClick={handleRegenerate} className={`${iconButtonClass}`}>
+                  <RotateCcw className={`${iconClass}`} />
+                </button>
+                <div className="flex items-center ml-1">
+                  <button title="Previous" onClick={handlePrevVariant} className={`${iconButtonClass}`} disabled={activeIndex <= 0}>
+                    <ChevronLeft className={`${iconClass}`} />
+                  </button>
+                  <button title="Next" onClick={handleNextVariant} className={`${iconButtonClass}`}>
+                    <ChevronRight className={`${iconClass}`} />
+                  </button>
+                </div>
+              </div>
+            );
+            
             if (hasContextUpdates || hasCurrentContext || hasEnabledAddons) {
               return (
                 <ContextDisplay 
@@ -275,10 +350,16 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   currentContext={trackedContext || latestMessage.current_context}
                   addonSettings={addonSettings}
                   className="mt-2"
+                  rightActions={rightActions}
                 />
               );
             }
-            return null;
+            // No context widget requested: still show the action bar aligned subtly
+            return (
+              <div className="flex justify-end">
+                {rightActions}
+              </div>
+            );
           })()}
         </div>
       )}

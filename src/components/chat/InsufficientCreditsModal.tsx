@@ -2,6 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Zap, CreditCard, Clock } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface InsufficientCreditsModalProps {
   isOpen: boolean;
@@ -16,6 +17,16 @@ export function InsufficientCreditsModal({
   currentBalance, 
   onUpgrade 
 }: InsufficientCreditsModalProps) {
+  const { subscription } = useAuth();
+  const planName = (subscription?.plan?.name || '').trim();
+  const normalized = planName.toLowerCase();
+  const isGuest = !planName || normalized.includes('guest') || normalized === 'free';
+  const isTrueFan = normalized.includes('true fan');
+  const isWhale = normalized.includes('whale'); // handles 'Whale' or 'The Whale'
+
+  // Primary CTA labels based on plan
+  const primaryLabel = isGuest ? 'Upgrade Plan' : isWhale ? 'Buy Credit Pack' : 'Upgrade Plan';
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="bg-[#1a1a2e] border-gray-700 text-white max-w-md">
@@ -25,7 +36,10 @@ export function InsufficientCreditsModal({
             Insufficient Credits
           </DialogTitle>
           <DialogDescription className="text-center text-gray-300">
-            You are out of credits. Choose an option below to continue chatting.
+            {isGuest && 'You are on Guest Pass. Upgrade your plan to get more monthly credits and features.'}
+            {isTrueFan && 'You are on True Fan. You can buy a credit pack or upgrade your plan for more monthly credits.'}
+            {isWhale && 'You are on The Whale plan. Please buy a credit pack to continue.'}
+            {!isGuest && !isTrueFan && !isWhale && 'You are out of credits. Buy a credit pack or upgrade your plan.'}
           </DialogDescription>
         </DialogHeader>
         
@@ -46,24 +60,68 @@ export function InsufficientCreditsModal({
           </div>
 
           <div className="space-y-3">
-            <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
-              <Clock className="w-5 h-5 text-[#FF7A00]" />
-              <div>
-                <p className="text-sm font-medium">Wait for Monthly Credits</p>
-                <p className="text-xs text-gray-400">Guest Pass users get 1,000 credits monthly</p>
+            {isGuest && (
+              <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
+                <Clock className="w-5 h-5 text-[#FF7A00]" />
+                <div>
+                  <p className="text-sm font-medium">Wait for Monthly Credits</p>
+                  <p className="text-xs text-gray-400">Guest Pass users get 1,000 credits monthly</p>
+                </div>
               </div>
-            </div>
-            
-            <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
-              <CreditCard className="w-5 h-5 text-[#FF7A00]" />
-              <div>
-                <p className="text-sm font-medium">Upgrade Your Plan</p>
-                <p className="text-xs text-gray-400">Get more credits and unlimited features</p>
+            )}
+
+            {/* Upgrade/Buy cards per plan */}
+            {isWhale && (
+              <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
+                <CreditCard className="w-5 h-5 text-[#FF7A00]" />
+                <div>
+                  <p className="text-sm font-medium">Buy a Credit Pack</p>
+                  <p className="text-xs text-gray-400">One-time purchase to top up your credits</p>
+                </div>
               </div>
-            </div>
+            )}
+
+            {isTrueFan && (
+              <>
+                <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
+                  <CreditCard className="w-5 h-5 text-[#FF7A00]" />
+                  <div>
+                    <p className="text-sm font-medium">Buy a Credit Pack</p>
+                    <p className="text-xs text-gray-400">Top up instantly with a one-time purchase</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
+                  <CreditCard className="w-5 h-5 text-[#FF7A00]" />
+                  <div>
+                    <p className="text-sm font-medium">Upgrade Your Plan</p>
+                    <p className="text-xs text-gray-400">Move to The Whale for the highest monthly credits</p>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {isGuest && (
+              <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
+                <CreditCard className="w-5 h-5 text-[#FF7A00]" />
+                <div>
+                  <p className="text-sm font-medium">Upgrade Your Plan</p>
+                  <p className="text-xs text-gray-400">Get more credits and premium features</p>
+                </div>
+              </div>
+            )}
+
+            {!isGuest && !isTrueFan && !isWhale && (
+              <div className="flex items-center gap-3 p-3 bg-[#121212] rounded-lg border border-gray-700">
+                <CreditCard className="w-5 h-5 text-[#FF7A00]" />
+                <div>
+                  <p className="text-sm font-medium">Manage Subscription</p>
+                  <p className="text-xs text-gray-400">Buy a credit pack or upgrade your plan</p>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <Button
               variant="outline"
               onClick={onClose}
@@ -71,12 +129,21 @@ export function InsufficientCreditsModal({
             >
               Close
             </Button>
-            <Button
-              onClick={onUpgrade}
-              className="flex-1 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white"
-            >
-              Upgrade Plan
-            </Button>
+
+            {isTrueFan ? (
+              <>
+                <Button onClick={onUpgrade} className="flex-1 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white">
+                  Buy Credit Pack
+                </Button>
+                <Button onClick={onUpgrade} className="flex-1 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white">
+                  Upgrade Plan
+                </Button>
+              </>
+            ) : (
+              <Button onClick={onUpgrade} className="flex-1 bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white">
+                {primaryLabel}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
