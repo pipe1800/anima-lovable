@@ -129,6 +129,20 @@ globalThis.Deno.serve(async (req) => {
         );
         break;
 
+      case 'regenerate-message':
+        console.log('🎯 Routing to regenerate message...');
+        {
+          const { handleRegenerateMessage } = await import('./modules/regenerate-message-handler.ts');
+          response = await handleRegenerateMessage(
+            requestBody as any,
+            user,
+            supabase,
+            supabaseAdmin,
+            req
+          );
+        }
+        break;
+
       case 'extract-context':
         console.log('🎯 Routing to context extraction...');
         response = await handleExtractContext(

@@ -314,7 +314,7 @@ export const ProfileView = () => {
               ) : (
                 <>
                   <Avatar className="w-24 h-24 ring-4 ring-primary/20">
-                    <AvatarImage src={data?.profile?.avatar_url} alt={data?.profile?.username} className="object-cover" />
+                    <AvatarImage src={data?.profile?.avatar_url || '/default_avatar.jpg'} alt={data?.profile?.username} className="object-cover" />
                     <AvatarFallback className="text-2xl">
                       {data?.profile?.username?.[0]?.toUpperCase() || 'U'}
                     </AvatarFallback>

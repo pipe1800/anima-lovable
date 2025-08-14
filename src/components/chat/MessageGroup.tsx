@@ -6,7 +6,9 @@ import { FormattedMessage } from "@/components/ui/FormattedMessage";
 import OptimizedMessageFormatter from "./OptimizedMessageFormatter";
 import type { TrackedContext, Message, Character } from '@/types/chat';
 import { useAuth } from '@/contexts/AuthContext';
-import { Pencil, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Pencil, RotateCcw, /* ChevronLeft, ChevronRight,*/ Check, X } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 interface MessageGroupData {
   id: string;
@@ -53,6 +55,10 @@ interface MessageGroupProps {
   styleOptions?: ChatStyleOptions;
   // New: persona > profile > default precedence for user avatar
   userAvatarUrlOverride?: string;
+  // New: live regenerating content for a specific AI message id
+  regeneratingContentByMessageId?: Record<string, string>;
+  // New: only allow edit/regenerate on the very latest AI group
+  canModify?: boolean;
 }
 
 // Helper: hex + opacity -> rgba string
@@ -69,13 +75,14 @@ const toRgba = (hex?: string, opacity?: number, fallbackHex: string = '#1f2937',
 const DEFAULT_AVATAR = '/default_avatar.jpg';
 
 // ✅ PHASE 3: Memoized component to prevent unnecessary re-renders
-export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions, userAvatarUrlOverride }: MessageGroupProps) {
+export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions, userAvatarUrlOverride, regeneratingContentByMessageId = {}, canModify = false }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
 
   const sizeClass = fontSizeClass || 'text-base';
 
   // Access user profile for avatar
   const { profile } = useAuth();
+  const { toast } = useToast();
   // Persona > profile > default precedence
   const resolvedUserAvatarUrl = userAvatarUrlOverride || profile?.avatar_url || DEFAULT_AVATAR;
 
@@ -128,41 +135,110 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, group.id]);
 
-  // Action handlers: dispatch CustomEvents upward, parent can listen on window/document
-  const handleEdit = () => {
-    const current = messages[Math.min(Math.max(activeIndex, 0), Math.max(messages.length - 1, 0))];
-    if (!current || isUser) return;
-    const ev = new CustomEvent('chat-ai-edit', { detail: { messageId: current.id } });
-    window.dispatchEvent(ev);
+  // Inline edit state for AI messages
+  const [editingIndex, setEditingIndex] = React.useState<number | null>(null);
+  const [editValue, setEditValue] = React.useState('');
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [editingHeight, setEditingHeight] = React.useState<number | null>(null);
+  const [editingWidth, setEditingWidth] = React.useState<number | null>(null);
+
+  const startEdit = () => {
+    if (isUser) return;
+    if (!canModify) return; // Only allow editing on latest AI message/group
+    const index = Math.max(messages.length - 1, 0);
+    const current = messages[index];
+    if (!current || current.id === 'streaming-temp') return;
+    // Broadcast begin-edit to ensure only one message is edited at a time globally
+    window.dispatchEvent(new CustomEvent('chat-ai-begin-edit', { detail: { groupId: group.id, messageId: current.id } }));
+    // Measure current bubble dimensions before switching to textarea
+    const el = messageRefs.current[index];
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      setEditingHeight(rect.height);
+      setEditingWidth(rect.width);
+      // Ensure the bubble is in view
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+    setEditingIndex(index);
+    setEditValue(current.content || '');
   };
+
+  const cancelEdit = React.useCallback(() => {
+    setEditingIndex(null);
+    setEditValue('');
+    setEditingHeight(null);
+    setEditingWidth(null);
+  }, []);
+
+  const saveEdit = async () => {
+    if (editingIndex === null) return;
+    const target = messages[editingIndex];
+    if (!target) return;
+    try {
+      setIsSaving(true);
+      const { error } = await supabase
+        .from('messages')
+        .update({ content: editValue })
+        .eq('id', target.id);
+      if (error) throw error;
+      toast({ title: 'Updated', description: 'Message edited successfully.' });
+      cancelEdit();
+      // Realtime should update the UI; if not, the next refresh will
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message || 'Failed to save edit', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const onKeyDownEditor: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEdit();
+    }
+  };
+
+  // Close edit when clicking outside the currently edited bubble or its controls
+  React.useEffect(() => {
+    if (editingIndex === null) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      const container = messageRefs.current[editingIndex!];
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // Ignore clicks on Save/Cancel controls
+      if (target.closest('[data-edit-control="true"]')) return;
+      if (container && !container.contains(target)) {
+        cancelEdit();
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [editingIndex, cancelEdit]);
+
+  // Listen for begin-edit events from other groups to enforce single-edit globally
+  React.useEffect(() => {
+    const onBeginEdit = (e: any) => {
+      const sourceGroupId = e?.detail?.groupId as string | undefined;
+      if (!sourceGroupId) return;
+      if (sourceGroupId !== group.id && editingIndex !== null) {
+        cancelEdit();
+      }
+    };
+    window.addEventListener('chat-ai-begin-edit' as any, onBeginEdit as any);
+    return () => window.removeEventListener('chat-ai-begin-edit' as any, onBeginEdit as any);
+  }, [group.id, editingIndex, cancelEdit]);
+
+  // Action handlers: regenerate (restricted to last message only)
   const handleRegenerate = () => {
-    const current = messages[Math.min(Math.max(activeIndex, 0), Math.max(messages.length - 1, 0))];
-    if (!current || isUser) return;
+    if (isUser || editingIndex !== null) return;
+    if (!canModify) return; // Only allow regenerate on latest AI message/group
+    const current = messages[Math.max(messages.length - 1, 0)];
+    if (!current) return;
     const ev = new CustomEvent('chat-ai-regenerate', { detail: { messageId: current.id } });
     window.dispatchEvent(ev);
-  };
-  const handleNextVariant = () => {
-    if (isUser) return;
-    if (activeIndex < messages.length - 1) {
-      const next = activeIndex + 1;
-      setActiveIndex(next);
-      const el = messageRefs.current[next];
-      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-    } else {
-      // At the end: request a new variant (keep previous)
-      const current = messages[Math.min(Math.max(activeIndex, 0), Math.max(messages.length - 1, 0))];
-      const ev = new CustomEvent('chat-ai-variant-next', { detail: { messageId: current?.id } });
-      window.dispatchEvent(ev);
-    }
-  };
-  const handlePrevVariant = () => {
-    if (isUser) return;
-    if (activeIndex > 0) {
-      const prev = activeIndex - 1;
-      setActiveIndex(prev);
-      const el = messageRefs.current[prev];
-      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-    }
   };
 
   // Subtle icon styles
@@ -225,12 +301,22 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                         {character.name}
                       </div>
                     )}
-                    <span style={textColor ? { color: textColor } : undefined}>
-                      <FormattedMessage 
-                        content={message.content}
-                        className="whitespace-pre-wrap select-text message-content"
+                    {(!isUser && editingIndex === index) ? (
+                      <textarea
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={onKeyDownEditor}
+                        className="w-full min-h-[6rem] bg-transparent outline-none resize-none text-white/90 placeholder-white/50"
+                        autoFocus
                       />
-                    </span>
+                    ) : (
+                      <span style={textColor ? { color: textColor } : undefined}>
+                        <FormattedMessage 
+                          content={message.content}
+                          className="whitespace-pre-wrap select-text message-content"
+                        />
+                      </span>
+                    )}
                   </div>
                 );
 
@@ -247,9 +333,38 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                         ? 'rounded-b-lg rounded-br-lg rounded-bl-sm'
                         : 'rounded-br-lg rounded-bl-sm'
                     }`}
-                    style={{ backgroundColor: bgColor }}
+                    style={{ 
+                      backgroundColor: bgColor, 
+                      height: (!isUser && editingIndex === index && editingHeight) ? `${editingHeight}px` : undefined,
+                      width: (!isUser && editingIndex === index && editingWidth) ? `${editingWidth}px` : undefined,
+                    }}
                   >
-                    {isUser ? (<>{TextSection}{AvatarSlice}</>) : (<>{AvatarSlice}{TextSection}</>)}
+                    {isUser ? (
+                      <>
+                        {TextSection}
+                        {AvatarSlice}
+                      </>
+                    ) : (
+                      <>
+                        {AvatarSlice}
+                        {editingIndex === index ? (
+                          <div className="flex-1 px-4 py-2 flex flex-col items-start h-full">
+                            <div className="text-[16px] font-bold text-white/85 leading-none mb-1">
+                              {character.name}
+                            </div>
+                            <textarea
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onKeyDown={onKeyDownEditor}
+                              className="w-full h-full bg-transparent outline-none resize-none text-white/90 placeholder-white/50"
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          TextSection
+                        )}
+                      </>
+                    )}
                   </div>
                 );
               }
@@ -275,19 +390,40 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                     ? 'rounded-bl-lg rounded-br-sm'
                     : 'rounded-br-lg rounded-bl-sm'
                 }`}
-                style={{ backgroundColor: bubbleBg, ...bubbleStyle }}
+                style={{ 
+                  backgroundColor: bubbleBg, 
+                  ...bubbleStyle, 
+                  height: (!isUser && editingIndex === index && editingHeight) ? `${editingHeight}px` : undefined,
+                  width: (!isUser && editingIndex === index && editingWidth) ? `${editingWidth}px` : undefined,
+                }}
               >
                 {!isUser && (
                   <div className="text-[11px] font-semibold text-white/85 leading-none mb-1">
                     {character.name}
                   </div>
                 )}
-                <span style={textColor ? { color: textColor } : undefined}>
-                  <FormattedMessage 
-                    content={message.content}
-                    className="whitespace-pre-wrap select-text message-content"
+                {(!isUser && editingIndex === index) ? (
+                  <textarea
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={onKeyDownEditor}
+                    className="w-full h-full bg-transparent outline-none resize-none text-white/90 placeholder-white/50"
+                    autoFocus
                   />
-                </span>
+                ) : (
+                  <span style={textColor ? { color: textColor } : undefined}>
+                    <FormattedMessage 
+                      content={(() => {
+                        const override = regeneratingContentByMessageId?.[(message as any).id];
+                        if (typeof override === 'string') {
+                          return override; // show live regenerated stream
+                        }
+                        return message.content;
+                      })()}
+                      className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                    />
+                  </span>
+                )}
               </div>
             );
           })}
@@ -323,24 +459,33 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
               addonSettings.characterPosition
             );
             
-            const rightActions = (
-              <div className="flex items-center gap-1">
-                <button title="Edit response" onClick={handleEdit} className={`${iconButtonClass}`}>
-                  <Pencil className={`${iconClass}`} />
-                </button>
-                <button title="Regenerate" onClick={handleRegenerate} className={`${iconButtonClass}`}>
-                  <RotateCcw className={`${iconClass}`} />
-                </button>
-                <div className="flex items-center ml-1">
-                  <button title="Previous" onClick={handlePrevVariant} className={`${iconButtonClass}`} disabled={activeIndex <= 0}>
-                    <ChevronLeft className={`${iconClass}`} />
-                  </button>
-                  <button title="Next" onClick={handleNextVariant} className={`${iconButtonClass}`}>
-                    <ChevronRight className={`${iconClass}`} />
-                  </button>
+            const rightActions = (() => {
+              // Only show action bar for latest AI group (canModify)
+              if (!canModify && editingIndex === null) return null;
+              return (
+                <div className="flex items-center gap-1">
+                  {editingIndex === null ? (
+                    <>
+                      <button title="Edit response" onClick={startEdit} className={`${iconButtonClass}`} disabled={latestMessage?.id === 'streaming-temp'}>
+                        <Pencil className={`${iconClass}`} />
+                      </button>
+                      <button title="Regenerate" onClick={handleRegenerate} className={`${iconButtonClass}`} disabled={latestMessage?.id === 'streaming-temp'}>
+                        <RotateCcw className={`${iconClass}`} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button data-edit-control="true" title={isSaving ? 'Saving...' : 'Save'} onClick={saveEdit} className={`${iconButtonClass}`} disabled={isSaving}>
+                        <Check className={`${iconClass}`} />
+                      </button>
+                      <button data-edit-control="true" title="Cancel" onClick={cancelEdit} className={`${iconButtonClass}`} disabled={isSaving}>
+                        <X className={`${iconClass}`} />
+                      </button>
+                    </>
+                  )}
                 </div>
-              </div>
-            );
+              );
+            })();
             
             if (hasContextUpdates || hasCurrentContext || hasEnabledAddons) {
               return (
@@ -350,11 +495,11 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   currentContext={trackedContext || latestMessage.current_context}
                   addonSettings={addonSettings}
                   className="mt-2"
-                  rightActions={rightActions}
+                  rightActions={rightActions || undefined}
                 />
               );
             }
-            // No context widget requested: still show the action bar aligned subtly
+            // No context widget requested: still show the action bar aligned subtly (only if allowed)
             return (
               <div className="flex justify-end">
                 {rightActions}

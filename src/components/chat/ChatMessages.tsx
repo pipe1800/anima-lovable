@@ -33,6 +33,8 @@ interface ChatMessagesProps {
   renderBackground?: boolean;
   // New: allow parent to override user avatar (persona > profile > default)
   userAvatarUrlOverride?: string;
+  // New: show regenerating stream for a deleted AI message in place
+  regeneratingContentByMessageId?: Record<string, string>;
 }
 
 const ChatMessages = ({ 
@@ -50,6 +52,7 @@ const ChatMessages = ({
   debugInfo = [],
   renderBackground = true,
   userAvatarUrlOverride,
+  regeneratingContentByMessageId = {},
 }: ChatMessagesProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -160,6 +163,15 @@ const ChatMessages = ({
     // Backend handles all message persistence, frontend just shows database messages
     return groupMessages(messages as any);
   }, [messages]);
+
+  // Identify the last AI group id to control modify permissions
+  const lastAiGroupId = useMemo(() => {
+    for (let i = messageGroups.length - 1; i >= 0; i--) {
+      const g = messageGroups[i] as any;
+      if (g && g.isUser === false) return g.id as string;
+    }
+    return null as any;
+  }, [messageGroups]);
 
   // ✅ PHASE 3: Memoized scroll handler to prevent recreation
   const handleLoadEarlier = useCallback(() => {
@@ -319,6 +331,8 @@ const ChatMessages = ({
               addonSettings={computedAddonSettings}
               fontSizeClass={fontSizeClass}
               userAvatarUrlOverride={userAvatarUrlOverride}
+              regeneratingContentByMessageId={regeneratingContentByMessageId}
+              canModify={!group.isUser && group.id === lastAiGroupId}
               {...({ styleOptions } as any)}
             />
           ))
@@ -354,6 +368,7 @@ const ChatMessages = ({
             addonSettings={computedAddonSettings}
             fontSizeClass={fontSizeClass}
             userAvatarUrlOverride={userAvatarUrlOverride}
+            canModify={false}
             {...({ styleOptions } as any)}
           />
         )}

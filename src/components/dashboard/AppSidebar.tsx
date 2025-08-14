@@ -244,7 +244,7 @@ const AppSidebar = () => {
           {!isCollapsed && profile && (
             <div className="flex items-center space-x-3 mb-4">
               <Avatar className="w-10 h-10">
-                <AvatarImage src={profile?.avatar_url} className="object-cover" />
+                <AvatarImage src={profile?.avatar_url || '/default_avatar.jpg'} className="object-cover" />
                 <AvatarFallback>{profile?.username?.[0] || 'U'}</AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">

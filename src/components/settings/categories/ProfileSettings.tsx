@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -135,7 +134,7 @@ export const ProfileSettings = () => {
             <div className="relative">
               <Avatar className="w-24 h-24">
                 <AvatarImage 
-                  src={formData.avatar || '/placeholder.svg'} 
+                  src={formData.avatar || '/default_avatar.jpg'} 
                   alt="Profile avatar" 
                 />
                 <AvatarFallback className="bg-gray-700 text-white text-xl">

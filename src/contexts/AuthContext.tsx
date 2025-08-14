@@ -53,7 +53,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const p = (async () => {
       try {
         const { data } = await getPrivateProfile(user.id);
-        setProfile(data || null);
+        let current = data || null;
+        setProfile(current);
+
+        // If no avatar is set, upload and assign the default avatar once
+        if (current && !current.avatar_url) {
+          try {
+            const response = await fetch('/default_avatar.jpg');
+            const blob = await response.blob();
+            const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
+            const storagePath = `${user.id}/avatar-default.jpg`;
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('character-avatars')
+              .upload(storagePath, file, { upsert: true });
+
+            let avatarUrlToSet: string = '/default_avatar.jpg';
+            if (!uploadError && uploadData?.path) {
+              const { data: pub } = await supabase.storage
+                .from('character-avatars')
+                .getPublicUrl(uploadData.path);
+              avatarUrlToSet = pub.publicUrl || avatarUrlToSet;
+            }
+
+            await supabase
+              .from('profiles')
+              .update({ avatar_url: avatarUrlToSet })
+              .eq('id', user.id);
+
+            // Update local state
+            setProfile(prev => prev ? { ...prev, avatar_url: avatarUrlToSet } as Profile : prev);
+          } catch (e) {
+            console.error('Failed to ensure default avatar on profile refresh:', e);
+          }
+        }
       } catch (error) {
         console.error('Profile fetch failed:', error);
         setProfile(null);

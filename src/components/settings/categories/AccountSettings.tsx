@@ -56,7 +56,7 @@ export const AccountSettings = () => {
   const [formData, setFormData] = useState({
     username: profile?.username || '',
     bio: profile?.bio || '',
-    avatar_url: profile?.avatar_url || '',
+    avatar_url: profile?.avatar_url || '/default_avatar.jpg',
     banner_url: profile?.banner_url || ''
   });
 
@@ -66,7 +66,7 @@ export const AccountSettings = () => {
       setFormData({
         username: profile.username || '',
         bio: profile.bio || '',
-        avatar_url: profile.avatar_url || '',
+        avatar_url: profile.avatar_url || '/default_avatar.jpg',
         banner_url: profile.banner_url || ''
       });
     }

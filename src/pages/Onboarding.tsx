@@ -128,6 +128,41 @@ const Onboarding = () => {
         .from('profiles')
         .update({ onboarding_completed: true })
         .eq('id', user.id);
+
+      // Ensure avatar exists; if missing, upload default and set avatar_url
+      try {
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (!profileRow || !profileRow.avatar_url) {
+          // Fetch default avatar from public
+          const response = await fetch('/default_avatar.jpg');
+          const blob = await response.blob();
+          const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('character-avatars')
+            .upload(`${user.id}/avatar-default.jpg`, file, { upsert: true });
+
+          let avatarUrlToSet: string = '/default_avatar.jpg';
+          if (!uploadError && uploadData?.path) {
+            const { data: pub } = await supabase.storage
+              .from('character-avatars')
+              .getPublicUrl(uploadData.path);
+            avatarUrlToSet = pub.publicUrl || avatarUrlToSet;
+          }
+
+          await supabase
+            .from('profiles')
+            .update({ avatar_url: avatarUrlToSet })
+            .eq('id', user.id);
+        }
+      } catch (e) {
+        console.error('Failed to ensure default avatar on onboarding complete:', e);
+      }
     }
   };
 

@@ -87,7 +87,7 @@ export const ProfileHeader: React.FC<ProfileHeaderProps> = ({
               className="relative z-10"
             >
               <Avatar className="w-32 h-32 border-4 border-background ring-2 ring-border/50">
-                <AvatarImage src={profile?.avatar_url} alt={profile?.username} className="object-cover" />
+                <AvatarImage src={profile?.avatar_url || '/default_avatar.jpg'} alt={profile?.username} className="object-cover" />
                 <AvatarFallback className="text-2xl">
                   {profile?.username?.[0]?.toUpperCase() || 'U'}
                 </AvatarFallback>

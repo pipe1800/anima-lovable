@@ -507,15 +507,15 @@ export function DashboardContent() {
         rightContent={
           <div className="flex items-center space-x-4">
             <Button
-              onClick={() => navigate(`/profile/${username}`)}
+              onClick={() => navigate('/profile')}
               variant="ghost"
               size="sm"
               className="p-0 hover:ring-2 hover:ring-[#FF7A00]/50 rounded-full transition-all"
             >
               <Avatar className="w-8 h-8 sm:w-12 sm:h-12 ring-2 ring-[#FF7A00]/50 cursor-pointer">
                 <AvatarImage 
-                  src={profile?.avatar_url || "https://images.unsplash.com/photo-1649972904349-6e44c42644a7?w=150&h=150&fit=crop&crop=face"} 
-                  alt={profile?.username || "User"} 
+                  src={profile?.avatar_url || '/default_avatar.jpg'} 
+                  alt={profile?.username || 'User'} 
                   className="object-cover"
                 />
                 <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-xs sm:text-base">

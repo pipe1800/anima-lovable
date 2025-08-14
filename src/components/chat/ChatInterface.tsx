@@ -202,6 +202,7 @@ const ChatInterface = ({
     chainOfThought: false,
     fewShotExamples: false,
   };
+  const streamingMode = (globalSettings?.streaming_mode || 'smooth') as 'smooth' | 'instant';
 
   // Sync tracked context with parent
   useEffect(() => {
@@ -418,49 +419,137 @@ const ChatInterface = ({
     }
   }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId]);
 
+  // Regeneration UI map: messageId -> streaming content
+  const [regeneratingContentById, setRegeneratingContentById] = useState<Record<string, string>>({});
+
+  const regenerateMessageById = useCallback(async (aiMessageId: string) => {
+    if (!user || !currentChatId) return;
+    if (creditsBalance < 1) {
+      setShowInsufficientCreditsModal(true);
+      return;
+    }
+    try {
+      setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: '' }));
+
+      // Delete AI message in backend first (frontend will overlay until refresh)
+      await supabase.from('messages').delete().eq('id', aiMessageId);
+
+      // Auth token
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData?.session?.access_token) throw new Error('Authentication failed');
+      const token = sessionData.session.access_token;
+
+      // Start regenerate stream
+      const { SUPABASE_API_URL } = await import('@/integrations/supabase/client');
+      const resp = await fetch(`${SUPABASE_API_URL}/functions/v1/chat-management`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'apikey': process.env.SUPABASE_ANON_KEY as any,
+        },
+        body: JSON.stringify({
+          operation: 'regenerate-message',
+          chatId: currentChatId,
+          characterId: character.id,
+          aiMessageId,
+          addonSettings: currentAddonSettings,
+          selectedPersonaId: selectedPersonaId ?? null,
+          selectedWorldInfoId: selectedWorldInfoId ?? null,
+        }),
+      });
+
+      if (!resp.ok || !resp.body) {
+        const text = await resp.text();
+        throw new Error(text || `Regenerate failed: ${resp.status}`);
+      }
+
+      // Stream handling (smooth or instant)
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      const { StreamingMessageParser, parseSSEMessage } = await import('@/lib/streaming-utils');
+      const parser = new StreamingMessageParser();
+      let full = '';
+
+      const scheduleAppend = async (text: string) => {
+        if (!text) return;
+        if (streamingMode !== 'smooth') { full += text; return; }
+        const size = 24;
+        for (let i = 0; i < text.length; i += size) {
+          full += text.slice(i, i + size);
+          setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
+          await new Promise(r => setTimeout(r, 16));
+        }
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const dataLines = parser.parseChunk(value);
+          for (const data of dataLines) {
+            const obj = parseSSEMessage(data);
+            if (!obj) continue;
+            if (obj.done === true) {
+              // Flush for instant mode
+              if (streamingMode !== 'smooth' && full) {
+                setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
+              }
+              // Let realtime update, then refresh cache
+              setTimeout(() => {
+                if (currentChatId) {
+                  queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
+                  if (user?.id) queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
+                }
+                setRegeneratingContentById(prev => {
+                  const { [aiMessageId]: _, ...rest } = prev; return rest;
+                });
+              }, 300);
+              return;
+            }
+            if (typeof obj?.content === 'string' && obj.content) {
+              await scheduleAppend(obj.content);
+            } else if (obj?.choices?.[0]?.delta?.content) {
+              await scheduleAppend(obj.choices[0].delta.content as string);
+            }
+          }
+        }
+      } catch (e) {
+        throw e;
+      }
+    } catch (err: any) {
+      console.error('Regenerate failed:', err);
+      setRegeneratingContentById(prev => {
+        const { [aiMessageId]: _, ...rest } = prev; return rest;
+      });
+      if (err?.message?.includes('credits')) setShowInsufficientCreditsModal(true);
+      else toast({ title: 'Error', description: err.message || 'Failed to regenerate message', variant: 'destructive' });
+    }
+  }, [user, currentChatId, creditsBalance, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, character.id, streamingMode, queryClient, toast]);
+
   // Keep latest regenerate function in a ref to avoid stale closures in global event listeners
   const regenerateLastAIRef = useRef(regenerateLastAI);
   useEffect(() => {
     regenerateLastAIRef.current = regenerateLastAI;
   }, [regenerateLastAI]);
 
-  // Variant navigation handlers
+  // Variant navigation handlers (inline editing handled within MessageGroup UI)
   useEffect(() => {
-    const onEdit = async (e: any) => {
-      const messageId = e?.detail?.messageId as string | undefined;
-      if (!messageId) return;
-      try {
-        const { data, error } = await supabase
-          .from('messages')
-          .select('content, is_ai_message')
-          .eq('id', messageId)
-          .single();
-        if (error || !data?.is_ai_message) return;
-        const current = data.content as string;
-        const edited = window.prompt('Edit AI response:', current);
-        if (edited == null || edited === current) return;
-        const { error: updErr } = await supabase
-          .from('messages')
-          .update({ content: edited })
-          .eq('id', messageId);
-        if (updErr) throw updErr;
-        // Refresh chat
-        if (currentChatId) {
-          queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
-        }
-      } catch (err) {
-        console.error('Edit failed:', err);
-        toast({ title: 'Error', description: 'Failed to edit message', variant: 'destructive' });
-      }
-    };
     const onRegenerate = async (e: any) => {
       const messageId = e?.detail?.messageId as string | undefined;
       if (!messageId || !currentChatId) return;
-      try {
-        await regenerateLastAIRef.current?.(false);
-      } catch (err: any) {
-        if (err?.message?.includes('credits')) setShowInsufficientCreditsModal(true);
+      // Enforce: only last AI message can be regenerated
+      const lastAi = (() => {
+        for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
+          const m = messages[i] as any;
+          if (m && !m.isUser) return m;
+        }
+        return null as any;
+      })();
+      if (!lastAi || lastAi.id !== messageId) {
+        return; // ignore attempts on older AI messages
       }
+      await regenerateMessageById(messageId);
     };
     const onVariantNext = async (_e: any) => {
       try {
@@ -473,17 +562,15 @@ const ChatInterface = ({
       setVariantIndexByMessage((prev) => prev);
     };
 
-    window.addEventListener('chat-ai-edit' as any, onEdit as any);
     window.addEventListener('chat-ai-regenerate' as any, onRegenerate as any);
     window.addEventListener('chat-ai-variant-next' as any, onVariantNext as any);
     window.addEventListener('chat-ai-variant-prev' as any, onVariantPrev as any);
     return () => {
-      window.removeEventListener('chat-ai-edit' as any, onEdit as any);
       window.removeEventListener('chat-ai-regenerate' as any, onRegenerate as any);
       window.removeEventListener('chat-ai-variant-next' as any, onVariantNext as any);
       window.removeEventListener('chat-ai-variant-prev' as any, onVariantPrev as any);
     };
-  }, [currentChatId, queryClient, toast]);
+  }, [currentChatId, regenerateMessageById, messages]);
 
   const handleUpgrade = () => {
     navigate('/subscription');
@@ -543,6 +630,7 @@ const ChatInterface = ({
             debugInfo={debugInfo}
             renderBackground={false}
             userAvatarUrlOverride={selectedPersonaData?.avatar_url || undefined}
+            regeneratingContentByMessageId={regeneratingContentById}
           />
         </div>
 

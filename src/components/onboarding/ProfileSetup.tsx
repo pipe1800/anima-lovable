@@ -123,14 +123,32 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
 
     setIsLoading(true);
     try {
-      // For now, we'll just save the bio. In a real app, you'd upload the avatar to storage first
-      const avatarUrl = avatarPreview || profile?.avatar_url || '';
-      const resolvedAvatar = avatarUrl || '/default_avatar.jpg';
+      // Determine avatar: uploaded preview, existing profile avatar, or default
+      let avatarUrl = avatarPreview || profile?.avatar_url || '';
+
+      if (!avatarUrl) {
+        // Upload default avatar from public folder to storage and use its public URL
+        const response = await fetch('/default_avatar.jpg');
+        const blob = await response.blob();
+        const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('character-avatars')
+          .upload(`${user.id}/avatar-default.jpg`, file, { upsert: true });
+        if (!uploadError && uploadData?.path) {
+          const { data: pub } = supabase.storage
+            .from('character-avatars')
+            .getPublicUrl(uploadData.path);
+          avatarUrl = pub.publicUrl;
+        } else {
+          // Fallback to public path if storage upload fails
+          avatarUrl = '/default_avatar.jpg';
+        }
+      }
       
       const { error } = await updateProfile(user.id, {
         username: username.trim() || undefined,
         bio: bio.trim() || undefined,
-        avatar_url: resolvedAvatar || undefined
+        avatar_url: avatarUrl || undefined
       });
 
       if (error) {

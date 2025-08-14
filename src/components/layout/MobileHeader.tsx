@@ -23,7 +23,8 @@ export const MobileHeader = ({
   const { profile } = useAuth();
   
   const handleAvatarClick = () => {
-    navigate(`/profile/${profile?.username || username}`);
+    // Navigate to own profile without appending username to the URL
+    navigate('/profile');
   };
   return (
     <header className={`md:hidden p-3 sm:p-4 select-none ${className}`}>
@@ -52,7 +53,7 @@ export const MobileHeader = ({
             onClick={handleAvatarClick}
           >
             <AvatarImage 
-              src={profile?.avatar_url} 
+              src={profile?.avatar_url || '/default_avatar.jpg'} 
               alt={profile?.username || username} 
               className="object-cover"
             />

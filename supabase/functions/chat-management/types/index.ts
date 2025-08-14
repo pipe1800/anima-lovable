@@ -1,4 +1,4 @@
-export type ChatOperation = 'create-basic' | 'create-with-greeting' | 'extract-context' | 'send-message' | 'create-memory';
+export type ChatOperation = 'create-basic' | 'create-with-greeting' | 'extract-context' | 'send-message' | 'create-memory' | 'regenerate-message';
 
 export interface BaseChatRequest {
   operation: ChatOperation;
@@ -77,7 +77,17 @@ export interface CreateMemoryRequest {
   characterId: string;
 }
 
-export type ChatManagementRequest = CreateBasicChatRequest | CreateWithGreetingRequest | ExtractContextRequest | SendMessageRequest | CreateMemoryRequest;
+export interface RegenerateMessageRequest {
+  operation: 'regenerate-message';
+  chatId: string;
+  characterId: string;
+  aiMessageId: string;
+  selectedPersonaId?: string | null;
+  selectedWorldInfoId?: string | null;
+  addonSettings?: any;
+}
+
+export type ChatManagementRequest = CreateBasicChatRequest | CreateWithGreetingRequest | ExtractContextRequest | SendMessageRequest | CreateMemoryRequest | RegenerateMessageRequest;
 
 export interface ChatResponse {
   success: boolean;
