@@ -50,10 +50,9 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
   const userId = user?.id;
   const queryClient = useQueryClient();
 
-  // Prefetch next page
+  // Prefetch next/prev pages (unchanged)
   React.useEffect(() => {
     if (userId) {
-      // Prefetch next page
       queryClient.prefetchQuery({
         queryKey: ['user', 'chats', 'paginated', userId, page + 1, limit],
         queryFn: async () => {
@@ -61,10 +60,8 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
           if (result.error) throw result.error;
           return result;
         },
-        staleTime: 30 * 1000,
+        staleTime: 60 * 1000,
       });
-
-      // Prefetch 2 pages ahead for even smoother experience
       queryClient.prefetchQuery({
         queryKey: ['user', 'chats', 'paginated', userId, page + 2, limit],
         queryFn: async () => {
@@ -72,10 +69,8 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
           if (result.error) throw result.error;
           return result;
         },
-        staleTime: 30 * 1000,
+        staleTime: 60 * 1000,
       });
-
-      // Also prefetch previous page if we're not on page 1
       if (page > 1) {
         queryClient.prefetchQuery({
           queryKey: ['user', 'chats', 'paginated', userId, page - 1, limit],
@@ -84,7 +79,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
             if (result.error) throw result.error;
             return result;
           },
-          staleTime: 30 * 1000,
+          staleTime: 60 * 1000,
         });
       }
     }
@@ -99,9 +94,10 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
       return result;
     },
     enabled: !!userId,
-    staleTime: 30 * 1000, // 30 seconds
-    gcTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 60 * 1000, // keep for a minute
+    gcTime: 10 * 60 * 1000,
     placeholderData: (previousData) => previousData, // Keeps previous data while loading
+    select: (data) => data,
   });
 };
 

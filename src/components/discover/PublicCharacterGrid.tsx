@@ -90,18 +90,6 @@ export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCha
 
   return (
     <div className="p-8">
-      {/* Results Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center space-x-4">
-          <h2 className="text-white text-xl font-semibold">
-            {sortedCharacters.length} Characters Found
-          </h2>
-          <div className="flex items-center space-x-2 text-gray-400 text-sm">
-            <TrendingUp className="w-4 h-4" />
-            <span>Updated 2 minutes ago</span>
-          </div>
-        </div>
-      </div>
 
       {/* Character Grid */}
       <div 

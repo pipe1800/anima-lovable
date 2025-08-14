@@ -12,6 +12,33 @@ import {
 } from './message-counter.ts';
 import { getMostRecentAutoSummary } from './auto-summary-new.ts';
 import { getTextEmbedding, cosineSimilarity } from './embeddings.ts';
+import { PromptBuilder } from './prompt-builder.ts';
+
+export type PromptMeta = {
+  currentContext?: Partial<{
+    moodTracking: string;
+    clothingInventory: string;
+    locationTracking: string;
+    timeAndWeather: string;
+    relationshipStatus: string;
+    characterPosition: string;
+  }>;
+  worldInfoUsed?: Array<{ keywords: string[]; preview: string }>;
+  memoryIds?: string[];
+  summary?: Partial<{ id: string; name: string; message_count: number; created_at: string }> | null;
+  tokens?: Partial<{
+    preamble: number;
+    core: number;
+    style: number;
+    persona: number;
+    context: number;
+    world: number;
+    memory: number;
+    summary: number;
+    time: number;
+    guidelines: number;
+  }>;
+};
 
 /**
  * Message generation and AI response handling
@@ -112,7 +139,7 @@ const memoryInjectionCache = globalThis.memoryInjectionCache;
 /**
  * Filter character memories based on keyword relevance to the conversation with weighting
  */
-function getRelevantMemoriesWeighted(
+export function getRelevantMemoriesWeighted(
   memories: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }>,
   userMessage: string,
   conversationHistory: any[],
@@ -246,7 +273,8 @@ export async function buildSystemPrompt(
     urgencyLevel?: string;
   },
   chatId?: string,
-  userId?: string
+  userId?: string,
+  metaCollector?: (meta: PromptMeta) => void
 ): Promise<string> {
   console.log('🎯 buildSystemPrompt called with:', {
     character: character ? 'loaded' : 'null',
@@ -259,23 +287,37 @@ export async function buildSystemPrompt(
     enhancedMemorySetting: addonSettings?.enhancedMemory
   });
 
-  let systemPrompt = `You are ${replaceTemplatesFn(character.personality_summary || 'a helpful assistant')}.
-    
-${character.description ? `Description: ${replaceTemplatesFn(character.description)}` : ''}
-${character.scenario ? `Scenario: ${replaceTemplatesFn(typeof character.scenario === 'string' ? character.scenario : JSON.stringify(character.scenario))}` : ''}`;
+  // Build the initial core sections via PromptBuilder
+  const builder = new PromptBuilder({ character, replaceTemplates: replaceTemplatesFn });
+  let systemPrompt = builder
+    .addPreamble()
+    .addCharacterCore()
+    .addStyleProfile()
+    .addUserPersona(selectedPersona)
+    .build();
 
-  // Add user persona information if available
-  if (selectedPersona && (selectedPersona.bio || selectedPersona.lore)) {
-    systemPrompt += '\n\n[USER PERSONA INFORMATION]';
-    if (selectedPersona.bio) {
-      systemPrompt += `\nUser Bio: ${selectedPersona.bio}`;
+  const meta: PromptMeta = { currentContext: {}, worldInfoUsed: [], memoryIds: [], summary: null, tokens: {} };
+  try {
+    const sectionTokens = (builder as any).getSectionTokens?.() || {};
+    if (sectionTokens) {
+      meta.tokens!.preamble = sectionTokens.preamble || 0;
+      meta.tokens!.core = sectionTokens.core || 0;
+      meta.tokens!.style = sectionTokens.style || 0;
+      meta.tokens!.persona = sectionTokens.persona || 0;
     }
-    if (selectedPersona.lore) {
-      systemPrompt += `\nUser Background & Lore: ${selectedPersona.lore}`;
-    }
-    systemPrompt += '\nRespond to the user accordingly, taking their persona traits and background into consideration.';
-    systemPrompt += '\n[/USER PERSONA INFORMATION]';
-  }
+  } catch {}
+
+  // Helper to capture added tokens per section
+  const withTokenDelta = (label: keyof NonNullable<PromptMeta['tokens']>, fn: () => void) => {
+    const before = estimateTokens(systemPrompt);
+    fn();
+    const after = estimateTokens(systemPrompt);
+    const delta = Math.max(0, after - before);
+    meta.tokens![label] = (meta.tokens![label] || 0) + delta;
+  };
+
+  // IMPORTANT DIALOGUE GUIDELINES appended below; record tokens later
+  const beforeGuidelines = estimateTokens(systemPrompt);
 
   systemPrompt += `
 
@@ -284,8 +326,10 @@ IMPORTANT DIALOGUE GUIDELINES:
 - NEVER write the user's responses or actions
 - NEVER continue the conversation for the user
 - STOP your response when it's the user's turn to speak`;
+  meta.tokens!.guidelines = (meta.tokens!.guidelines || 0) + (estimateTokens(systemPrompt) - beforeGuidelines);
 
-  // Add chat mode specific guidelines
+  // Add chat mode specific guidelines (these count into guidelines bucket)
+  const beforeMode = estimateTokens(systemPrompt);
   if (chatMode === 'companion') {
     systemPrompt += `
 
@@ -337,108 +381,103 @@ You are in STORYTELLING MODE. You should:
 
 Balance dialogue with descriptive elements to create an engaging story.`;
   }
+  meta.tokens!.guidelines += (estimateTokens(systemPrompt) - beforeMode);
 
-  systemPrompt += `
-
-CRITICAL: You must ONLY play your character. Never write what the user says, thinks, or does. Stop your response when it's the user's turn to speak.
-
-Stay in character and engage in natural dialogue with the user.`;
-
-  // Add current context if available and relevant addons are enabled
+  // CURRENT CONTEXT section
   if (currentContext && addonSettings) {
-    const contextParts: string[] = [];
+    withTokenDelta('context', () => {
+      const contextParts: string[] = [];
+      if (addonSettings.moodTracking && currentContext.moodTracking && currentContext.moodTracking !== 'No context') {
+        contextParts.push(`Current Mood: ${currentContext.moodTracking}`);
+        meta.currentContext!.moodTracking = currentContext.moodTracking;
+      }
+      if (addonSettings.clothingInventory && currentContext.clothingInventory && currentContext.clothingInventory !== 'No context') {
+        contextParts.push(`Current Clothing: ${currentContext.clothingInventory}`);
+        meta.currentContext!.clothingInventory = currentContext.clothingInventory;
+      }
+      if (addonSettings.locationTracking && currentContext.locationTracking && currentContext.locationTracking !== 'No context') {
+        contextParts.push(`Current Location: ${currentContext.locationTracking}`);
+        meta.currentContext!.locationTracking = currentContext.locationTracking;
+      }
+      if (addonSettings.timeAndWeather && currentContext.timeAndWeather && currentContext.timeAndWeather !== 'No context') {
+        contextParts.push(`Time & Weather: ${currentContext.timeAndWeather}`);
+        meta.currentContext!.timeAndWeather = currentContext.timeAndWeather;
+      }
+      if (addonSettings.relationshipStatus && currentContext.relationshipStatus && currentContext.relationshipStatus !== 'No context') {
+        contextParts.push(`Relationship Status: ${currentContext.relationshipStatus}`);
+        meta.currentContext!.relationshipStatus = currentContext.relationshipStatus;
+      }
+      if (addonSettings.characterPosition && currentContext.characterPosition && currentContext.characterPosition !== 'No context') {
+        contextParts.push(`Character Position: ${currentContext.characterPosition}`);
+        meta.currentContext!.characterPosition = currentContext.characterPosition;
+      }
 
-    if (addonSettings.moodTracking && currentContext.moodTracking && currentContext.moodTracking !== 'No context') {
-      contextParts.push(`Current Mood: ${currentContext.moodTracking}`);
-    }
-    if (addonSettings.clothingInventory && currentContext.clothingInventory && currentContext.clothingInventory !== 'No context') {
-      contextParts.push(`Current Clothing: ${currentContext.clothingInventory}`);
-    }
-    if (addonSettings.locationTracking && currentContext.locationTracking && currentContext.locationTracking !== 'No context') {
-      contextParts.push(`Current Location: ${currentContext.locationTracking}`);
-    }
-    if (addonSettings.timeAndWeather && currentContext.timeAndWeather && currentContext.timeAndWeather !== 'No context') {
-      contextParts.push(`Time & Weather: ${currentContext.timeAndWeather}`);
-    }
-    if (addonSettings.relationshipStatus && currentContext.relationshipStatus && currentContext.relationshipStatus !== 'No context') {
-      contextParts.push(`Relationship Status: ${currentContext.relationshipStatus}`);
-    }
-    if (addonSettings.characterPosition && currentContext.characterPosition && currentContext.characterPosition !== 'No context') {
-      contextParts.push(`Character Position: ${currentContext.characterPosition}`);
-    }
-
-    if (contextParts.length > 0) {
-      systemPrompt += '\n\n[CURRENT CONTEXT]\n' + contextParts.join('\n') + '\n[/CURRENT CONTEXT]';
-    }
+      if (contextParts.length > 0) {
+        const staleHint = (timeAwarenessData && timeAwarenessData.delaySeconds && timeAwarenessData.delaySeconds > 1800)
+          ? `\n(Notice: This context may be stale; over 30 minutes since your last message.)`
+          : '';
+        systemPrompt += `\n\n[CURRENT CONTEXT]\n` +
+          `Use this section as the latest known state. Treat it as tentative and observational.${staleHint}\n` +
+          `- Live conversation (the user's latest message and what happens now) ALWAYS takes precedence over this block.\n` +
+          `- If the user's message or your next actions imply a new value for any field (mood, clothing, location, relationship, position, time/weather), adopt the new value immediately.\n` +
+          `- Do not force or repeat these details unless they are relevant to answering the current message naturally.\n` +
+          contextParts.join('\n') + `\n[/CURRENT CONTEXT]`;
+      }
+    });
   }
 
-  // Add time awareness context if enabled
+  // TIME AWARENESS section
   if (timeAwarenessData?.enabled) {
-    const formatDelay = (seconds: number): string => {
-      if (seconds < 60) return `${seconds} seconds`;
-      if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
-      if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`;
-      return `${Math.floor(seconds / 86400)} days`;
-    };
-
-    const getDelayCategory = (seconds: number): string => {
-      if (seconds < 300) return 'short'; // < 5 min
-      if (seconds < 1800) return 'medium'; // < 30 min
-      if (seconds < 7200) return 'long'; // < 2 hours
-      return 'very_long';
-    };
-
-    systemPrompt += `\n\n[TIME AWARENESS ACTIVE]
+    withTokenDelta('time', () => {
+      const formatDelay = (seconds: number): string => {
+        if (seconds < 60) return `${seconds} seconds`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
+        if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`;
+        return `${Math.floor(seconds / 86400)} days`;
+      };
+      const getDelayCategory = (seconds: number): string => {
+        if (seconds < 300) return 'short';
+        if (seconds < 1800) return 'medium';
+        if (seconds < 7200) return 'long';
+        return 'very_long';
+      };
+      systemPrompt += `\n\n[TIME AWARENESS ACTIVE]
 Current time: ${timeAwarenessData.userLocalTime}
 Timezone: ${timeAwarenessData.userTimezone} (we share the same timezone)`;
-
-    // Only add delay information if there's an actual delay > 30 seconds
-    if (timeAwarenessData.delaySeconds > 30) {
-      const delayCategory = getDelayCategory(timeAwarenessData.delaySeconds);
-      const formattedDelay = formatDelay(timeAwarenessData.delaySeconds);
-
-      systemPrompt += `\nTime since your last message: ${formattedDelay}
+      if (timeAwarenessData.delaySeconds > 30) {
+        const delayCategory = getDelayCategory(timeAwarenessData.delaySeconds);
+        const formattedDelay = formatDelay(timeAwarenessData.delaySeconds);
+        systemPrompt += `\nTime since your last message: ${formattedDelay}
 Delay category: ${delayCategory}`;
-
-      if (timeAwarenessData.conversationTone && timeAwarenessData.conversationTone !== 'No context') {
-        systemPrompt += `\nConversation tone: ${timeAwarenessData.conversationTone}`;
+        if (timeAwarenessData.conversationTone && timeAwarenessData.conversationTone !== 'No context') {
+          systemPrompt += `\nConversation tone: ${timeAwarenessData.conversationTone}`;
+        }
+        if (timeAwarenessData.urgencyLevel && timeAwarenessData.urgencyLevel !== 'No context') {
+          systemPrompt += `\nUrgency level: ${timeAwarenessData.urgencyLevel}`;
+        }
       }
-      if (timeAwarenessData.urgencyLevel && timeAwarenessData.urgencyLevel !== 'No context') {
-        systemPrompt += `\nUrgency level: ${timeAwarenessData.urgencyLevel}`;
-      }
-    }
-
-    systemPrompt += `\n\nIMPORTANT: You and the user are in the same timezone (${timeAwarenessData.userTimezone}). When asked about time, respond with the actual current time (${timeAwarenessData.userLocalTime}), not a placeholder like {current_time}.`;
-
-    if (timeAwarenessData.delaySeconds > 30) {
-      systemPrompt += `\n\nBased on your character's personality, react appropriately to this delay:
+      systemPrompt += `\n\nIMPORTANT: You and the user are in the same timezone (${timeAwarenessData.userTimezone}). When asked about time, respond with the actual current time (${timeAwarenessData.userLocalTime}), not a placeholder like {current_time}.`;
+      if (timeAwarenessData.delaySeconds > 30) {
+        systemPrompt += `\n\nBased on your character's personality, react appropriately to this delay:
 - Consider the time gap when crafting your response
 - Take into account the current time (are they likely sleeping, working, etc.)
 - Factor in the conversation tone and urgency level
 - React authentically based on your personality traits (patient vs impatient, understanding vs demanding, etc.)
 - You may acknowledge the delay if it fits your character, but don't always mention it
 - When discussing time, remember you both share the same current time`;
-    }
-    
-    systemPrompt += `\n[/TIME AWARENESS]`;
+      }
+      systemPrompt += `\n[/TIME AWARENESS]`;
+    });
   }
 
-  // Add addon context if enabled
+  // WORLD INFO section
   if (addonSettings) {
-    if (addonSettings.enhancedMemory) {
-      systemPrompt += '\n\nRemember details from previous conversations and reference them naturally.';
-    }
-    if (addonSettings.moodTracking) {
-      systemPrompt += '\n\nPay attention to emotional context and respond appropriately to the user\'s mood.';
-    }
-
     console.log('🔍 World Info Processing Check:', {
       dynamicWorldInfoEnabled: addonSettings.dynamicWorldInfo,
       hasWorldInfoEntries: !!worldInfoEntries && worldInfoEntries.length > 0,
       hasUserMessage: !!userMessage,
       willProcessWorldInfo: addonSettings.dynamicWorldInfo && worldInfoEntries && worldInfoEntries.length > 0 && userMessage
     });
-
     if (addonSettings.dynamicWorldInfo && worldInfoEntries && worldInfoEntries.length > 0 && userMessage) {
       console.log('🌍 Processing world info for system prompt...');
       
@@ -455,16 +494,19 @@ Delay category: ${delayCategory}`;
       });
       
       if (relevantEntries.length > 0) {
-        systemPrompt += '\n\n[WORLD INFORMATION]';
-        systemPrompt += '\nUse this world information to enhance your responses when relevant:';
-        
-        for (const entry of relevantEntries) {
-          systemPrompt += `\n\n- Keywords: ${entry.keywords.join(', ')}`;
-          systemPrompt += `\n  Content: ${entry.entry_text}`;
-        }
-        
-        systemPrompt += '\n[/WORLD INFORMATION]';
-        systemPrompt += '\nReference this world information naturally when it\'s relevant to the conversation.';
+        try { meta.worldInfoUsed = relevantEntries.map(e => ({ keywords: e.keywords, preview: e.entry_text.substring(0, 120) })); } catch {}
+        withTokenDelta('world', () => {
+          systemPrompt += '\n\n[WORLD INFORMATION]';
+          systemPrompt += '\nUse this world information to enhance your responses when relevant:';
+          
+          for (const entry of relevantEntries) {
+            systemPrompt += `\n\n- Keywords: ${entry.keywords.join(', ')}`;
+            systemPrompt += `\n  Content: ${entry.entry_text}`;
+          }
+          
+          systemPrompt += '\n[/WORLD INFORMATION]';
+          systemPrompt += "\nReference this world information naturally when it's relevant to the conversation.";
+        });
         
         console.log('✅ World information added to system prompt');
       } else {
@@ -478,14 +520,13 @@ Delay category: ${delayCategory}`;
       });
     }
 
-    // Enhanced Memory Processing
+    // MEMORY BANK section
     console.log('🔍 Memory Processing Check:', {
       enhancedMemoryEnabled: addonSettings.enhancedMemory,
       hasCharacterMemories: !!characterMemories && characterMemories.length > 0,
       hasUserMessage: !!userMessage,
       willProcessMemories: addonSettings.enhancedMemory && characterMemories && characterMemories.length > 0 && userMessage
     });
-
     if (addonSettings.enhancedMemory && characterMemories && characterMemories.length > 0 && userMessage) {
       console.log('🧠 Processing character memories for system prompt...');
       
@@ -521,6 +562,7 @@ Delay category: ${delayCategory}`;
       });
       
       if (relevantMemories.length > 0) {
+        try { meta.memoryIds = relevantMemories.map(m => (m.id || '')).filter(Boolean) as string[]; } catch {}
         // Persist injection timestamps and counts (best-effort)
         try {
           const ids = relevantMemories.map(m => m.id).filter(Boolean) as string[];
@@ -543,23 +585,25 @@ Delay category: ${delayCategory}`;
           console.warn('⚠️ Failed to persist memory injection metadata (after retries):', e);
         }
 
-        systemPrompt += '\n\n[MEMORY BANK]';
-        systemPrompt += '\nPrevious interactions with this user:';
-        
-        for (const memory of relevantMemories) {
-          const memoryDate = new Date(memory.created_at).toLocaleDateString('en-US', { 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-          });
+        withTokenDelta('memory', () => {
+          systemPrompt += '\n\n[MEMORY BANK]';
+          systemPrompt += '\nPrevious interactions with this user:';
           
-          systemPrompt += `\n\n- Date: ${memoryDate}`;
-          systemPrompt += `\n  Summary: ${memory.summary_content}`;
-          systemPrompt += `\n  Keywords: ${memory.trigger_keywords.join(', ')}`;
-        }
-        
-        systemPrompt += '\n[/MEMORY BANK]';
-        systemPrompt += '\nReference these memories naturally when relevant keywords appear in the conversation.';
+          for (const memory of relevantMemories) {
+            const memoryDate = new Date(memory.created_at).toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
+            });
+            
+            systemPrompt += `\n\n- Date: ${memoryDate}`;
+            systemPrompt += `\n  Summary: ${memory.summary_content}`;
+            systemPrompt += `\n  Keywords: ${memory.trigger_keywords.join(', ')}`;
+          }
+          
+          systemPrompt += '\n[/MEMORY BANK]';
+          systemPrompt += '\nReference these memories naturally when relevant keywords appear in the conversation.';
+        });
         
         console.log('✅ Character memories added to system prompt');
       } else {
@@ -596,11 +640,13 @@ Delay category: ${delayCategory}`;
         : await getMostRecentAutoSummary(chatId, character.id, supabase as any);
     
       if (latestSummary) {
-        systemPrompt += '\n\n[CONVERSATION SUMMARY]';
-        systemPrompt += '\nMost recent conversation summary:';
-        systemPrompt += `\n${latestSummary.summary_content}`;
-        systemPrompt += '\n[/CONVERSATION SUMMARY]';
-        systemPrompt += '\nUse this summary to maintain continuity with previous conversations.';
+        withTokenDelta('summary', () => {
+          systemPrompt += '\n\n[CONVERSATION SUMMARY]';
+          systemPrompt += '\nMost recent conversation summary:';
+          systemPrompt += `\n${latestSummary.summary_content}`;
+          systemPrompt += '\n[/CONVERSATION SUMMARY]';
+          systemPrompt += '\nUse this summary to maintain continuity with previous conversations.';
+        });
         
         console.log('✅ Most recent auto-summary added to system prompt:', {
           summaryName: latestSummary.name,
@@ -621,6 +667,15 @@ Delay category: ${delayCategory}`;
 
   console.log('📝 Final system prompt length:', systemPrompt.length);
   console.log('📋 System prompt preview:', systemPrompt.substring(0, 500) + '...');
+  console.log('🔢 System prompt estimated tokens:', estimateTokens(systemPrompt));
+  if (metaCollector) {
+    try {
+      metaCollector(meta);
+      console.log('🧩 Prompt meta collected:', JSON.stringify(meta));
+    } catch (e) {
+      console.warn('⚠️ Failed to collect prompt meta:', e);
+    }
+  }
 
   return systemPrompt;
 }
@@ -692,119 +747,20 @@ export async function generateAIResponse(
 
   return response;
 }
-
-/**
- * Filter character memories based on keyword relevance to the conversation with weighting
- */
-export function getRelevantMemories(
-   userQuery: string,
-   worldInfoEntries: Array<{ keywords: string[]; entry_text: string }>,
-   memories: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }>,
-   characterName: string,
-   context: { recentInjectionIds?: Set<string> },
- ): Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }>{
-   if (!memories || memories.length === 0) return [];
-
-   // Combine user message and recent conversation for context
-   const recentMessages = context.recentInjectionIds ? Array.from(context.recentInjectionIds) : [];
-   const conversationText = [
-     userQuery,
-     ...recentMessages.map(id => {
-       const msg = memories.find(m => m.id === id);
-       return msg ? msg.summary_content : '';
-     })
-   ].join(' ').toLowerCase();
-
-   // Scoring helpers
-   const daysSince = (dateStr?: string) => {
-     if (!dateStr) return Number.POSITIVE_INFINITY;
-     const d = new Date(dateStr).getTime();
-     const now = Date.now();
-     return Math.max(0, (now - d) / (1000 * 60 * 60 * 24));
-   };
-   const recencyScore = (createdAt: string) => {
-     const days = daysSince(createdAt);
-     // 0 days -> ~1.0, 7 days -> ~0.5, 30 days -> ~0.3
-     return 1 / Math.log2(2 + Math.max(0, days));
-   };
-   const freshnessBoost = (updatedAt?: string) => {
-     const days = daysSince(updatedAt);
-     return days <= 7 ? 0.2 : 0;
-   };
-   const recentInjectionPenalty = (lastInjectedAt?: string | null, count?: number | null) => {
-     if (!lastInjectedAt) return 0;
-     const deltaMs = Date.now() - new Date(lastInjectedAt).getTime();
-     const base = deltaMs < 10 * 60 * 1000 ? 0.4 : 0; // 10-min cooldown
-     const extra = Math.min(0.3, (count || 0) * 0.05); // small accumulation
-     return base + extra;
-   };
-  const injectionPenalty = (m: any) => recentInjectionPenalty(m.last_injected_at, m.injection_count);
-
-   const charName = String(characterName || '').toLowerCase();
-   const userAliases = ['user'];
-   // Clean user query keywords
-   const cleanedQuery = userQuery.toLowerCase();
-   
-   const calcOverlap = (keywords: string[]) => {
-     const keywordSet = new Set((keywords || [])
-       .map(k => k.toLowerCase())
-       .filter(k => k !== charName && !userAliases.includes(k))
-     );
-     let overlap = 0;
-     // Basic keyword overlap with the user query
-     for (const key of keywordSet) {
-       if (cleanedQuery.includes(key)) overlap++;
-     }
-     return Math.min(overlap, 3);
-   };
-
-   const scored = memories.map(m => {
-     const overlap = calcOverlap(m.trigger_keywords);
-     const overlapScore = overlap / 3; // normalize 0..1
-     const r = recencyScore(m.created_at);
-     const f = freshnessBoost(m.updated_at);
-     const p = injectionPenalty(m);
-     const score = 0.6 * overlapScore + 0.3 * r + 0.2 * f - p;
-     return { mem: m, score, overlap };
+ 
+ function rerankWithSemantic(
+   candidates: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; embedding?: number[] }>,
+   queryVec: number[] | null,
+   threshold = 0.17
+ ) {
+   if (!queryVec) return { ranked: candidates, hit: false, topScore: null };
+   const scored = candidates.map(c => {
+     const score = cosineSimilarity(queryVec, (c as any).embedding || []);
+     return { c, score };
    });
-
-   // Keep only with minimum relevance and pick top 3
-   const MIN_SCORE = 0.45; // was 0.7
-   let selected = scored
-     .filter(s => s.score >= MIN_SCORE && s.overlap > 0)
-     .sort((a, b) => b.score - a.score)
-     .slice(0, 3)
-     .map(s => s.mem);
-
-   // Fallback: if nothing passed threshold but we have at least one overlap, inject the best single match
-   if (selected.length === 0) {
-     const withOverlap = scored.filter(s => s.overlap > 0);
-     if (withOverlap.length > 0) {
-       withOverlap.sort((a, b) => (b.overlap - a.overlap) || (b.score - a.score));
-       console.log('🧠 Memory injection fallback (simple): injecting best overlap despite low score', {
-         bestOverlapScore: withOverlap[0]?.score,
-         overlap: withOverlap[0]?.overlap
-       });
-       selected = [withOverlap[0].mem];
-     }
-   }
-
-   return selected;
- }
-
-function rerankWithSemantic(
-  candidates: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; embedding?: number[] }>,
-  queryVec: number[] | null,
-  threshold = 0.17
-) {
-  if (!queryVec) return { ranked: candidates, hit: false, topScore: null };
-  const scored = candidates.map(c => {
-    const score = cosineSimilarity(queryVec, (c as any).embedding || []);
-    return { c, score };
-  });
-  scored.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-  const topScore = scored[0]?.score ?? null;
-  const hit = topScore !== null && topScore >= threshold;
-  const ranked = hit ? scored.map(s => s.c) : candidates;
-  return { ranked, hit, topScore };
+   scored.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+   const topScore = scored[0]?.score ?? null;
+   const hit = topScore !== null && topScore >= threshold;
+   const ranked = hit ? scored.map(s => s.c) : candidates;
+   return { ranked, hit, topScore };
 }

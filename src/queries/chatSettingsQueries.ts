@@ -14,9 +14,9 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
   // Addon settings (global defaults)
   dynamic_world_info: false,
   enhanced_memory: false,
-  mood_tracking: true,
-  clothing_inventory: true,
-  location_tracking: true,
+  mood_tracking: false,
+  clothing_inventory: false,
+  location_tracking: false,
   time_and_weather: false,
   relationship_status: false,
   character_position: false,

@@ -49,7 +49,12 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           </Avatar>
           <div className="min-w-0 flex-1">
             <h1 className="text-white font-semibold text-sm sm:text-base truncate">{character.name}</h1>
-            <p className="text-gray-400 text-xs sm:text-sm truncate">{character.tagline}</p>
+            <p className="text-gray-400 text-xs sm:text-sm truncate">
+              {(() => {
+                const t = character.tagline || '';
+                return t.length > 30 ? `${t.slice(0, 30)}…` : t;
+              })()}
+            </p>
           </div>
         </div>
 

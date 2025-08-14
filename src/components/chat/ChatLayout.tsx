@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { getUserChats, getCharacterDetails } from '@/lib/supabase-queries';
+import { getUserChats, getCharacterDetails, deleteChat as deleteChatRpc } from '@/lib/supabase-queries';
 import type { Persona } from '@/lib/persona-operations';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { getUserCharacterSettings, upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
@@ -402,21 +402,30 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   const handleDeleteChat = async (chatId: string) => {
     if (!currentUser) return;
+
+    // Optimistically remove from chat history cache
+    queryClient.setQueryData(['user', 'chats', currentUser.id], (old: any[] | undefined) => {
+      if (!old) return old;
+      return old.filter((c: any) => c.id !== chatId);
+    });
+
+    // If deleting the currently open chat, navigate to character base route immediately
+    if (chatId === currentChatId) {
+      navigate(`/chat/${character.id}`);
+    }
+
     try {
-      const { error } = await supabase
-        .from('chats')
-        .delete()
-        .eq('id', chatId)
-        .eq('user_id', currentUser.id);
+      const { error } = await deleteChatRpc(chatId, currentUser.id);
       if (error) throw error;
+
       toast.success('Chat deleted successfully');
+      // Ensure server truth
       queryClient.invalidateQueries({ queryKey: ['user', 'chats', currentUser.id] });
-      if (chatId === currentChatId) {
-        navigate(`/chat/${character.id}`);
-      }
     } catch (error) {
       logger.error('Error deleting chat:', error);
       toast.error('Failed to delete chat');
+      // Revalidate to restore correct state if optimistic update was wrong
+      queryClient.invalidateQueries({ queryKey: ['user', 'chats', currentUser.id] });
     }
   };
 

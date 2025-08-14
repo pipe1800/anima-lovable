@@ -118,6 +118,12 @@ export default function RightPanel(props: RightPanelProps) {
         onClick={onClose}
       />
 
+      {/* Backdrop - Desktop */}
+      <div
+        className="hidden md:block fixed inset-0 bg-black/20 z-40"
+        onClick={onClose}
+      />
+
       {/* Panel - Full screen on mobile, slide-in on desktop */}
       <div
         className="fixed inset-0 md:inset-auto md:right-0 md:top-0 md:h-full w-full md:w-[544px] bg-[#0f0f0f] md:border-l border-gray-700/50 flex flex-col animate-slide-in-right z-[41]"

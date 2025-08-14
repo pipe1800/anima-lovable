@@ -6,6 +6,7 @@ import { authenticateUser, createCorsResponse, createErrorResponse } from '../_s
 import { extractInitialContext, extractContextFromResponse, saveContextUpdates } from './modules/context-extractor.ts';
 import { fetchCharacterData, fetchUserData, getCharacterForContext, createTemplateReplacer } from './modules/character-fetcher.ts';
 import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreeting, updateChatMetadata } from './modules/greeting-enhancer.ts';
+import { anyAddonEnabled, sanitizeAddonSettings } from '../_shared/settings-mapper.ts';
 /**
  * Extract Chat Context Edge Function - Refactored and Optimized
  * 
@@ -13,7 +14,7 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
  * ✅ Authentication & Authorization
  * ✅ Character Data Fetching (with fallback logic)
  * ✅ User Persona & Profile Fetching
- * ✅ Context Extraction (separate model: mistralai/mistral-7b-instruct)
+ * ✅ Context Extraction (separate model: mistralai/mistral-small-3.2-24b-instruct)
  * ✅ Template Replacement
  * ✅ Greeting Enhancement
  * ✅ Message Context Building
@@ -28,7 +29,7 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
  * - 50% less memory usage (modular structure)
  * - Better error isolation and handling
  * - Shared modules with chat-stream (consistency)
- */ Deno.serve(async (req)=>{
+ */ declare const Deno: any; Deno.serve(async (req)=>{
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     console.log('📋 CORS preflight request received');
@@ -60,6 +61,7 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
     console.log('📥 Parsing request body...');
     const requestBody = await req.json();
     const { chat_id, character_id, addon_settings, mode = 'initial' } = requestBody;
+    const normalizedAddonSettings = sanitizeAddonSettings(addon_settings);
     
     if (!chat_id || !character_id) {
       console.error('❌ Missing required fields:', {
@@ -83,35 +85,42 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
       character_id,
       mode
     });
-    console.log('📊 Addon settings received:', JSON.stringify(addon_settings, null, 2));
+    console.log('📊 Addon settings (normalized):', JSON.stringify(normalizedAddonSettings, null, 2));
     // ============================================================================
     // EARLY EXIT CHECK
     // ============================================================================
     const openRouterKey = Deno.env.get('OPENROUTER_API_KEY');
-    if (!addon_settings || !Object.values(addon_settings).some(Boolean) || !openRouterKey) {
+    if (!anyAddonEnabled(normalizedAddonSettings) || !openRouterKey) {
       console.log('⏭️ Skipping context extraction - no addons enabled or missing API key');
+      const endEarly = Date.now();
       const response = {
         success: true,
         chat_id: chat_id,
         message: 'Context extraction skipped - no addons enabled',
-        context_summary: null
+        context_summary: null,
+        timings: {
+          totalMs: endEarly - startTime
+        }
       };
       return createCorsResponse(response);
     }
     // ============================================================================
     // PARALLEL DATA FETCHING
     // ============================================================================
+    const tFetchStart = Date.now();
     console.log('📊 Fetching required data in parallel...');
     const [character, userData] = await Promise.all([
       fetchCharacterData(character_id, supabase),
       fetchUserData(user.id, supabase)
     ]);
+    const tFetchEnd = Date.now();
     const { persona: userPersona, profile: userProfile } = userData;
     console.log('✅ Data fetched successfully:', {
       hasCharacter: !!character,
       hasDefinitions: !!character.character_definitions,
       hasPersona: !!userPersona,
-      hasProfile: !!userProfile
+      hasProfile: !!userProfile,
+      fetchMs: tFetchEnd - tFetchStart
     });
     // ============================================================================
     // TEMPLATE PROCESSING SETUP
@@ -121,29 +130,42 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
     // ============================================================================
     // CONTEXT EXTRACTION
     // ============================================================================
-    // CONTEXT EXTRACTION
-    // ============================================================================
     console.log('🔄 Starting context extraction...');
-    let extractedContext = null;
+    const tExtractStart = Date.now();
+    let extractedContext: Record<string, string> | null = null;
     
     if (mode === 'conversation') {
       // Extract context from recent conversation messages
       console.log('💬 Extracting context from recent conversation...');
       
-      // Fetch recent messages from the chat
+      // Fetch recent messages from the chat (get a wider window and pair reliably)
       const { data: messages, error: messagesError } = await supabase
         .from('messages')
         .select('id, content, is_ai_message, created_at')
         .eq('chat_id', chat_id)
-        .order('created_at', { ascending: false })
-        .limit(4); // Get last 4 messages (2 exchanges)
+        .order('created_at', { ascending: true })
+        .limit(12);
       
       if (messagesError || !messages || messages.length < 2) {
         console.log('⏭️ Not enough messages for conversation context extraction');
       } else {
-        // Get the most recent user message and AI response
-        const aiMessage = messages.find(m => m.is_ai_message);
-        const userMessage = messages.find(m => !m.is_ai_message);
+        // Find the latest clean user → AI pair
+        let userMessage: any = null;
+        let aiMessage: any = null;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const msg = messages[i];
+          if (msg.is_ai_message) {
+            // look backward for the preceding user message
+            for (let j = i - 1; j >= 0; j--) {
+              if (!messages[j].is_ai_message) {
+                userMessage = messages[j];
+                aiMessage = msg;
+                break;
+              }
+            }
+            if (userMessage && aiMessage) break;
+          }
+        }
         
         if (aiMessage && userMessage) {
           try {
@@ -152,7 +174,7 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
               [], // No conversation history needed for this mode
               userMessage.content,
               aiMessage.content,
-              addon_settings,
+              normalizedAddonSettings,
               openRouterKey,
               templateReplacer,
               supabase,
@@ -161,61 +183,45 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
               character_id
             );
             
-            // Update the AI message with the extracted context
-            if (extractedContext) {
-              console.log('💾 Updating AI message with extracted context...');
-              const contextForMessage = {
-                moodTracking: (extractedContext as any).mood || 'No context',
-                clothingInventory: (extractedContext as any).clothing || 'No context',
-                locationTracking: (extractedContext as any).location || 'No context',
-                timeAndWeather: (extractedContext as any).time_weather || 'No context',
-                relationshipStatus: (extractedContext as any).relationship || 'No context',
-                characterPosition: (extractedContext as any).character_position || 'No context'
-              };
-              
-              const { error: updateError } = await supabase
-                .from('messages')
-                .update({ current_context: contextForMessage })
-                .eq('id', aiMessage.id);
-                
-              if (updateError) {
-                console.error('❌ Failed to update message with context:', updateError);
-              } else {
-                console.log('✅ AI message updated with context successfully');
-              }
-            }
+            // NOTE: Do not update the AI message here to avoid double-writes.
+            // saveContextUpdates() will update chat_context and the latest AI message consistently.
           } catch (contextError) {
             console.error('❌ Conversation context extraction failed:', contextError);
           }
+        } else {
+          console.log('⏭️ No suitable user→AI message pair found for context extraction');
         }
       }
     } else {
       // Extract initial context from character card (existing functionality)
       console.log('🔄 Extracting initial context from character card...');
       try {
-        extractedContext = await extractInitialContext(characterForContext, addon_settings, openRouterKey, templateReplacer);
+        extractedContext = await extractInitialContext(characterForContext, normalizedAddonSettings, openRouterKey, templateReplacer);
       } catch (contextError) {
         console.error('❌ Initial context extraction failed:', contextError);
       }
     }
+    const tExtractEnd = Date.now();
     // ============================================================================
     // CONTEXT PERSISTENCE
     // ============================================================================
+    const tPersistStart = Date.now();
     if (extractedContext) {
       console.log('💾 Saving extracted context to database...');
       try {
-        await saveContextUpdates(extractedContext, addon_settings, user.id, chat_id, character_id, supabaseAdmin);
+        await saveContextUpdates(extractedContext, normalizedAddonSettings, user.id, chat_id, character_id, supabaseAdmin);
       } catch (saveError) {
         console.error('❌ Failed to save context updates:', saveError);
       // Continue - don't fail for context save errors
       }
     }
+    const tPersistEnd = Date.now();
     // ============================================================================
     // GREETING ENHANCEMENT (only for initial mode)
     // ============================================================================
     if (mode === 'initial') {
       const enhancedGreeting = generateEnhancedGreeting(character, userPersona, userProfile, extractedContext, templateReplacer);
-      const messageContext = buildMessageContext(extractedContext, addon_settings);
+      const messageContext = buildMessageContext(extractedContext, normalizedAddonSettings);
       console.log('💾 Updating greeting message with context:', messageContext);
       // ============================================================================
       // DATABASE UPDATES
@@ -241,7 +247,13 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
       success: true,
       chat_id: chat_id,
       message: mode === 'initial' ? 'Context extracted and greeting enhanced successfully' : 'Context extracted from conversation successfully',
-      context_summary: extractedContext
+      context_summary: extractedContext,
+      timings: {
+        totalMs: endTime - startTime,
+        fetchMs: tFetchEnd - tFetchStart,
+        extractMs: tExtractEnd - tExtractStart,
+        persistMs: tPersistEnd - tPersistStart
+      }
     };
     return createCorsResponse(response);
   } catch (error) {
@@ -250,7 +262,7 @@ import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreetin
       success: false,
       chat_id: '',
       message: 'Context extraction failed',
-      error: error.message
+      error: (error as any)?.message || String(error)
     };
     return createCorsResponse(errorResponse, 500);
   }

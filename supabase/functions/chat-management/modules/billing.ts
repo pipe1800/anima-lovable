@@ -1,28 +1,28 @@
 import type { AddonSettings, CreditInfo, PlanInfo, SupabaseClient } from '../types/streaming-interfaces.ts';
 
 /**
- * Credit calculation and billing utilities - Updated for Universal 12k Context System
+ * Credit calculation and billing utilities - Updated for Universal Context System per plan
  * Fixed costs per tier, no addon multipliers, all addons are free
  */
 
 export const PLAN_MODEL_COSTS = {
   'Guest Pass': {
-    model: 'openai/gpt-4o-mini',
-    cost: 8, // Fixed cost - no multipliers
+    model: 'mistralai/mistral-small-3.2-24b-instruct',
+    cost: 10, // Fixed cost - no multipliers
     maxContextTokens: 12000,
-    modelIdentifier: 'openai/gpt-4o-mini'
+    modelIdentifier: 'mistralai/mistral-small-3.2-24b-instruct'
   },
   'True Fan': {
-    model: 'microsoft/wizardlm-2-8x22b',
-    cost: 23, // Fixed cost - no multipliers
-    maxContextTokens: 12000,
-    modelIdentifier: 'microsoft/wizardlm-2-8x22b'
+    model: 'nousresearch/hermes-3-llama-3.1-70b',
+    cost: 10, // Fixed cost - no multipliers
+    maxContextTokens: 16000,
+    modelIdentifier: 'nousresearch/hermes-3-llama-3.1-70b'
   },
   'The Whale': {
-    model: 'nousresearch/nous-hermes-2-mixtral-8x7b-dpo',
-    cost: 23, // Fixed cost - no multipliers
-    maxContextTokens: 12000,
-    modelIdentifier: 'nousresearch/nous-hermes-2-mixtral-8x7b-dpo'
+    model: 'nousresearch/hermes-3-llama-3.1-70b',
+    cost: 10, // Fixed cost - no multipliers
+    maxContextTokens: 24000,
+    modelIdentifier: 'nousresearch/hermes-3-llama-3.1-70b'
   }
 } as const;
 

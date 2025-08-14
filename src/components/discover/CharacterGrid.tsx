@@ -6,16 +6,17 @@ import {
   MessageCircle, 
   Heart,
   Star,
-  TrendingUp,
   Loader2,
   Eye,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
-import { usePublicCharacters } from '@/hooks/useCharacters';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { useAuth } from '@/contexts/AuthContext';
 import { CharacterCardSkeleton } from './CharacterCardSkeleton';
+import { getThumbUrl } from '@/utils/image';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryConfigs } from '@/queries/chatQueries';
 
 interface CharacterGridProps {
   characters: PublicCharacter[];
@@ -142,16 +143,11 @@ export function CharacterGrid({
   const navigate = useNavigate();
   const { user } = useAuth();
   const { startChat, isCreating } = useChatCreation();
+  const queryClient = useQueryClient();
 
-  // Use initial characters if no search has been performed
-  const { 
-    data: initialCharacters = [], 
-    isLoading: initialLoading
-  } = usePublicCharacters(ITEMS_PER_PAGE, 0);
-
-  // Determine which data to display
-  const displayCharacters = hasSearched ? characters : initialCharacters;
-  const loading = hasSearched ? isLoading : initialLoading;
+  // Determine which data to display - rely on props only
+  const displayCharacters = characters;
+  const loading = isLoading;
   const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
 
   const handleViewCharacter = (character: PublicCharacter) => {
@@ -163,6 +159,11 @@ export function CharacterGrid({
     }
   };
 
+  // Prefetch character details on hover to make details instant
+  const prefetchCharacterDetails = (id: string) => {
+    queryClient.prefetchQuery(queryConfigs.characterDetails(id));
+  };
+
   const handleStartChat = (character: PublicCharacter) => {
     if (!user) {
       // Redirect to auth with signup mode
@@ -171,6 +172,7 @@ export function CharacterGrid({
       startChat(character);
     }
   };
+
   // Loading state with skeleton cards
   if (loading) {
     return (
@@ -185,7 +187,7 @@ export function CharacterGrid({
   }
 
   // Empty state for search results
-  if (hasSearched && characters.length === 0) {
+  if (hasSearched && displayCharacters.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
@@ -194,34 +196,10 @@ export function CharacterGrid({
         </div>
       </div>
     );
-  }  return (
-    <div className="px-3 sm:px-6 py-4 sm:py-8">
-      {/* Results Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-8 space-y-2 sm:space-y-0">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-1 sm:space-y-0">
-          <h2 className="text-white text-lg sm:text-xl font-semibold">
-            {hasSearched ? (
-              <>
-                {totalCount} <span className="hidden sm:inline">Characters</span> Found
-                {totalCount > ITEMS_PER_PAGE && (
-                  <span className="text-gray-400 text-sm sm:text-base font-normal ml-2">
-                    (Page {currentPage} of {totalPages})
-                  </span>
-                )}
-              </>
-            ) : (
-              <>
-                {displayCharacters.length} <span className="hidden sm:inline">Characters</span> Found
-              </>
-            )}
-          </h2>
-          <div className="flex items-center space-x-2 text-gray-400 text-xs sm:text-sm">
-            <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
-            <span>Updated 2 minutes ago</span>
-          </div>
-        </div>
-      </div>
+  }
 
+  return (
+    <div className="px-3 sm:px-6 py-4 sm:py-8">
       {/* Character Grid - 2 columns on mobile, responsive thereafter */}
       <div 
         className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6 lg:gap-8 transition-all duration-500 ease-in-out"
@@ -231,14 +209,19 @@ export function CharacterGrid({
             key={character.id}
             className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group cursor-pointer"
             style={{
-              animation: `fade-in 0.6s ease-out ${index * 0.1}s both`
+              animation: `fade-in 0.6s ease-out ${index * 0.1}s both`,
+              contentVisibility: 'auto',
+              containIntrinsicSize: '320px 512px'
             }}
             onClick={() => window.innerWidth < 768 ? handleViewCharacter(character) : undefined}
+            onMouseEnter={() => prefetchCharacterDetails(character.id)}
           >
             <CardContent className="p-0 relative h-full">
               <img 
-                src={character.avatar_url || "/placeholder.svg"} 
+                src={getThumbUrl(character.avatar_url, { width: 512, quality: 70, format: 'webp' })} 
                 alt={character.name}
+                loading="lazy"
+                decoding="async"
                 className="absolute inset-0 w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
@@ -322,7 +305,7 @@ export function CharacterGrid({
         </div>
       )}
 
-      {/* Pagination Controls */}
+      {/* Pagination Controls (search mode) */}
       {hasSearched && totalCount > ITEMS_PER_PAGE && onPageChange && (
         <PaginationControls
           currentPage={currentPage}
@@ -332,10 +315,11 @@ export function CharacterGrid({
       )}
 
       {/* Load More for initial characters (non-search) */}
-      {!hasSearched && displayCharacters.length > 0 && (
+      {!hasSearched && displayCharacters.length > 0 && onPageChange && (
         <div className="flex justify-center mt-8 sm:mt-16">
           <Button
             variant="outline"
+            onClick={() => onPageChange(currentPage + 1)}
             className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 hover:border-[#FF7A00] bg-transparent px-6 sm:px-10 py-3 sm:py-4 text-base sm:text-lg font-medium"
           >
             <span className="hidden sm:inline">Load More Characters</span>

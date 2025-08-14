@@ -66,3 +66,44 @@ export function mapAddonSettingsToGlobalSettings(addonSettings: AddonSettings): 
     few_shot_examples: false, // Temporarily disabled - coming soon
   };
 }
+
+export const ADDON_DB_KEYS = [
+  'dynamic_world_info',
+  'enhanced_memory',
+  'mood_tracking',
+  'clothing_inventory',
+  'location_tracking',
+  'time_and_weather',
+  'relationship_status',
+  'character_position',
+] as const;
+
+export const ADDON_RUNTIME_KEYS = [
+  'dynamicWorldInfo',
+  'enhancedMemory',
+  'moodTracking',
+  'clothingInventory',
+  'locationTracking',
+  'timeAndWeather',
+  'relationshipStatus',
+  'characterPosition',
+  'timeAwareness',
+] as const;
+
+export type AddonDbKey = typeof ADDON_DB_KEYS[number];
+export type AddonRuntimeKey = typeof ADDON_RUNTIME_KEYS[number];
+
+export function anyAddonEnabled(addonSettings: Partial<AddonSettings> | null | undefined): boolean {
+  if (!addonSettings) return false;
+  return ADDON_RUNTIME_KEYS.some((k) => (addonSettings as any)[k]);
+}
+
+export function sanitizeAddonSettings(input: any): AddonSettings {
+  const out: AddonSettings = {};
+  for (const key of ADDON_RUNTIME_KEYS) {
+    if (input && Object.prototype.hasOwnProperty.call(input, key)) {
+      (out as any)[key] = !!input[key];
+    }
+  }
+  return out;
+}

@@ -166,64 +166,50 @@ export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = 
 
   // Apply NSFW filtering based on tags
   if (nsfwEnabled === false) {
-    // User has NSFW disabled - exclude characters with NSFW tag
     const { data: nsfwCharacters } = await supabase
       .from('character_tags')
       .select('character_id')
-      .eq('tag_id', 24); // NSFW tag ID
+      .eq('tag_id', 24);
 
-    if (nsfwCharacters && nsfwCharacters.length > 0) {
-      const nsfwCharacterIds = new Set(nsfwCharacters.map(c => c.character_id));
-      filteredData = filteredData.filter(char => !nsfwCharacterIds.has(char.id));
+    if (nsfwCharacters?.length) {
+      const nsfwIds = new Set(nsfwCharacters.map(c => c.character_id));
+      filteredData = filteredData.filter(char => !nsfwIds.has(char.id));
     }
   }
 
-  // Fetch creator profiles, counts, and tags separately for each character
-  const charactersWithCreators = await Promise.all(
-    filteredData.map(async (character) => {
-      // Get creator profile
-      const { data: creatorData } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('id', character.creator_id)
-        .maybeSingle()
+  if (filteredData.length === 0) return { data: [], error: null };
 
-      // Get actual chat count
-      const { count: chatCount } = await supabase
-        .from('chats')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id)
+  // Batch fetch related data
+  const ids = filteredData.map(c => c.id);
+  const creatorIds = [...new Set(filteredData.map(c => c.creator_id))];
 
-      // Get likes count
-      const { count: likesCount } = await supabase
-        .from('character_likes')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id)
+  const [creatorsRes, chatsRes, likesRes, favsRes, tagsRes] = await Promise.all([
+    supabase.from('profiles').select('id, username, avatar_url').in('id', creatorIds),
+    supabase.from('chats').select('character_id, id'),
+    supabase.from('character_likes').select('character_id, id'),
+    supabase.from('character_favorites').select('character_id, id'),
+    supabase.from('character_tags').select('character_id, tags(id, name)')
+  ]);
 
-      // Get favorites count
-      const { count: favoritesCount } = await supabase
-        .from('character_favorites')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id)
+  const creatorsMap = new Map((creatorsRes.data || []).map(c => [c.id, c]));
+  const chatCounts = new Map<string, number>();
+  const likeCounts = new Map<string, number>();
+  const favCounts = new Map<string, number>();
+  const tagMap = new Map<string, Array<{ id: number; name: string }>>();
 
-      // Get character tags
-      const { data: tagsData } = await supabase
-        .from('character_tags')
-        .select(`
-          tag:tags(id, name)
-        `)
-        .eq('character_id', character.id)
+  (chatsRes.data || []).forEach((r: any) => chatCounts.set(r.character_id, (chatCounts.get(r.character_id) || 0) + 1));
+  (likesRes.data || []).forEach((r: any) => likeCounts.set(r.character_id, (likeCounts.get(r.character_id) || 0) + 1));
+  (favsRes.data || []).forEach((r: any) => favCounts.set(r.character_id, (favCounts.get(r.character_id) || 0) + 1));
+  (tagsRes.data || []).forEach((r: any) => tagMap.set(r.character_id, (r as any).tags ? [(r as any).tags] : []));
 
-      return {
-        ...character,
-        creator: creatorData,
-        chats_count: chatCount || 0,
-        likes_count: likesCount || 0,
-        favorites_count: favoritesCount || 0,
-        tags: tagsData?.map(t => t.tag) || []
-      }
-    })
-  )
+  const charactersWithCreators = filteredData.map((character) => ({
+    ...character,
+    creator: creatorsMap.get(character.creator_id),
+    chats_count: chatCounts.get(character.id) || 0,
+    likes_count: likeCounts.get(character.id) || 0,
+    favorites_count: favCounts.get(character.id) || 0,
+    tags: tagMap.get(character.id) || []
+  }));
 
   return { data: charactersWithCreators, error: null }
 }
@@ -374,7 +360,7 @@ export const searchPublicCharacters = async (params: SearchParams): Promise<Sear
         chats_count: chatCount || 0,
         likes_count: likesCount || 0,
         favorites_count: favoritesCount || 0,
-        tags: tagsData?.map(t => t.tag).filter(Boolean) || []
+        tags: tagsData?.map(t => t.tag) || []
       };
     })
   );
@@ -686,8 +672,8 @@ export const getUserChatsPaginated = async (
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId);
 
-  // Then get paginated data
-  const { data, error } = await supabase
+  // Then get paginated data (lighter payload - drop heavy character_definitions join)
+  const { data: chats, error } = await supabase
     .from('chats')
     .select(`
       id,
@@ -696,14 +682,10 @@ export const getUserChatsPaginated = async (
       created_at,
       character_id,
       character:characters(
-        id, 
-        name, 
+        id,
+        name,
         avatar_url,
-        short_description,
-        character_definitions!inner(
-          personality_summary,
-          scenario
-        )
+        short_description
       )
     `)
     .eq('user_id', userId)
@@ -711,58 +693,76 @@ export const getUserChatsPaginated = async (
     .order('created_at', { ascending: false })
     .range(offset, offset + pageSize - 1);
 
-  if (error || !data) {
+  if (error || !chats) {
     return { data: [], totalCount: 0, error };
   }
 
-  // Fetch last message and user character settings for each chat
-  const chatsWithLastMessage = await Promise.all(
-    data.map(async (chat) => {
-      // Fetch message count for this chat
-      const { count: messageCount } = await supabase
-        .from('messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('chat_id', chat.id);
+  const chatIds = chats.map((c) => c.id);
+  const characterIds = chats.map((c) => c.character_id).filter(Boolean);
 
-      const { data: messages } = await supabase
-        .from('messages')
-        .select('content, is_ai_message')
-        .eq('chat_id', chat.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
+  // Batch fetch last messages for all chats
+  const { data: lastMsgsData } = await supabase
+    .from('messages')
+    .select('chat_id, content, is_ai_message, created_at')
+    .in('chat_id', chatIds as string[])
+    .order('created_at', { ascending: false });
 
-      const lastMessage = messages?.[0];
+  const lastMessageMap = new Map<string, { content: string; is_ai_message: boolean }>();
+  lastMsgsData?.forEach((m) => {
+    if (!lastMessageMap.has(m.chat_id)) {
+      lastMessageMap.set(m.chat_id, { content: m.content, is_ai_message: m.is_ai_message });
+    }
+  });
 
-      // Fetch user character settings
-      const { data: userSettings } = await supabase
-        .from('user_character_settings')
-        .select('chat_mode, time_awareness_enabled')
-        .eq('user_id', userId)
-        .eq('character_id', chat.character_id)
-        .maybeSingle();
+  // Batch fetch message counts per chat (exclude placeholders)
+  const messageCounts = new Map<string, number>();
+  if (chatIds.length > 0) {
+    const { data: countsData } = await (supabase as any)
+      .from('messages')
+      .select('chat_id, count:count()', { head: false })
+      .in('chat_id', chatIds as string[])
+      .not('content', 'ilike', '%[PLACEHOLDER]%')
+      .group('chat_id');
+    countsData?.forEach((row: any) => {
+      if (row.chat_id) messageCounts.set(row.chat_id, Number(row.count) || 0);
+    });
+  }
 
-      return {
-        ...chat,
-        message_count: messageCount || 0, // Add message count here
-        character: {
-          ...chat.character,
-          tagline: (() => {
-            try {
-              const personalitySummary = JSON.parse(chat.character?.character_definitions?.personality_summary || '{}');
-              return personalitySummary.title || (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
-            } catch {
-              return (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
-            }
-          })()
-        },
-        messages: lastMessage ? [lastMessage] : [],
-        userSettings: userSettings || { chat_mode: 'storytelling', time_awareness_enabled: false }
-      };
-    })
-  );
+  // Batch fetch user character settings
+  const settingsMap = new Map<string, { chat_mode: string; time_awareness_enabled: boolean }>();
+  if (characterIds.length > 0) {
+    const { data: settingsData } = await supabase
+      .from('user_character_settings')
+      .select('character_id, chat_mode, time_awareness_enabled')
+      .eq('user_id', userId)
+      .in('character_id', characterIds as string[]);
+
+    settingsData?.forEach((row) => {
+      settingsMap.set(row.character_id, { 
+        chat_mode: row.chat_mode ?? 'storytelling', 
+        time_awareness_enabled: row.time_awareness_enabled ?? false 
+      });
+    });
+  }
+
+  // Compose result (provide messages array with last message for UI)
+  const chatsWithExtras = chats.map((chat) => {
+    const last = lastMessageMap.get(chat.id);
+    const userSettings = settingsMap.get(chat.character_id) || { chat_mode: 'storytelling', time_awareness_enabled: false };
+    return {
+      ...chat,
+      character: {
+        ...chat.character,
+        tagline: chat.character?.short_description || ''
+      },
+      messages: last ? [last] : [],
+      userSettings,
+      message_count: messageCounts.get(chat.id) || 0,
+    };
+  });
 
   return { 
-    data: chatsWithLastMessage, 
+    data: chatsWithExtras, 
     totalCount: totalCount || 0,
     currentPage: page,
     totalPages: Math.ceil((totalCount || 0) / pageSize),
@@ -774,7 +774,8 @@ export const getUserChatsPaginated = async (
  * Get user's chat sessions with last message preview (legacy - keep for compatibility)
  */
 export const getUserChats = async (userId: string) => {
-  const { data, error } = await supabase
+  // Fetch chats with lighter character fields
+  const { data: chats, error } = await supabase
     .from('chats')
     .select(`
       id,
@@ -783,64 +784,87 @@ export const getUserChats = async (userId: string) => {
       created_at,
       character_id,
       character:characters(
-        id, 
-        name, 
+        id,
+        name,
         avatar_url,
-        short_description,
-        character_definitions!inner(
-          personality_summary,
-          scenario
-        )
+        short_description
       )
     `)
     .eq('user_id', userId)
     .order('last_message_at', { ascending: false, nullsFirst: false })
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false });
 
-  if (error || !data) {
-    return { data: data || [], error }
+  if (error || !chats) {
+    return { data: chats || [], error };
   }
 
-  // Fetch last message and user character settings for each chat
-  const chatsWithLastMessage = await Promise.all(
-    data.map(async (chat) => {
-      const { data: lastMessage } = await supabase
-        .from('messages')
-        .select('content, is_ai_message')
-        .eq('chat_id', chat.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
+  const chatIds = chats.map((c) => c.id);
+  const characterIds = chats.map((c) => c.character_id).filter(Boolean);
 
-      // Fetch user character settings
-      const { data: userSettings } = await supabase
-        .from('user_character_settings')
-        .select('chat_mode, time_awareness_enabled')
-        .eq('user_id', userId)
-        .eq('character_id', chat.character_id)
-        .maybeSingle()
+  // Batch fetch last messages for all chats
+  const { data: lastMsgsData } = await supabase
+    .from('messages')
+    .select('chat_id, content, is_ai_message, created_at')
+    .in('chat_id', chatIds as string[])
+    .order('created_at', { ascending: false });
 
-      return {
-        ...chat,
-        character: {
-          ...chat.character,
-          tagline: (() => {
-            try {
-              const personalitySummary = JSON.parse(chat.character?.character_definitions?.personality_summary || '{}');
-              return personalitySummary.title || (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
-            } catch {
-              return (chat.character?.character_definitions?.scenario as any)?.title || chat.character?.short_description || '';
-            }
-          })()
-        },
-        lastMessage: lastMessage?.content || null,
-        lastMessageIsAI: lastMessage?.is_ai_message || false,
-        userSettings: userSettings || { chat_mode: 'storytelling', time_awareness_enabled: false }
-      }
-    })
-  )
+  const lastMessageMap = new Map<string, { content: string; is_ai_message: boolean }>();
+  lastMsgsData?.forEach((m) => {
+    if (!lastMessageMap.has(m.chat_id)) {
+      lastMessageMap.set(m.chat_id, { content: m.content, is_ai_message: m.is_ai_message });
+    }
+  });
 
-  return { data: chatsWithLastMessage, error: null }
+  // Batch fetch message counts per chat (exclude placeholders)
+  const messageCounts = new Map<string, number>();
+  if (chatIds.length > 0) {
+    const { data: countsData } = await (supabase as any)
+      .from('messages')
+      .select('chat_id, count:count()', { head: false })
+      .in('chat_id', chatIds as string[])
+      .not('content', 'ilike', '%[PLACEHOLDER]%')
+      .group('chat_id');
+    countsData?.forEach((row: any) => {
+      if (row.chat_id) messageCounts.set(row.chat_id, Number(row.count) || 0);
+    });
+  }
+
+  // Batch fetch user character settings
+  const settingsMap = new Map<string, { chat_mode: string; time_awareness_enabled: boolean }>();
+  if (characterIds.length > 0) {
+    const { data: settingsData } = await supabase
+      .from('user_character_settings')
+      .select('character_id, chat_mode, time_awareness_enabled')
+      .eq('user_id', userId)
+      .in('character_id', characterIds as string[]);
+
+    settingsData?.forEach((row) => {
+      settingsMap.set(row.character_id, { 
+        chat_mode: row.chat_mode ?? 'storytelling', 
+        time_awareness_enabled: row.time_awareness_enabled ?? false 
+      });
+    });
+  }
+
+  // Compose result
+  const chatsWithLastMessage = chats.map((chat) => {
+    const last = lastMessageMap.get(chat.id);
+    const userSettings = settingsMap.get(chat.character_id) || { chat_mode: 'storytelling', time_awareness_enabled: false };
+    return {
+      ...chat,
+      character: {
+        ...chat.character,
+        tagline: chat.character?.short_description || ''
+      },
+      lastMessage: last?.content || null,
+      lastMessageIsAI: last?.is_ai_message || false,
+      messages: last ? [last] : [],
+      userSettings,
+      message_count: messageCounts.get(chat.id) || 0,
+    };
+  });
+
+  return { data: chatsWithLastMessage, error: null };
 }
 
 /**

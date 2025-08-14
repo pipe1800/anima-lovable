@@ -1,0 +1,135 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.character_definitions (
+  -- ...existing code...
+);
+CREATE TABLE public.character_favorites (
+  -- ...existing code...
+);
+CREATE TABLE public.character_likes (
+  -- ...existing code...
+);
+CREATE TABLE public.character_memories (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  character_id uuid NOT NULL,
+  chat_id uuid NOT NULL,
+  summary_content text NOT NULL,
+  trigger_keywords text[] NOT NULL,
+  message_count integer NOT NULL,
+  input_token_cost integer NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  is_auto_summary boolean DEFAULT false,
+  name text,
+  last_injected_at timestamp with time zone,
+  injection_count integer DEFAULT 0,
+  content_hash text,
+  CONSTRAINT character_memories_pkey PRIMARY KEY (id),
+  CONSTRAINT character_memories_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
+  CONSTRAINT character_memories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT character_memories_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
+);
+CREATE TABLE public.character_tags (
+  -- ...existing code...
+);
+CREATE TABLE public.character_world_info_link (
+  -- ...existing code...
+);
+CREATE TABLE public.characters (
+  -- ...existing code...
+);
+CREATE TABLE public.chat_context (
+  -- ...existing code...
+);
+CREATE TABLE public.chats (
+  -- ...existing code...
+);
+CREATE TABLE public.credit_pack_purchases (
+  -- ...existing code...
+);
+CREATE TABLE public.credit_packs (
+  -- ...existing code...
+);
+CREATE TABLE public.credits (
+  -- ...existing code...
+);
+CREATE TABLE public.messages (
+  -- ...existing code...
+);
+CREATE TABLE public.models (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tier_name text NOT NULL UNIQUE,
+  credit_multiplier numeric NOT NULL DEFAULT 1,
+  is_nsfw_compatible boolean NOT NULL DEFAULT false,
+  min_plan_id uuid,
+  description text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  model_identifier text NOT NULL DEFAULT ''::text,
+  max_context_tokens integer NOT NULL DEFAULT 12000,
+  CONSTRAINT models_pkey PRIMARY KEY (id),
+  CONSTRAINT models_min_plan_id_fkey FOREIGN KEY (min_plan_id) REFERENCES public.plans(id)
+);
+CREATE TABLE public.onboarding_checklist_items (
+  -- ...existing code...
+);
+CREATE TABLE public.parsed_character_cards (
+  -- ...existing code...
+);
+CREATE TABLE public.personas (
+  -- ...existing code...
+);
+CREATE TABLE public.plans (
+  -- ...existing code...
+);
+CREATE TABLE public.profiles (
+  -- ...existing code...
+);
+CREATE TABLE public.public_app_settings (
+  -- ...existing code...
+);
+CREATE TABLE public.subscriptions (
+  -- ...existing code...
+);
+CREATE TABLE public.tags (
+  -- ...existing code...
+);
+CREATE TABLE public.user_age_verification (
+  -- ...existing code...
+);
+CREATE TABLE public.user_character_settings (
+  -- ...existing code...
+);
+CREATE TABLE public.user_character_world_info_settings (
+  -- ...existing code...
+);
+CREATE TABLE public.user_global_chat_settings (
+  -- ...existing code...
+);
+CREATE TABLE public.user_onboarding_progress (
+  -- ...existing code...
+);
+CREATE TABLE public.world_info_entries (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  world_info_id uuid NOT NULL,
+  keywords text[] NOT NULL,
+  entry_text text NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT world_info_entries_pkey PRIMARY KEY (id),
+  CONSTRAINT world_info_entries_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
+);
+CREATE TABLE public.world_info_tags (
+  -- ...existing code...
+);
+CREATE TABLE public.world_info_user_likes (
+  -- ...existing code...
+);
+CREATE TABLE public.world_info_users (
+  -- ...existing code...
+);
+CREATE TABLE public.world_infos (
+  -- ...existing code...
+);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { WorldInfoGrid } from './WorldInfoGrid';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDashboardData, preloadDashboardData } from '@/hooks/useDashboard';
@@ -24,6 +24,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useNavigate } from 'react-router-dom';
 
 export function WorldInfoDiscoverContent() {
   const { user, profile } = useAuth();
@@ -32,6 +33,7 @@ export function WorldInfoDiscoverContent() {
   const userCredits = dashboardData?.credits || 0;
   const username = profile?.username || user?.email?.split('@')[0] || 'User';
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   
   const [searchInput, setSearchInput] = useState('');
   const [sortBy, setSortBy] = useState('popular');
@@ -39,9 +41,9 @@ export function WorldInfoDiscoverContent() {
   const [hasSearched, setHasSearched] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Build search parameters from current state
-  const searchParams: SearchParams = {
-    searchQuery: searchInput, // Use searchInput directly 
+  // Memoized params
+  const searchParams: SearchParams = useMemo(() => ({
+    searchQuery: searchInput,
     sortBy,
     filters: {
       tags: selectedTags,
@@ -51,7 +53,7 @@ export function WorldInfoDiscoverContent() {
     },
     limit: 20,
     offset: (currentPage - 1) * 20
-  };
+  }), [searchInput, sortBy, selectedTags, nsfwEnabled, currentPage]);
 
   // Use search hook with manual refetch
   const { data: searchResults, refetch: executeSearch, isLoading: isSearching } = useSearchPublicWorldInfos(searchParams);
@@ -69,9 +71,16 @@ export function WorldInfoDiscoverContent() {
   // Handle search button click
   const handleSearch = () => {
     setHasSearched(true);
-    setCurrentPage(1); // Reset to first page when searching
-    executeSearch();
+    setCurrentPage(1);
+    // refetch handled by effect
   };
+
+  // Trigger refetch when params change and user searched
+  useEffect(() => {
+    if (hasSearched) {
+      executeSearch();
+    }
+  }, [hasSearched, executeSearch, searchParams]);
 
   // Handle search on Enter key
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
@@ -83,8 +92,8 @@ export function WorldInfoDiscoverContent() {
   // Handle page change
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
-    // Update search params and refetch with new page
-    executeSearch();
+    // refetch handled by effect
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Handle tag selection
@@ -94,7 +103,6 @@ export function WorldInfoDiscoverContent() {
         ? prev.filter(t => t !== tag)
         : [...prev, tag]
     );
-    // Don't auto-trigger search - user must click search button
   };
 
   // Remove individual tag
@@ -110,31 +118,27 @@ export function WorldInfoDiscoverContent() {
     setHasSearched(false);
   };
 
-  // Handle surprise me - navigate to random world info
+  // Handle surprise me - SPA navigation (no full reload)
   const handleSurpriseMe = async () => {
     const worldInfosToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialWorldInfos;
-    
     if (!worldInfosToChooseFrom || worldInfosToChooseFrom.length === 0) return;
-    
     const randomIndex = Math.floor(Math.random() * worldInfosToChooseFrom.length);
     const randomWorldInfo = worldInfosToChooseFrom[randomIndex];
-    
     if (randomWorldInfo) {
-      // Navigate to world info details page
-      window.location.href = `/world-info/${randomWorldInfo.id}`;
+      navigate(`/world-info/${randomWorldInfo.id}`);
     }
   };
 
-  // Preload dashboard data after discover loads
+  // Defer dashboard preload so discover paints first
   useEffect(() => {
-    if (user?.id) {
-      // Small delay to ensure discovery renders first
-      const timer = setTimeout(() => {
-        preloadDashboardData(user.id, queryClient);
-      }, 500);
-      
-      return () => clearTimeout(timer);
-    }
+    if (!user?.id) return;
+    const run = () => preloadDashboardData(user.id, queryClient);
+    const win: any = window as any;
+    const id = win.requestIdleCallback ? win.requestIdleCallback(run, { timeout: 1500 }) : setTimeout(run, 800);
+    return () => {
+      if (win.cancelIdleCallback && id) win.cancelIdleCallback(id);
+      else clearTimeout(id);
+    };
   }, [user?.id, queryClient]);
 
   // World infos to display and active filters

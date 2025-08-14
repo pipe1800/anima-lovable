@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CharacterGrid } from './CharacterGrid';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDashboardData, preloadDashboardData } from '@/hooks/useDashboard';
@@ -25,25 +25,74 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 export function DiscoverContent() {
   const { user, profile } = useAuth();
   const { nsfwEnabled } = useNSFW();
   const { data: dashboardData } = useDashboardData();
-  const userCredits = dashboardData?.credits || 0;
-  const username = profile?.username || user?.email?.split('@')[0] || 'User';
   const queryClient = useQueryClient();
   const { startChat, isCreating } = useChatCreation();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const prefetchNextRef = useRef<boolean>(false);
+  const hasIncrementedRef = useRef(false);
+  const [autoLoadEnabled, setAutoLoadEnabled] = useState(false);
   
   const [searchInput, setSearchInput] = useState('');
   const [sortBy, setSortBy] = useState('popular');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [initialAccumulated, setInitialAccumulated] = useState<any[]>([]);
 
-  // Build search parameters from current state
-  const searchParams: SearchParams = {
-    searchQuery: searchInput, // Use searchInput directly 
+  // Hydrate filters from URL
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const q = params.get('q') || '';
+    const s = params.get('sort') || 'popular';
+    const t = params.get('tags');
+    const p = Math.max(1, parseInt(params.get('page') || '1', 10) || 1);
+    const searched = params.get('searched') === '1';
+    setSearchInput(q);
+    setSortBy(s);
+    setSelectedTags(t ? t.split(',').filter(Boolean) : []);
+    setCurrentPage(p);
+    setHasSearched(searched);
+    hasIncrementedRef.current = false; // reset increment guard on navigation
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+
+  // Persist filters to URL (avoid defaults)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (searchInput) params.set('q', searchInput); else params.delete('q');
+    if (sortBy && sortBy !== 'popular') params.set('sort', sortBy); else params.delete('sort');
+    if (selectedTags.length) params.set('tags', selectedTags.join(',')); else params.delete('tags');
+    if (currentPage > 1) params.set('page', String(currentPage)); else params.delete('page');
+    if (hasSearched) params.set('searched', '1'); else params.delete('searched');
+    const query = params.toString();
+    const next = `${location.pathname}${query ? `?${query}` : ''}`;
+    if (next !== `${location.pathname}${location.search}`) {
+      navigate(next, { replace: true });
+    }
+  }, [searchInput, sortBy, selectedTags, currentPage, hasSearched, navigate, location.pathname, location.search]);
+
+  // Debounced auto-search
+  useEffect(() => {
+    if (!hasSearched) return; // only auto-search in search mode
+    const id = setTimeout(() => {
+      setCurrentPage(1);
+      executeSearch();
+    }, 300);
+    return () => clearTimeout(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput, sortBy, selectedTags]);
+
+  // Memoized params
+  const searchParams: SearchParams = useMemo(() => ({
+    searchQuery: searchInput,
     sortBy,
     filters: {
       tags: selectedTags,
@@ -53,13 +102,65 @@ export function DiscoverContent() {
     },
     limit: 20,
     offset: (currentPage - 1) * 20
-  };
+  }), [searchInput, sortBy, selectedTags, nsfwEnabled, currentPage]);
 
-  // Use search hook with manual refetch
-  const { data: searchResults, refetch: executeSearch, isLoading: isSearching } = useSearchPublicCharacters(searchParams);
-  
-  // Fallback to initial load of popular characters
-  const { data: initialCharacters = [] } = usePublicCharacters(20, 0);
+  const { data: searchResults, refetch: executeSearch, isFetching: isSearchFetching } = useSearchPublicCharacters(searchParams);
+
+  // Initial characters with offset
+  const initialOffset = hasSearched ? 0 : (currentPage - 1) * 20;
+  const { 
+    data: initialCharacters = [], 
+    isLoading: isInitialLoading,
+    isFetching: isInitialFetching,
+    isPlaceholderData: isInitialPlaceholder,
+  } = usePublicCharacters(20, initialOffset);
+
+  // Accumulate initial characters
+  useEffect(() => {
+    if (hasSearched) return;
+    if (currentPage === 1) setInitialAccumulated(initialCharacters);
+    else if (initialCharacters?.length) {
+      setInitialAccumulated(prev => {
+        const ids = new Set(prev.map((c: any) => c.id));
+        const merged = [...prev];
+        initialCharacters.forEach((c: any) => { if (!ids.has(c.id)) merged.push(c); });
+        return merged;
+      });
+    }
+  }, [initialCharacters, currentPage, hasSearched]);
+
+  // Manual refetch after state settles for search
+  useEffect(() => {
+    if (hasSearched) executeSearch();
+  }, [hasSearched, executeSearch, searchParams]);
+
+  // Infinite scroll for initial mode, but only after user enables via click
+  useEffect(() => {
+    if (hasSearched) return;
+    if (!autoLoadEnabled) return; // disabled until user clicks
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (entry.isIntersecting) {
+        if (!hasIncrementedRef.current) {
+          setCurrentPage((p) => p + 1);
+          hasIncrementedRef.current = true;
+        }
+      } else {
+        hasIncrementedRef.current = false;
+      }
+    }, { rootMargin: '0px 0px 40% 0px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasSearched, autoLoadEnabled]);
+
+  // When clearing filters or exiting search, reset page to 1
+  useEffect(() => {
+    if (!hasSearched) {
+      setCurrentPage((p) => (p < 1 ? 1 : p));
+    }
+  }, [hasSearched]);
 
   // Available filter tags
   const availableTags = [
@@ -71,38 +172,25 @@ export function DiscoverContent() {
   // Handle search button click
   const handleSearch = () => {
     setHasSearched(true);
-    setCurrentPage(1); // Reset to first page when searching
+    setCurrentPage(1);
     executeSearch();
-  };
-
-  // Handle search on Enter key
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSearch();
-    }
   };
 
   // Handle page change
   const handlePageChange = (page: number) => {
+    // If user manually asks for next page, enable auto-load
+    if (page > currentPage && !autoLoadEnabled) setAutoLoadEnabled(true);
     setCurrentPage(page);
-    // Update search params and refetch with new page
-    executeSearch();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Handle tag selection
   const handleTagToggle = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) 
-        ? prev.filter(t => t !== tag)
-        : [...prev, tag]
-    );
-    // Don't auto-trigger search - user must click search button
+    setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
   // Remove individual tag
-  const removeTag = (tag: string) => {
-    setSelectedTags(prev => prev.filter(t => t !== tag));
-  };
+  const removeTag = (tag: string) => setSelectedTags(prev => prev.filter(t => t !== tag));
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -112,35 +200,33 @@ export function DiscoverContent() {
     setHasSearched(false);
   };
 
-  // Handle surprise me - open chat with random character
+  // Handle surprise me - open chat with random character or view if logged out
   const handleSurpriseMe = async () => {
-    const charactersToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialCharacters;
-    
-    if (!charactersToChooseFrom || charactersToChooseFrom.length === 0) return;
-    
-    const randomIndex = Math.floor(Math.random() * charactersToChooseFrom.length);
-    const randomCharacter = charactersToChooseFrom[randomIndex];
-    
-    if (randomCharacter) {
-      await startChat(randomCharacter);
-    }
+    const charactersToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialAccumulated.length ? initialAccumulated : initialCharacters;
+    if (!charactersToChooseFrom?.length) return;
+    const randomCharacter = charactersToChooseFrom[Math.floor(Math.random() * charactersToChooseFrom.length)];
+    if (randomCharacter) await startChat(randomCharacter);
   };
 
-  // Preload dashboard data after discover loads
+  // Defer dashboard preload so discover paints first
   useEffect(() => {
-    if (user?.id) {
-      // Small delay to ensure discovery renders first
-      const timer = setTimeout(() => {
-        preloadDashboardData(user.id, queryClient);
-      }, 500);
-      
-      return () => clearTimeout(timer);
-    }
+    if (!user?.id) return;
+    const run = () => preloadDashboardData(user.id, queryClient);
+    const win: any = window as any;
+    const id = win.requestIdleCallback ? win.requestIdleCallback(run, { timeout: 1500 }) : setTimeout(run, 800);
+    return () => {
+      if (win.cancelIdleCallback && id) win.cancelIdleCallback(id);
+      else clearTimeout(id);
+    };
   }, [user?.id, queryClient]);
 
-  // Characters to display and active filters
-  const displayCharacters = hasSearched && searchResults?.data ? searchResults.data : initialCharacters;
-  const activeFilters = selectedTags.length > 0 || searchInput.length > 0;
+  // Display data
+  const displayCharacters = hasSearched && searchResults?.data ? searchResults.data : (initialAccumulated.length ? initialAccumulated : initialCharacters);
+
+  // Determine grid loading state: show skeletons when fetching and nothing to display yet
+  const isGridLoading = hasSearched
+    ? (isSearchFetching && displayCharacters.length === 0)
+    : ((isInitialLoading || isInitialFetching) && displayCharacters.length === 0);
 
   return (
     <div className="min-h-screen bg-[#121212] w-full">
@@ -170,7 +256,7 @@ export function DiscoverContent() {
               placeholder="Search characters by name or description... (Press Enter to search)"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
+              onKeyDown={(e) => { if ((e as any).key === 'Enter') handleSearch(); }}
               className="pl-9 bg-[#121212] border-gray-700 text-white placeholder-gray-400 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20"
             />
           </div>
@@ -207,12 +293,7 @@ export function DiscoverContent() {
                         onCheckedChange={() => handleTagToggle(tag)}
                         className="border-gray-600 data-[state=checked]:bg-[#FF7A00] data-[state=checked]:border-[#FF7A00]"
                       />
-                      <label
-                        htmlFor={tag}
-                        className="text-sm text-white cursor-pointer"
-                      >
-                        {tag}
-                      </label>
+                      <label htmlFor={tag} className="text-sm text-white cursor-pointer">{tag}</label>
                     </div>
                   ))}
                 </div>
@@ -234,21 +315,13 @@ export function DiscoverContent() {
           </Select>
 
           {/* Search Button */}
-          <Button
-            onClick={handleSearch}
-            disabled={isSearching}
-            className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium"
-          >
+          <Button onClick={handleSearch} disabled={isSearchFetching} className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium">
             <Search className="w-4 h-4 mr-2" />
-            {isSearching ? 'Searching...' : 'Search'}
+            {isSearchFetching ? 'Searching...' : 'Search'}
           </Button>
 
           {/* Surprise Me Button */}
-          <Button
-            onClick={handleSurpriseMe}
-            disabled={isCreating || (hasSearched ? searchResults?.data?.length === 0 : initialCharacters.length === 0)}
-            className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium"
-          >
+          <Button onClick={handleSurpriseMe} disabled={isCreating || (hasSearched ? (searchResults?.data?.length === 0) : (displayCharacters.length === 0))} className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium">
             <Sparkles className="w-4 h-4 mr-2" />
             Surprise Me!
           </Button>
@@ -260,27 +333,13 @@ export function DiscoverContent() {
         <div className="px-3 sm:px-6 py-3 border-b border-gray-700/50">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-white text-sm font-medium">Active Filters:</h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearAllFilters}
-              className="text-gray-400 hover:text-[#FF7A00] text-sm"
-            >
-              Clear All
-            </Button>
+            <Button variant="ghost" size="sm" onClick={clearAllFilters} className="text-gray-400 hover:text-[#FF7A00] text-sm">Clear All</Button>
           </div>
           <div className="flex flex-wrap gap-2">
             {selectedTags.map(tag => (
-              <Badge 
-                key={tag} 
-                variant="outline" 
-                className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-3 py-1 flex items-center gap-2"
-              >
+              <Badge key={tag} variant="outline" className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-3 py-1 flex items-center gap-2">
                 <span>{tag}</span>
-                <button 
-                  onClick={() => removeTag(tag)} 
-                  className="hover:text-white transition-colors"
-                >
+                <button onClick={() => removeTag(tag)} className="hover:text-white transition-colors">
                   <X className="w-3 h-3" />
                 </button>
               </Badge>
@@ -292,12 +351,16 @@ export function DiscoverContent() {
       {/* Character Grid */}
       <CharacterGrid 
         characters={displayCharacters}
-        isLoading={isSearching}
+        isLoading={isGridLoading}
         hasSearched={hasSearched}
         totalCount={searchResults?.total || 0}
         currentPage={currentPage}
         onPageChange={handlePageChange}
       />
+      {/* Sentinel for infinite scroll in initial mode - only when enabled by user */}
+      {!hasSearched && autoLoadEnabled && (
+        <div ref={sentinelRef} className="h-8" />
+      )}
     </div>
   );
 }

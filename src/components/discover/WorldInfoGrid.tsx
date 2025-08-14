@@ -225,7 +225,9 @@ export function WorldInfoGrid({
             key={worldInfo.id}
             className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group cursor-pointer"
             style={{
-              animation: `fade-in 0.6s ease-out ${index * 0.1}s both`
+              animation: `fade-in 0.6s ease-out ${index * 0.1}s both`,
+              contentVisibility: 'auto',
+              containIntrinsicSize: '320px 512px'
             }}
             onClick={() => window.innerWidth < 768 ? handleViewWorldInfo(worldInfo) : undefined}
           >
@@ -323,10 +325,11 @@ export function WorldInfoGrid({
       )}
 
       {/* Load More for initial world infos (non-search) */}
-      {!hasSearched && worldInfos.length > 0 && (
+      {!hasSearched && worldInfos.length > 0 && onPageChange && (
         <div className="flex justify-center mt-8 sm:mt-16">
           <Button
             variant="outline"
+            onClick={() => onPageChange(currentPage + 1)}
             className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 hover:border-[#FF7A00] bg-transparent px-6 sm:px-10 py-3 sm:py-4 text-base sm:text-lg font-medium"
           >
             <span className="hidden sm:inline">Load More World Infos</span>

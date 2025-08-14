@@ -8,8 +8,11 @@ export function estimateTokens(text: string): number {
 }
 
 export function getPlanMaxTokens(planName?: string | null): number {
-  // Match server PLAN_MODEL_COSTS (currently all 12k)
-  return 12000;
+  // Match server PLAN_MODEL_COSTS per plan
+  const name = (planName || '').toLowerCase();
+  if (name.includes('whale')) return 24000;
+  if (name.includes('true fan')) return 16000;
+  return 12000; // Guest or unknown
 }
 
 function buildPersonalitySummaryJSON(form: CharacterFormData): any {

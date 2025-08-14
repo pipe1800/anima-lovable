@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -6,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 export const SubscriptionTestimonials = () => {
   const testimonials = [
     {
-      text: "The 16K context on the Whale tier is a game-changer for long-form RP. My character remembers everything. Worth every penny.",
+      text: "The 24K context on the Whale tier is a game-changer for long-form RP. My character remembers everything. Worth every penny.",
       author: "@LoreMaster_Flex",
       tier: "The Whale",
       tierColor: "bg-purple-600"

@@ -1,5 +1,8 @@
 import { createErrorResponse } from '../../_shared/auth.ts';
 import { mapGlobalSettingsToAddonSettings } from '../../_shared/settings-mapper.ts';
+import { anyAddonEnabled, sanitizeAddonSettings } from '../../_shared/settings-mapper.ts';
+import type { SendMessageRequest } from '../types/index.ts';
+import type { TemplateContext, CurrentContext } from '../types/streaming-interfaces.ts';
 
 // Import from local modules (consolidated)
 import { 
@@ -42,12 +45,8 @@ import {
 } from './message-handler.ts';
 import { buildConversationMessagesWithMessageBudget } from './message-counter.ts';
 import { triggerMessageBasedSummary, getMostRecentAutoSummary } from './auto-summary-new.ts';
-
-import type { SendMessageRequest } from '../types/index.ts';
-import type { 
-  TemplateContext, 
-  CurrentContext 
-} from '../types/streaming-interfaces.ts';
+import { assembleConversation } from './conversation-assembler.ts';
+import type { ConversationKnobs } from './message-counter.ts';
 
 /**
  * Send Message Handler - Streaming AI Responses
@@ -117,12 +116,15 @@ export async function handleSendMessage(
       (selectedPersonaId ? await fetchSelectedPersona(selectedPersonaId, user.id, supabase) : null);
 
     // Convert global settings to addon settings for backward compatibility
-    const effectiveAddonSettings = globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {});
+    const effectiveAddonSettings = sanitizeAddonSettings(globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {}));
     
     // Add time awareness from user character settings
     if (userCharacterSettings?.time_awareness_enabled) {
       effectiveAddonSettings.timeAwareness = true;
     }
+
+    // Early guard: if all addons disabled, skip extraction later
+    const addonsActive = anyAddonEnabled(effectiveAddonSettings);
 
     console.log('🌍 World Info Status:', {
       requested: !!selectedWorldInfoId,
@@ -246,35 +248,37 @@ export async function handleSendMessage(
     }
 
     // ============================================================================
-    // BUILD SYSTEM PROMPT & CONVERSATION (same as chat-stream)
+    // BUILD SYSTEM PROMPT & CONVERSATION (centralized)
     // ============================================================================
-        const systemPrompt = await buildSystemPrompt(
+    const defaultKnobs: ConversationKnobs = {
+      maxPairs: 5,
+      historyTokenLimit: Math.floor(planAndModel.maxContextTokens * 2 / 3),
+      safetyMarginTokens: Math.floor(planAndModel.maxContextTokens * 0.05), // keep 5% headroom
+      greedyBaseline: { maxPairs: 10, historyTokenLimit: planAndModel.maxContextTokens }
+    };
+
+    const { conversationResult, systemPrompt, promptMeta } = await assembleConversation({
       character,
-      effectiveAddonSettings,
+      addonSettings: effectiveAddonSettings,
       templateContext,
       currentContext,
       selectedPersona,
-      (content) => replaceTemplates(content, templateContext),
+      replaceTemplatesFn: (content) => replaceTemplates(content, templateContext),
       supabase,
       worldInfoEntries,
-      message,
+      userMessage: message,
       messageHistory,
-      characterMemories,
-      userCharacterSettings?.chat_mode || 'storytelling',
+      characterMemories: characterMemories || undefined,
+      chatMode: userCharacterSettings?.chat_mode || 'storytelling',
       timeAwarenessData,
       chatId,
-      user.id
-    );
-
-    // Use new message-based budget management
-    const conversationResult = await buildConversationMessagesWithMessageBudget(
-      systemPrompt,
-      messageHistory,
-      message,
-      planAndModel.maxContextTokens,
-      chatId,
-      supabase
-    );
+      userId: user.id,
+      maxContextTokens: planAndModel.maxContextTokens,
+      knobs: defaultKnobs
+    });
+    if (promptMeta) {
+      console.log('🧾 Prompt meta (backend-ready for UX drawer):', JSON.stringify(promptMeta));
+    }
 
     let conversationMessages = conversationResult.messages;
 
@@ -342,21 +346,31 @@ export async function handleSendMessage(
           console.log(`✅ Summary completed successfully: ${summaryResult.summaryId} (${summaryResult.messageRange})`);
           console.log('🔄 Rebuilding conversation context with new summary...');
           
-          // IMPORTANT: Rebuild the conversation context after summary is saved
-          // This ensures the next AI response uses the summary instead of raw messages
-          const updatedConversationResult = await buildConversationMessagesWithMessageBudget(
-            systemPrompt,
-            messageHistory,
-            message,
-            planAndModel.maxContextTokens,
-            chatId,
-            supabaseAdmin
-          );
-          
-          // Update the conversation messages to use the new context with summary
-          conversationMessages = updatedConversationResult.messages;
+          // Rebuild via centralized assembler to ensure consistent policy
+          const rebuilt = await assembleConversation({
+             character,
+             addonSettings: effectiveAddonSettings,
+             templateContext,
+             currentContext,
+             selectedPersona,
+             replaceTemplatesFn: (content) => replaceTemplates(content, templateContext),
+             supabase: supabaseAdmin,
+             worldInfoEntries,
+             userMessage: message,
+             messageHistory,
+             characterMemories: characterMemories || undefined,
+             chatMode: userCharacterSettings?.chat_mode || 'storytelling',
+             timeAwarenessData,
+             chatId,
+             userId: user.id,
+             maxContextTokens: planAndModel.maxContextTokens
+           });
+           conversationMessages = rebuilt.conversationResult.messages;
+           if (rebuilt.promptMeta) {
+             console.log('🧾 Prompt meta after summary rebuild:', JSON.stringify(rebuilt.promptMeta));
+           }
           console.log('✅ Context rebuilt with summary, new message count:', conversationMessages.length);
-          console.log('📊 Updated token usage:', updatedConversationResult.totalTokens);
+          console.log('📊 Updated token usage:', rebuilt.conversationResult.totalTokens);
         } else {
           console.error(`❌ Summary failed: ${summaryResult.error}. Continuing with current context.`);
           // Continue with existing context if summary fails
@@ -458,35 +472,39 @@ export async function handleSendMessage(
                   // Trigger addon context extraction after message is saved
                   console.log('🔍 Triggering addon context extraction...');
                   try {
-                    const supabaseUrl = (() => {
-                      try {
-                        return globalThis.Deno?.env?.get('SUPABASE_URL');
-                      } catch {
-                        return process?.env?.SUPABASE_URL;
-                      }
-                    })();
-                    
-                    // Get the Authorization header from the original request
-                    const authHeader = req.headers.get('authorization');
-                    
-                    const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': authHeader || '',
-                        'Content-Type': 'application/json'
-                      },
-                      body: JSON.stringify({
-                        chat_id: chatId,
-                        character_id: characterId,
-                        addon_settings: effectiveAddonSettings,
-                        mode: 'conversation'
-                      })
-                    });
-                    
-                    if (extractResponse.ok) {
-                      console.log('✅ Addon context extraction triggered successfully');
+                    if (!addonsActive) {
+                      console.log('⏭️ All addons disabled; skipping extract-addon-context call');
                     } else {
-                      console.error('❌ Failed to trigger addon context extraction:', extractResponse.status);
+                      const supabaseUrl = (() => {
+                        try {
+                          return globalThis.Deno?.env?.get('SUPABASE_URL');
+                        } catch {
+                          return process?.env?.SUPABASE_URL;
+                        }
+                      })();
+                      
+                      // Get the Authorization header from the original request
+                      const authHeader = req.headers.get('authorization');
+                      
+                      const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': authHeader || '',
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                          chat_id: chatId,
+                          character_id: characterId,
+                          addon_settings: effectiveAddonSettings,
+                          mode: 'conversation'
+                        })
+                      });
+                      
+                      if (extractResponse.ok) {
+                        console.log('✅ Addon context extraction triggered successfully');
+                      } else {
+                        console.error('❌ Failed to trigger addon context extraction:', extractResponse.status);
+                      }
                     }
                   } catch (extractError) {
                     console.error('💥 Error triggering addon context extraction:', extractError);
@@ -529,15 +547,25 @@ export async function handleSendMessage(
             };
           }
           
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(completionData)}\n\n`));
-          controller.close();
+          // Add prompt meta for UX drawer (world info, memories, context, summary)
+          if (promptMeta) {
+            completionData.promptMeta = promptMeta;
+          }
 
-        } catch (streamError) {
-          console.error('💥 Streaming error:', streamError);
-          controller.error(streamError);
-        }
-      }
-    });
+          // Add diagnostics for token savings and totals
+          if (conversationResult?.diagnostics) {
+            completionData.diagnostics = conversationResult.diagnostics;
+          }
+           
+           controller.enqueue(encoder.encode(`data: ${JSON.stringify(completionData)}\n\n`));
+           controller.close();
+
+         } catch (streamError) {
+           console.error('💥 Streaming error:', streamError);
+           controller.error(streamError);
+         }
+       }
+     });
 
     return new Response(readable, {
       headers: {

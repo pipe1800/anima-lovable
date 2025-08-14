@@ -783,3 +783,20 @@ export async function fetchMessagesForSummary(
   console.log(`✅ Fetched ${chronologicalMessages.length} messages for summary.`);
   return chronologicalMessages;
 }
+
+export async function fetchContextRecency(
+  supabase: SupabaseClient,
+  chatId: string,
+  userId: string,
+  characterId: string
+): Promise<{ updatedAt: string | null }>{
+  const { data, error } = await supabase
+    .from('chat_context')
+    .select('updated_at')
+    .eq('chat_id', chatId)
+    .eq('user_id', userId)
+    .eq('character_id', characterId)
+    .maybeSingle();
+  if (error || !data) return { updatedAt: null };
+  return { updatedAt: data.updated_at as string };
+}

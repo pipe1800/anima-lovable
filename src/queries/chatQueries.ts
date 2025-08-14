@@ -64,9 +64,9 @@ export const queryConfigs = {
     queryFn: async () => {
       const { count, error } = await supabase
         .from('messages')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('chat_id', chatId)
-        .neq('is_placeholder', true);
+        .not('content', 'ilike', '%[PLACEHOLDER]%');
       if (error) throw error;
       return count || 0;
     },

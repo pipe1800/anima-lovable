@@ -200,6 +200,7 @@ const FeatureComparisonTable = ({ plans }: { plans: Plan[] }) => {
   const features = [
     { label: 'Monthly Price', key: 'price' },
     { label: 'Monthly Credits', key: 'credits' },
+    { label: 'Cost per Message', key: 'message_cost' },
     { label: 'Messages per Day', key: 'messages' },
     { label: 'Character Creation', key: 'characters' },
     { label: 'Premium AI Models', key: 'premium_models' },
@@ -216,13 +217,15 @@ const FeatureComparisonTable = ({ plans }: { plans: Plan[] }) => {
         return plan.price_monthly === 0 ? 'Free' : `$${plan.price_monthly}/mo`;
       case 'credits':
         return plan.monthly_credits_allowance.toLocaleString();
+      case 'message_cost':
+        return '10 credits';
 
       case 'premium_models':
         return plan.name !== 'Guest Pass';
       case 'priority':
         return plan.name !== 'Guest Pass';
       case 'memory':
-        return plan.name === 'Guest Pass' ? 'Standard' : plan.name === 'True Fan' ? '8K Context' : '16K Context';
+        return plan.name === 'Guest Pass' ? '12K Context' : plan.name === 'True Fan' ? '16K Context' : '24K Context';
       case 'nsfw':
         return plan.name !== 'Guest Pass';
       case 'addons':

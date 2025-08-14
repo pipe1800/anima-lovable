@@ -66,7 +66,7 @@ function createDateKeywords(): string[] {
 }
 
 /**
- * Generate chat summary using Mistral 7B Instruct
+ * Generate chat summary using Mistral Small 3.2 24B Instruct
  */
 async function generateChatSummary(
   messages: any[],
@@ -105,7 +105,7 @@ Respond in this exact JSON format:
 }`;
 
   try {
-    console.log('🤖 Generating chat summary with Mistral 7B...');
+    console.log('🤖 Generating chat summary with Mistral Small 3.2 24B...');
     
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -116,7 +116,7 @@ Respond in this exact JSON format:
         'X-Title': 'AnimaChat-MemorySummary'
       },
       body: JSON.stringify({
-        model: 'mistralai/mistral-7b-instruct',
+        model: 'mistralai/mistral-small-3.2-24b-instruct',
         messages: [
           {
             role: 'user',

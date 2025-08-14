@@ -83,7 +83,27 @@ export const ChatConfigurationTab = ({
 
   // Current effective settings (merging global settings with pending changes)
   const effectiveSettings = globalSettings ? { ...globalSettings, ...pendingChanges } : null;
-  
+
+  // Count active stateful tracking addons for Guest Pass limits (using effective settings)
+  const activeStatefulAddons = effectiveSettings ? [
+    effectiveSettings.mood_tracking,
+    effectiveSettings.clothing_inventory,
+    effectiveSettings.location_tracking,
+    effectiveSettings.time_and_weather,
+    effectiveSettings.relationship_status,
+    effectiveSettings.character_position,
+  ].filter(Boolean).length : 0;
+
+  // Define which keys are considered stateful tracking addons (for limit checks)
+  const STATEFUL_KEYS: Array<keyof UserGlobalChatSettings> = [
+    'mood_tracking',
+    'clothing_inventory',
+    'location_tracking',
+    'time_and_weather',
+    'relationship_status',
+    'character_position',
+  ];
+
   // Calculate total addon cost percentage
   const calculateTotalAddonCost = () => {
     if (!effectiveSettings) return 0;
@@ -114,16 +134,6 @@ export const ChatConfigurationTab = ({
   const userPlan = subscription?.plan?.name || 'Guest Pass';
   const isGuestPass = userPlan === 'Guest Pass';
   const isTrueFanOrWhale = userPlan === 'True Fan' || userPlan === 'The Whale';
-
-  // Count active stateful tracking addons for Guest Pass limits (using effective settings)
-  const activeStatefulAddons = effectiveSettings ? [
-    effectiveSettings.mood_tracking,
-    effectiveSettings.clothing_inventory,
-    effectiveSettings.location_tracking,
-    effectiveSettings.time_and_weather,
-    effectiveSettings.relationship_status,
-    effectiveSettings.character_position,
-  ].filter(Boolean).length : 0;
 
   const addonCategories = {
     'Core Enhancements': {
@@ -156,35 +166,35 @@ export const ChatConfigurationTab = ({
         name: 'Clothing Inventory', 
         cost: 5, 
         description: 'Track character outfits',
-        available: isTrueFanOrWhale || globalSettings?.clothing_inventory || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || effectiveSettings?.clothing_inventory || activeStatefulAddons < 2,
         dynamicCost: null
       },
       location_tracking: { 
         name: 'Location Tracking', 
         cost: 5, 
         description: 'Track current location',
-        available: isTrueFanOrWhale || globalSettings?.location_tracking || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || effectiveSettings?.location_tracking || activeStatefulAddons < 2,
         dynamicCost: null
       },
       time_and_weather: { 
         name: 'Time & Weather', 
         cost: 5, 
         description: 'Real-time environment',
-        available: isTrueFanOrWhale || globalSettings?.time_and_weather || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || effectiveSettings?.time_and_weather || activeStatefulAddons < 2,
         dynamicCost: null
       },
       relationship_status: { 
         name: 'Relationship Status', 
         cost: 5, 
         description: 'Track relationships',
-        available: isTrueFanOrWhale || globalSettings?.relationship_status || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || effectiveSettings?.relationship_status || activeStatefulAddons < 2,
         dynamicCost: null
       },
       character_position: { 
         name: 'Character Position', 
         cost: 5, 
         description: 'Track character\'s physical position and body language',
-        available: isTrueFanOrWhale || globalSettings?.character_position || activeStatefulAddons < 2,
+        available: isTrueFanOrWhale || effectiveSettings?.character_position || activeStatefulAddons < 2,
         dynamicCost: null
       },
     },
@@ -218,6 +228,16 @@ export const ChatConfigurationTab = ({
 
     const currentValue = effectiveSettings?.[addonKey] ?? globalSettings[addonKey];
     const newValue = !currentValue;
+
+    // Guest Pass safeguard: prevent enabling more than 2 stateful tracking addons
+    if (isGuestPass && STATEFUL_KEYS.includes(addonKey)) {
+      // If turning ON and this would exceed the limit, block and notify
+      const prospectiveCount = activeStatefulAddons + (currentValue ? 0 : 1);
+      if (newValue && prospectiveCount > 2) {
+        toast.warning('Guest Pass limit reached: Only 2 tracking addons can be active.');
+        return;
+      }
+    }
     
     // Update pending changes
     const newPendingChanges = {

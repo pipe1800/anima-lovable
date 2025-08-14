@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
 import { CharacterGrid } from '@/components/discover/CharacterGrid';
 import { usePublicCharacters, useSearchPublicCharacters } from '@/hooks/useCharacters';
@@ -22,16 +22,18 @@ import {
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { useNavigate } from 'react-router-dom';
 
 const PublicDiscover = () => {
+  const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState('');
   const [sortBy, setSortBy] = useState('popular');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Build search parameters from current state
-  const searchParams: SearchParams = {
+  // Memoized search params
+  const searchParams: SearchParams = useMemo(() => ({
     searchQuery: searchInput,
     sortBy,
     filters: {
@@ -42,13 +44,13 @@ const PublicDiscover = () => {
     },
     limit: 20,
     offset: (currentPage - 1) * 20
-  };
+  }), [searchInput, sortBy, selectedTags, currentPage]);
 
   // Use search hook with manual refetch
   const { data: searchResults, refetch: executeSearch, isLoading: isSearching } = useSearchPublicCharacters(searchParams);
   
   // Fallback to initial load of popular characters
-  const { data: initialCharacters = [] } = usePublicCharacters(20, 0);
+  const { data: initialCharacters = [], isLoading: isInitialLoading } = usePublicCharacters(20, 0);
 
   // Available filter tags
   const availableTags = [
@@ -100,14 +102,11 @@ const PublicDiscover = () => {
   // Handle surprise me - navigate to random character
   const handleSurpriseMe = () => {
     const charactersToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialCharacters;
-    
     if (!charactersToChooseFrom || charactersToChooseFrom.length === 0) return;
-    
     const randomIndex = Math.floor(Math.random() * charactersToChooseFrom.length);
     const randomCharacter = charactersToChooseFrom[randomIndex];
-    
     if (randomCharacter) {
-      window.location.href = `/characters/${randomCharacter.id}`;
+      navigate(`/characters/${randomCharacter.id}`);
     }
   };
 
@@ -262,7 +261,7 @@ const PublicDiscover = () => {
         <div className="max-w-7xl mx-auto">
           <CharacterGrid 
             characters={displayCharacters}
-            isLoading={isSearching}
+            isLoading={hasSearched ? isSearching : isInitialLoading}
             hasSearched={hasSearched}
             totalCount={searchResults?.total || 0}
             currentPage={currentPage}
@@ -283,13 +282,13 @@ const PublicDiscover = () => {
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <Button
-                    onClick={() => window.location.href = '/auth?mode=signup'}
+                    onClick={() => navigate('/auth?mode=signup')}
                     className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-bold px-8 py-3"
                   >
                     Sign Up Free
                   </Button>
                   <Button
-                    onClick={() => window.location.href = '/auth'}
+                    onClick={() => navigate('/auth')}
                     variant="outline"
                     className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10"
                   >

@@ -14,8 +14,9 @@ export const usePublicCharacters = (limit = 50, offset = 0) => {
       if (result.error) throw result.error;
       return result.data || [];
     },
-    staleTime: 10 * 60 * 1000, // 10 minutes - public characters don't change frequently
-    gcTime: 30 * 60 * 1000, // 30 minutes
+    staleTime: 60 * 1000, // 1 minute for discovery freshness
+    gcTime: 15 * 60 * 1000, // 15 minutes
+    placeholderData: (prev) => prev ?? [],
   });
 };
 
@@ -24,7 +25,9 @@ export const useSearchPublicCharacters = (params: SearchParams) => {
     queryKey: ['public-characters-search', params],
     queryFn: () => searchPublicCharacters(params),
     enabled: false, // Manual execution only
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 60 * 1000, // fresher search cache
+    gcTime: 15 * 60 * 1000,
+    placeholderData: (prev) => prev ?? undefined,
   });
 };
 

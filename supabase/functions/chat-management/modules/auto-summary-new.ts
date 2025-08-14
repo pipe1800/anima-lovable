@@ -8,7 +8,7 @@ import { getTextEmbedding } from './embeddings.ts';
  * Note: Idempotency is enforced by unique index on (user_id, character_id, chat_id, message_count) where is_auto_summary=true
  */
 
-const MISTRAL_MODEL = 'mistralai/mistral-7b-instruct';
+const MISTRAL_MODEL = 'mistralai/mistral-small-3.2-24b-instruct';
 const MAX_SUMMARY_TOKENS = 2500; // Increased significantly for longer summaries
 
 // Global summary lock to prevent race conditions  

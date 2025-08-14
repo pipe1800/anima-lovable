@@ -1,4 +1,3 @@
-
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -102,10 +101,10 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
       period: isYearly ? "year" : "month",
       features: [
         "15,000 credits/month",
-        "Unlimited messages",
+        "~1,500+ messages (10 credits/message)",
         "Up to 50 characters",
         "Premium AI models",
-        "8K context memory",
+        "16K context memory",
         "NSFW content access",
         "Priority generation",
         "Credit booster packs"
@@ -120,10 +119,10 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
       period: isYearly ? "year" : "month",
       features: [
         "32,000 credits/month",
-        "Unlimited messages",
+        "~3,200+ messages (10 credits/message)",
         "Unlimited characters",
         "All premium AI models",
-        "16K+ context memory",
+        "24K context memory",
         "NSFW content access",
         "Top priority generation",
         "Credit booster packs",

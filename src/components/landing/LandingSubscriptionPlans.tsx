@@ -119,9 +119,10 @@ export const LandingSubscriptionPlans = () => {
       description: 'For dedicated AI enthusiasts',
       features: [
         '15,000 credits/month',
+        '~1,500+ messages (10 credits/message)',
         'Unlimited characters',
         'Premium AI models',
-        '8K context memory',
+        '16K context memory',
         'NSFW content access',
         'Priority generation',
         'Credit booster packs',
@@ -135,9 +136,10 @@ export const LandingSubscriptionPlans = () => {
       description: 'The ultimate AI experience',
       features: [
         '32,000 credits/month',
+        '~3,200+ messages (10 credits/message)',
         'Unlimited characters',
         'Premium AI models',
-        '16K+ context memory',
+        '24K context memory',
         'NSFW content access',
         'Top priority generation',
         'Credit booster packs',

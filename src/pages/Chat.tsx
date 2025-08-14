@@ -93,6 +93,12 @@ const Chat = () => {
 
         log.debug('🎛️ Mapped addon settings:', addonSettings);
 
+        const anyEnabled = Object.values(addonSettings).some(Boolean);
+        if (!anyEnabled) {
+          log.debug('⏭️ All addons disabled; skipping extract-addon-context call');
+          return;
+        }
+
         const { data, error } = await supabase.functions.invoke('extract-addon-context', {
           body: {
             chat_id: chatId,

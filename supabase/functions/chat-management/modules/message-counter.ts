@@ -32,6 +32,13 @@ export interface ConversationResult {
     currentMessage: number;
     remaining: number;
   };
+  diagnostics?: {
+    tokenSavingsAgainstGreedyHistory: number; // Positive numbers mean we used fewer tokens than a greedy history baseline
+    baseline: {
+      historyTokens: number;
+      totalTokens: number;
+    };
+  };
 }
 
 export interface SummaryTriggerInfo {
@@ -41,6 +48,16 @@ export interface SummaryTriggerInfo {
   lastSummaryEndMessage: number;
   messagesToSummarize: MessageHistoryItem[];
   lockPrevented?: boolean;
+}
+
+export interface ConversationKnobs {
+  maxPairs?: number; // default 5
+  historyTokenLimit?: number; // default 8000
+  safetyMarginTokens?: number; // default 0, remove oldest history to keep at least this many tokens free
+  greedyBaseline?: {
+    maxPairs?: number; // default 10
+    historyTokenLimit?: number; // default 12000
+  };
 }
 
 /**
@@ -129,8 +146,8 @@ export async function checkSummaryTrigger(
   // CRITICAL FIX: Check if summary is already being processed for this chat
   // Import summaryLocks from auto-summary-new.ts if available
   if (typeof globalThis !== 'undefined' && 
-      globalThis.summaryLocks && 
-      globalThis.summaryLocks.has(lockKey)) {
+      (globalThis as any).summaryLocks && 
+      (globalThis as any).summaryLocks.has(lockKey)) {
     console.log(`🔒 Summary lock detected for chat ${chatId}, skipping trigger check`);
     return {
       shouldTriggerSummary: false,
@@ -161,7 +178,7 @@ export async function checkSummaryTrigger(
   
   // Count AI messages since last summary
   const aiMessagesAfterSummary = allAiMessages.filter(msg => 
-    msg.aiSequenceNumber! > lastSummaryEndMessage
+    (msg.aiSequenceNumber as number) > lastSummaryEndMessage
   );
   
   const currentAiCount = aiMessagesAfterSummary.length;
@@ -219,12 +236,13 @@ export async function checkSummaryTrigger(
 }
 
 /**
- * Get the most recent 5 message pairs for context
- * FIXED: Now properly limits to 5 pairs and respects token budget
+ * Get the most recent message pairs for context
+ * Parameterized: limit pairs and respect a token budget
  */
 export function getRecentMessagePairs(
   messageHistory: MessageHistoryItem[],
-  maxTokens: number = 12000
+  maxTokens: number = 12000,
+  maxPairs: number = 5
 ): MessageHistoryItem[] {
   // Sort messages by order (most recent first)
   const sortedMessages = [...messageHistory].sort((a, b) => b.message_order - a.message_order);
@@ -232,9 +250,9 @@ export function getRecentMessagePairs(
   const recentMessages: MessageHistoryItem[] = [];
   let currentTokens = 0;
   let pairCount = 0;
-  const MAX_PAIRS = 5; // Strict limit of 5 pairs
+  const MAX_PAIRS = Math.max(1, maxPairs);
   
-  // FIXED: Collect exactly 5 pairs (user + AI response), not all messages
+  // Collect exactly K pairs (user + AI response), not all messages
   let i = 0;
   while (i < sortedMessages.length && pairCount < MAX_PAIRS) {
     const message = sortedMessages[i];
@@ -266,7 +284,7 @@ export function getRecentMessagePairs(
         const userTokens = estimateTokens(userMessage.content);
         if (currentTokens + userTokens <= maxTokens) {
           // Check if we already have this user message
-          if (!recentMessages.find(m => m.id === userMessage.id)) {
+          if (!recentMessages.find(m => m.id === userMessage!.id)) {
             recentMessages.unshift(userMessage);
             currentTokens += userTokens;
           }
@@ -282,7 +300,7 @@ export function getRecentMessagePairs(
   // Re-sort messages in chronological order
   recentMessages.sort((a, b) => a.message_order - b.message_order);
   
-  console.log('📝 FIXED Recent Message Context:', {
+  console.log('📝 Recent Message Context (param):', {
     totalMessages: messageHistory.length,
     recentMessagesIncluded: recentMessages.length,
     pairsIncluded: pairCount,
@@ -303,15 +321,26 @@ export async function buildConversationMessagesWithMessageBudget(
   userMessage: string,
   maxContextTokens: number,
   chatId: string,
-  supabase: any
+  supabase: any,
+  knobs: ConversationKnobs = {}
 ): Promise<ConversationResult> {
   console.log('🔨 Building conversation with message-based system');
+  
+  const appliedKnobs: Required<ConversationKnobs> = {
+    maxPairs: knobs.maxPairs ?? 5,
+    historyTokenLimit: knobs.historyTokenLimit ?? 8000,
+    safetyMarginTokens: knobs.safetyMarginTokens ?? 0,
+    greedyBaseline: {
+      maxPairs: knobs.greedyBaseline?.maxPairs ?? 10,
+      historyTokenLimit: knobs.greedyBaseline?.historyTokenLimit ?? 12000
+    }
+  } as any;
   
   // Check if we need to trigger a summary
   const summaryInfo = await checkSummaryTrigger(chatId, messageHistory, supabase);
   
-  // Get recent messages for context (FIXED: strict 5 pairs, conservative token limit)
-  const recentMessages = getRecentMessagePairs(messageHistory, 8000); // Reduced from 12k to 8k for safety
+  // Get recent messages for context (strict K pairs, conservative token limit)
+  const recentMessages = getRecentMessagePairs(messageHistory, appliedKnobs.historyTokenLimit, appliedKnobs.maxPairs);
   
   // Build conversation messages
   const conversationHistory = recentMessages.map(msg => ({
@@ -321,7 +350,7 @@ export async function buildConversationMessagesWithMessageBudget(
   
   const systemPromptTokens = estimateTokens(systemPrompt);
   const userMessageTokens = estimateTokens(userMessage);
-  const historyTokens = conversationHistory.reduce((total, msg) => total + estimateTokens(msg.content), 0);
+  let historyTokens = conversationHistory.reduce((total, msg) => total + estimateTokens(msg.content), 0);
   
   const finalMessages: ConversationMessage[] = [
     { role: 'system', content: systemPrompt },
@@ -329,21 +358,38 @@ export async function buildConversationMessagesWithMessageBudget(
     { role: 'user', content: userMessage }
   ];
   
-  const totalTokens = systemPromptTokens + historyTokens + userMessageTokens;
-  const truncated = recentMessages.length < messageHistory.length;
+  let totalTokens = systemPromptTokens + historyTokens + userMessageTokens;
+  let truncated = recentMessages.length < messageHistory.length;
   const droppedMessages = messageHistory.length - recentMessages.length;
   
   // Safety check: if total exceeds max context, truncate further
-  if (totalTokens > maxContextTokens) {
-    console.log(`⚠️ Context still exceeds limit (${totalTokens}/${maxContextTokens}), truncating further...`);
+  if (totalTokens > maxContextTokens || (appliedKnobs.safetyMarginTokens > 0 && (maxContextTokens - totalTokens) < appliedKnobs.safetyMarginTokens)) {
+    console.log(`⚠️ Context exceeds limit or safety margin (${totalTokens}/${maxContextTokens}), truncating further...`);
     
-    // Remove oldest messages until we fit
-    while (finalMessages.length > 2 && totalTokens > maxContextTokens) {
+    // Remove oldest history messages until we fit
+    while (finalMessages.length > 2 && (totalTokens > maxContextTokens || (maxContextTokens - totalTokens) < appliedKnobs.safetyMarginTokens)) {
       if (finalMessages[1] && finalMessages[1].role !== 'system') {
-        finalMessages.splice(1, 1); // Remove first non-system message
+        const removed = finalMessages.splice(1, 1)[0];
+        const removedTokens = estimateTokens(removed.content);
+        if (removed.role !== 'user' && removed.role !== 'assistant') continue;
+        historyTokens = Math.max(0, historyTokens - removedTokens);
+        totalTokens = systemPromptTokens + historyTokens + userMessageTokens;
+        truncated = true;
+      } else {
+        break;
       }
     }
   }
+  
+  // Greedy baseline: what if we allowed more history tokens and more pairs
+  const baselinePairs = getRecentMessagePairs(
+    messageHistory,
+    appliedKnobs.greedyBaseline.historyTokenLimit,
+    appliedKnobs.greedyBaseline.maxPairs
+  );
+  const baselineHistoryTokens = baselinePairs.reduce((total, m) => total + estimateTokens(m.content), 0);
+  const baselineTotal = systemPromptTokens + baselineHistoryTokens + userMessageTokens;
+  const tokenSavingsAgainstGreedyHistory = Math.max(0, baselineTotal - totalTokens);
   
   console.log('✅ Message-based conversation built:', {
     totalMessages: messageHistory.length,
@@ -353,7 +399,9 @@ export async function buildConversationMessagesWithMessageBudget(
     droppedMessages,
     summaryTrigger: summaryInfo.shouldTriggerSummary ? '🚨 YES' : '❌ NO',
     currentAiCount: summaryInfo.currentAiCount,
-    nextSummaryAt: summaryInfo.nextSummaryAt
+    nextSummaryAt: summaryInfo.nextSummaryAt,
+    tokenSavingsAgainstGreedyHistory,
+    baselineTotal
   });
   
   return {
@@ -370,6 +418,13 @@ export async function buildConversationMessagesWithMessageBudget(
       history: historyTokens,
       currentMessage: userMessageTokens,
       remaining: maxContextTokens - totalTokens
+    },
+    diagnostics: {
+      tokenSavingsAgainstGreedyHistory,
+      baseline: {
+        historyTokens: baselineHistoryTokens,
+        totalTokens: baselineTotal
+      }
     }
   };
 }
