@@ -142,7 +142,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       currentStep,
       globalSettings,
       enhancedMemory: globalSettings?.enhanced_memory,
-      shouldShowButton: (globalSettings?.enhanced_memory || (isActive && currentStep === 4))
+      shouldShowButton: (globalSettings?.enhanced_memory || (isActive && currentStep === 6))
     });
   }, [isActive, currentStep, globalSettings]);
 
@@ -621,7 +621,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
            onStartNewChat={handleStartNewChat}
            isCreatingNewChat={isCreatingNewChat}
            onEditCharacter={handleEditCharacter}
-           showMemoriesButton={!!(globalSettings?.enhanced_memory || (isActive && currentStep === 4))}
+           showMemoriesButton={!!(globalSettings?.enhanced_memory || (isActive && currentStep === 6))}
            memoriesCount={memories.length}
            onOpenMemories={() => {
              setShowMemoriesDialog(true);

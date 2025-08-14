@@ -75,6 +75,24 @@ const tutorialSteps: TutorialStep[] = [
   },
   {
     id: 5,
+    title: 'Chat Config',
+    description: 'This subtab controls behavior and logic: personas, world info, time awareness, and addons.',
+    target: '[data-tutorial="chat-config-subtab"]',
+    action: 'none',
+    position: 'bottom',
+    requiredInteraction: false
+  },
+  {
+    id: 6,
+    title: 'Chat Style',
+    description: 'This subtab customizes visuals: bubbles, fonts, avatars, and backgrounds.',
+    target: '[data-tutorial="chat-style-subtab"]',
+    action: 'none',
+    position: 'bottom',
+    requiredInteraction: false
+  },
+  {
+    id: 7,
     title: 'Memories - Long-term Context',
     description: 'Memories are automatically generated every 15 responses from the character to create a long-term memory effect. These memories are shared between chats and don\'t cost credits.',
     target: '[data-tutorial="create-memory"]',
@@ -83,7 +101,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 6,
+    id: 8,
     title: 'Personas - Your Character',
     description: 'Personas define who YOU are in the conversation. Create different personas to roleplay as different characters or aspects of yourself.',
     target: '[data-tutorial="persona-section"]',
@@ -92,7 +110,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 7,
+    id: 9,
     title: 'World Info & Lore',
     description: 'Enhance conversations with world information and lore. Explore the available options to add depth to your chats.',
     target: '[data-tutorial="world-info-section"]',
@@ -101,7 +119,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 8,
+    id: 10,
     title: 'Global Addons',
     description: 'Addons enhance your conversations with features like mood tracking and relationship dynamics. They use additional credits but create more immersive experiences.',
     target: '[data-tutorial="global-addons-section"]',
@@ -111,7 +129,7 @@ const tutorialSteps: TutorialStep[] = [
     scrollTo: true
   },
   {
-    id: 9,
+    id: 11,
     title: 'Create Characters',
     description: 'Build your own AI characters with unique personalities, backgrounds, and traits. Share them with the community or keep them private.',
     target: '[data-tutorial="create-character-nav"]',
@@ -120,7 +138,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 10,
+    id: 12,
     title: 'Discover Characters',
     description: 'Browse and chat with thousands of characters created by the community. Find your perfect AI companion, mentor, or adventure partner.',
     target: '[data-tutorial="discover-nav"]',
@@ -129,7 +147,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 11,
+    id: 13,
     title: 'World Info Library',
     description: 'Access and manage world building elements like locations, factions, and lore to create rich, consistent story worlds.',
     target: '[data-tutorial="world-info-nav"]',
@@ -138,7 +156,7 @@ const tutorialSteps: TutorialStep[] = [
     requiredInteraction: false
   },
   {
-    id: 12,
+    id: 14,
     title: 'Welcome to Anima!',
     description: 'You\'ve completed the tour! Now you\'re ready to create amazing AI conversations with all the powerful features at your fingertips.',
     target: null,

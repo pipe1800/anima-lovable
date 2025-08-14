@@ -348,26 +348,18 @@ All colors MUST be HSL.
     position: relative !important;
     z-index: 50003 !important; /* Above overlay (50000), border (50001), and tooltip (50002) */
     pointer-events: auto !important;
+    will-change: transform, opacity, top, left, width, height;
   }
 
-  /* Ensure interactive elements inside highlighted areas work */
-  body.tutorial-active [data-tutorial] * {
-    pointer-events: auto !important;
+  body.tutorial-active .tutorial-overlay, 
+  body.tutorial-active .tutorial-tooltip {
+    will-change: transform, opacity, top, left;
   }
 
-  /* Right panel should stay below tutorial but be interactable when highlighted */
-  body.tutorial-active .animate-slide-in-right {
-    z-index: 30 !important;
-  }
-
-  /* When right panel is the highlighted element, bring it forward */
-  body.tutorial-active [data-tutorial="right-panel"] {
-    z-index: 50003 !important;
-  }
-
-  /* Tutorial active state */
+  /* Prevent scrollbar reflow during tutorial */
   body.tutorial-active {
     overflow: hidden;
+    padding-right: var(--removed-body-scrollbar-size, 0px);
   }
 
   /* Video performance optimizations */

@@ -15,7 +15,6 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
 
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
-      // Minimal debug once per mount/change
       console.debug('TutorialManager: effect', { shouldStart, hasUser: !!user });
     }
 
@@ -29,6 +28,12 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
       localStorage.removeItem('fromOnboarding');
     }
   }, [shouldStart, user]);
+
+  useEffect(() => {
+    const handler = () => setShowWelcomeModal(true);
+    window.addEventListener('openTutorialWelcome', handler as EventListener);
+    return () => window.removeEventListener('openTutorialWelcome', handler as EventListener);
+  }, []);
 
   const handleStartTutorial = () => {
     if (process.env.NODE_ENV === 'development') {
@@ -46,7 +51,6 @@ export const TutorialManager: React.FC<TutorialManagerProps> = ({ shouldStart })
     skipTutorial();
   };
 
-  // Avoid noisy render logs
   return (
     <>
       <TutorialWelcomeModal

@@ -304,6 +304,7 @@ export default function RightPanel(props: RightPanelProps) {
                   <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg">
                     <button
                       onClick={() => trySwitchConfigSubtab('chat')}
+                      data-tutorial="chat-config-subtab"
                       className={`flex-1 px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
                         activeConfigSubtab === 'chat' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
                       }`}
@@ -312,6 +313,7 @@ export default function RightPanel(props: RightPanelProps) {
                     </button>
                     <button
                       onClick={() => trySwitchConfigSubtab('style')}
+                      data-tutorial="chat-style-subtab"
                       className={`flex-1 px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
                         activeConfigSubtab === 'style' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
                       }`}

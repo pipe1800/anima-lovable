@@ -21,6 +21,41 @@ export const TutorialOverlay: React.FC = () => {
   
   const [highlightedRect, setHighlightedRect] = useState<DOMRect | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const prevFocusedElRef = useRef<HTMLElement | null>(null);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const titleId = 'tutorial-tooltip-title';
+
+  useEffect(() => {
+    // Track prefers-reduced-motion
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduceMotion(mq.matches);
+    update();
+    mq.addEventListener?.('change', update);
+    return () => mq.removeEventListener?.('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!isActive) return;
+    // Save previously focused element and move focus to tooltip
+    prevFocusedElRef.current = (document.activeElement as HTMLElement) || null;
+    // Focus tooltip after render
+    const t = setTimeout(() => {
+      tooltipRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [isActive, currentStep]);
+
+  // Restore focus when tutorial ends
+  useEffect(() => {
+    if (!isActive && prevFocusedElRef.current) {
+      const el = prevFocusedElRef.current;
+      if (document.contains(el)) {
+        try { el.focus(); } catch {}
+      }
+      prevFocusedElRef.current = null;
+    }
+  }, [isActive]);
 
   useEffect(() => {
     log.debug('🎓 TutorialOverlay: Rendering/updated', {/* redacted debug to avoid heavy objects */});
@@ -48,40 +83,42 @@ export const TutorialOverlay: React.FC = () => {
     if (currentStepData) {
       if (currentStepData.target) {
         log.debug('🎓 Setting highlight to:', currentStepData.target);
+
+        // Ensure correct right panel subtab is active based on target
+        const needsChatSubtab = /persona-section|world-info-section|global-addons-section/.test(currentStepData.target);
+        const needsStyleSubtab = /chat-style-subtab/.test(currentStepData.target);
+        if (needsChatSubtab) {
+          const btn = document.querySelector('[data-tutorial="chat-config-subtab"]') as HTMLElement | null;
+          // Only click if not already active (check class)
+          if (btn && !btn.className.includes('bg-[#FF7A00]')) {
+            setTimeout(() => btn.click(), 50);
+          }
+        } else if (needsStyleSubtab) {
+          const btn = document.querySelector('[data-tutorial="chat-style-subtab"]') as HTMLElement | null;
+          if (btn && !btn.className.includes('bg-[#FF7A00]')) {
+            setTimeout(() => btn.click(), 50);
+          }
+        }
+
         setHighlight(currentStepData.target);
         
-        // Handle scrollTo if needed
         if (currentStepData.scrollTo) {
-          // For addons section, scroll the right panel content
-          if (currentStep === 7) { // Step 8 is now index 7
-            const rightPanel = document.querySelector('[data-tutorial="right-panel"]');
-            const addonsSection = document.querySelector(currentStepData.target) as HTMLElement;
-            if (rightPanel && addonsSection) {
-              const scrollContainer = rightPanel.querySelector('.overflow-y-auto') as HTMLElement;
-              if (scrollContainer) {
-                scrollContainer.scrollTo({
-                  top: addonsSection.offsetTop - 100,
-                  behavior: 'smooth'
-                });
-              }
-            }
-          } else {
-            const element = document.querySelector(currentStepData.target);
-            if (element) {
-              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+          // Scroll within right panel if target is inside it
+          const targetEl = document.querySelector(currentStepData.target) as HTMLElement | null;
+          const rightPanel = document.querySelector('[data-tutorial="right-panel"]') as HTMLElement | null;
+          const scrollContainer = rightPanel?.querySelector('.overflow-y-auto') as HTMLElement | null;
+          const container = scrollContainer ?? document.scrollingElement ?? document.documentElement;
+          if (targetEl) {
+            const top = (scrollContainer ? targetEl.offsetTop : targetEl.getBoundingClientRect().top + window.scrollY) - 100;
+            (container as any).scrollTo?.({ top, behavior: 'smooth' });
           }
         }
         
-        // Special handling for right panel steps
         if (currentStepData.target?.includes('right-panel-tabs') || currentStepData.target?.includes('config-tab')) {
-          // Wait for panel slide-in animation to complete (300ms based on animate-slide-in-right)
           setTimeout(() => {
-            const element = document.querySelector(currentStepData.target);
-            if (element) {
-              element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-          }, 400); // Wait for panel animation + buffer
+            const element = document.querySelector(currentStepData.target!);
+            element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }, 400);
         }
       } else {
         log.debug('🎓 Clearing highlight - step has no target');
@@ -93,15 +130,14 @@ export const TutorialOverlay: React.FC = () => {
 
   // Ensure sidebar is visible for navigation steps
   useEffect(() => {
-    if (isActive && currentStep >= 8 && currentStep <= 10) {
-      // Check if sidebar is collapsed
+    if (!isActive) return;
+
+    const isNavStep = !!currentStepData?.target && /-(nav)"\]$/.test(currentStepData.target);
+    if (isNavStep) {
       const sidebarCollapsed = localStorage.getItem('sidebarCollapsed');
       if (sidebarCollapsed === 'true') {
-        // Temporarily expand sidebar for tutorial
         localStorage.setItem('sidebarCollapsed', 'false');
         window.dispatchEvent(new CustomEvent('sidebarToggled'));
-        
-        // Restore state when tutorial ends
         return () => {
           if (sidebarCollapsed === 'true') {
             localStorage.setItem('sidebarCollapsed', 'true');
@@ -110,61 +146,48 @@ export const TutorialOverlay: React.FC = () => {
         };
       }
     }
-  }, [isActive, currentStep]);
+  }, [isActive, currentStepData]);
 
   useEffect(() => {
     if (!highlightedElement) {
-      log.debug('🎓 No highlighted element - clearing rect immediately');
       setHighlightedRect(null);
       return;
     }
 
-    // Clear the rect first to ensure clean transition
-    setHighlightedRect(null);
-
+    let raf = 0;
     const updateRect = () => {
-      const element = document.querySelector(highlightedElement);
-      if (element) {
-        const rect = element.getBoundingClientRect();
-        setHighlightedRect(rect);
-        log.debug('🎓 Updated highlight rect for:', highlightedElement);
-      } else {
-        log.warn('🎓 TutorialOverlay: Element not found:', highlightedElement);
-        setHighlightedRect(null);
-      }
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const element = document.querySelector(highlightedElement);
+        if (element) {
+          setHighlightedRect(element.getBoundingClientRect());
+        } else {
+          setHighlightedRect(null);
+        }
+      });
     };
 
-    // Delay to ensure DOM has updated and previous highlight is cleared
-    const timer = setTimeout(() => {
-      updateRect();
-      
-      // Update rect on scroll or resize
-      window.addEventListener('scroll', updateRect, true);
-      window.addEventListener('resize', updateRect);
-      
-      // Use MutationObserver to detect DOM changes
-      const observer = new MutationObserver(updateRect);
-      observer.observe(document.body, { 
-        childList: true, 
-        subtree: true, 
-        attributes: true,
-        attributeFilter: ['class', 'style']
-      });
+    // Initial
+    updateRect();
 
-      // Also update on any transition end
-      document.addEventListener('transitionend', updateRect);
+    // Observe size/position changes without causing thrash
+    const element = document.querySelector(highlightedElement) as HTMLElement | null;
+    const ro = element ? new ResizeObserver(updateRect) : null;
+    ro?.observe(element!);
 
-      return () => {
-        window.removeEventListener('scroll', updateRect, true);
-        window.removeEventListener('resize', updateRect);
-        document.removeEventListener('transitionend', updateRect);
-        observer.disconnect();
-      };
-    }, currentStepData?.target?.includes('right-panel-tabs') || currentStepData?.target?.includes('config-tab') ? 300 : 50); // Longer delay for panel tabs
+    window.addEventListener('scroll', updateRect, true);
+    window.addEventListener('resize', updateRect);
+    const mo = new MutationObserver(updateRect);
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+    document.addEventListener('transitionend', updateRect);
 
     return () => {
-      clearTimeout(timer);
-      setHighlightedRect(null); // Clear rect when unmounting
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', updateRect, true);
+      window.removeEventListener('resize', updateRect);
+      document.removeEventListener('transitionend', updateRect);
+      mo.disconnect();
+      ro?.disconnect();
     };
   }, [highlightedElement]);
 
@@ -234,7 +257,30 @@ export const TutorialOverlay: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         skipTutorial();
-      } else if (e.key === 'ArrowRight' && !currentStepData?.requiredInteraction) {
+        return;
+      }
+      // Trap focus within tooltip
+      if (e.key === 'Tab' && tooltipRef.current) {
+        const focusables = tooltipRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+          return;
+        }
+        if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+          return;
+        }
+      }
+      // Arrow navigation only when interaction not required
+      if (e.key === 'ArrowRight' && !currentStepData?.requiredInteraction) {
         nextStep();
       } else if (e.key === 'ArrowLeft' && currentStep > 0) {
         previousStep();
@@ -449,7 +495,7 @@ export const TutorialOverlay: React.FC = () => {
       {/* Highlight box with glow effect */}
       {highlightedRect && (
         <div
-          className="fixed z-[50001] pointer-events-none transition-all duration-300 ease-in-out" // Added transition
+          className="fixed z-[50001] pointer-events-none"
           style={{
             top: highlightedRect.top - 4,
             left: highlightedRect.left - 4,
@@ -458,12 +504,12 @@ export const TutorialOverlay: React.FC = () => {
             border: '2px solid #FF7A00',
             borderRadius: '8px',
             boxShadow: currentStepData.requiredInteraction 
-              ? '0 0 0 4px rgba(255, 122, 0, 0.3), 0 0 30px rgba(255, 122, 0, 0.6), inset 0 0 20px rgba(255, 122, 0, 0.2)'
-              : '0 0 0 4px rgba(255, 122, 0, 0.3), 0 0 20px rgba(255, 122, 0, 0.5)',
-            transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)' // Smooth transition
+              ? '0 0 0 4px rgba(255, 122, 0, 0.25), 0 0 24px rgba(255, 122, 0, 0.5), inset 0 0 16px rgba(255, 122, 0, 0.2)'
+              : '0 0 0 4px rgba(255, 122, 0, 0.25), 0 0 16px rgba(255, 122, 0, 0.4)',
+            transition: reduceMotion ? 'none' : 'transform 200ms ease-out, top 200ms ease-out, left 200ms ease-out, width 200ms ease-out, height 200ms ease-out'
           }}
         >
-          {currentStepData.requiredInteraction && (
+          {currentStepData.requiredInteraction && !reduceMotion && (
             <div className="absolute inset-0 rounded-lg animate-pulse-glow" />
           )}
         </div>
@@ -471,17 +517,23 @@ export const TutorialOverlay: React.FC = () => {
 
       {/* Tutorial tooltip */}
       <div 
-        className="tutorial-tooltip fixed z-[50002] bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-6 transition-all duration-300 ease-in-out" // Added ease-in-out
+        ref={tooltipRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="tutorial-tooltip fixed z-[50002] bg-[#1a1a2e] border-2 border-[#FF7A00] rounded-lg shadow-2xl p-6"
         style={{
           ...getTooltipPosition(),
           minWidth: isMobile ? '300px' : '400px',
           maxWidth: isMobile ? '90vw' : '400px',
-          transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)' // Add smooth transition
+          transition: reduceMotion ? 'none' : 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+          opacity: highlightedRect || !currentStepData.target ? 1 : 0
         }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white font-bold text-lg pr-4">{currentStepData.title}</h3>
+          <h3 id={titleId} className="text-white font-bold text-lg pr-4">{currentStepData.title}</h3>
           <Button
             variant="ghost"
             size="icon"
@@ -581,6 +633,11 @@ export const TutorialOverlay: React.FC = () => {
         /* Ensure tooltip is always visible */
         .tutorial-tooltip {
           pointer-events: auto !important;
+        }
+        
+        /* Reduced motion: disable animations */
+        @media (prefers-reduced-motion: reduce) {
+          .animate-pulse-glow { animation: none !important; }
         }
       `}</style>
     </div>

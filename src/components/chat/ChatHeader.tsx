@@ -74,7 +74,10 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
             <Button
               variant="outline"
               size="sm"
-              onClick={startTutorial}
+              onClick={() => {
+                // Open the tutorial welcome modal via a global event
+                window.dispatchEvent(new CustomEvent('openTutorialWelcome'));
+              }}
               className="bg-[#0f0f0f] border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 hover:border-blue-400 transition-all duration-200 text-xs sm:text-sm px-2 sm:px-3"
               title="Start tutorial (dev only)"
             >
