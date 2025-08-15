@@ -17,11 +17,9 @@ import Discover from "./pages/Discover";
 import Chat from "./pages/Chat";
 import CharacterCreator from "./pages/CharacterCreator";
 import TestTags from "./pages/TestTags";
-import WorldInfo from "./pages/WorldInfo";
-import WorldInfoEditor from "./pages/WorldInfoEditor";
-import ImprovedWorldInfoPage from "./components/world-info/ImprovedWorldInfoPage";
-import UnifiedWorldInfoEditor from "./components/world-info/UnifiedWorldInfoEditor";
-import UnifiedWorldInfoEditorWrapper from "./components/world-info/UnifiedWorldInfoEditorWrapper";
+import WorldInfoPage from "./components/world-info/WorldInfoPage";
+import WorldInfoEditor from "./components/world-info/WorldInfoEditor";
+import WorldInfoEditorWrapper from "./components/world-info/WorldInfoEditorWrapper";
 import UserProfile from "./pages/UserProfile";
 import Subscription from "./pages/Subscription";
 import Settings from "./pages/Settings";
@@ -112,35 +110,21 @@ const App = () => (
             <Route path="/world-info" element={
               <OnboardingGuard requireOnboardingComplete={true}>
                 <AuthenticatedLayout>
-                  <ImprovedWorldInfoPage />
+                  <WorldInfoPage />
                 </AuthenticatedLayout>
               </OnboardingGuard>
             } />
             <Route path="/world-info/create" element={
               <OnboardingGuard requireOnboardingComplete={true}>
                 <AuthenticatedLayout>
-                  <UnifiedWorldInfoEditor mode="create" />
+                  <WorldInfoEditor mode="create" />
                 </AuthenticatedLayout>
               </OnboardingGuard>
             } />
             <Route path="/world-info/:id/edit" element={
               <OnboardingGuard requireOnboardingComplete={true}>
                 <AuthenticatedLayout>
-                  <UnifiedWorldInfoEditorWrapper />
-                </AuthenticatedLayout>
-              </OnboardingGuard>
-            } />
-            <Route path="/world-info-editor" element={
-              <OnboardingGuard requireOnboardingComplete={true}>
-                <AuthenticatedLayout>
-                  <WorldInfoEditor />
-                </AuthenticatedLayout>
-              </OnboardingGuard>
-            } />
-            <Route path="/world-info-editor/:id" element={
-              <OnboardingGuard requireOnboardingComplete={true}>
-                <AuthenticatedLayout>
-                  <WorldInfoEditor />
+                  <WorldInfoEditorWrapper />
                 </AuthenticatedLayout>
               </OnboardingGuard>
             } />

@@ -44,9 +44,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useUserWorldInfos, usePublicWorldInfos, useAllTags } from '@/hooks/useWorldInfos';
 import { createWorldInfo, addWorldInfoEntry } from '@/lib/world-info-operations';
 import { cn } from '@/lib/utils';
-import StandardizedWorldInfoCard from './StandardizedWorldInfoCard';
+import WorldInfoCard from './WorldInfoCard';
 
-export default function ImprovedWorldInfoPage() {
+export default function WorldInfoPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -167,7 +167,7 @@ export default function ImprovedWorldInfoPage() {
       }
       if (entriesArray.length > 100) entriesArray = entriesArray.slice(0,100);
 
-      navigate('/world-info-editor', {
+      navigate('/world-info/create', {
         state: {
           importedWorldInfo: {
             name: jsonData.name || jsonData.data?.name || '',
@@ -431,7 +431,7 @@ export default function ImprovedWorldInfoPage() {
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
                   {filteredAndSortedWorldInfos.map((worldInfo: any, index: number) => (
-                    <StandardizedWorldInfoCard
+                    <WorldInfoCard
                       key={worldInfo.id}
                       worldInfo={worldInfo}
                       isOwner={worldInfo.creator_id === user?.id}
@@ -473,7 +473,7 @@ export default function ImprovedWorldInfoPage() {
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
                   {filteredAndSortedWorldInfos.map((worldInfo: any, index: number) => (
-                    <StandardizedWorldInfoCard
+                    <WorldInfoCard
                       key={worldInfo.id}
                       worldInfo={worldInfo}
                       isOwner={true}

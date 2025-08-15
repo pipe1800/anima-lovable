@@ -57,7 +57,7 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
       case '/guidelines': return 'Guidelines';
       default: 
         if (pathname.startsWith('/character/')) return 'Character';
-        if (pathname.startsWith('/world-info-editor')) return 'World Info Editor';
+        if (pathname.startsWith('/world-info/')) return 'World Info Editor';
         if (pathname.startsWith('/profile/')) return 'Profile';
         return 'ANIMA';
     }

@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 
-interface StandardizedWorldInfoCardProps {
+interface WorldInfoCardProps {
   worldInfo: any;
   isOwner?: boolean;
   showCreator?: boolean;
@@ -30,14 +30,14 @@ interface StandardizedWorldInfoCardProps {
   index?: number;
 }
 
-export default function StandardizedWorldInfoCard({ 
+export default function WorldInfoCard({ 
   worldInfo, 
   isOwner = false,
   showCreator = true,
   onEdit,
   className,
   index = 0
-}: StandardizedWorldInfoCardProps) {
+}: WorldInfoCardProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();

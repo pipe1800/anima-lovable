@@ -151,7 +151,7 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
   }, [disabled, selectedWorldInfo, onWorldInfoSelect]);
 
   const handleCreateWorldInfo = () => {
-    navigate('/world-info-editor');
+    navigate('/world-info/create');
   };
 
   const handleDiscoverWorldInfos = () => {

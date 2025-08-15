@@ -559,7 +559,7 @@ const WorldInfoCreator = () => {
       }
       if (entriesArray.length > 100) entriesArray = entriesArray.slice(0,100);
 
-      navigate('/world-info-editor', {
+      navigate('/world-info/create', {
         state: {
           importedWorldInfo: {
             name: jsonData.name || jsonData.data?.name || '',

@@ -264,7 +264,7 @@ export default function PublicWorldInfoProfile() {
 
   const handleEdit = () => {
     if (!id) return;
-    navigate(`/world-info-editor/${id}`);
+    navigate(`/world-info/${id}/edit`);
   };
 
   const handleExport = () => {
