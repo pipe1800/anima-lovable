@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Plus, Upload, Edit2, Trash2, Save, X, Search, Tag, User, BookOpen, Image, Loader2, ArrowLeft, Heart, FileText } from 'lucide-react';
@@ -156,6 +156,11 @@ const WorldInfoCreator = () => {
   const [showWorldInfoList, setShowWorldInfoList] = useState(true);
   const [editingWorldInfo, setEditingWorldInfo] = useState<WorldInfo | null>(null);
   
+  // Unsaved changes detection
+  const [isDirty, setIsDirty] = useState(false);
+  const [showExitDialog, setShowExitDialog] = useState(false);
+  const [pendingNav, setPendingNav] = useState<string | null>(null);
+  
   // Computed loading state
   const loading = worldInfosLoading || collectionLoading;
 
@@ -169,6 +174,23 @@ const WorldInfoCreator = () => {
   React.useEffect(() => {
     setSelectedTags(worldInfoTags);
   }, [worldInfoTags]);
+
+  // Unsaved changes detection
+  React.useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
+
+  React.useEffect(() => {
+    const dirty = !!(editName || editDescription || editAvatarFile || selectedTags.length || newEntryKeywords || newEntryText);
+    setIsDirty(dirty);
+  }, [editName, editDescription, editAvatarFile, selectedTags, newEntryKeywords, newEntryText]);
 
   const handleAvatarSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -267,8 +289,17 @@ const WorldInfoCreator = () => {
     setShowWorldInfoList(false);
   };
 
+  const guardedNavigate = (path: string) => {
+    if (isDirty) {
+      setPendingNav(path);
+      setShowExitDialog(true);
+    } else {
+      navigate(path);
+    }
+  };
+
   const handleViewWorldInfo = (worldInfo: WorldInfo) => {
-    navigate(`/world-info-view/${worldInfo.id}`);
+    guardedNavigate(`/world-info-view/${worldInfo.id}`);
   };
 
   const handleUpdateWorldInfo = async () => {
@@ -1389,12 +1420,24 @@ const WorldInfoCreator = () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Importing World Info</DialogTitle>
-              <DialogDescription>
-                Please wait while we process your world info file. This may take a few moments for larger files.
-              </DialogDescription>
+              <p className="text-gray-400 text-sm">Please wait while we process your world info file. This may take a few moments for larger files.</p>
             </DialogHeader>
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Unsaved Changes Exit Confirmation Dialog */}
+        <Dialog open={showExitDialog} onOpenChange={setShowExitDialog}>
+          <DialogContent className="bg-[#1a1a2e] border-gray-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Discard changes?</DialogTitle>
+            </DialogHeader>
+            <p className="text-gray-300">You have unsaved changes. Continue editing or discard?</p>
+            <div className="flex justify-end gap-3 mt-4">
+              <Button variant="outline" className="border-gray-600" onClick={() => setShowExitDialog(false)}>Continue Editing</Button>
+              <Button className="bg-red-600 hover:bg-red-700" onClick={() => { setShowExitDialog(false); if (pendingNav) navigate(pendingNav); }}>Discard</Button>
             </div>
           </DialogContent>
         </Dialog>

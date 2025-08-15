@@ -118,12 +118,12 @@ async function decodeChunkText(entry: { type: string; keyword: string; text: str
 // Normalize character card data into app-friendly creator form shape
 // deno-lint-ignore no-explicit-any
 function normalizeToFormShape(raw: any) {
-  // Handle v2 wrapper
   const data = (raw && raw.spec === 'chara_card_v2' && raw.data) ? raw.data : raw;
-
   const name = data.name || data.char_name || data.character?.name || '';
 
-  // Short description: use only explicit short fields; do not derive from long description
+  const longDescription = data.description || data.data?.description || '';
+  const personalitySummary = data.personality || data.char_persona || data.data?.personality || '';
+
   const candidateShorts: Array<string | undefined> = [
     data.short_description,
     data.tagline,
@@ -132,14 +132,16 @@ function normalizeToFormShape(raw: any) {
     data.data?.tagline,
     data.data?.title,
   ];
-  const shortDescription = (candidateShorts.find((v) => typeof v === 'string' && v.trim().length > 0) as string | undefined) || '';
+  let shortDescription = (candidateShorts.find(v => typeof v === 'string' && v.trim()) || '') as string;
+  if (!shortDescription) {
+    const source = personalitySummary || longDescription;
+    shortDescription = source ? source.replace(/\s+/g, ' ').trim().slice(0, 150) : '';
+  }
 
-  // Personality/definition text goes to core_personality (prefer explicit personality field, fallback to full description)
-  const corePersonality = (data.personality || data.char_persona || data.data?.personality || '') || (data.description || data.data?.description || '');
+  const corePersonality = longDescription || personalitySummary || '';
+  const knowledgeBase = personalitySummary || '';
 
   const scenario = data.scenario || data.world_scenario || data.data?.scenario || '';
-
-  // Greeting and alternates
   const greeting = data.first_mes || data.greeting || data.char_greeting || data.data?.first_mes || data.data?.greeting || '';
   const alternate_greetings: string[] = Array.isArray(data.alternate_greetings)
     ? (data.alternate_greetings as unknown[]).filter((g: unknown) => typeof g === 'string').map((g: any) => g.trim()).filter(Boolean)
@@ -147,19 +149,12 @@ function normalizeToFormShape(raw: any) {
       ? (data.data.alternate_greetings as unknown[]).filter((g: unknown) => typeof g === 'string').map((g: any) => g.trim()).filter(Boolean)
       : [];
 
-  // Tags (ensure array of strings)
-  const rawTags = Array.isArray(data.tags) ? data.tags
-    : Array.isArray(data.data?.tags) ? data.data.tags
-    : [];
-  const tags: string[] = (rawTags as unknown[])
-    .map((t) => (typeof t === 'string' ? t.trim() : ''))
-    .filter((t) => !!t);
+  const rawTags = Array.isArray(data.tags) ? data.tags : Array.isArray(data.data?.tags) ? data.data.tags : [];
+  const tags: string[] = (rawTags as unknown[]).map(t => typeof t === 'string' ? t.trim() : '').filter(t => !!t);
 
-  // Notes mapping
   const creatorNotes = data.creator_notes || data.data?.creator_notes || '';
   const characterNotes = data.system_prompt || data.data?.system_prompt || '';
 
-  // Example dialogues
   const mes_example = data.mes_example || data.example_dialogue || data.example_messages || data.data?.mes_example || data.data?.example_dialogue || '';
   const example_dialogues = typeof mes_example === 'string' ? parseExampleDialogue(mes_example) : Array.isArray(data.example_dialogues) ? data.example_dialogues : [];
 
@@ -173,7 +168,7 @@ function normalizeToFormShape(raw: any) {
       personality: {
         core_personality: String(corePersonality || ''),
         tags,
-        knowledge_base: '',
+        knowledge_base: String(knowledgeBase || ''),
         scenario_definition: String(scenario || ''),
       },
       dialogue: {

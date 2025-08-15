@@ -77,8 +77,32 @@ function readType(bytes: Uint8Array, offset: number): string {
 function normalizeToFormShape(raw: any) {
   const data = (raw && raw.spec === 'chara_card_v2' && raw.data) ? raw.data : raw;
   const name = data.name || data.char_name || data.character?.name || '';
-  const shortDescription = data.description || data.data?.description || '';
-  const corePersonality = data.personality || data.char_persona || data.data?.personality || '';
+
+  // Original long description (often the detailed definition block)
+  const longDescription = data.description || data.data?.description || '';
+  // Personality summary (shorter free-form summary in many cards)
+  const personalitySummary = data.personality || data.char_persona || data.data?.personality || '';
+
+  // Short description candidates (explicit short fields). If none, derive from personality summary, else from long description.
+  const candidateShorts: Array<string | undefined> = [
+    data.short_description,
+    data.tagline,
+    data.title,
+    data.data?.short_description,
+    data.data?.tagline,
+    data.data?.title,
+  ];
+  let shortDescription = (candidateShorts.find(v => typeof v === 'string' && v.trim()) || '') as string;
+  if (!shortDescription) {
+    const source = personalitySummary || longDescription;
+    shortDescription = source ? source.replace(/\s+/g, ' ').trim().slice(0, 150) : '';
+  }
+
+  // Map: core_personality gets the full long description (fallback to personality summary if missing)
+  const corePersonality = longDescription || personalitySummary || '';
+  // Map: knowledge_base (shown as Personality summary in UI) gets the personality summary text
+  const knowledgeBase = personalitySummary || '';
+
   const scenario = data.scenario || data.world_scenario || data.data?.scenario || '';
   const greeting = data.first_mes || data.greeting || data.char_greeting || data.data?.first_mes || data.data?.greeting || '';
   const tags = Array.isArray(data.tags) ? data.tags : Array.isArray(data.data?.tags) ? data.data.tags : [];
@@ -95,13 +119,13 @@ function normalizeToFormShape(raw: any) {
     formData: {
       name,
       avatar: '',
-      title: '', // leave empty
+      title: '',
       description: shortDescription,
       chatMode: 'storytelling',
       personality: {
         core_personality: corePersonality,
         tags,
-        knowledge_base: knowledge,
+        knowledge_base: knowledgeBase, // personality summary
         scenario_definition: scenario,
       },
       dialogue: { greeting, example_dialogues, alternate_greetings },

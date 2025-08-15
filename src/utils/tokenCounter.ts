@@ -8,11 +8,8 @@ export function estimateTokens(text: string): number {
 }
 
 export function getPlanMaxTokens(planName?: string | null): number {
-  // Match server PLAN_MODEL_COSTS per plan
-  const name = (planName || '').toLowerCase();
-  if (name.includes('whale')) return 24000;
-  if (name.includes('true fan')) return 16000;
-  return 12000; // Guest or unknown
+  // Hard universal limit
+  return 3500;
 }
 
 function buildPersonalitySummaryJSON(form: CharacterFormData): any {
@@ -60,9 +57,9 @@ export type CreatorTokenEstimate = {
 
 export function estimateCreatorTokenUsage(form: CharacterFormData, planName?: string | null, overrideGreeting?: string): CreatorTokenEstimate {
   const maxTokens = getPlanMaxTokens(planName);
-  const reservedForResponse = Math.min(512, Math.floor(maxTokens * 0.2));
-  const contextBudget = Math.max(0, maxTokens - reservedForResponse);
-  const permanentBudget = Math.floor(contextBudget * 0.6);
+  const reservedForResponse = 0; // removed
+  const contextBudget = maxTokens; // full budget usable
+  const permanentBudget = maxTokens; // treat all as single pool
 
   // Build sections similar to server extractCharacterContext
   const personalitySummaryStr = `Personality: ${JSON.stringify(buildPersonalitySummaryJSON(form))}`;
@@ -76,17 +73,11 @@ export function estimateCreatorTokenUsage(form: CharacterFormData, planName?: st
   const descriptionTokens = estimateTokens(descriptionStr);
   const scenarioTokens = estimateTokens(scenarioStr);
   const characterNotesTokens = estimateTokens(characterNotesStr);
-
-  const permanentUsedRaw = personalitySummaryTokens + descriptionTokens + scenarioTokens + characterNotesTokens;
-  const permanentUsed = Math.min(permanentUsedRaw, permanentBudget);
-
-  const remainingForVariable = Math.max(0, contextBudget - permanentUsed);
   const greetingTokens = estimateTokens(greetingStr);
-  const variableUsed = Math.min(greetingTokens, remainingForVariable);
 
-  const totalUsed = Math.min(contextBudget, permanentUsed + variableUsed);
-  const overPermanent = permanentUsedRaw > permanentBudget;
-  const overTotal = permanentUsedRaw + greetingTokens > contextBudget;
+  const permanentUsedRaw = personalitySummaryTokens + descriptionTokens + scenarioTokens + characterNotesTokens + greetingTokens;
+  const overTotal = permanentUsedRaw > contextBudget;
+  const totalUsed = Math.min(permanentUsedRaw, contextBudget);
 
   return {
     totals: {
@@ -94,10 +85,10 @@ export function estimateCreatorTokenUsage(form: CharacterFormData, planName?: st
       reservedForResponse,
       contextBudget,
       permanentBudget,
-      permanentUsed,
-      variableUsed,
+      permanentUsed: Math.min(permanentUsedRaw, permanentBudget),
+      variableUsed: 0, // no variable segment now
       totalUsed,
-      overPermanent,
+      overPermanent: overTotal, // same concept since single pool
       overTotal,
     },
     breakdown: {

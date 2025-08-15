@@ -156,28 +156,24 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
       {/* Token Budget Meter */}
       <div className="mb-6 md:mb-8 p-3 md:p-4 rounded-xl border border-gray-700/50 bg-gray-800/30">
         <div className="flex items-center justify-between text-xs md:text-sm text-gray-300">
-          <span>Token budget preview</span>
+          <span>Token usage</span>
           <span>
-            {tokenInfo.totals.totalUsed.toLocaleString()} / {tokenInfo.totals.contextBudget.toLocaleString()} tokens
+            {tokenInfo.totals.totalUsed.toLocaleString()} / {tokenInfo.totals.maxTokens.toLocaleString()} tokens
           </span>
         </div>
         <div className="mt-2 h-2 rounded bg-gray-700 overflow-hidden">
           <div
             className={`h-full ${tokenInfo.totals.overTotal ? 'bg-red-500' : 'bg-[#FF7A00]'}`}
-            style={{ width: `${Math.min(100, (tokenInfo.totals.totalUsed / Math.max(1, tokenInfo.totals.contextBudget)) * 100)}%` }}
+            style={{ width: `${Math.min(100, (tokenInfo.totals.totalUsed / Math.max(1, tokenInfo.totals.maxTokens)) * 100)}%` }}
           />
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] md:text-xs text-gray-400">
-          <div>
-            Permanent: {tokenInfo.totals.permanentUsed.toLocaleString()} / {tokenInfo.totals.permanentBudget.toLocaleString()}
-            {tokenInfo.totals.overPermanent && <span className="text-red-400 ml-1">(over)</span>}
-          </div>
-          <div>
-            Reserved for reply: {tokenInfo.totals.reservedForResponse.toLocaleString()} tokens
-          </div>
+        <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] md:text-xs text-gray-400">
+          <div>Definition: {(tokenInfo.breakdown.personalitySummary + tokenInfo.breakdown.description).toLocaleString()}</div>
+          <div>Scenario+Notes: {(tokenInfo.breakdown.scenario + tokenInfo.breakdown.characterNotes).toLocaleString()}</div>
+          <div>Greeting: {tokenInfo.breakdown.greeting.toLocaleString()}</div>
         </div>
-        {(tokenInfo.totals.overTotal || tokenInfo.totals.overPermanent) && (
-          <p className="mt-2 text-red-400 text-xs md:text-sm">Reduce description/personality/notes or greeting to fit within the limits for your plan.</p>
+        {tokenInfo.totals.overTotal && (
+          <p className="mt-2 text-red-400 text-xs md:text-sm">Over 3,500 token limit. Reduce fields before saving.</p>
         )}
       </div>
 

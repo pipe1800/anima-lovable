@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { Tables } from '@/integrations/supabase/types';
 import { supabase, SUPABASE_API_URL } from '@/integrations/supabase/client';
+import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
 
 // Lazy load heavy components for better performance
 const FoundationStep = lazy(() => import('@/components/character-creator/FoundationStep'));
@@ -23,7 +24,7 @@ const PersonalityStep = lazy(() => import('@/components/character-creator/Person
 const DialogueStep = lazy(() => import('@/components/character-creator/DialogueStep'));
 const FinalizeStep = lazy(() => import('@/components/character-creator/FinalizeStep'));
 
-type Tag = Tables<'tags'>;
+type Tag = { id: number; name: string };
 
 const STEPS = [
   { id: 1, title: 'Foundation', description: 'Basic details', icon: 'user' },
@@ -149,9 +150,23 @@ const CharacterCreator = () => {
 
       if (meta?.flags?.nsfwDetected) {
         toast({ title: 'NSFW content detected', description: 'This character may contain NSFW content. Review and adjust visibility if needed.' });
+        try {
+          const { data: nsfwTagRow } = await supabase.from('tags').select('id,name').ilike('name','nsfw').maybeSingle();
+          if (nsfwTagRow) {
+            setSelectedTags(prev => prev.some(t => t.name.toLowerCase() === 'nsfw') ? prev : [...prev, nsfwTagRow as Tag]);
+          }
+        } catch {}
       } else {
         toast({ title: 'Character Imported', description: 'Character data has been imported successfully.' });
       }
+
+      // After import, compute token usage and warn if over limit
+      try {
+        const tokenInfo = estimateCreatorTokenUsage({ ...(parsed as any) });
+        if (tokenInfo.totals.overTotal) {
+          toast({ title: 'Token Limit Exceeded', description: 'Imported character exceeds 3,500 token limit. Reduce content before saving.', variant: 'destructive' });
+        }
+      } catch {}
     } catch (err) {
       console.error('Error invoking parse-character-card, attempting fallback...', err);
       try {
@@ -229,6 +244,15 @@ const CharacterCreator = () => {
     }
   }, [isDirty, navigate]);
 
+  const handleSaveCharacter = () => {
+    const tokenInfo = estimateCreatorTokenUsage(characterData);
+    if (tokenInfo.totals.overTotal) {
+      toast({ title: 'Cannot Save', description: 'Character exceeds 3,500 token limit. Reduce content before saving.', variant: 'destructive' });
+      return;
+    }
+    saveCharacter();
+  };
+
   const renderStep = () => {
     const stepProps = {
       data: characterData,
@@ -262,7 +286,7 @@ const CharacterCreator = () => {
         return (
           <FinalizeStep
             {...stepProps}
-            onFinalize={saveCharacter}
+            onFinalize={handleSaveCharacter}
             isCreating={isCreating}
             isEditing={isEditing}
             selectedTags={selectedTags}
@@ -293,7 +317,7 @@ const CharacterCreator = () => {
         rightContent={
           isEditing ? (
             <Button
-              onClick={saveCharacter}
+              onClick={() => handleSaveCharacter()}
               disabled={!isDirty || isCreating}
               className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -427,10 +451,9 @@ const CharacterCreator = () => {
             </Button>
           ) : (
             <Button
-              onClick={saveCharacter}
-              disabled={isCreating}
-              size="sm"
-              className="bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => handleSaveCharacter()}
+              disabled={!isDirty || isCreating}
+              className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isCreating ? (
                 <Loader2 className="w-4 h-4 animate-spin" />

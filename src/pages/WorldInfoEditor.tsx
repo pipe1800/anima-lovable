@@ -31,6 +31,7 @@ import {
   useWorldInfoTags,
   type WorldInfoWithDetails
 } from '@/hooks/useWorldInfos';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 type WorldInfo = WorldInfoWithDetails & {
   entries?: any[];
@@ -129,6 +130,9 @@ export default function WorldInfoEditor() {
   const [entriesSearchQuery, setEntriesSearchQuery] = useState('');
   
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showExitDialog, setShowExitDialog] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<null | string>(null);
 
   // Keyword & text limit helpers (max 10 keywords, 5 words per keyword, 1000 chars text)
   const processKeywordsInput = (input: string) => {
@@ -201,8 +205,41 @@ export default function WorldInfoEditor() {
     }
   }, [isStagedImport, importedState]);
 
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
+
+  useEffect(() => {
+    if (!id) {
+      setIsDirty(!!(editName || editDescription || selectedTags.length || stagedEntries.length));
+    } else if (worldInfoDetails) {
+      const changed = (
+        editName !== worldInfoDetails.name ||
+        (editDescription || '') !== (worldInfoDetails.short_description || '') ||
+        selectedTags.length !== worldInfoTags.length
+      );
+      setIsDirty(changed);
+    }
+  }, [editName, editDescription, selectedTags, stagedEntries, id, worldInfoDetails, worldInfoTags]);
+
+  const guardedNavigate = (path: string) => {
+    if (isDirty) {
+      setPendingNavigation(path);
+      setShowExitDialog(true);
+    } else {
+      navigate(path);
+    }
+  };
+
   const handleBackToList = () => {
-    navigate('/world-info');
+    guardedNavigate('/world-info');
   };
 
   const handleAvatarSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -823,6 +860,20 @@ export default function WorldInfoEditor() {
           onChange={handleAvatarSelect}
           className="hidden"
         />
+
+        {/* Unsaved changes dialog */}
+        <Dialog open={showExitDialog} onOpenChange={setShowExitDialog}>
+          <DialogContent className="bg-[#1a1a2e] border-gray-700">
+            <DialogHeader>
+              <DialogTitle className="text-white">Discard changes?</DialogTitle>
+            </DialogHeader>
+            <p className="text-gray-300">You have unsaved changes. Continue editing or discard?</p>
+            <div className="flex justify-end gap-3 mt-4">
+              <Button variant="outline" className="border-gray-600" onClick={() => setShowExitDialog(false)}>Continue Editing</Button>
+              <Button className="bg-red-600 hover:bg-red-700" onClick={() => { setShowExitDialog(false); if (pendingNavigation) navigate(pendingNavigation); }}>Discard</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );
