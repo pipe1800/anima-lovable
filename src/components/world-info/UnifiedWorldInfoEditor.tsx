@@ -46,8 +46,8 @@ import {
 } from '@/hooks/useWorldInfos';
 import type { Tables } from '@/integrations/supabase/types';
 
-type WorldInfoEntry = Tables<'world_info_entries'>;
-type Tag = Tables<'tags'>;
+type WorldInfoEntry = Tables<'world_info_entries', never>;
+type Tag = Tables<'tags', never>;
 
 interface UnifiedWorldInfoEditorProps {
   mode: 'create' | 'edit';
@@ -299,13 +299,13 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
             </TabsList>
 
             <TabsContent value="basics" className="space-y-6">
-              <Card className="bg-gray-800/50 border-gray-700">
-                <CardHeader>
-                  <CardTitle className="text-white">World Info Details</CardTitle>
+              <Card className="bg-transparent border-0 shadow-none sm:bg-gray-800/50 sm:border sm:border-gray-700">
+                <CardHeader className="p-0 sm:p-6">
+                  <CardTitle className="text-white sm:mb-0 mb-4">World Info Details</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Name and Description */}
+                <CardContent className="space-y-6 p-0 sm:p-6">
                   <div className="grid gap-4">
+                    {/* Name */}
                     <div>
                       <Label htmlFor="name" className="text-white">
                         Name <span className="text-red-400">*</span>
@@ -318,7 +318,7 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
                         className="mt-1 bg-gray-800/50 border-gray-600 text-white"
                       />
                     </div>
-
+                    {/* Description */}
                     <div>
                       <Label htmlFor="description" className="text-white">Description</Label>
                       <Textarea
@@ -330,7 +330,7 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
                         className="mt-1 bg-gray-800/50 border-gray-600 text-white"
                       />
                     </div>
-
+                    {/* Visibility */}
                     <div>
                       <Label htmlFor="visibility" className="text-white">Visibility</Label>
                       <Select 
@@ -365,8 +365,7 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
                       </Select>
                     </div>
                   </div>
-
-                  {/* Tags Section */}
+                  {/* Tags */}
                   <div>
                     <Label className="text-white mb-2 block">Tags</Label>
                     <div className="flex flex-wrap gap-2 mb-3">
@@ -409,8 +408,8 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
             </TabsContent>
 
             <TabsContent value="entries" className="space-y-6">
-              <Card className="bg-gray-800/50 border-gray-700">
-                <CardHeader>
+              <Card className="bg-transparent border-0 shadow-none sm:bg-gray-800/50 sm:border sm:border-gray-700">
+                <CardHeader className="p-0 sm:p-6">
                   <CardTitle className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-white">
                     <span>Lorebook Entries</span>
                     <div className="relative w-full sm:w-64">
@@ -424,9 +423,9 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
                     </div>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6">
+                <CardContent className="space-y-6 p-0 sm:p-6">
                   {/* Add New Entry */}
-                  <div className="p-4 bg-gray-900/50 rounded-lg border border-gray-600 space-y-4">
+                  <div className="p-0 border-0 bg-transparent sm:p-4 sm:bg-gray-900/50 sm:rounded-lg sm:border sm:border-gray-600 space-y-4">
                     <h3 className="font-semibold text-white flex items-center gap-2">
                       <Plus className="w-4 h-4" />
                       Add New Entry
@@ -461,7 +460,6 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
                       </Button>
                     </div>
                   </div>
-
                   {/* Entries List */}
                   {filteredEntries.length === 0 ? (
                     <div className="text-center py-8 text-gray-400">
@@ -472,10 +470,10 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
                   ) : (
                     <div className="space-y-3">
                       {filteredEntries.map(entry => (
-                        <Card key={entry.id} className="bg-gray-900/50 border-gray-600">
-                          <CardContent className="p-4">
+                        <Card key={entry.id} className="bg-transparent border-0 sm:bg-gray-900/50 sm:border sm:border-gray-600">
+                          <CardContent className="p-0 sm:p-4">
                             {editingEntry?.id === entry.id ? (
-                              <div className="space-y-4">
+                              <div className="space-y-4 p-4 sm:p-0">
                                 <Input
                                   value={editingEntry.keywords}
                                   onChange={(e) => setEditingEntry(prev => prev ? { ...prev, keywords: e.target.value } : null)}
@@ -499,7 +497,7 @@ export default function UnifiedWorldInfoEditor({ mode, worldInfoId }: UnifiedWor
                                 </div>
                               </div>
                             ) : (
-                              <div className="flex items-start justify-between gap-4">
+                              <div className="flex items-start justify-between gap-4 p-4 sm:p-0">
                                 <div className="flex-1 space-y-2">
                                   <div className="flex flex-wrap gap-1">
                                     {entry.keywords.map((keyword, idx) => (

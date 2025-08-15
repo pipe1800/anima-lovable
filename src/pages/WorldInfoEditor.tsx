@@ -624,6 +624,19 @@ export default function WorldInfoEditor() {
             }
           />
 
+          {/* Mobile action button */}
+          <div className="md:hidden px-4 pt-4 flex justify-end">
+            <Button
+              onClick={handleCreateOrUpdateWorldInfo}
+              disabled={saving}
+              size="sm"
+              className="bg-primary hover:bg-primary/80 text-white font-medium flex items-center gap-2"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              <span>{id ? 'Update' : 'Create'}</span>
+            </Button>
+          </div>
+
           {/* Content */}
           <div className="flex-1 overflow-auto p-6">
             <div className="max-w-4xl mx-auto space-y-6">
