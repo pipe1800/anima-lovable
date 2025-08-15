@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,14 +8,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, Edit2, Trash2, Save, X, Search, Tag, User, BookOpen, Image, Loader2, ArrowLeft } from 'lucide-react';
+import { Plus, Edit2, Trash2, Save, X, Search, Tag, BookOpen, Image, Loader2, ArrowLeft } from 'lucide-react';
 import { TopBar } from '@/components/ui/TopBar';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
-import { Tables } from '@/integrations/supabase/types';
 import {
   createWorldInfo,
   updateWorldInfo,
@@ -36,11 +33,15 @@ import {
 } from '@/hooks/useWorldInfos';
 
 type WorldInfo = WorldInfoWithDetails & {
-  entries?: Tables<'world_info_entries'>[];
+  entries?: any[];
   avatar_url?: string;
 };
 
-type WorldInfoEntry = Tables<'world_info_entries'>;
+// Replace incorrect Tables generic usage
+// entries?: Tables<'world_info_entries'>[];
+// type WorldInfoEntry = Tables<'world_info_entries'>;
+// Use loose typing to resolve build error (can refine later)
+type WorldInfoEntry = any;
 
 type Tag = {
   id: number;
@@ -107,7 +108,10 @@ export default function WorldInfoEditor() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  
+  const location = useLocation();
+  const importedState = (location.state as any)?.importedWorldInfo;
+  const isStagedImport = !id && importedState;
+
   // Form states
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -125,7 +129,49 @@ export default function WorldInfoEditor() {
   const [entriesSearchQuery, setEntriesSearchQuery] = useState('');
   
   const [saving, setSaving] = useState(false);
-  
+
+  // Keyword & text limit helpers (max 10 keywords, 5 words per keyword, 1000 chars text)
+  const processKeywordsInput = (input: string) => {
+    return input
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0)
+      .slice(0, 10) // cap keyword count
+      .map(k => {
+        const words = k.split(/\s+/).filter(w => w.length > 0).slice(0, 5); // cap words per keyword
+        return words.join(' ');
+      })
+      .join(', ');
+  };
+  const getKeywordsArray = (value: string) => value
+    .split(',')
+    .map(k => k.trim())
+    .filter(k => k.length > 0);
+
+  const onNewKeywordsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewEntryKeywords(processKeywordsInput(e.target.value));
+  };
+  const onEditingKeywordsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEditingEntryKeywords(processKeywordsInput(e.target.value));
+  };
+  const onNewEntryTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setNewEntryText(e.target.value.slice(0, 1000));
+  };
+  const onEditingEntryTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setEditingEntryText(e.target.value.slice(0, 1000));
+  };
+
+  // Local staged entries (for new imported before creation)
+  const [stagedEntries, setStagedEntries] = useState<Array<{ tempId: string; keywords: string[]; entry_text: string }>>(
+    isStagedImport
+      ? importedState.entries.slice(0, 100).map((e: any, idx: number) => ({
+          tempId: `imp-${idx}`,
+          keywords: Array.isArray(e.keywords) ? e.keywords : (e.keywords ? [e.keywords] : []),
+          entry_text: e.entry_text || ''
+        }))
+      : []
+  );
+
   // Data fetching
   const { data: allTags = [] } = useAllTags();
   const { data: worldInfoDetails, refetch: refetchWorldInfoDetails } = useWorldInfoWithEntries(id || null);
@@ -146,6 +192,14 @@ export default function WorldInfoEditor() {
       setSelectedTags(worldInfoTags);
     }
   }, [id, worldInfoTags]);
+
+  // Pre-fill name/description for staged import
+  useEffect(() => {
+    if (isStagedImport) {
+      setEditName(importedState.name || '');
+      setEditDescription(importedState.description || '');
+    }
+  }, [isStagedImport, importedState]);
 
   const handleBackToList = () => {
     navigate('/world-info');
@@ -211,13 +265,17 @@ export default function WorldInfoEditor() {
     setSelectedTags(prev => prev.filter(tag => tag.id !== tagId));
   };
 
+  // Validation for final save (staged import)
+  const hasInvalidStagedEntries = isStagedImport && stagedEntries.some(e => e.keywords.length === 0 || !e.entry_text.trim());
+
+  // Override create/update to handle staged creation with entries
   const handleCreateOrUpdateWorldInfo = async () => {
     if (!editName.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter a name for your world info",
-        variant: "destructive"
-      });
+      toast({ title: 'Error', description: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    if (hasInvalidStagedEntries) {
+      toast({ title: 'Error', description: 'Fill keywords and text for all entries or delete incomplete ones', variant: 'destructive' });
       return;
     }
 
@@ -265,6 +323,21 @@ export default function WorldInfoEditor() {
             await addWorldInfoTag(worldInfoId, tag.id);
           } catch (tagError) {
             console.error('Error adding tag to new world info:', tagError);
+          }
+        }
+
+        // If this is a staged import, add the staged entries
+        if (isStagedImport && worldInfoId) {
+          for (const entry of stagedEntries) {
+            try {
+              const entryData: WorldInfoEntryData = {
+                keywords: entry.keywords,
+                entry_text: entry.entry_text
+              };
+              await addWorldInfoEntry(worldInfoId, entryData);
+            } catch (entryError) {
+              console.error('Error adding staged entry:', entryError);
+            }
           }
         }
 
@@ -425,14 +498,50 @@ export default function WorldInfoEditor() {
     }
   };
 
-  const filteredEntries = worldInfoDetails?.entries?.filter(entry => {
+  // Replace add/update entry behavior for staged import
+  const handleAddStagedEntry = () => {
+    if (stagedEntries.length >= 100) {
+      toast({ title: 'Limit Reached', description: 'Maximum of 100 entries allowed before creation', variant: 'destructive' });
+      return;
+    }
+    if (!newEntryKeywords.trim() && !newEntryText.trim()) return;
+    const keywords = getKeywordsArray(newEntryKeywords); // already limited
+    setStagedEntries(prev => [...prev, { tempId: `new-${Date.now()}`, keywords, entry_text: newEntryText }]);
+    setNewEntryKeywords('');
+    setNewEntryText('');
+  };
+
+  const handleUpdateStagedEntry = (tempId: string, keywordsStr: string, text: string) => {
+    const keywords = getKeywordsArray(processKeywordsInput(keywordsStr));
+    setStagedEntries(prev => prev.map(e => e.tempId === tempId ? { ...e, keywords, entry_text: text.slice(0, 1000) } : e));
+  };
+
+  const handleDeleteStagedEntry = (tempId: string) => {
+    setStagedEntries(prev => prev.filter(e => e.tempId !== tempId));
+  };
+
+  // Utility to scroll to first invalid staged entry
+  const scrollToFirstInvalid = () => {
+    setTimeout(() => {
+      const el = document.querySelector('.border-red-500');
+      if (el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 50);
+  };
+
+  // Rendering source for entries (unified for staged & saved)
+  const baseEntries: any[] = id ? (worldInfoDetails?.entries || []) : stagedEntries;
+  const displayEntries = baseEntries.filter(entry => {
     if (!entriesSearchQuery) return true;
     const searchLower = entriesSearchQuery.toLowerCase();
     return (
-      entry.keywords.some(keyword => keyword.toLowerCase().includes(searchLower)) ||
-      entry.entry_text.toLowerCase().includes(searchLower)
+      (entry.keywords || []).some((keyword: string) => keyword.toLowerCase().includes(searchLower)) ||
+      (entry.entry_text || '').toLowerCase().includes(searchLower)
     );
-  }) || [];
+  });
+  // Reintroduce isEntryInvalid helper
+  const isEntryInvalid = (entry: any) => ((entry.keywords || []).length === 0 || !(entry.entry_text || '').trim());
 
   return (
     <div className="min-h-screen bg-[#121212]">
@@ -556,21 +665,25 @@ export default function WorldInfoEditor() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-white">
                     <BookOpen className="w-5 h-5" />
-                    Lorebook Entries ({filteredEntries.length})
+                    {id ? 'Lorebook Entries' : 'Staged Entries (not saved yet)'} ({displayEntries.length})
                   </CardTitle>
-                  {id && (
-                    <div className="relative">
-                      <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input
-                        placeholder="Search entries..."
-                        value={entriesSearchQuery}
-                        onChange={(e) => setEntriesSearchQuery(e.target.value)}
-                        className="pl-10 bg-gray-800/50 border-gray-600 text-white"
-                      />
-                    </div>
-                  )}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder={id ? 'Search entries...' : 'Search staged entries...'}
+                      value={entriesSearchQuery}
+                      onChange={(e) => setEntriesSearchQuery(e.target.value)}
+                      className="pl-10 bg-gray-800/50 border-gray-600 text-white"
+                    />
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {/* Invalid staged entries banner */}
+                  {isStagedImport && hasInvalidStagedEntries && (
+                    <div className="p-3 rounded-md border border-red-500 bg-red-500/10 text-sm text-red-300">
+                      {stagedEntries.filter(e => e.keywords.length === 0 || !e.entry_text.trim()).length} incomplete entr{stagedEntries.filter(e => e.keywords.length === 0 || !e.entry_text.trim()).length === 1 ? 'y' : 'ies'}. All entries must have at least one keyword and text before creation.
+                    </div>
+                  )}
                   {/* Add New Entry Form */}
                   <div className="space-y-4 p-4 bg-gray-900/50 rounded-lg border border-gray-600">
                     <h3 className="text-white font-semibold flex items-center gap-2">
@@ -579,7 +692,7 @@ export default function WorldInfoEditor() {
                     </h3>
                     {!id && (
                       <p className="text-sm text-gray-400">
-                        Save the world info first to add entries.
+                        These entries are staged. Complete keywords & text before creating.
                       </p>
                     )}
                     <div className="space-y-4">
@@ -588,28 +701,27 @@ export default function WorldInfoEditor() {
                         <Input
                           id="new-entry-keywords"
                           value={newEntryKeywords}
-                          onChange={(e) => setNewEntryKeywords(e.target.value)}
+                          onChange={onNewKeywordsChange}
                           placeholder="keyword1, keyword2, keyword3"
                           className="bg-gray-800/50 border-gray-600 text-white"
-                          disabled={!id}
                         />
+                        <div className="text-xs text-gray-400 mt-1">{getKeywordsArray(newEntryKeywords).length} / 10 keywords (max 5 words each)</div>
                       </div>
                       <div>
                         <Label htmlFor="new-entry-text" className="text-white">Entry Text</Label>
                         <Textarea
                           id="new-entry-text"
                           value={newEntryText}
-                          onChange={(e) => setNewEntryText(e.target.value)}
+                          onChange={onNewEntryTextChange}
                           rows={4}
                           placeholder="Enter the content for this entry..."
                           className="bg-gray-800/50 border-gray-600 text-white"
-                          disabled={!id}
                         />
+                        <div className="text-xs text-gray-400 mt-1">{newEntryText.length} / 1000 characters</div>
                       </div>
                       <Button 
-                        onClick={handleAddEntry} 
+                        onClick={id ? handleAddEntry : handleAddStagedEntry} 
                         className="bg-primary hover:bg-primary/80"
-                        disabled={!id}
                       >
                         <Plus className="w-4 h-4 mr-2" />
                         Add Entry
@@ -617,43 +729,44 @@ export default function WorldInfoEditor() {
                     </div>
                   </div>
 
-                  {/* Existing Entries */}
-                  {id && (
-
-                    <div className="space-y-4">
-                      {filteredEntries.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500">
-                          <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                          <p>No entries found</p>
-                          {entriesSearchQuery && <p className="text-sm">Try adjusting your search</p>}
-                        </div>
-                      ) : (
-                        filteredEntries.map((entry) => (
-                          <Card key={entry.id} className="bg-gray-900/50 border-gray-600">
+                  {/* Entries List */}
+                  <div className="space-y-4">
+                    {displayEntries.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No entries {id ? 'found' : 'staged'}</p>
+                      </div>
+                    ) : (
+                      displayEntries.map((entry: any) => {
+                        const invalid = isEntryInvalid(entry);
+                        const entryId = entry.id || entry.tempId;
+                        const editing = editingEntryId === entryId;
+                        return (
+                          <Card key={entryId} className={invalid ? 'border-red-500 bg-red-500/10' : 'bg-gray-900/50 border-gray-600'}>
                             <CardContent className="p-4">
-                              {editingEntryId === entry.id ? (
+                              {editing ? (
                                 <div className="space-y-4">
                                   <div>
-                                    <Label htmlFor="edit-entry-keywords" className="text-white">Keywords</Label>
+                                    <Label className="text-white">Keywords</Label>
                                     <Input
-                                      id="edit-entry-keywords"
                                       value={editingEntryKeywords}
-                                      onChange={(e) => setEditingEntryKeywords(e.target.value)}
+                                      onChange={onEditingKeywordsChange}
                                       className="bg-gray-800/50 border-gray-600 text-white"
                                     />
+                                    <div className="text-xs text-gray-400 mt-1">{getKeywordsArray(editingEntryKeywords).length} / 10 keywords (max 5 words each)</div>
                                   </div>
                                   <div>
-                                    <Label htmlFor="edit-entry-text" className="text-white">Entry Text</Label>
+                                    <Label className="text-white">Entry Text</Label>
                                     <Textarea
-                                      id="edit-entry-text"
                                       value={editingEntryText}
-                                      onChange={(e) => setEditingEntryText(e.target.value)}
+                                      onChange={onEditingEntryTextChange}
                                       rows={4}
                                       className="bg-gray-800/50 border-gray-600 text-white"
                                     />
+                                    <div className="text-xs text-gray-400 mt-1">{editingEntryText.length} / 1000 characters</div>
                                   </div>
                                   <div className="flex gap-2">
-                                    <Button onClick={handleUpdateEntry} size="sm">
+                                    <Button onClick={id ? handleUpdateEntry : () => { handleUpdateStagedEntry(entryId, editingEntryKeywords, editingEntryText); setEditingEntryId(null); }} size="sm">
                                       <Save className="w-4 h-4 mr-1" />
                                       Save
                                     </Button>
@@ -666,56 +779,36 @@ export default function WorldInfoEditor() {
                               ) : (
                                 <div className="flex items-start justify-between gap-4">
                                   <div className="flex-1 space-y-3">
-                                    <div className="flex flex-wrap gap-2">
-                                      {entry.keywords.map((keyword, idx) => (
-                                        <Badge key={idx} variant="secondary" className="text-xs font-medium">
-                                          {keyword}
+                                    <div className="flex flex-wrap gap-1">
+                                      {(entry.keywords || []).map((k: string, i: number) => (
+                                        <Badge key={i} variant="outline" className="text-xs border-gray-500 text-gray-300">
+                                          {k}
                                         </Badge>
                                       ))}
+                                      {entry.keywords.length === 0 && (
+                                        <span className="text-xs text-red-400">No keywords</span>
+                                      )}
                                     </div>
-                                    <p className="text-sm leading-relaxed whitespace-pre-wrap text-gray-300">{entry.entry_text}</p>
+                                    <p className="text-sm text-gray-300 whitespace-pre-wrap">
+                                      {entry.entry_text || <span className="text-red-400">No text</span>}
+                                    </p>
                                   </div>
                                   <div className="flex gap-1 flex-shrink-0">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => startEditingEntry(entry)}
-                                    >
+                                    <Button size="sm" variant="ghost" onClick={() => { setEditingEntryId(entryId); setEditingEntryKeywords(processKeywordsInput(entry.keywords.join(', '))); setEditingEntryText((entry.entry_text || '').slice(0,1000)); }} className="text-gray-400 hover:text-white p-2">
                                       <Edit2 className="w-4 h-4" />
                                     </Button>
-                                    <AlertDialog>
-                                      <AlertDialogTrigger asChild>
-                                        <Button size="sm" variant="ghost">
-                                          <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                      </AlertDialogTrigger>
-                                      <AlertDialogContent>
-                                        <AlertDialogHeader>
-                                          <AlertDialogTitle>Delete Entry</AlertDialogTitle>
-                                          <AlertDialogDescription>
-                                            Are you sure you want to delete this world info entry? This action cannot be undone.
-                                          </AlertDialogDescription>
-                                        </AlertDialogHeader>
-                                        <AlertDialogFooter>
-                                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                          <AlertDialogAction
-                                            onClick={() => handleDeleteEntry(entry.id)}
-                                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                          >
-                                            Delete
-                                          </AlertDialogAction>
-                                        </AlertDialogFooter>
-                                      </AlertDialogContent>
-                                    </AlertDialog>
+                                    <Button size="sm" variant="ghost" onClick={() => id ? handleDeleteEntry(entryId) : handleDeleteStagedEntry(entryId)} className="text-gray-400 hover:text-red-400 p-2">
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
                                   </div>
                                 </div>
                               )}
                             </CardContent>
                           </Card>
-                        ))
-                      )}
-                    </div>
-                  )}
+                        );
+                      })
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </div>

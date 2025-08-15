@@ -15,7 +15,10 @@ import {
   BookOpen,
   Search,
   Download,
-  Edit2
+  Edit2,
+  Trash2,
+  Globe,
+  Lock
 } from 'lucide-react';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
 import { supabase } from '@/integrations/supabase/client';
@@ -264,6 +267,50 @@ export default function PublicWorldInfoProfile() {
     navigate(`/world-info-editor/${id}`);
   };
 
+  const handleExport = () => {
+    if (!worldInfo) return;
+    const exportData = {
+      name: worldInfo.name,
+      description: worldInfo.short_description,
+      entries: worldInfo.entries.map(e => ({ keywords: e.keywords, entry_text: e.entry_text }))
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${worldInfo.name.replace(/[^a-z0-9-_]/gi,'_') || 'world_info'}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast({ title: 'Exported', description: 'World info downloaded.' });
+  };
+
+  const handleDelete = async () => {
+    if (!worldInfo || !isOwner) return;
+    try {
+      const { error } = await supabase.from('world_infos').delete().eq('id', worldInfo.id);
+      if (error) throw error;
+      toast({ title: 'Deleted', description: 'World info deleted.' });
+      navigate('/world-info');
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to delete world info', variant: 'destructive' });
+    }
+  };
+
+  const toggleVisibility = async () => {
+    if (!worldInfo || !isOwner) return;
+    const newVisibility = worldInfo.visibility === 'public' ? 'private' : 'public';
+    try {
+      const { error } = await supabase.from('world_infos').update({ visibility: newVisibility }).eq('id', worldInfo.id);
+      if (error) throw error;
+      setWorldInfo(prev => prev ? { ...prev, visibility: newVisibility } : prev);
+      toast({ title: 'Visibility Updated', description: `World info is now ${newVisibility}.` });
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to update visibility', variant: 'destructive' });
+    }
+  };
+
   // Filter entries based on search term
   const filteredEntries = worldInfo?.entries.filter(entry => {
     if (!entriesSearchQuery) return true;
@@ -340,8 +387,35 @@ export default function PublicWorldInfoProfile() {
                     <Heart className={`mr-2 h-4 w-4 ${worldInfo.isLiked ? 'fill-current' : ''}`} />
                     {worldInfo.likesCount} Likes
                   </Button>
-                  {/* Only show Add to Collection if user is not the owner */}
-                  {!isOwner && (
+                  <Button
+                    onClick={handleExport}
+                    variant="outline"
+                    className="border-gray-600"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Export
+                  </Button>
+                  {isOwner && (
+                    <Button
+                      onClick={toggleVisibility}
+                      variant="outline"
+                      className="border-gray-600"
+                    >
+                      {worldInfo.visibility === 'public' ? <Globe className="mr-2 h-4 w-4" /> : <Lock className="mr-2 h-4 w-4" />}
+                      {worldInfo.visibility === 'public' ? 'Make Private' : 'Make Public'}
+                    </Button>
+                  )}
+                  {/* Collection toggle for non-owner or remove for owner */}
+                  {isOwner ? (
+                    <Button
+                      onClick={handleDelete}
+                      variant="destructive"
+                      className=""
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete
+                    </Button>
+                  ) : (
                     <Button
                       onClick={handleUseLorebook}
                       variant={worldInfo.isUsed ? "outline" : "secondary"}

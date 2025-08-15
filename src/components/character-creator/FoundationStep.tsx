@@ -161,8 +161,8 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
         {/* Mobile: Stack vertically, Desktop: Side by side */}
         <div className="flex flex-col lg:grid lg:grid-cols-2 gap-6 lg:gap-12 min-h-[calc(100vh-200px)]">
           
-          {/* Avatar Upload Section */}
-          <div className="flex flex-col items-center space-y-4 md:space-y-6 order-1 lg:order-none">
+          {/* Avatar Upload Section (moved to first on mobile by order-0) */}
+          <div className="flex flex-col items-center space-y-4 md:space-y-6 order-0 lg:order-none">
             <div className="text-center mb-4 md:mb-6">
               <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Avatar</h2>
               <p className="text-gray-400 text-sm md:text-base">Give your character a face</p>
@@ -265,8 +265,8 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
             </div>
           </div>
 
-          {/* Core Details Section - Order first on mobile */}
-          <div className="flex flex-col justify-center space-y-4 md:space-y-6 order-0 lg:order-none">
+          {/* Core Details Section - now second on mobile (order-1) */}
+          <div className="flex flex-col justify-center space-y-4 md:space-y-6 order-1 lg:order-none">
             <div className="mb-4 md:mb-6">
               <h2 className="text-xl md:text-2xl font-bold text-white mb-2">Core Details</h2>
               <p className="text-gray-400 text-sm md:text-base">Define your character's identity</p>

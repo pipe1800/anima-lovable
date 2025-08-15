@@ -18,7 +18,7 @@ export async function fetchCharacterData(
 ): Promise<Character> {
   const { data: character, error } = await supabaseAdmin
     .from('character_definitions')
-    .select('character_id, personality_summary, description, scenario, greeting')
+    .select('character_id, name, personality_summary, description, scenario, greeting')
     .eq('character_id', characterId)
     .single();
 
@@ -30,6 +30,7 @@ export async function fetchCharacterData(
   // Return character with id field mapped correctly
   return {
     id: character.character_id, // Map character_id to id
+    name: character.name, // newly included for template replacement
     personality_summary: character.personality_summary,
     description: character.description,
     scenario: character.scenario,
@@ -686,25 +687,14 @@ export async function updateChatLastActivity(
     .eq('id', characterId);
 }
 
-export function replaceTemplates(content: string, context: TemplateContext): string {
-  if (!content || typeof content !== 'string') return content || '';
-  
-  const { userName = 'User', charName = 'Character' } = context;
-  
-  try {
-    const replaced = content
+export function buildTemplateReplacer(context: TemplateContext) {
+  return (content: string): string => {
+    if (!content) return content;
+    const { userName = 'User', charName = 'Character' } = context;
+    return content
       .replace(/\{\{user\}\}/g, userName)
       .replace(/\{\{char\}\}/g, charName);
-    
-    if (content !== replaced) {
-      console.log('🔄 Template replaced:', content.substring(0, 50) + '...', '->', replaced.substring(0, 50) + '...');
-    }
-    
-    return replaced;
-  } catch (error) {
-    console.error('Template replacement error:', error);
-    return content;
-  }
+  };
 }
 
 export async function getLatestAutoSummary(

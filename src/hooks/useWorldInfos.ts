@@ -23,7 +23,7 @@ export interface WorldInfoWithDetails {
 
 // Optimized query to get user world infos with all related data in one go
 const fetchUserWorldInfos = async (userId: string): Promise<WorldInfoWithDetails[]> => {
-  // Single optimized query with joins to get all data at once
+  // Include all visibilities for owner
   const { data: worldInfosWithCounts, error } = await supabase
     .from('world_infos')
     .select(`
@@ -143,12 +143,10 @@ export const useUserWorldInfoCollection = () => {
 // Single world info with entries
 export const useWorldInfoWithEntries = (worldInfoId: string | null) => {
   const { user } = useAuth();
-  
   return useQuery({
-    queryKey: ['world-info-with-entries', worldInfoId],
+    queryKey: ['world-info-with-entries', worldInfoId, user?.id],
     queryFn: async () => {
-      if (!worldInfoId || !user) throw new Error('Missing required data');
-      
+      if (!worldInfoId) throw new Error('Missing required data');
       const { data: worldInfo, error: worldInfoError } = await supabase
         .from('world_infos')
         .select(`
@@ -157,19 +155,21 @@ export const useWorldInfoWithEntries = (worldInfoId: string | null) => {
         `)
         .eq('id', worldInfoId)
         .single();
-
-      if (worldInfoError || !worldInfo) {
-        throw new Error('Failed to fetch world info');
+      if (worldInfoError || !worldInfo) throw new Error('Failed to fetch world info');
+      // Enforce visibility: if private and not owner, block
+      if (worldInfo.visibility === 'private' && (!user || worldInfo.creator_id !== user.id)) {
+        throw new Error('World info not public');
       }
-
-      return {
-        ...worldInfo,
-        entries: worldInfo.world_info_entries || []
-      };
+      return { ...worldInfo, entries: worldInfo.world_info_entries || [] };
     },
-    enabled: !!worldInfoId && !!user,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 10, // 10 minutes
+    enabled: !!worldInfoId,
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
+    retry: (failureCount, error) => {
+      const msg = (error as any)?.message || '';
+      if (msg.includes('not public')) return false;
+      return failureCount < 3;
+    }
   });
 };
 
@@ -210,10 +210,7 @@ export const usePublicWorldInfos = () => {
         `)
         .eq('visibility', 'public')
         .order('created_at', { ascending: false });
-
-      if (error) {
-        throw new Error('Failed to fetch public world infos');
-      }
+      if (error) throw new Error('Failed to fetch public world infos');
 
       if (!worldInfos || worldInfos.length === 0) return [];
 

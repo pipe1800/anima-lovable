@@ -501,7 +501,7 @@ Delay category: ${delayCategory}`;
           
           for (const entry of relevantEntries) {
             systemPrompt += `\n\n- Keywords: ${entry.keywords.join(', ')}`;
-            systemPrompt += `\n  Content: ${entry.entry_text}`;
+            systemPrompt += `\n  Content: ${replaceTemplatesFn(entry.entry_text)}`; // template replacement applied
           }
           
           systemPrompt += '\n[/WORLD INFORMATION]';
@@ -597,7 +597,7 @@ Delay category: ${delayCategory}`;
             });
             
             systemPrompt += `\n\n- Date: ${memoryDate}`;
-            systemPrompt += `\n  Summary: ${memory.summary_content}`;
+            systemPrompt += `\n  Summary: ${replaceTemplatesFn(memory.summary_content)}`; // template replacement applied
             systemPrompt += `\n  Keywords: ${memory.trigger_keywords.join(', ')}`;
           }
           
@@ -643,7 +643,7 @@ Delay category: ${delayCategory}`;
         withTokenDelta('summary', () => {
           systemPrompt += '\n\n[CONVERSATION SUMMARY]';
           systemPrompt += '\nMost recent conversation summary:';
-          systemPrompt += `\n${latestSummary.summary_content}`;
+          systemPrompt += `\n${replaceTemplatesFn(latestSummary.summary_content)}`; // template replacement applied
           systemPrompt += '\n[/CONVERSATION SUMMARY]';
           systemPrompt += '\nUse this summary to maintain continuity with previous conversations.';
         });

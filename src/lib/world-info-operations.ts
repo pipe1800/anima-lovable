@@ -248,20 +248,28 @@ export const deleteWorldInfo = async (worldInfoId: string) => {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('Not authenticated');
 
-    const { error } = await supabase
+    // Ensure ownership
+    const { data: worldInfo } = await supabase
       .from('world_infos')
-      .delete()
+      .select('id, creator_id')
       .eq('id', worldInfoId)
-      .eq('creator_id', user.user.id); // Ensure user owns the world info
+      .single();
 
-    if (error) {
-      console.error('Error deleting world info:', error);
-      throw new Error('Failed to delete world info');
+    if (!worldInfo || worldInfo.creator_id !== user.user.id) {
+      throw new Error('Not authorized to delete');
     }
 
-    return true;
+    // Delete dependent rows first (entries, tags links, likes, users collection)
+    await supabase.from('world_info_entries').delete().eq('world_info_id', worldInfoId);
+    await supabase.from('world_info_tags').delete().eq('world_info_id', worldInfoId);
+    await supabase.from('world_info_user_likes').delete().eq('world_info_id', worldInfoId);
+    await supabase.from('world_info_users').delete().eq('world_info_id', worldInfoId);
+
+    const { error } = await supabase.from('world_infos').delete().eq('id', worldInfoId);
+    if (error) throw error;
+    return { success: true };
   } catch (error) {
-    console.error('Error in deleteWorldInfo:', error);
+    console.error('Error deleting world info:', error);
     throw error;
   }
 };
@@ -807,49 +815,44 @@ export const removeWorldInfoFromCollection = async (worldInfoId: string) => {
 
 export const importWorldInfo = async (jsonData: any, userId: string) => {
   try {
-    // Validate the JSON structure
-    if (!jsonData.name || (!jsonData.entries && !jsonData.data?.entries)) {
-      throw new Error('Invalid world info format. Expected "name" and "entries" fields.');
-    }
+    // Be permissive: only require syntactically valid JSON. Name & entries optional.
+    const worldInfoName: string =
+      jsonData?.name ||
+      jsonData?.data?.name ||
+      `Imported World Info ${new Date().toISOString()}`;
 
-    // Handle both direct entries and nested data.entries structure
-    const entries = jsonData.entries || jsonData.data?.entries || {};
-    
-    // Create the world info
+    // Support multiple possible locations / shapes for entries
+    const rawEntries = jsonData?.entries || jsonData?.data?.entries || [];
+
+    // Create the world info first (user can edit later)
     const worldInfo = await createWorldInfo({
-      name: jsonData.name || jsonData.data?.name || 'Imported World Info',
-      short_description: jsonData.description || jsonData.data?.description || '',
+      name: worldInfoName,
+      short_description: jsonData?.description || jsonData?.data?.description || '',
       visibility: 'private'
     });
 
-    // Process entries - handle both array and object formats
+    // Normalize entries into an array of objects with keywords + entry_text
     let entriesArray: any[] = [];
-    
-    if (Array.isArray(entries)) {
-      entriesArray = entries;
-    } else if (typeof entries === 'object') {
-      // Convert object entries to array
-      entriesArray = Object.entries(entries).map(([key, value]: [string, any]) => ({
-        keywords: value.keys || value.keywords || [key],
-        entry_text: value.content || value.entry || value.text || value.entry_text || ''
+    if (Array.isArray(rawEntries)) {
+      entriesArray = rawEntries;
+    } else if (rawEntries && typeof rawEntries === 'object') {
+      entriesArray = Object.entries(rawEntries).map(([k, v]: [string, any]) => ({
+        keywords: v?.keys || v?.key || v?.keywords || [k],
+        entry_text: v?.entry_text || v?.content || v?.entry || v?.text || ''
       }));
     }
 
-    // Add each entry to the world info
     for (const entry of entriesArray) {
-      if (entry.keywords || entry.keys) {
-        const keywords = Array.isArray(entry.keywords || entry.keys) 
-          ? (entry.keywords || entry.keys) 
-          : [entry.keywords || entry.keys];
-        
-        const entryText = entry.entry_text || entry.content || entry.text || entry.entry || '';
-        
-        if (keywords.length > 0 && entryText) {
-          await addWorldInfoEntry(worldInfo.id, {
-            keywords: keywords.filter(k => k && k.trim()),
+      // Accept keywords / keys / key (string or array)
+      const rawKeywords = entry.keywords || entry.keys || entry.key;
+      const keywords = Array.isArray(rawKeywords) ? rawKeywords : rawKeywords ? [rawKeywords] : [];
+      const entryText = entry.entry_text || entry.content || entry.text || entry.entry || '';
+
+      if (keywords.length > 0 && entryText) {
+        await addWorldInfoEntry(worldInfo.id, {
+          keywords: keywords.filter((k: string) => k && k.trim()),
             entry_text: entryText
-          });
-        }
+        });
       }
     }
 
@@ -858,4 +861,21 @@ export const importWorldInfo = async (jsonData: any, userId: string) => {
     console.error('Error importing world info:', error);
     throw error;
   }
+};
+
+export const exportWorldInfo = (worldInfo: { name: string; short_description?: string | null; entries: Array<{ keywords: string[]; entry_text: string }> }) => {
+  const data = {
+    name: worldInfo.name,
+    description: worldInfo.short_description || '',
+    entries: worldInfo.entries
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${worldInfo.name.replace(/[^a-z0-9-_]/gi, '_') || 'world_info'}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 };

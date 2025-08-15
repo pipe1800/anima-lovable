@@ -43,11 +43,18 @@ import {
 } from '@/hooks/useWorldInfos';
 
 type WorldInfo = WorldInfoWithDetails & {
-  entries?: Tables<'world_info_entries'>[];
   avatar_url?: string;
+  entries?: WorldInfoEntry[]; // added optional for local handling
 };
 
-type WorldInfoEntry = Tables<'world_info_entries'>;
+// type WorldInfoEntry = Tables<'world_info_entries'>;
+
+// Temporary loose typing
+type WorldInfoEntry = {
+  id: string;
+  keywords: string[];
+  entry_text: string;
+};
 
 type Tag = {
   id: number;
@@ -507,67 +514,42 @@ const WorldInfoCreator = () => {
       const text = await file.text();
       const jsonData = JSON.parse(text);
       
-      // Validate JSON structure
-      if (!jsonData.name || !jsonData.entries) {
-        toast({
-          title: "Error",
-          description: "Invalid JSON format. Expected 'name' and 'entries' fields.",
-          variant: "destructive"
-        });
-        return;
+      const rawEntries = jsonData.entries || jsonData.data?.entries || [];
+      let entriesArray: any[] = [];
+      if (Array.isArray(rawEntries)) {
+        entriesArray = rawEntries;
+      } else if (rawEntries && typeof rawEntries === 'object') {
+        entriesArray = Object.entries(rawEntries).map(([k, v]: [string, any]) => ({
+          keywords: v?.keys || v?.key || v?.keywords || [],
+          entry_text: v?.entry_text || v?.content || v?.entry || v?.text || ''
+        }));
       }
+      if (entriesArray.length > 100) entriesArray = entriesArray.slice(0,100);
 
-      // Create the main World Info record
-      const newWorldInfo = await createWorldInfo({
-        name: jsonData.name,
-        short_description: jsonData.description || '',
-        visibility: 'private'
-      });
-
-      // Import entries
-      const entries = Object.entries(jsonData.entries);
-      for (const [key, value] of entries) {
-        if (typeof value === 'object' && value !== null) {
-          const entry = value as any;
-          if (entry.keys && entry.content) {
-            await addWorldInfoEntry(newWorldInfo.id, {
-              keywords: Array.isArray(entry.keys) ? entry.keys : [entry.keys],
-              entry_text: entry.content
-            });
+      navigate('/world-info-editor', {
+        state: {
+          importedWorldInfo: {
+            name: jsonData.name || jsonData.data?.name || '',
+            description: jsonData.description || jsonData.data?.description || '',
+            entries: entriesArray
           }
         }
-      }
-
-      // Refresh the list and select the new World Info
-      await refetchWorldInfos();
-      
-      // Get the detailed info and set it as selected
-      const detailedInfo: WorldInfo = { 
-        ...newWorldInfo, 
-        entries: [],
-        entriesCount: 0,
-        likesCount: 0,
-        tags: []
-      };
-      setSelectedWorldInfo(detailedInfo);
+      });
 
       toast({
-        title: "Success",
-        description: `Successfully imported "${jsonData.name}" with ${entries.length} entries`
+        title: "Imported",
+        description: `Staged ${entriesArray.length} entries for editing`
       });
     } catch (error) {
-      console.error('Error importing file:', error);
+      console.error('Error staging import:', error);
       toast({
         title: "Error",
-        description: "Failed to import file. Please check the format and try again.",
+        description: "Failed to read JSON.",
         variant: "destructive"
       });
     } finally {
       setImporting(false);
-      // Reset file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value='';
     }
   };
 

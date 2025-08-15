@@ -151,112 +151,47 @@ export default function ImprovedWorldInfoPage() {
       setImporting(true);
       setImportProgress(0);
       setImportStatus('reading');
-      setImportedEntriesCount({ current: 0, total: 0 });
 
-      // Read file
       const text = await file.text();
-      setImportProgress(20);
-      
       const jsonData = JSON.parse(text);
-      
-      // Validate JSON structure
-      if (!jsonData.name || (!jsonData.entries && !jsonData.data?.entries)) {
-        toast({
-          title: "Error",
-          description: "Invalid JSON format. Expected 'name' and 'entries' fields.",
-          variant: "destructive"
-        });
-        setImporting(false);
-        setImportStatus('idle');
-        return;
-      }
 
-      setImportStatus('creating');
-      setImportProgress(30);
-
-      // Create the main World Info record
-      const newWorldInfo = await createWorldInfo({
-        name: jsonData.name || jsonData.data?.name || 'Imported World Info',
-        short_description: jsonData.description || jsonData.data?.description || '',
-        visibility: 'private'
-      });
-
-      setImportProgress(40);
-      setImportStatus('entries');
-
-      // Handle both direct entries and nested data.entries structure
-      const entries = jsonData.entries || jsonData.data?.entries || {};
+      const rawEntries = jsonData.entries || jsonData.data?.entries || [];
       let entriesArray: any[] = [];
-      
-      if (Array.isArray(entries)) {
-        entriesArray = entries;
-      } else if (typeof entries === 'object') {
-        // Convert object entries to array
-        entriesArray = Object.entries(entries).map(([key, value]: [string, any]) => ({
-          keywords: value.keys || value.keywords || [key],
-          entry_text: value.content || value.entry || value.text || value.entry_text || ''
+      if (Array.isArray(rawEntries)) {
+        entriesArray = rawEntries;
+      } else if (rawEntries && typeof rawEntries === 'object') {
+        entriesArray = Object.entries(rawEntries).map(([k, v]: [string, any]) => ({
+          keywords: v?.keys || v?.key || v?.keywords || [],
+          entry_text: v?.entry_text || v?.content || v?.entry || v?.text || ''
         }));
       }
+      if (entriesArray.length > 100) entriesArray = entriesArray.slice(0,100);
 
-      setImportedEntriesCount({ current: 0, total: entriesArray.length });
-      
-      // Import entries with progress tracking
-      for (let i = 0; i < entriesArray.length; i++) {
-        const entry = entriesArray[i];
-        
-        if (entry.keywords || entry.keys) {
-          const keywords = Array.isArray(entry.keywords || entry.keys) 
-            ? (entry.keywords || entry.keys) 
-            : [entry.keywords || entry.keys];
-          
-          const entryText = entry.entry_text || entry.content || entry.text || entry.entry || '';
-          
-          if (keywords.length > 0 && entryText) {
-            await addWorldInfoEntry(newWorldInfo.id, {
-              keywords: keywords.filter(k => k && k.trim()),
-              entry_text: entryText
-            });
+      navigate('/world-info-editor', {
+        state: {
+          importedWorldInfo: {
+            name: jsonData.name || jsonData.data?.name || '',
+            description: jsonData.description || jsonData.data?.description || '',
+            entries: entriesArray
           }
         }
-        
-        // Update progress
-        const entryProgress = 40 + ((i + 1) / entriesArray.length) * 50;
-        setImportProgress(entryProgress);
-        setImportedEntriesCount({ current: i + 1, total: entriesArray.length });
-      }
-
-      setImportProgress(100);
-      setImportStatus('complete');
-
-      // Invalidate queries to refresh the list
-      await queryClient.invalidateQueries({ queryKey: ['user-world-infos'] });
-      
-      toast({
-        title: "Import Successful",
-        description: `Successfully imported "${newWorldInfo.name}" with ${entriesArray.length} entries`
       });
 
-      // Close dialog after a short delay
-      setTimeout(() => {
-        setImporting(false);
-        setImportStatus('idle');
-        setImportProgress(0);
-      }, 1500);
-
-    } catch (error) {
-      console.error('Import error:', error);
       toast({
-        title: "Import Failed",
-        description: error instanceof Error ? error.message : "Failed to import world info. Please check the file format.",
+        title: "Imported",
+        description: `Staged ${entriesArray.length} entries for editing`
+      });
+    } catch (error) {
+      console.error('Error staging import:', error);
+      toast({
+        title: "Error",
+        description: "Failed to read JSON.",
         variant: "destructive"
       });
+    } finally {
       setImporting(false);
       setImportStatus('idle');
-      setImportProgress(0);
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value='';
     }
   };
 

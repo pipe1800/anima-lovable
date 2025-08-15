@@ -82,53 +82,78 @@ function extractKeywordsFromMessages(messages: any[], characterName: string): st
 export async function generateMessageBasedSummary(
   messagesToSummarize: any[],
   character: any,
-  openRouterKey: string
+  openRouterKey: string,
+  previousSummary?: string
 ): Promise<{ title: string, content: string, keywords: string[] }> {
   if (!messagesToSummarize || messagesToSummarize.length === 0) {
     throw new Error('No messages to summarize');
   }
 
-  // Build conversation text for summarization
+  // Build conversation text for summarization (compact speaker labels to avoid name spam)
   const conversationText = messagesToSummarize
     .sort((a, b) => a.message_order - b.message_order)
     .map(msg => {
-      const speaker = msg.is_ai_message ? character.name || 'Character' : 'User';
-      return `${speaker}: ${msg.content}`;
+      const speaker = msg.is_ai_message ? (character.name || 'Character') : 'User';
+      return `${speaker}> ${msg.content}`; // single delimiter form helps reduce repetition in model output
     })
-    .join('\n\n');
+    .join('\n');
 
   // Calculate AI sequence range for display
   const aiMessagesInRange = messagesToSummarize.filter(m => m.is_ai_message);
-  const rangeStart = aiMessagesInRange.length > 0 && aiMessagesInRange[0].aiSequenceNumber 
-    ? Math.min(...aiMessagesInRange.map(m => m.aiSequenceNumber).filter(n => n != null))
+  const rangeStart = (aiMessagesInRange.length > 0 && aiMessagesInRange[0].aiSequenceNumber)
+    ? Math.min(...aiMessagesInRange.map(m => m.aiSequenceNumber).filter((n: number | null | undefined) => n != null) as number[])
     : 1;
-  const rangeEnd = aiMessagesInRange.length > 0 && aiMessagesInRange[0].aiSequenceNumber 
-    ? Math.max(...aiMessagesInRange.map(m => m.aiSequenceNumber).filter(n => n != null))
+  const rangeEnd = (aiMessagesInRange.length > 0 && aiMessagesInRange[0].aiSequenceNumber)
+    ? Math.max(...aiMessagesInRange.map(m => m.aiSequenceNumber).filter((n: number | null | undefined) => n != null) as number[])
     : aiMessagesInRange.length;
 
-  const summaryPrompt = `You are a professional conversation analyst. Create a detailed summary of the following roleplay conversation.
+  // Trim previous summary to avoid token bloat
+  let prior = '';
+  if (previousSummary) {
+    const MAX_PRIOR_CHARS = 6000; // ~1500 tokens approx
+    prior = previousSummary.slice(0, MAX_PRIOR_CHARS);
+  }
 
-CRITICAL: You MUST respond with ONLY a valid JSON object in this EXACT format (no other text):
+  const hasPrior = !!prior;
+
+  const summaryPrompt = `You are an expert long-term memory curator for an AI character. You will produce a CUMULATIVE conversation summary that integrates NEW messages into the existing narrative without restating unchanged background details.
+
+STRICT OUTPUT: Return ONLY a single valid JSON object. NO backticks. NO extra commentary.
+
+REPETITION RULES:
+- Mention the character's name exactly once in the first sentence, then switch to pronouns or role descriptors.
+- Do NOT repeatedly write "User"; use pronouns after first reference.
+- Avoid re-listing unchanged facts already in prior summary unless they are directly modified.
+
+GOALS:
+1. Integrate new developments succinctly while preserving continuity.
+2. Capture persistent facts worth remembering for future context.
+3. Identify emotional / relational trajectory shifts.
+4. Surface unresolved threads or goals.
+5. Extract high-signal retrieval keywords (for future triggering) – no names of user or character.
+
+${hasPrior ? `PRIOR_CUMULATIVE_SUMMARY (context only, do NOT copy verbatim; update it):\n${prior}\n` : 'NO PRIOR SUMMARY: create an initial comprehensive baseline.'}
+
+NEW MESSAGES (AI range ${rangeStart}-${rangeEnd}):\n${conversationText}
+
+REQUIRED JSON SHAPE:
 {
-  "title": "Brief descriptive title (5-10 words)",
-  "summary": "Your 4-paragraph summary text goes here. Write exactly 4 detailed paragraphs with at least 500 words total. First paragraph: Set the scene and introduce the main participants. Second paragraph: Describe the key events and interactions in detail. Third paragraph: Detail emotional developments and relationship dynamics. Fourth paragraph: Highlight important revelations and future implications.",
-  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
- }
+  "title": "5-10 word descriptive snapshot (avoid repeating character name)",
+  "summary": "3-5 paragraphs (400-650 words) cumulative narrative: 1) situational framing & continuity, 2) key new interactions & actions, 3) emotional + relational dynamics shifts, 4) newly revealed facts / world details & implications, 5) forward-looking hooks (merge with 4 if concise). No bullet lists inside paragraphs.",
+  "new_developments": ["List ONLY novel events or changes introduced in this batch"],
+  "facts_to_remember": ["Stable enduring facts that should persist beyond this scene"],
+  "unresolved_threads": ["Outstanding goals, mysteries, tensions to monitor"],
+  "emotional_dynamics": "1-2 sentences summarizing evolving emotional / relational state",
+  "entities": {"people": ["(excluding user/character)"], "locations": [], "objects": [], "concepts": []},
+  "keywords": ["8-12 lowercase trigger terms or short multi-word phrases (2-3 words) focusing on distinctive topics, objects, events, emotions, locations, unresolved plot hooks; exclude character & user names, exclude generic words like conversation, chat, talk, feelings, character, user."]
+}
 
-Keywords MUST be:
-- 5-10 specific, meaningful words from THIS conversation
-- Include locations, objects, emotions, activities
-- DO NOT include the user's name or the character's name
-- NO generic terms like: chat, roleplay, character, conversation, talk, discussion
-- Extract from the actual dialogue content
-
-Character: ${character.name}
-Message Range: AI messages ${rangeStart}-${rangeEnd}
-
-CONVERSATION TO SUMMARIZE:
-${conversationText}
-
-REMEMBER: Return ONLY the JSON object, no additional text or formatting.`;
+VALIDATION:
+- Arrays may be empty but must exist.
+- keywords length 8-12.
+- No markdown code fences.
+- Use double quotes only.
+`;
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -143,7 +168,7 @@ REMEMBER: Return ONLY the JSON object, no additional text or formatting.`;
           { role: 'user', content: summaryPrompt }
         ],
         max_tokens: MAX_SUMMARY_TOKENS,
-        temperature: 0.3 // Lower temperature for consistent formatting
+        temperature: 0.35
       }),
     });
 
@@ -152,14 +177,13 @@ REMEMBER: Return ONLY the JSON object, no additional text or formatting.`;
       throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
     }
 
-    const data = await response.json();
-    const summaryText = data.choices?.[0]?.message?.content?.trim();
+    const data: any = await response.json();
+    const summaryText = data?.choices?.[0]?.message?.content?.trim();
 
     if (!summaryText) {
       throw new Error('No summary content returned from API');
     }
 
-    // FIXED: Better parsing function
     return parseSummaryResponse(summaryText, messagesToSummarize, character.name || 'Character');
     
   } catch (error) {
@@ -173,57 +197,54 @@ REMEMBER: Return ONLY the JSON object, no additional text or formatting.`;
  */
 function parseSummaryResponse(response: string, messages: any[], characterName: string): { title: string, content: string, keywords: string[] } {
   try {
-    // Clean the response - remove any markdown formatting
     let cleanedResponse = response.trim();
-    
-    // Remove code blocks if present
     cleanedResponse = cleanedResponse
       .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/i, '')
       .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '');
-    
-    // Try to extract JSON from the response
-    const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON structure found');
-    }
-    
-    const parsed = JSON.parse(jsonMatch[0]);
-    
-    // Validate structure
-    if (parsed.summary && parsed.keywords && Array.isArray(parsed.keywords)) {
-      // Filter and clean keywords
-      const cleanKeywords = parsed.keywords
-        .filter((k: string) => k && k.trim().length > 0)
-        .map((k: string) => k.trim().toLowerCase())
-        // Exclude character name
-        .filter((k: string) => k !== String(characterName || '').toLowerCase())
-        .slice(0, 10);
-      
+      .replace(/```$/i, '');
+
+    const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}$/);
+    if (!jsonMatch) throw new Error('No JSON structure found');
+
+    const parsed: any = JSON.parse(jsonMatch[0]);
+
+    if (parsed) {
+      // Build enriched content
+      let baseSummary = parsed.summary || parsed.cumulative_summary || '';
+      const sections: string[] = [];
+      if (parsed.new_developments?.length) sections.push('NEW DEVELOPMENTS:\n- ' + parsed.new_developments.join('\n- '));
+      if (parsed.facts_to_remember?.length) sections.push('FACTS TO REMEMBER:\n- ' + parsed.facts_to_remember.join('\n- '));
+      if (parsed.unresolved_threads?.length) sections.push('UNRESOLVED THREADS:\n- ' + parsed.unresolved_threads.join('\n- '));
+      if (parsed.emotional_dynamics) sections.push('EMOTIONAL DYNAMICS: ' + parsed.emotional_dynamics);
+      if (parsed.entities) {
+        const entLines: string[] = [];
+        for (const k of ['people','locations','objects','concepts']) {
+          if (Array.isArray(parsed.entities[k]) && parsed.entities[k].length) entLines.push(`${k.toUpperCase()}: ${parsed.entities[k].join(', ')}`);
+        }
+        if (entLines.length) sections.push('ENTITIES:\n' + entLines.join('\n'));
+      }
+      const fullContent = [baseSummary.trim(), ...sections].filter(Boolean).join('\n\n');
+
+      const cleanedRawKeywords: string[] = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+      const cleanKeywords = cleanedRawKeywords
+        .map(k => (k || '').trim().toLowerCase())
+        .filter(k => k && k !== String(characterName).toLowerCase() && k !== 'user' && k.length < 64)
+        .slice(0, 12);
+
       return {
         title: parsed.title || `${characterName} Conversation Summary`,
-        content: parsed.summary, // Use the summary field, not the full JSON
-        keywords: cleanKeywords.length > 0 ? cleanKeywords : extractKeywordsFromMessages(messages, characterName)
+        content: fullContent,
+        keywords: cleanKeywords.length ? cleanKeywords : extractKeywordsFromMessages(messages, characterName)
       };
     }
   } catch (error) {
-    // Silent fallback
+    console.warn('⚠️ Enhanced summary parse failed, falling back:', error instanceof Error ? error.message : error);
   }
-  
-  // Fallback: Extract meaningful keywords from conversation
+  // fallback unchanged behavior
   const extractedKeywords = extractKeywordsFromMessages(messages, characterName);
-  
-  // Try to extract summary content if JSON parsing failed
-  let summaryContent = response;
-  const summaryMatch = response.match(/"summary"\s*:\s*"([^"]+)"/);
-  if (summaryMatch) {
-    summaryContent = summaryMatch[1];
-  }
-  
   return {
     title: `${characterName} Conversation Summary`,
-    content: summaryContent,
+    content: response,
     keywords: extractedKeywords
   };
 }
@@ -330,10 +351,26 @@ export async function triggerMessageBasedSummary(
       });
 
       // Generate summary
+      // Fetch previous summary content (if any) for cumulative context
+      let previousSummaryContent: string | undefined;
+      try {
+        const { data: prev } = await supabase
+          .from('character_memories')
+          .select('summary_content')
+            .eq('chat_id', chatId)
+            .eq('character_id', characterId)
+            .eq('is_auto_summary', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        previousSummaryContent = prev?.summary_content;
+      } catch {}
+
       const summaryData = await generateMessageBasedSummary(
         sortedMessages,
         character,
-        openRouterKey
+        openRouterKey,
+        previousSummaryContent
       );
 
       if (!summaryData) {

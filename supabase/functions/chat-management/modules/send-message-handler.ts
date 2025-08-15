@@ -36,7 +36,7 @@ import {
   updateMessageContent,
   saveCharacterMessage,
   updateChatLastActivity,
-  replaceTemplates
+  buildTemplateReplacer
 } from './database.ts';
 import {
   buildSystemPrompt,
@@ -165,7 +165,7 @@ export async function handleSendMessage(
     // ============================================================================
     const templateContext: TemplateContext = {
       userName: selectedPersona?.name || userProfile?.username || 'User',
-      charName: character.personality_summary?.split(' ')[0] || 'Character'
+      charName: character.name || 'Character'
     };
 
     const currentContext = await fetchCurrentContext(user.id, chatId, characterId, supabase);
@@ -263,7 +263,7 @@ export async function handleSendMessage(
       templateContext,
       currentContext,
       selectedPersona,
-      replaceTemplatesFn: (content) => replaceTemplates(content, templateContext),
+      replaceTemplatesFn: buildTemplateReplacer(templateContext),
       supabase,
       worldInfoEntries,
       userMessage: message,
@@ -353,7 +353,7 @@ export async function handleSendMessage(
              templateContext,
              currentContext,
              selectedPersona,
-             replaceTemplatesFn: (content) => replaceTemplates(content, templateContext),
+             replaceTemplatesFn: buildTemplateReplacer(templateContext),
              supabase: supabaseAdmin,
              worldInfoEntries,
              userMessage: message,

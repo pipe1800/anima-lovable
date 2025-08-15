@@ -8,6 +8,8 @@
 import type { 
   Character
 } from '../types/streaming-interfaces.ts';
+import { buildTemplateReplacer } from './database.ts';
+import type { TemplateContext } from '../types/streaming-interfaces.ts';
 
 // Define missing types locally
 interface CharacterData extends Character {
@@ -149,14 +151,9 @@ export function createTemplateReplacer(
   profile: UserProfile | null,
   character: CharacterData
 ) {
-  return (content: string): string => {
-    if (!content) return content;
-    
-    const userName = persona?.name || profile?.username || 'User';
-    const charName = character.name || 'Character';
-    
-    return content
-      .replace(/\{\{user\}\}/g, userName)
-      .replace(/\{\{char\}\}/g, charName);
+  const context: TemplateContext = {
+    userName: persona?.name || profile?.username || 'User',
+    charName: character.name || 'Character'
   };
+  return buildTemplateReplacer(context);
 }
