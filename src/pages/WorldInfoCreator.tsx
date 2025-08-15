@@ -1076,10 +1076,7 @@ const WorldInfoCreator = () => {
                         {/* Add New Entry Form */}
                         <Card className="bg-gray-700/50 border-gray-600">
                           <CardContent className="p-4">
-                            <h4 className="font-semibold mb-4 flex items-center gap-2 text-white">
-                              <Plus className="w-4 h-4" />
-                              Add New Entry
-                            </h4>
+                            {/* Removed title heading as requested */}
                             <div className="space-y-4">
                               <div>
                                 <Label htmlFor="new-entry-keywords" className="text-white">Keywords (comma-separated)</Label>
@@ -1274,10 +1271,7 @@ const WorldInfoCreator = () => {
                         {/* Add New Entry Form */}
                         <Card className="bg-gray-700/50 border-gray-600">
                           <CardContent className="p-4">
-                            <h4 className="font-semibold mb-4 flex items-center gap-2 text-white">
-                              <Plus className="w-4 h-4" />
-                              Add New Entry
-                            </h4>
+                            {/* Removed title heading as requested */}
                             <div className="space-y-4">
                               <div>
                                 <Label htmlFor="new-entry-keywords" className="text-white">Keywords (comma-separated)</Label>
