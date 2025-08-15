@@ -138,6 +138,19 @@ export default function WorldInfo() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
+      {/* Mobile action bar */}
+      <div className="md:hidden sticky top-0 z-40 bg-[#1a1a2e] border-b border-gray-700/50 px-4 py-2 flex items-center justify-between">
+        <h1 className="text-white font-semibold text-base">World Infos</h1>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={handleStartCreate} className="bg-primary px-3 py-1 h-8 text-xs font-medium">
+            <Plus className="w-4 h-4" />
+          </Button>
+          <Button size="sm" onClick={handleImportFile} variant="outline" className="h-8 px-3 py-1 text-xs border-primary/50 text-primary">
+            <Upload className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
           {/* Standardized TopBar */}

@@ -289,17 +289,19 @@ const WorldInfoCreator = () => {
     setShowWorldInfoList(false);
   };
 
-  const guardedNavigate = (path: string) => {
+  const navigateRef = React.useRef(navigate);
+  navigateRef.current = navigate;
+  const guardedNav = (to: string) => {
     if (isDirty) {
-      setPendingNav(path);
+      setPendingNav(to);
       setShowExitDialog(true);
     } else {
-      navigate(path);
+      navigateRef.current(to);
     }
   };
 
   const handleViewWorldInfo = (worldInfo: WorldInfo) => {
-    guardedNavigate(`/world-info-view/${worldInfo.id}`);
+    guardedNav(`/world-info-view/${worldInfo.id}`);
   };
 
   const handleUpdateWorldInfo = async () => {
@@ -620,7 +622,7 @@ const WorldInfoCreator = () => {
   };
 
   const handleBackToList = () => {
-    setShowWorldInfoList(true);
+    guardedNav('/world-info');
     setSelectedWorldInfo(null);
     setIsCreating(false);
     setIsEditing(false);
@@ -1437,7 +1439,7 @@ const WorldInfoCreator = () => {
             <p className="text-gray-300">You have unsaved changes. Continue editing or discard?</p>
             <div className="flex justify-end gap-3 mt-4">
               <Button variant="outline" className="border-gray-600" onClick={() => setShowExitDialog(false)}>Continue Editing</Button>
-              <Button className="bg-red-600 hover:bg-red-700" onClick={() => { setShowExitDialog(false); if (pendingNav) navigate(pendingNav); }}>Discard</Button>
+              <Button className="bg-red-600 hover:bg-red-700" onClick={() => { setShowExitDialog(false); if (pendingNav) navigateRef.current(pendingNav); }}>Discard</Button>
             </div>
           </DialogContent>
         </Dialog>

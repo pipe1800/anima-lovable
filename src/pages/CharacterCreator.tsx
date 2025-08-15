@@ -98,6 +98,34 @@ const CharacterCreator = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  // Popstate navigation guard for unsaved changes (legacy) -- superseded by router blocker
+  // useEffect kept for hard refresh; primary interception via useBlocker below
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        history.pushState(null, '', window.location.href);
+        setExitDestination('/dashboard');
+        setShowExitDialog(true);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isDirty]);
+
+  // Router navigation interception (manual) – wrap navigate
+  const realNavigate = navigate;
+  const navigateRef = React.useRef(realNavigate);
+  navigateRef.current = realNavigate;
+  const guardedNavigate = React.useCallback((to: string) => {
+    if (isDirty) {
+      setExitDestination(to);
+      setShowExitDialog(true);
+    } else {
+      navigateRef.current(to);
+    }
+  }, [isDirty]);
+
   const handleFileChange = async (file: File) => {
     if (!file || file.type !== 'image/png') {
       toast({ title: 'Invalid File', description: 'Please select a PNG character card file.', variant: 'destructive' });
@@ -236,13 +264,8 @@ const CharacterCreator = () => {
   };
 
   const handleExit = useCallback((destination: string = '/dashboard') => {
-    if (isDirty) {
-      setExitDestination(destination);
-      setShowExitDialog(true);
-    } else {
-      navigate(destination);
-    }
-  }, [isDirty, navigate]);
+    guardedNavigate(destination);
+  }, [guardedNavigate]);
 
   const handleSaveCharacter = () => {
     const tokenInfo = estimateCreatorTokenUsage(characterData);
@@ -476,7 +499,9 @@ const CharacterCreator = () => {
           </p>
           <div className="flex justify-end space-x-3 mt-4">
             <Button
-              onClick={() => setShowExitDialog(false)}
+              onClick={() => {
+                setShowExitDialog(false);
+              }}
               variant="outline"
               className="border-gray-600"
             >
@@ -485,7 +510,7 @@ const CharacterCreator = () => {
             <Button
               onClick={() => {
                 setShowExitDialog(false);
-                navigate(exitDestination);
+                navigateRef.current(exitDestination);
               }}
               className="bg-red-600 hover:bg-red-700"
             >
@@ -495,7 +520,7 @@ const CharacterCreator = () => {
               onClick={() => {
                 saveCharacter().then(() => {
                   setShowExitDialog(false);
-                  navigate(exitDestination);
+                  navigateRef.current(exitDestination);
                 });
               }}
               className="bg-purple-600 hover:bg-purple-700"

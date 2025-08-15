@@ -219,37 +219,56 @@ export default function ImprovedWorldInfoPage() {
         title="World Info"
         subtitle="Discover and manage lorebooks"
         rightContent={
-          activeTab === 'my-world-info' && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleImportFile}
-                disabled={importing}
-                className="hidden sm:flex border-gray-600 text-gray-300"
-              >
-                {importing ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Upload className="w-4 h-4 mr-2" />
-                )}
-                Import
-              </Button>
-              <Button
-                onClick={() => navigate('/world-info/create')}
-                className="bg-[#FF7A00] hover:bg-[#FF7A00]/80"
-                size="sm"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                <span className="hidden sm:inline">Create New</span>
-                <span className="sm:hidden">New</span>
-              </Button>
-            </div>
-          )
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImportFile}
+              disabled={importing}
+              className="border-gray-600 text-gray-300"
+            >
+              {importing ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4 mr-2" />
+              )}
+              Import
+            </Button>
+            <Button
+              onClick={() => navigate('/world-info/create')}
+              className="bg-[#FF7A00] hover:bg-[#FF7A00]/80"
+              size="sm"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              <span className="hidden sm:inline">Create New</span>
+              <span className="sm:hidden">New</span>
+            </Button>
+          </div>
         }
       />
 
       <div className="container mx-auto px-4 py-6">
+        {/* Mobile action buttons above tabs */}
+        <div className="sm:hidden flex justify-end gap-2 mb-4">
+          <Button
+            size="sm"
+            onClick={handleImportFile}
+            disabled={importing}
+            variant="outline"
+            className="h-8 px-3 py-1 text-xs border-gray-600 text-gray-300 flex items-center gap-1"
+          >
+            {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            <span>Import</span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => navigate('/world-info/create')}
+            className="h-8 px-3 py-1 text-xs bg-[#FF7A00] hover:bg-[#FF7A00]/80 flex items-center gap-1"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Create</span>
+          </Button>
+        </div>
         {/* Large, prominent tabs */}
         <div className="mb-8">
           <Tabs value={activeTab} onValueChange={setActiveTab}>

@@ -229,6 +229,17 @@ export default function WorldInfoEditor() {
     }
   }, [editName, editDescription, selectedTags, stagedEntries, id, worldInfoDetails, worldInfoTags]);
 
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const guardedNavigateDirect = (to: string) => {
+    if (isDirty) {
+      setPendingNavigation(to);
+      setShowExitDialog(true);
+    } else {
+      navigateRef.current(to);
+    }
+  };
+
   const guardedNavigate = (path: string) => {
     if (isDirty) {
       setPendingNavigation(path);
@@ -239,7 +250,7 @@ export default function WorldInfoEditor() {
   };
 
   const handleBackToList = () => {
-    guardedNavigate('/world-info');
+    guardedNavigateDirect('/world-info');
   };
 
   const handleAvatarSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -580,6 +591,19 @@ export default function WorldInfoEditor() {
   // Reintroduce isEntryInvalid helper
   const isEntryInvalid = (entry: any) => ((entry.keywords || []).length === 0 || !(entry.entry_text || '').trim());
 
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        history.pushState(null, '', window.location.href);
+        setPendingNavigation('/world-info');
+        setShowExitDialog(true);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isDirty]);
+
   return (
     <div className="min-h-screen bg-[#121212]">
       <main className="flex-1 overflow-hidden">
@@ -870,7 +894,7 @@ export default function WorldInfoEditor() {
             <p className="text-gray-300">You have unsaved changes. Continue editing or discard?</p>
             <div className="flex justify-end gap-3 mt-4">
               <Button variant="outline" className="border-gray-600" onClick={() => setShowExitDialog(false)}>Continue Editing</Button>
-              <Button className="bg-red-600 hover:bg-red-700" onClick={() => { setShowExitDialog(false); if (pendingNavigation) navigate(pendingNavigation); }}>Discard</Button>
+              <Button className="bg-red-600 hover:bg-red-700" onClick={() => { setShowExitDialog(false); if (pendingNavigation) navigateRef.current(pendingNavigation); }}>Discard</Button>
             </div>
           </DialogContent>
         </Dialog>
