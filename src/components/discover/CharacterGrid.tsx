@@ -213,7 +213,11 @@ export function CharacterGrid({
               contentVisibility: 'auto',
               containIntrinsicSize: '320px 512px'
             }}
-            onClick={() => window.innerWidth < 768 ? handleViewCharacter(character) : undefined}
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                handleViewCharacter(character);
+              }
+            }}
             onMouseEnter={() => prefetchCharacterDetails(character.id)}
           >
             <CardContent className="p-0 relative h-full">
@@ -233,8 +237,8 @@ export function CharacterGrid({
                 </h3>
               </div>
 
-              {/* Action Buttons - Center - Hidden on mobile */}
-              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 hidden sm:flex">
+              {/* Action Buttons - desktop only */}
+              <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
                 <div className="flex flex-col gap-2">
                   <Button
                     onClick={(e) => {

@@ -634,7 +634,6 @@ export default function CharacterProfile() {
                     onClick={handleStartChat}
                     disabled={isCreating}
                     className="flex-1 sm:flex-initial h-14 sm:h-11 text-base sm:text-sm"
-                    size="lg"
                   >
                     {isCreating ? (
                       <>
@@ -648,6 +647,18 @@ export default function CharacterProfile() {
                       </>
                     )}
                   </Button>
+
+                  {/* Mobile-only Edit button for owners */}
+                  {isOwner && (
+                    <Button
+                      onClick={() => navigate('/character-creator', { state: { editingCharacter: character, isEditing: true } })}
+                      variant="outline"
+                      className="sm:hidden h-12 text-base"
+                    >
+                      <Edit2 className="w-4 h-4 mr-2" />
+                      Edit Character
+                    </Button>
+                  )}
 
                   <div className="flex gap-2">
                     <Button

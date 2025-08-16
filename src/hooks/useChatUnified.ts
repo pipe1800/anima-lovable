@@ -143,24 +143,20 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           filter: `chat_id=eq.${chatId}`
         },
         (payload) => {
-          // ✅ SIMPLIFIED: Basic real-time conflict prevention
-          if (isStreamingRef.current) {
-            addDebugInfo('Skipping real-time update - streaming active');
+          // ✅ Refined: allow initial greeting (message_order === 1) to invalidate even during streaming
+          if (isStreamingRef.current && !(payload.new.is_ai_message && payload.new.message_order === 1)) {
+            addDebugInfo('Skipping real-time update - streaming active (non-greeting)');
             return;
           }
-          
           if (payload.new.is_placeholder || !payload.new.content?.trim()) {
             addDebugInfo('Skipping empty/placeholder message');
             return;
           }
-          
           addDebugInfo(`New message: ${payload.new.is_ai_message ? 'AI' : 'User'}`);
-          
-          // ✅ SIMPLIFIED: Single invalidation with minimal delay
           setTimeout(() => {
             invalidationHelpers.invalidateChatData(queryClient, chatId);
             addDebugInfo('Real-time chat data invalidated');
-          }, 100); // Single, consistent delay
+          }, 100);
         }
       )
       .on(

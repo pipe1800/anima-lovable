@@ -1,9 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
-// Persistent in-memory dismissal store (session scoped)
-const greetingDismissedStore: Set<string> = (globalThis as any).__chatGreetingDismissedStore || new Set<string>();
-if (!(globalThis as any).__chatGreetingDismissedStore) {
-  (globalThis as any).__chatGreetingDismissedStore = greetingDismissedStore;
-}
+// Removed greetingDismissedStore to ensure greeting selection UI always appears for each new chat session
 
 import { Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -84,7 +80,7 @@ const ChatInterface = ({
 
   // Phase machine: 'greeting' -> (user submits) 'creating' -> (after first user message queued) 'active'
   type ChatPhase = 'greeting' | 'creating' | 'active';
-  const initialPhase: ChatPhase = existingChatId || greetingDismissedStore.has(character.id) ? 'active' : 'greeting';
+  const initialPhase: ChatPhase = existingChatId ? 'active' : 'greeting';
   const [chatPhase, setChatPhase] = useState<ChatPhase>(initialPhase);
   const chatPhaseRef = useRef(chatPhase); useEffect(()=>{ chatPhaseRef.current = chatPhase; }, [chatPhase]);
 
@@ -92,9 +88,8 @@ const ChatInterface = ({
   useEffect(() => {
     if (existingChatId && chatPhase !== 'active') {
       setChatPhase('active');
-      greetingDismissedStore.add(character.id);
     }
-  }, [existingChatId, chatPhase, character.id]);
+  }, [existingChatId, chatPhase]);
 
   // Ensure that once currentChatId is set we always leave pre-chat (legacy flag) and phase >= creating
   useEffect(() => {
@@ -117,7 +112,10 @@ const ChatInterface = ({
 
   // Variant navigation state per AI message id (post-creation regenerations)
   const [variantIndexByMessage, setVariantIndexByMessage] = useState<Record<string, number>>({});
-  const [selectedGreetingIndex, setSelectedGreetingIndex] = useState(0); // Added missing state for greeting carousel
+  // const [selectedGreetingIndex, setSelectedGreetingIndex] = useState(0); // replaced with stable ref-based init to avoid flicker
+  const initialGreetingIndexRef = useRef<number | null>(null);
+  const [selectedGreetingIndex, setSelectedGreetingIndex] = useState<number>(() => 0); // will be set once variants known
+  const [greetingPersisted, setGreetingPersisted] = useState(false);
 
   // Greeting carousel controls (pre-chat)
   const handleNextGreeting = () => {
@@ -148,9 +146,13 @@ const ChatInterface = ({
   }, [toast, log]);
 
   // Auto-select a random greeting index initially if multiple (purely visual pre-chat)
+  // REPLACED: previous effect caused flicker (initial 0 then random). Now we set once after variants resolved.
   useEffect(() => {
-    if (!existingChatId && greetingVariants.length > 1) {
-      setSelectedGreetingIndex(Math.floor(Math.random() * greetingVariants.length));
+    if (initialGreetingIndexRef.current === null) {
+      initialGreetingIndexRef.current = (!existingChatId && greetingVariants.length > 1)
+        ? Math.floor(Math.random() * greetingVariants.length)
+        : 0;
+      setSelectedGreetingIndex(initialGreetingIndexRef.current);
     }
   }, [existingChatId, greetingVariants]);
 
@@ -191,10 +193,13 @@ const ChatInterface = ({
     if (!messagesLoaded || !currentChatId) return;
     if (hasUserMessage) return; // user already sent a message -> locked
     const firstAi = messages.find((m: any) => (m.is_ai_message === true) || (m.role === 'assistant') || (m.isUser === false));
-    if (!firstAi || typeof firstAi.content !== 'string') return;
-    const idx = greetingVariants.indexOf(firstAi.content);
-    if (idx >= 0 && idx !== selectedGreetingIndex) setSelectedGreetingIndex(idx);
-  }, [messagesLoaded, messages, currentChatId, hasUserMessage, greetingVariants, selectedGreetingIndex]);
+    if (firstAi && typeof firstAi.content === 'string') {
+      // Mark greeting persisted once we see first AI message
+      if (!greetingPersisted) setGreetingPersisted(true);
+      const idx = greetingVariants.indexOf(firstAi.content);
+      if (idx >= 0 && idx !== selectedGreetingIndex) setSelectedGreetingIndex(idx);
+    }
+  }, [messagesLoaded, messages, currentChatId, hasUserMessage, greetingVariants, selectedGreetingIndex, greetingPersisted]);
 
   // ✅ FIX: Safety cleanup for stuck streaming states
   useEffect(() => {
@@ -266,36 +271,42 @@ const ChatInterface = ({
   }, [currentChatId, isPreChatPhase, log]);
 
   // Helper: create chat with chosen greeting THEN send first user message (reordered after dependencies)
-  const waitForGreetingPersistence = useCallback(async (newChatId: string, timeoutMs = 600) => {
-    // Shortened to reduce flicker window
+  const waitForGreetingPersistence = useCallback(async (newChatId: string, timeoutMs = 2000) => {
     const start = Date.now();
+    let attempt = 0;
     while (Date.now() - start < timeoutMs) {
+      attempt++;
       try {
         const { data } = await supabase
           .from('messages')
-          .select('id')
-          .eq('chat_id', newChatId)
-          .eq('is_ai_message', true)
-          .order('message_order', { ascending: true })
-          .limit(1);
-        if (data && data.length > 0) return true;
+          .select('content,is_ai_message,message_order')
+            .eq('chat_id', newChatId)
+            .eq('is_ai_message', true)
+            .order('message_order', { ascending: true })
+            .limit(1);
+        if (data && data.length > 0) {
+          const msg = data[0];
+          // Accept if first AI message present; optionally verify it matches a known greeting variant
+          if (!greetingPersisted) setGreetingPersisted(true);
+          if (greetingVariants.length === 0 || greetingVariants.includes(msg.content) || msg.message_order === 1) {
+            return { found: true, content: msg.content };
+          }
+        }
       } catch {}
-      await new Promise(r => setTimeout(r, 120));
+      // Exponential-ish backoff within bounds
+      const delay = Math.min(100 + attempt * 75, 300);
+      await new Promise(r => setTimeout(r, delay));
     }
-    return false;
-  }, []);
+    return { found: false };
+  }, [greetingVariants, greetingPersisted]);
 
   const createChatAndSendFirstMessage = useCallback(async (userMessage: string) => {
     if (!user || currentChatId || sendingFirstMessage) return;
-    // Transition immediately so UI can deterministically hide greeting
-    setChatPhase('creating');
     setSendingFirstMessage(true);
-    setHasSentFirstUserMessage(true);
-    greetingDismissedStore.add(character.id);
     try {
       setIsCreatingChat(true);
+      log.info('[FLOW 1] Deferred chat creation start');
       const chosenGreeting = greetingVariants[selectedGreetingIndex] || null;
-      log.info('[FLOW 1] Deferred chat creation start', { chosenGreetingIndex: selectedGreetingIndex });
       const { chatId: newChatId } = await createChat({
         characterId: character.id,
         characterName: character.name,
@@ -307,25 +318,40 @@ const ChatInterface = ({
       window.history.replaceState(null, '', `/chat/${character.id}/${newChatId}`);
       onChatCreated?.(newChatId);
 
-      // (Optional) brief wait for greeting persistence
-      await waitForGreetingPersistence(newChatId);
+      // Wait for greeting persistence (extended)
+      const result = await waitForGreetingPersistence(newChatId);
+      if (!result.found) {
+        log.warn('⚠️ Greeting not detected within wait window; proceeding anyway');
+      } else {
+        log.info('✅ Greeting persistence confirmed');
+      }
+
+      // Force refetch of messages now that greeting should exist
+      try {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(newChatId) });
+      } catch {}
+
+      // Poll cache until greeting message visible or timeout (avoid flicker)
+      const visibilityStart = Date.now();
+      const visibilityTimeout = 1500; // ms
+      let greetingVisible = false;
+      while (Date.now() - visibilityStart < visibilityTimeout) {
+        const cache: any = queryClient.getQueryData(queryKeys.chat.messages(newChatId));
+        const msgs = cache?.pages?.flatMap((p: any) => p.messages) || [];
+        if (msgs.some((m: any) => m.isUser === false && (!greetingVariants.length || greetingVariants.includes(m.content)))) {
+          greetingVisible = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+      if (!greetingVisible) log.warn('⚠️ Greeting not visible in cache before first user message send');
+
+      // Now hide greeting bubble deterministically only after attempt to show persisted greeting
+      if (chatPhase === 'greeting') {
+        setChatPhase('creating');
+      }
 
       log.info('[FLOW 3] Sending first user message');
-      // Optimistic user message insert BEFORE streaming to prevent bubble revival based on message heuristics
-      try {
-        const key = queryKeys.chat.messages(newChatId);
-        const previous: any = queryClient.getQueryData(key);
-        const optimisticId = `user-first-${Date.now()}`;
-        const optimisticMessage = { id: optimisticId, content: userMessage, isUser: true, is_ai_message: false, message_order: 1 }; // order not critical, will be realigned
-        if (previous?.pages?.length) {
-          queryClient.setQueryData(key, (old: any) => {
-            const first = old.pages[0];
-            const updatedFirst = { ...first, messages: [...first.messages, optimisticMessage] };
-            return { ...old, pages: [updatedFirst, ...old.pages.slice(1)] };
-          });
-        }
-      } catch (e) { log.debug('Optimistic first user message insert skipped', e); }
-
       await sendMessage(
         userMessage,
         currentAddonSettings,
@@ -337,12 +363,12 @@ const ChatInterface = ({
       log.info('[FLOW 4] First user message dispatched');
       setIsFirstMessage(false);
       setChatPhase('active');
+      setHasSentFirstUserMessage(true);
       onFirstMessage();
     } catch (error: any) {
       log.error('[FLOW X] Error in deferred creation path', error);
       const chatError = handleChatError(error, 'creating chat', false);
       toast({ title: 'Error', description: chatError.message, variant: 'destructive' });
-      // Rollback phase only if chat not created
       if (!currentChatId) {
         setChatPhase('greeting');
         setHasSentFirstUserMessage(false);
@@ -351,7 +377,7 @@ const ChatInterface = ({
       setIsCreatingChat(false);
       setSendingFirstMessage(false);
     }
-  }, [user, currentChatId, sendingFirstMessage, greetingVariants, selectedGreetingIndex, log, character.id, character.name, propSelectedPersonaId, createChat, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, onChatCreated, waitForGreetingPersistence, sendMessage, queryClient, onFirstMessage, toast]);
+  }, [user, currentChatId, sendingFirstMessage, greetingVariants, selectedGreetingIndex, log, character.id, character.name, propSelectedPersonaId, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, onChatCreated, sendMessage, onFirstMessage, toast, chatPhase, waitForGreetingPersistence, queryClient]);
 
   // Sync tracked context with parent
   useEffect(() => {
@@ -442,13 +468,9 @@ const ChatInterface = ({
     e.preventDefault();
     if (!inputValue.trim() || !user) return;
     if (!currentChatId) {
-      // Dismiss greeting deterministically before async
-      if (chatPhase === 'greeting') {
-        setChatPhase('creating');
-        greetingDismissedStore.add(character.id);
-      }
       const firstMsg = inputValue;
       setInputValue('');
+      // Keep greeting bubble visible (disabled) until persistence; do not pre-dismiss
       await createChatAndSendFirstMessage(firstMsg);
       return;
     }
@@ -485,7 +507,6 @@ const ChatInterface = ({
       if (isFirstMessage) {
         setIsFirstMessage(false);
         setHasSentFirstUserMessage(true);
-        greetingDismissedStore.add(character.id);
         setChatPhase('active');
         onFirstMessage();
       }
@@ -832,7 +853,7 @@ const ChatInterface = ({
               )}
             </div>
             <div className="mt-1 ml-1 text-[10px] text-gray-500">
-              {isCreatingChat || sendingFirstMessage ? 'Creating chat…' : hasMultipleGreetings ? 'Pick a greeting (optional) and send your first message to start.' : 'Send your first message to start the chat.'}
+              {(isCreatingChat || sendingFirstMessage) && 'Creating chat…'}
             </div>
           </div>
         </div>
@@ -842,16 +863,13 @@ const ChatInterface = ({
 
   // Pre-chat (and pre-first-user-message) greeting bubble styled like AI message
   const renderGreetingBubble = () => {
-    // New gating: ONLY phase === 'greeting'
     if (chatPhase !== 'greeting') return null;
-    if (greetingDismissedStore.has(character.id)) return null; // safety
+    // Removed greetingDismissedStore.has(character.id) check so greeting always shows for new chat
     if (greetingVariants.length === 0) return null;
     const currentGreeting = greetingVariants[selectedGreetingIndex] || '';
-    const helperText = isCreatingChat || sendingFirstMessage
+    const helperText = (isCreatingChat || sendingFirstMessage)
       ? 'Creating chat…'
-      : (hasMultipleGreetings
-          ? 'Pick a greeting (optional) and send your first message to start.'
-          : 'Send your first message to start the chat.');
+      : '';
     // Derive name font size (message font +4px like normal AI messages)
     const tailwindFontPx: Record<string, number> = { 'text-sm': 14, 'text-base': 16, 'text-lg': 18 };
     const messageFontSizePx = tailwindFontPx[fontSizeClass] || 16;
@@ -863,7 +881,7 @@ const ChatInterface = ({
     if (avatarStyle === 'classic' || avatarStyle === 'portrait' || avatarStyle === 'side-banner') {
       return (
         <div className="px-4 pt-4">
-          <div className="flex items-start gap-3 max-w-3xl">
+          <div className="flex items-start gap-3 max-w-3xl w-[90vw] sm:w-auto mx-auto">
             {showCharacterAvatar && (
               <div className="hidden sm:flex w-16 h-16 rounded-full overflow-hidden bg-[#1f1f1f] border border-white/10 items-center justify-center shrink-0">
                 <img
@@ -936,7 +954,7 @@ const ChatInterface = ({
                 </div>
               )}
               <div className="mt-1 ml-1 text-[10px] text-gray-500">
-                {isCreatingChat || sendingFirstMessage ? 'Creating chat…' : hasMultipleGreetings ? 'Pick a greeting (optional) and send your first message to start.' : 'Send your first message to start the chat.'}
+                {(isCreatingChat || sendingFirstMessage) && 'Creating chat…'}
               </div>
             </div>
           </div>
@@ -951,7 +969,7 @@ const ChatInterface = ({
       const avatarMask = 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)';
       return (
         <div className="px-4 pt-4">
-          <div className="flex items-start gap-3 max-w-5xl">
+          <div className="flex items-start gap-3 max-w-5xl w-[90vw] sm:w-auto mx-auto">
             <div
               className={`relative ${fontSizeClass} border border-white/10 rounded-lg shadow-md w-full overflow-hidden`}
               style={{ backgroundColor: bgColor }}
@@ -977,7 +995,7 @@ const ChatInterface = ({
               <div className="clear-both" />
             </div>
             <div className="mt-1 ml-1 text-[10px] text-gray-500">
-              {helperText}
+              {(isCreatingChat || sendingFirstMessage) && 'Creating chat…'}
             </div>
           </div>
           {hasMultipleGreetings && (

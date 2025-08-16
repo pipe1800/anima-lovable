@@ -66,6 +66,9 @@ export function DashboardContent() {
   const { startChat, isCreating } = useChatCreation();
   const queryClient = useQueryClient();
   
+  // Track active dashboard tab to conditionally render actions (e.g., Delete All on recent chats only)
+  const [activeTab, setActiveTab] = useState<string>('recent-chats');
+  
   // IMPORTANT: Initialize currentPage from sessionStorage to persist across renders
   const [currentPage, setCurrentPage] = useState(() => {
     const savedPage = sessionStorage.getItem('dashboard-current-page');
@@ -586,8 +589,8 @@ export function DashboardContent() {
               <CardTitle className="text-white text-xl sm:text-2xl">Your Dashboard</CardTitle>
               
               <div className="flex items-center space-x-2">
-                {/* Delete All Button - Dev Only */}
-                {process.env.NODE_ENV === 'development' && totalChats > 0 && (
+                {/* Delete All Button - Dev Only and only on Recent Chats tab */}
+                {process.env.NODE_ENV === 'development' && totalChats > 0 && activeTab === 'recent-chats' && (
                   <Button
                     onClick={() => setShowDeleteAllDialog(true)}
                     size="sm"
@@ -625,7 +628,7 @@ export function DashboardContent() {
             </div>
           </CardHeader>
           <CardContent className="p-3 sm:p-6">
-              <Tabs defaultValue="recent-chats" className="w-full">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-3 bg-[#121212] border border-gray-700/50 h-auto">
                   <TabsTrigger 
                     value="recent-chats" 
@@ -721,6 +724,7 @@ export function DashboardContent() {
                         <Card
                           key={character.id}
                           className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group"
+                          onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
                         >
                           <CardContent className="p-0 relative h-full">
                             <img 
@@ -730,8 +734,8 @@ export function DashboardContent() {
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
                             
-                            {/* Middle section with stacked buttons - hidden by default, shown on hover */}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            {/* Middle section with stacked buttons - desktop only */}
+                            <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
                               <div className="flex flex-col gap-2">
                                 <Button
                                   size="sm"
@@ -763,7 +767,7 @@ export function DashboardContent() {
                               </div>
                             </div>
                             
-                            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4">
+                            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 z-20 pointer-events-none">
                               <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate" title={character.name}>
                                 {character.name}
                               </h3>
@@ -818,6 +822,7 @@ export function DashboardContent() {
                         <Card
                           key={character.id}
                           className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group"
+                          onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
                         >
                           <CardContent className="p-0 relative h-full">
                             <img 
@@ -827,8 +832,8 @@ export function DashboardContent() {
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
                             
-                            {/* Middle section with stacked buttons - hidden by default, shown on hover */}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            {/* Middle section with stacked buttons - desktop only */}
+                            <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
                               <div className="flex flex-col gap-2">
                                 <Button
                                   size="sm"
@@ -851,7 +856,7 @@ export function DashboardContent() {
                               </div>
                             </div>
                             
-                            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4">
+                            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 z-20 pointer-events-none">
                               <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate" title={character.name}>
                                 {character.name}
                               </h3>
