@@ -60,7 +60,7 @@ const HeroSection = () => {
             </Link>
 
             {/* Trust Indicators */}
-            <p className="text-xs sm:text-sm text-gray-400 mt-4 sm:mt-6">
+            <p className="text-sm sm:text-base text-gray-400 mt-4 sm:mt-6">
               ✓ Free to Start ✓ No Credit Card Required ✓ Join 100K+ Users
             </p>
           </div>

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -66,7 +65,7 @@ export function DiscoverControlBar({
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
               {/* Sort By Dropdown */}
               <div className="flex items-center space-x-2">
-                <span className="text-gray-400 font-medium text-xs sm:text-sm whitespace-nowrap">Sort:</span>
+                <span className="text-gray-400 font-medium text-sm sm:text-base whitespace-nowrap">Sort:</span>
                 <Select value={sortBy} onValueChange={setSortBy}>
                   <SelectTrigger className="w-full sm:w-[140px] h-10 sm:h-12 bg-[#1a1a2e] border-gray-600/50 text-white text-sm">
                     <SelectValue />
@@ -140,7 +139,7 @@ export function DiscoverControlBar({
 
           {/* Active Filters Display - mobile optimized */}
           <div className="flex flex-wrap items-center space-x-2 mt-3 sm:mt-4">
-            <span className="text-gray-500 text-xs sm:text-sm">Active filters:</span>
+            <span className="text-gray-500 text-sm sm:text-base">Active filters:</span>
             <div className="flex flex-wrap gap-1 sm:gap-2">
               {filterBy !== 'all' && (
                 <span className="px-2 sm:px-3 py-1 bg-[#FF7A00]/20 text-[#FF7A00] rounded-full text-xs font-medium border border-[#FF7A00]/30">

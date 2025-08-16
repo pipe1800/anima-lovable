@@ -632,21 +632,21 @@ export function DashboardContent() {
                 <TabsList className="grid w-full grid-cols-3 bg-[#121212] border border-gray-700/50 h-auto">
                   <TabsTrigger 
                     value="recent-chats" 
-                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-xs sm:text-sm py-2"
+                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
                   >
                     <span className="hidden sm:inline">Recent Chats</span>
                     <span className="sm:hidden">Chats</span>
                   </TabsTrigger>
                   <TabsTrigger 
                     value="my-characters" 
-                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-xs sm:text-sm py-2"
+                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
                   >
                     <span className="hidden sm:inline">My Characters</span>
                     <span className="sm:hidden">Characters</span>
                   </TabsTrigger>
                   <TabsTrigger 
                     value="favorites" 
-                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-xs sm:text-sm py-2"
+                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
                   >
                     Favorites
                   </TabsTrigger>
@@ -773,12 +773,12 @@ export function DashboardContent() {
                               </h3>
                               
                               {character.tagline && (
-                                <p className="text-gray-400 text-xs sm:text-sm mb-2 truncate">
+                                <p className="text-gray-400 text-sm sm:text-base mb-2 truncate">
                                   {character.tagline}
                                 </p>
                               )}
                               
-                              <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-xs sm:text-sm">
+                              <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-sm sm:text-base">
                                 <div className="flex items-center space-x-1 text-gray-300">
                                   <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
                                   <span>{formatNumberWithK(character.totalChats)}</span>
@@ -862,16 +862,16 @@ export function DashboardContent() {
                               </h3>
                               
                               {character.tagline && (
-                                <p className="text-gray-400 text-xs sm:text-sm mb-2 truncate">
+                                <p className="text-gray-400 text-sm sm:text-base mb-2 truncate">
                                   {character.tagline}
                                 </p>
                               )}
                               
-                              <p className="text-gray-400 text-xs mb-2">
+                              <p className="text-gray-400 text-sm mb-2">
                                 by @{character.creatorUsername}
                               </p>
                               
-                              <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-xs sm:text-sm">
+                              <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-sm sm:text-base">
                                 <div className="flex items-center space-x-1 text-gray-300">
                                   <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
                                   <span>{formatNumberWithK(character.totalChats)}</span>

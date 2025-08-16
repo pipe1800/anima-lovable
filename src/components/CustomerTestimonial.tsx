@@ -1,4 +1,3 @@
-
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Lock, Shield, Database } from "lucide-react";
 
@@ -50,7 +49,7 @@ const CustomerTestimonial = () => {
               <div className="w-12 h-12 sm:w-14 sm:h-14 mb-2 flex items-center justify-center">
                 <Shield className="w-8 h-8 sm:w-10 sm:h-10 text-gray-300 group-hover:text-white transition-colors" />
               </div>
-              <p className="text-xs sm:text-sm text-gray-400 font-medium">AES-256 Encryption</p>
+              <p className="text-sm sm:text-base text-gray-400 font-medium">AES-256 Encryption</p>
             </div>
 
             {/* Private & Secure Badge */}
@@ -58,7 +57,7 @@ const CustomerTestimonial = () => {
               <div className="w-12 h-12 sm:w-14 sm:h-14 mb-2 flex items-center justify-center">
                 <Lock className="w-8 h-8 sm:w-10 sm:h-10 text-gray-300 group-hover:text-white transition-colors" />
               </div>
-              <p className="text-xs sm:text-sm text-gray-400 font-medium">Private & Secure</p>
+              <p className="text-sm sm:text-base text-gray-400 font-medium">Private & Secure</p>
             </div>
 
             {/* No Data Training Badge */}
@@ -66,7 +65,7 @@ const CustomerTestimonial = () => {
               <div className="w-12 h-12 sm:w-14 sm:h-14 mb-2 flex items-center justify-center">
                 <Database className="w-8 h-8 sm:w-10 sm:h-10 text-gray-300 group-hover:text-white transition-colors" />
               </div>
-              <p className="text-xs sm:text-sm text-gray-400 font-medium">No Data Training</p>
+              <p className="text-sm sm:text-base text-gray-400 font-medium">No Data Training</p>
             </div>
           </div>
         </div>

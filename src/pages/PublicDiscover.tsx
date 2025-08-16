@@ -215,11 +215,11 @@ const PublicDiscover = () => {
         {activeFilters && (
           <div className="bg-[#1a1a2e]/30 px-3 sm:px-6 py-2 sm:py-3 border-b border-gray-700/30">
             <div className="max-w-7xl mx-auto flex flex-wrap items-center gap-2">
-              <span className="text-gray-400 text-xs sm:text-sm">Active filters:</span>
+              <span className="text-gray-400 text-sm sm:text-base">Active filters:</span>
               {searchInput && (
                 <Badge 
                   variant="outline" 
-                  className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-2 sm:px-3 py-0.5 sm:py-1 text-xs sm:text-sm"
+                  className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-2 sm:px-3 py-0.5 sm:py-1 text-sm sm:text-base"
                 >
                   Search: {searchInput}
                   <button 
@@ -234,7 +234,7 @@ const PublicDiscover = () => {
                 <Badge 
                   key={tag} 
                   variant="outline" 
-                  className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-2 sm:px-3 py-0.5 sm:py-1 text-xs sm:text-sm"
+                  className="bg-[#FF7A00]/20 border-[#FF7A00]/30 text-[#FF7A00] hover:bg-[#FF7A00]/30 px-2 sm:px-3 py-0.5 sm:py-1 text-sm sm:text-base"
                 >
                   {tag}
                   <button 
@@ -249,7 +249,7 @@ const PublicDiscover = () => {
                 onClick={handleClearFilters}
                 variant="ghost"
                 size="sm"
-                className="text-gray-400 hover:text-white text-xs sm:text-sm"
+                className="text-gray-400 hover:text-white text-sm sm:text-base"
               >
                 Clear all
               </Button>

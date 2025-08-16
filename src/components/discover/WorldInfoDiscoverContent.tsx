@@ -154,7 +154,7 @@ export function WorldInfoDiscoverContent() {
             <h1 className="text-white text-xl sm:text-2xl font-bold">
               World Info Discovery
             </h1>
-            <p className="text-gray-400 text-xs sm:text-sm">Explore and discover world information</p>
+            <p className="text-gray-400 text-sm sm:text-base">Explore and discover world information</p>
           </div>
           <div className="flex items-center">
             <NSFWToggle />

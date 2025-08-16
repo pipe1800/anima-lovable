@@ -1,4 +1,3 @@
-
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
@@ -34,8 +33,8 @@ const ClosingSection = () => {
           </Link>
 
           {/* Trust-building text */}
-          <p className="text-xs sm:text-sm text-gray-400 mt-3 sm:mt-4">
-            ✓ Secure & Private ✓ Cancel Anytime ✓ Join 100,000+ Users
+          <p className="text-sm sm:text-base text-gray-400 mt-3 sm:mt-4">
+            Ready to dive deeper? Join thousands exploring limitless character interactions.
           </p>
         </div>
       </div>

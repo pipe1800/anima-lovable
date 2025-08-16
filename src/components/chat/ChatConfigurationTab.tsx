@@ -508,7 +508,7 @@ export const ChatConfigurationTab = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Clock className="w-4 h-4 text-[#FF7A00]" />
-                <span className="text-white text-xs sm:text-sm font-medium">Time Awareness</span>
+                <span className="text-white text-sm sm:text-base font-medium">Time Awareness</span>
               </div>
               <Switch
                 checked={pendingTimeAwareness}

@@ -273,8 +273,8 @@ export function CharacterGrid({
 
               {/* Description preview and stats at bottom */}
               <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4">
-                <p className="text-gray-300 text-xs sm:text-sm line-clamp-1 sm:line-clamp-2 leading-relaxed mb-2">
-                  {character.short_description || "No description available"}
+                <p className="text-gray-300 text-sm sm:text-base line-clamp-1 sm:line-clamp-2 leading-relaxed mb-2">
+                  {character.short_description || character.character_definitions?.[0]?.greeting || 'A mysterious character waiting to chat with you.'}
                 </p>
                 
                 {/* Likes and Favorites Stats */}
@@ -282,11 +282,11 @@ export function CharacterGrid({
                   <div className="flex items-center space-x-3">
                     <div className="flex items-center space-x-1">
                       <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="text-xs sm:text-sm">{character.likes_count}</span>
+                      <span className="text-sm sm:text-base">{character.likes_count}</span>
                     </div>
                     <div className="flex items-center space-x-1">
                       <Star className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="text-xs sm:text-sm">{character.favorites_count}</span>
+                      <span className="text-sm sm:text-base">{character.favorites_count}</span>
                     </div>
                   </div>
                   {character.creator && (

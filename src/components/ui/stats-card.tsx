@@ -34,7 +34,7 @@ export const StatsCard = React.memo(({
       <CardContent className="p-3 sm:p-6">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-gray-400 text-xs sm:text-sm">{title}</p>
+            <p className="text-gray-400 text-sm sm:text-base">{title}</p>
             <p className={`text-white font-bold ${largeValue ? 'text-xl sm:text-3xl' : 'text-lg sm:text-2xl'}`}>{value}</p>
             {trend && (
               <p className={`text-xs mt-1 ${trend.isPositive ? 'text-green-400' : 'text-red-400'}`}>

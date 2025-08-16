@@ -142,7 +142,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
           Create different personalities that AI characters will interact with
         </p>
         <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 sm:p-4 mb-6">
-          <p className="text-blue-200 text-xs sm:text-sm text-center">
+          <p className="text-blue-200 text-sm sm:text-base text-center">
             <strong>Personas</strong> are the identities you roleplay as when chatting with AI characters. 
             You can create multiple personas and switch between them during conversations.
           </p>

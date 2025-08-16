@@ -209,7 +209,7 @@ export function WorldInfoGrid({
               </>
             )}
           </h2>
-          <div className="flex items-center space-x-2 text-gray-400 text-xs sm:text-sm">
+          <div className="flex items-center space-x-2 text-gray-400 text-sm sm:text-base">
             <TrendingUp className="w-3 h-3 sm:w-4 sm:h-4" />
             <span>Updated 2 minutes ago</span>
           </div>
@@ -279,8 +279,8 @@ export function WorldInfoGrid({
 
               {/* Description preview and stats at bottom */}
               <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4">
-                <p className="text-gray-300 text-xs sm:text-sm line-clamp-1 sm:line-clamp-2 leading-relaxed mb-2">
-                  {worldInfo.short_description || "No description available"}
+                <p className="text-gray-300 text-sm sm:text-base line-clamp-1 sm:line-clamp-2 leading-relaxed mb-2">
+                  {worldInfo.short_description || worldInfo.description || 'Explore this world info entry'}
                 </p>
                 
                 {/* Likes and Usage Stats */}
@@ -288,11 +288,11 @@ export function WorldInfoGrid({
                   <div className="flex items-center space-x-3">
                     <div className="flex items-center space-x-1">
                       <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="text-xs sm:text-sm">{worldInfo.likes_count}</span>
+                      <span className="text-sm sm:text-base">{worldInfo.likes_count}</span>
                     </div>
                     <div className="flex items-center space-x-1">
                       <Download className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="text-xs sm:text-sm">{worldInfo.interaction_count}</span>
+                      <span className="text-sm sm:text-base">{worldInfo.interaction_count}</span>
                     </div>
                   </div>
                   {worldInfo.creator && (

@@ -1101,7 +1101,7 @@ const ChatInterface = ({
               <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
               <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
             </div>
-            <span className="text-xs sm:text-sm">
+            <span className="text-sm sm:text-base">
               {(() => {
                 const raw = isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`;
                 return raw.length > 50 ? raw.slice(0,47) + '…' : raw;

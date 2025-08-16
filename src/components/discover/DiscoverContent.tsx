@@ -237,7 +237,7 @@ export function DiscoverContent() {
             <h1 className="text-white text-xl sm:text-2xl font-bold">
               Character Discovery
             </h1>
-            <p className="text-gray-400 text-xs sm:text-sm">Explore and discover characters</p>
+            <p className="text-gray-400 text-sm sm:text-base">Explore and discover characters</p>
           </div>
           <div className="flex items-center">
             <NSFWToggle />

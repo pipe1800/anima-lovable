@@ -243,7 +243,7 @@ export default function RightPanel(props: RightPanelProps) {
           <div className="flex space-x-1 bg-[#1a1a2e] p-1 rounded-lg" data-tutorial="right-panel-tabs">
             <button
               onClick={() => trySwitchTab('history')}
-              className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-sm sm:text-base font-medium transition-colors ${
                 activeTab === 'history' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -252,7 +252,7 @@ export default function RightPanel(props: RightPanelProps) {
             </button>
             <button
               onClick={() => trySwitchTab('details')}
-              className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-sm sm:text-base font-medium transition-colors ${
                 activeTab === 'details' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -262,7 +262,7 @@ export default function RightPanel(props: RightPanelProps) {
             <button
               onClick={() => trySwitchTab('config')}
               data-tutorial="config-tab"
-              className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-2 rounded-md text-sm sm:text-base font-medium transition-colors ${
                 activeTab === 'config' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -314,7 +314,7 @@ export default function RightPanel(props: RightPanelProps) {
                     <button
                       onClick={() => trySwitchConfigSubtab('chat')}
                       data-tutorial="chat-config-subtab"
-                      className={`flex-1 px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+                      className={`flex-1 px-3 py-2 rounded-md text-sm sm:text-base font-medium transition-colors ${
                         activeConfigSubtab === 'chat' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
                       }`}
                     >
@@ -323,7 +323,7 @@ export default function RightPanel(props: RightPanelProps) {
                     <button
                       onClick={() => trySwitchConfigSubtab('style')}
                       data-tutorial="chat-style-subtab"
-                      className={`flex-1 px-3 py-2 rounded-md text-xs sm:text-sm font-medium transition-colors ${
+                      className={`flex-1 px-3 py-2 rounded-md text-sm sm:text-base font-medium transition-colors ${
                         activeConfigSubtab === 'style' ? 'bg-[#FF7A00] text-white' : 'text-gray-400 hover:text-white'
                       }`}
                     >

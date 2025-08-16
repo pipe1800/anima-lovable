@@ -128,7 +128,7 @@ const PlanCard = ({
     >
       {isPopular && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
-          <Badge className="bg-[#FF7A00] text-white px-2 sm:px-3 py-1 text-xs sm:text-sm">
+          <Badge className="bg-[#FF7A00] text-white px-2 sm:px-3 py-1 text-sm sm:text-base">
             Most Popular
           </Badge>
         </div>
@@ -145,7 +145,7 @@ const PlanCard = ({
                 {plan.name === 'The Whale' && <Crown className="w-4 h-4 sm:w-5 sm:h-5 fill-yellow-500 text-yellow-500" />}
               </CardTitle>
               {plan.description && (
-                <CardDescription className="mt-1 sm:mt-2 text-xs sm:text-sm">{plan.description}</CardDescription>
+                <CardDescription className="mt-1 sm:mt-2 text-sm sm:text-base">{plan.description}</CardDescription>
               )}
             </div>
             {isCurrentPlan && (
@@ -162,7 +162,7 @@ const PlanCard = ({
               </span>
               <span className="text-gray-400 text-sm">/month</span>
             </div>
-            <p className="text-xs sm:text-sm text-gray-400 mt-1">
+            <p className="text-sm sm:text-base text-gray-400 mt-1">
               {plan.monthly_credits_allowance.toLocaleString()} credits/month
             </p>
           </div>
@@ -304,7 +304,7 @@ const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPu
               <p className="text-2xl sm:text-3xl font-bold text-[#FF7A00] mt-1 sm:mt-2">
                 {pack.credits_granted.toLocaleString()}
               </p>
-              <p className="text-xs sm:text-sm text-gray-400">credits</p>
+              <p className="text-sm sm:text-base text-gray-400">credits</p>
             </div>
             {bonusPercentage > 0 && (
               <Badge className="bg-green-500/20 text-green-400 border-green-500/50 text-xs">
@@ -316,7 +316,7 @@ const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPu
         <CardContent className="px-4 sm:px-6">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
             <span className="text-xl sm:text-2xl font-bold text-white">${pack.price}</span>
-            <span className="text-xs sm:text-sm text-gray-400">${(pack.price / pack.credits_granted * 1000).toFixed(2)}/1k</span>
+            <span className="text-sm sm:text-base text-gray-400">${(pack.price / pack.credits_granted * 1000).toFixed(2)}/1k</span>
           </div>
           <Button 
             onClick={onPurchase} 

@@ -406,3 +406,29 @@ All colors MUST be HSL.
 .tutorial-highlight-target::before {
   content: none !important;
 }
+
+/* ---- Mobile Typography Overrides (improve readability) ---- */
+@layer utilities {
+  @media (max-width: 639.5px) {
+    html { font-size: 16px; }
+
+    .text-xs { font-size: 0.8125rem; line-height: 1.15rem; }
+    .text-sm { font-size: 0.9rem; line-height: 1.35rem; }
+    .text-base { font-size: 1rem; line-height: 1.5rem; }
+    .text-lg { font-size: 1.125rem; line-height: 1.6rem; }
+    .text-xl { font-size: 1.25rem; line-height: 1.7rem; }
+    .text-2xl { font-size: 1.5rem; line-height: 1.9rem; }
+
+    h1, .prose h1 { @apply text-2xl; }
+    h2, .prose h2 { @apply text-xl; }
+    h3, .prose h3 { @apply text-lg; }
+    p { line-height: 1.5rem; }
+
+    .text-2xs { font-size: 0.7rem; line-height: 1rem; letter-spacing: 0.2px; }
+
+    button, .btn, .shadcn-button { font-size: 0.9rem; }
+    .badge, .Badge, .badge-sm { font-size: 0.7rem; line-height: 0.95rem; }
+    .line-clamp-2, .line-clamp-3, .line-clamp-4 { line-height: 1.35rem; }
+  }
+}
+/* ---- End Mobile Typography Overrides ---- */

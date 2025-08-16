@@ -380,7 +380,7 @@ export default function PublicWorldInfoProfile() {
                       {worldInfo.short_description && (
                         <p className="text-gray-400 mt-2 text-sm sm:text-base leading-relaxed break-words">{worldInfo.short_description}</p>
                       )}
-                      <div className="flex flex-wrap gap-3 mt-3 text-xs sm:text-sm text-gray-400">
+                      <div className="flex flex-wrap gap-3 mt-3 text-sm sm:text-base text-gray-400">
                         <span className="flex items-center gap-1"><Calendar className="h-4 w-4" />{new Date(worldInfo.created_at).toLocaleDateString()}</span>
                         <span className="flex items-center gap-1"><Eye className="h-4 w-4" />{worldInfo.interaction_count} views</span>
                         <span className="flex items-center gap-1"><Heart className="h-4 w-4" />{worldInfo.likesCount} likes</span>
@@ -451,7 +451,7 @@ export default function PublicWorldInfoProfile() {
                           {!entry.entry_text.trim() && <Badge variant="destructive" className="text-[10px]">Empty Text</Badge>}
                           {entry.keywords.map((k,i)=>(<Badge key={i} variant="outline" className="text-[10px] border-gray-500 text-gray-300">{k}</Badge>))}
                         </div>
-                        <p className="text-xs sm:text-sm text-gray-300 whitespace-pre-wrap leading-relaxed break-words">{entry.entry_text}</p>
+                        <p className="text-base text-gray-300 whitespace-pre-wrap leading-relaxed break-words">{entry.entry_text}</p>
                       </div>
                     ))}
                   </div>

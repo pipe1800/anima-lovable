@@ -93,7 +93,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-white font-semibold text-base sm:text-lg truncate max-w-full" title={character.name}>{character.name}</h2>
-                <p className="text-gray-300/90 text-xs sm:text-sm line-clamp-2">
+                <p className="text-gray-300/90 text-sm sm:text-base line-clamp-2">
                   {character.tagline}
                 </p>
               </div>
@@ -144,7 +144,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
           <div className="p-4 space-y-4">
             {shortSummary && (
               <div className="rounded-lg border border-gray-700/50 bg-[#0b0b10] p-3">
-                <h4 className="text-white/90 font-medium text-xs sm:text-sm mb-1">Short Summary</h4>
+                <h4 className="text-white/90 font-medium text-sm sm:text-base mb-1">Short Summary</h4>
                 <p className={`text-gray-300 text-sm leading-relaxed whitespace-pre-wrap ${!expandSummary && shouldClamp(shortSummary, 280) ? 'line-clamp-4' : ''}`}>
                   {shortSummary}
                 </p>
@@ -161,7 +161,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
             )}
             {scenarioText && (
               <div className="rounded-lg border border-gray-700/50 bg-[#0b0b10] p-3">
-                <h4 className="text-white/90 font-medium text-xs sm:text-sm mb-1">Scenario</h4>
+                <h4 className="text-white/90 font-medium text-sm sm:text-base mb-1">Scenario</h4>
                 <p className={`text-gray-300 text-sm leading-relaxed whitespace-pre-wrap ${!expandScenario && shouldClamp(scenarioText, 280) ? 'line-clamp-4' : ''}`}>
                   {scenarioText}
                 </p>
@@ -178,7 +178,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
             )}
             {greetingText && (
               <div className="rounded-lg border border-gray-700/50 bg-[#0b0b10] p-3">
-                <h4 className="text-white/90 font-medium text-xs sm:text-sm mb-1">Greeting</h4>
+                <h4 className="text-white/90 font-medium text-sm sm:text-base mb-1">Greeting</h4>
                 <p className={`text-gray-300 text-sm leading-relaxed whitespace-pre-wrap ${!expandGreeting && shouldClamp(greetingText, 200) ? 'line-clamp-4' : ''}`}>
                   {greetingText}
                 </p>
@@ -249,7 +249,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
               variant="outline"
               size="sm"
               onClick={onLike}
-              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-xs sm:text-sm ${
+              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-sm sm:text-base ${
                 isLiked ? 'text-red-400 border-red-400' : 'text-gray-300'
               }`}
             >
@@ -260,7 +260,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
               variant="outline"
               size="sm"
               onClick={onFavorite}
-              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-xs sm:text-sm ${
+              className={`flex-1 bg-transparent border-gray-600/50 hover:bg-[#1a1a2e] hover:text-white text-sm sm:text-base ${
                 isFavorited ? 'text-yellow-400 border-yellow-400' : 'text-gray-300'
               }`}
             >
