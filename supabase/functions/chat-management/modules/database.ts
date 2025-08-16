@@ -16,26 +16,58 @@ export async function fetchCharacterData(
   characterId: string,
   supabaseAdmin: SupabaseClient
 ): Promise<Character> {
-  const { data: character, error } = await supabaseAdmin
+  // First attempt: fetch from characters with joined character_definitions to get name + definition fields
+  const { data: characterWithDef, error: charError } = await supabaseAdmin
+    .from('characters')
+    .select(`
+      id,
+      name,
+      character_definitions ( personality_summary, description, scenario, greeting )
+    `)
+    .eq('id', characterId)
+    .single();
+
+  if (characterWithDef && !charError) {
+    const def = (characterWithDef as any).character_definitions;
+    return {
+      id: characterWithDef.id,
+      name: characterWithDef.name,
+      personality_summary: def?.personality_summary || undefined,
+      description: def?.description || undefined,
+      scenario: def?.scenario || undefined,
+      greeting: def?.greeting || undefined,
+      character_definitions: def || undefined
+    };
+  }
+
+  // Fallback: previous logic (definitions table only) BUT do not select nonexistent name column
+  const { data: definitionOnly, error: defError } = await supabaseAdmin
     .from('character_definitions')
-    .select('character_id, name, personality_summary, description, scenario, greeting')
+    .select('character_id, personality_summary, description, scenario, greeting')
     .eq('character_id', characterId)
     .single();
 
-  if (error) {
-    console.error('Character definition error:', error);
-    throw new Error('Character definition not found');
+  if (definitionOnly && !defError) {
+    // Need separate fetch for name from characters table
+    const { data: charRow } = await supabaseAdmin
+      .from('characters')
+      .select('name')
+      .eq('id', characterId)
+      .single();
+
+    return {
+      id: definitionOnly.character_id,
+      name: charRow?.name, // may be undefined if not found
+      personality_summary: (definitionOnly as any).personality_summary,
+      description: (definitionOnly as any).description,
+      scenario: (definitionOnly as any).scenario,
+      greeting: (definitionOnly as any).greeting,
+      character_definitions: definitionOnly as any
+    };
   }
 
-  // Return character with id field mapped correctly
-  return {
-    id: character.character_id, // Map character_id to id
-    name: character.name, // newly included for template replacement
-    personality_summary: character.personality_summary,
-    description: character.description,
-    scenario: character.scenario,
-    greeting: character.greeting
-  };
+  console.error('Character definition fetch errors:', { charError, defError });
+  throw new Error('Character definition not found');
 }
 
 export async function fetchConversationHistory(

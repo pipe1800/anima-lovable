@@ -115,6 +115,10 @@ const TagSection: React.FC<TagSectionProps> = ({ selectedTags, availableTags, on
 };
 
 const WorldInfoCreator = () => {
+  // Limits
+  const MAX_ENTRY_CHARS = 2000;
+  const MAX_KEYWORDS = 10;
+
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -269,6 +273,8 @@ const WorldInfoCreator = () => {
         title: "Success",
         description: "World Info created successfully"
       });
+      // Navigate back to main world info page after create
+      navigate('/world-info');
     } catch (error) {
       console.error('Error creating world info:', error);
       toast({
@@ -339,6 +345,8 @@ const WorldInfoCreator = () => {
         title: "Success",
         description: "World Info updated successfully"
       });
+      // Navigate back after save
+      navigate('/world-info');
     } catch (error) {
       console.error('Error updating world info:', error);
       toast({
@@ -1079,21 +1087,42 @@ const WorldInfoCreator = () => {
                             {/* Removed title heading as requested */}
                             <div className="space-y-4">
                               <div>
-                                <Label htmlFor="new-entry-keywords" className="text-white">Keywords (comma-separated)</Label>
+                                <Label htmlFor="new-entry-keywords" className="text-white flex items-center justify-between">
+                                  <span>Keywords (comma-separated)</span>
+                                  <span className={`text-xs ${newEntryKeywords.split(',').map(k=>k.trim()).filter(k=>k).length > MAX_KEYWORDS ? 'text-red-400' : 'text-gray-400'}`}>
+                                    {newEntryKeywords.split(',').map(k=>k.trim()).filter(k=>k).length}/{MAX_KEYWORDS}
+                                  </span>
+                                </Label>
                                 <Input
                                   id="new-entry-keywords"
                                   value={newEntryKeywords}
-                                  onChange={(e) => setNewEntryKeywords(e.target.value)}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    const parts = raw.split(',').map(p=>p.trim()).filter(p=>p);
+                                    if (parts.length > MAX_KEYWORDS) {
+                                      toast({ title: 'Keyword limit', description: `Maximum ${MAX_KEYWORDS} keywords per entry. Extra keywords ignored.`, variant: 'destructive' });
+                                      const limited = parts.slice(0, MAX_KEYWORDS).join(', ');
+                                      setNewEntryKeywords(limited);
+                                    } else {
+                                      setNewEntryKeywords(raw);
+                                    }
+                                  }}
                                   placeholder="character name, location, event"
                                   className="bg-gray-800/50 border-gray-600 text-white"
                                 />
                               </div>
                               <div>
-                                <Label htmlFor="new-entry-text" className="text-white">Entry Text</Label>
+                                <Label htmlFor="new-entry-text" className="text-white flex items-center justify-between">
+                                  <span>Entry Text</span>
+                                  <span className={`text-xs ${newEntryText.length > MAX_ENTRY_CHARS ? 'text-red-400' : 'text-gray-400'}`}>{newEntryText.length}/{MAX_ENTRY_CHARS}</span>
+                                </Label>
                                 <Textarea
                                   id="new-entry-text"
                                   value={newEntryText}
-                                  onChange={(e) => setNewEntryText(e.target.value)}
+                                  onChange={(e) => {
+                                    const val = e.target.value.slice(0, MAX_ENTRY_CHARS);
+                                    setNewEntryText(val);
+                                  }}
                                   placeholder="Describe the lore or information"
                                   rows={4}
                                   className="bg-gray-800/50 border-gray-600 text-white"
@@ -1101,7 +1130,9 @@ const WorldInfoCreator = () => {
                               </div>
                               <Button 
                                 onClick={handleAddEntry} 
-                                disabled={!newEntryKeywords.trim() || !newEntryText.trim()}
+                                disabled={!
+                                  newEntryKeywords.trim() || !newEntryText.trim() || newEntryText.length === 0
+                                }
                                 className="w-full"
                               >
                                 <Plus className="w-4 h-4 mr-2" />
@@ -1274,21 +1305,42 @@ const WorldInfoCreator = () => {
                             {/* Removed title heading as requested */}
                             <div className="space-y-4">
                               <div>
-                                <Label htmlFor="new-entry-keywords" className="text-white">Keywords (comma-separated)</Label>
+                                <Label htmlFor="new-entry-keywords" className="text-white flex items-center justify-between">
+                                  <span>Keywords (comma-separated)</span>
+                                  <span className={`text-xs ${newEntryKeywords.split(',').map(k=>k.trim()).filter(k=>k).length > MAX_KEYWORDS ? 'text-red-400' : 'text-gray-400'}`}>
+                                    {newEntryKeywords.split(',').map(k=>k.trim()).filter(k=>k).length}/{MAX_KEYWORDS}
+                                  </span>
+                                </Label>
                                 <Input
                                   id="new-entry-keywords"
                                   value={newEntryKeywords}
-                                  onChange={(e) => setNewEntryKeywords(e.target.value)}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    const parts = raw.split(',').map(p=>p.trim()).filter(p=>p);
+                                    if (parts.length > MAX_KEYWORDS) {
+                                      toast({ title: 'Keyword limit', description: `Maximum ${MAX_KEYWORDS} keywords per entry. Extra keywords ignored.`, variant: 'destructive' });
+                                      const limited = parts.slice(0, MAX_KEYWORDS).join(', ');
+                                      setNewEntryKeywords(limited);
+                                    } else {
+                                      setNewEntryKeywords(raw);
+                                    }
+                                  }}
                                   placeholder="character name, location, event"
                                   className="bg-gray-800/50 border-gray-600 text-white"
                                 />
                               </div>
                               <div>
-                                <Label htmlFor="new-entry-text" className="text-white">Entry Text</Label>
+                                <Label htmlFor="new-entry-text" className="text-white flex items-center justify-between">
+                                  <span>Entry Text</span>
+                                  <span className={`text-xs ${newEntryText.length > MAX_ENTRY_CHARS ? 'text-red-400' : 'text-gray-400'}`}>{newEntryText.length}/{MAX_ENTRY_CHARS}</span>
+                                </Label>
                                 <Textarea
                                   id="new-entry-text"
                                   value={newEntryText}
-                                  onChange={(e) => setNewEntryText(e.target.value)}
+                                  onChange={(e) => {
+                                    const val = e.target.value.slice(0, MAX_ENTRY_CHARS);
+                                    setNewEntryText(val);
+                                  }}
                                   placeholder="Describe the lore or information"
                                   rows={4}
                                   className="bg-gray-800/50 border-gray-600 text-white"
@@ -1296,7 +1348,9 @@ const WorldInfoCreator = () => {
                               </div>
                               <Button 
                                 onClick={handleAddEntry} 
-                                disabled={!newEntryKeywords.trim() || !newEntryText.trim()}
+                                disabled={!
+                                  newEntryKeywords.trim() || !newEntryText.trim() || newEntryText.length === 0
+                                }
                                 className="w-full"
                               >
                                 <Plus className="w-4 h-4 mr-2" />
@@ -1316,25 +1370,44 @@ const WorldInfoCreator = () => {
                             </div>
                           ) : (
                             filteredEntries.map((entry) => (
-                              <Card key={entry.id} className="border-l-4 border-l-primary/30 bg-gray-700/30 border-gray-600">
+                              <Card key={entry.id} className={`border-l-4 bg-gray-700/30 border-gray-600 ${entry.keywords.length === 0 || !entry.entry_text.trim() ? 'ring-1 ring-red-500/60 border-l-red-500/70' : 'border-l-primary/30'}`}>
                                 <CardContent className="p-4">
                                   {editingEntryId === entry.id ? (
                                     <div className="space-y-4">
                                       <div>
-                                        <Label htmlFor="edit-entry-keywords" className="text-white">Keywords</Label>
+                                        <Label htmlFor="edit-entry-keywords" className="text-white flex items-center justify-between">
+                                          <span>Keywords</span>
+                                          <span className={`text-xs ${editingEntryKeywords.split(',').map(k=>k.trim()).filter(k=>k).length > MAX_KEYWORDS ? 'text-red-400' : 'text-gray-400'}`}>{editingEntryKeywords.split(',').map(k=>k.trim()).filter(k=>k).length}/{MAX_KEYWORDS}</span>
+                                        </Label>
                                         <Input
                                           id="edit-entry-keywords"
                                           value={editingEntryKeywords}
-                                          onChange={(e) => setEditingEntryKeywords(e.target.value)}
+                                          onChange={(e) => {
+                                            const raw = e.target.value;
+                                            const parts = raw.split(',').map(p=>p.trim()).filter(p=>p);
+                                            if (parts.length > MAX_KEYWORDS) {
+                                              toast({ title: 'Keyword limit', description: `Maximum ${MAX_KEYWORDS} keywords per entry. Extra keywords ignored.`, variant: 'destructive' });
+                                              const limited = parts.slice(0, MAX_KEYWORDS).join(', ');
+                                              setEditingEntryKeywords(limited);
+                                            } else {
+                                              setEditingEntryKeywords(raw);
+                                            }
+                                          }}
                                           className="bg-gray-800/50 border-gray-600 text-white"
                                         />
                                       </div>
                                       <div>
-                                        <Label htmlFor="edit-entry-text" className="text-white">Entry Text</Label>
+                                        <Label htmlFor="edit-entry-text" className="text-white flex items-center justify-between">
+                                          <span>Entry Text</span>
+                                          <span className={`text-xs ${editingEntryText.length > MAX_ENTRY_CHARS ? 'text-red-400' : 'text-gray-400'}`}>{editingEntryText.length}/{MAX_ENTRY_CHARS}</span>
+                                        </Label>
                                         <Textarea
                                           id="edit-entry-text"
                                           value={editingEntryText}
-                                          onChange={(e) => setEditingEntryText(e.target.value)}
+                                          onChange={(e) => {
+                                            const val = e.target.value.slice(0, MAX_ENTRY_CHARS);
+                                            setEditingEntryText(val);
+                                          }}
                                           rows={4}
                                           className="bg-gray-800/50 border-gray-600 text-white"
                                         />
@@ -1354,6 +1427,12 @@ const WorldInfoCreator = () => {
                                     <div className="flex items-start justify-between gap-4">
                                       <div className="flex-1 space-y-3">
                                         <div className="flex flex-wrap gap-2">
+                                          {entry.keywords.length === 0 && (
+                                            <Badge variant="destructive" className="text-xs">Missing Keywords</Badge>
+                                          )}
+                                          {!entry.entry_text.trim() && (
+                                            <Badge variant="destructive" className="text-xs">Missing Text</Badge>
+                                          )}
                                           {entry.keywords.map((keyword, idx) => (
                                             <Badge key={idx} variant="secondary" className="text-xs font-medium">
                                               {keyword}

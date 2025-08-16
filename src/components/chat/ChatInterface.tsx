@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
+// Persistent in-memory dismissal store (session scoped)
+const greetingDismissedStore: Set<string> = (globalThis as any).__chatGreetingDismissedStore || new Set<string>();
+if (!(globalThis as any).__chatGreetingDismissedStore) {
+  (globalThis as any).__chatGreetingDismissedStore = greetingDismissedStore;
+}
+
 import { Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { InsufficientCreditsModal } from './InsufficientCreditsModal';
@@ -8,13 +14,15 @@ import { useChatUnified } from '@/hooks/useChatUnified';
 import { useChatPerformance } from '@/hooks/useChatPerformance';
 import type { TrackedContext } from '@/types/chat';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
-import { supabase } from '@/integrations/supabase/client';
+import { createChat } from '@/lib/chat-operations';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import logger from '@/utils/logger';
 import { getPersonaById, type Persona } from '@/lib/persona-operations';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/queries/chatQueries';
 import { useNavigate } from 'react-router-dom';
+import { buildGreetingVariants } from '@/lib/greeting-utils'; // still used for initial variants (could swap to getGreetingVariants)
+import { supabase } from '@/integrations/supabase/client';
 
 // Debug components - Only load when needed
 const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
@@ -46,6 +54,7 @@ interface ChatInterfaceProps {
   selectedWorldInfoId?: string | null;
   onChatCreated?: (chatId: string) => void; // New callback for when chat is created
   onMessageSent?: () => Promise<void>; // New callback for when message is sent
+  characterDetails?: any; // New: full character details including definition (for greeting variants)
 }
 
 const ChatInterface = ({
@@ -57,7 +66,8 @@ const ChatInterface = ({
   selectedPersonaId: propSelectedPersonaId,
   selectedWorldInfoId,
   onChatCreated,
-  onMessageSent
+  onMessageSent,
+  characterDetails
 }: ChatInterfaceProps) => {
   const [inputValue, setInputValue] = useState('');
   const [isFirstMessage, setIsFirstMessage] = useState(true);
@@ -66,7 +76,38 @@ const ChatInterface = ({
   const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
-  
+  const [isPreChatPhase, setIsPreChatPhase] = useState(!existingChatId); // true until chat created
+  const [sendingFirstMessage, setSendingFirstMessage] = useState(false);
+  const [hasSentFirstUserMessage, setHasSentFirstUserMessage] = useState(!!existingChatId);
+  const hasSentFirstUserMessageRef = useRef(hasSentFirstUserMessage);
+  useEffect(() => { hasSentFirstUserMessageRef.current = hasSentFirstUserMessage; }, [hasSentFirstUserMessage]);
+
+  // Phase machine: 'greeting' -> (user submits) 'creating' -> (after first user message queued) 'active'
+  type ChatPhase = 'greeting' | 'creating' | 'active';
+  const initialPhase: ChatPhase = existingChatId || greetingDismissedStore.has(character.id) ? 'active' : 'greeting';
+  const [chatPhase, setChatPhase] = useState<ChatPhase>(initialPhase);
+  const chatPhaseRef = useRef(chatPhase); useEffect(()=>{ chatPhaseRef.current = chatPhase; }, [chatPhase]);
+
+  // Defensive: if an existing chat id appears later, force active
+  useEffect(() => {
+    if (existingChatId && chatPhase !== 'active') {
+      setChatPhase('active');
+      greetingDismissedStore.add(character.id);
+    }
+  }, [existingChatId, chatPhase, character.id]);
+
+  // Ensure that once currentChatId is set we always leave pre-chat (legacy flag) and phase >= creating
+  useEffect(() => {
+    if (currentChatId && chatPhase === 'creating') {
+      // remain creating until first user message dispatched -> then active
+      return;
+    }
+  }, [currentChatId, chatPhase]);
+
+  // Greeting variants (available before chat creation)
+  const greetingVariants = React.useMemo(() => buildGreetingVariants((characterDetails as any) || (character as any)), [characterDetails, character]);
+  const hasMultipleGreetings = greetingVariants.length > 1;
+
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
@@ -74,8 +115,19 @@ const ChatInterface = ({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  // Variant navigation state per AI message id
+  // Variant navigation state per AI message id (post-creation regenerations)
   const [variantIndexByMessage, setVariantIndexByMessage] = useState<Record<string, number>>({});
+  const [selectedGreetingIndex, setSelectedGreetingIndex] = useState(0); // Added missing state for greeting carousel
+
+  // Greeting carousel controls (pre-chat)
+  const handleNextGreeting = () => {
+    if (!hasMultipleGreetings) return;
+    setSelectedGreetingIndex(i => (i + 1) % greetingVariants.length);
+  };
+  const handlePrevGreeting = () => {
+    if (!hasMultipleGreetings) return;
+    setSelectedGreetingIndex(i => (i - 1 + greetingVariants.length) % greetingVariants.length);
+  };
 
   // Listen for auto-summary success events and show notification
   useEffect(() => {
@@ -95,51 +147,12 @@ const ChatInterface = ({
     };
   }, [toast, log]);
 
-  // Create chat if needed
+  // Auto-select a random greeting index initially if multiple (purely visual pre-chat)
   useEffect(() => {
-    if (!currentChatId && user && character && !isCreatingChat) {
-      setIsCreatingChat(true);
-      
-      const initializeChat = async () => {
-        try {
-          log.info('Creating new chat for character:', character.id);
-          
-          const { data, error } = await supabase.functions.invoke('chat-management', {
-            body: {
-              operation: 'create-basic',
-              charactersData: [{
-                id: character.id,
-                name: character.name
-              }],
-              selectedPersonaId: propSelectedPersonaId
-            }
-          });
-          
-          if (error) throw error;
-          
-          if (data?.success && data?.chat_id) {
-            log.info('Chat created successfully:', data.chat_id);
-            setCurrentChatId(data.chat_id);
-            // Notify parent component about the new chat ID
-            onChatCreated?.(data.chat_id);
-            // Update URL
-            window.history.replaceState(
-              null, 
-              '', 
-              `/chat/${character.id}/${data.chat_id}`
-            );
-          }
-        } catch (error) {
-          const chatError = handleChatError(error, 'creating chat', false);
-          toast({ title: 'Error', description: chatError.message, variant: 'destructive' });
-        } finally {
-          setIsCreatingChat(false);
-        }
-      };
-      
-      initializeChat();
+    if (!existingChatId && greetingVariants.length > 1) {
+      setSelectedGreetingIndex(Math.floor(Math.random() * greetingVariants.length));
     }
-  }, [currentChatId, user, character, propSelectedPersonaId, onChatCreated, isCreatingChat, log, toast]);
+  }, [existingChatId, greetingVariants]);
 
   // Unified chat hook
   const {
@@ -157,9 +170,31 @@ const ChatInterface = ({
     isStreaming,
     streamingMessage
   } = useChatUnified(currentChatId, character.id);
-
-  // Use the prop context as primary; fallback to unified hook context
+  // Reintroduce effectiveTrackedContext (was removed during duplicate cleanup)
   const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
+  // Derived: whether any user message exists in this chat (used to lock greeting picker)
+  const hasUserMessage = React.useMemo(() => {
+    if (!messages || messages.length === 0) return false;
+    return messages.some((m: any) => {
+      // Treat anything that is NOT explicitly an AI message as user (covers null / undefined backend values)
+      if (m.is_ai_message === true) return false;
+      if (m.isUser === true) return true;
+      if (m.role === 'user') return true;
+      // If backend omits is_ai_message for user messages, count those with a user_id / without is_ai_message true
+      if (m.user_id && m.is_ai_message !== true) return true;
+      return false;
+    });
+  }, [messages]);
+  // Guard: only evaluate greeting sync after messages have loaded at least once
+  const messagesLoaded = !!messages && messages.length > 0;
+  useEffect(() => {
+    if (!messagesLoaded || !currentChatId) return;
+    if (hasUserMessage) return; // user already sent a message -> locked
+    const firstAi = messages.find((m: any) => (m.is_ai_message === true) || (m.role === 'assistant') || (m.isUser === false));
+    if (!firstAi || typeof firstAi.content !== 'string') return;
+    const idx = greetingVariants.indexOf(firstAi.content);
+    if (idx >= 0 && idx !== selectedGreetingIndex) setSelectedGreetingIndex(idx);
+  }, [messagesLoaded, messages, currentChatId, hasUserMessage, greetingVariants, selectedGreetingIndex]);
 
   // ✅ FIX: Safety cleanup for stuck streaming states
   useEffect(() => {
@@ -168,7 +203,6 @@ const ChatInterface = ({
         log.warn('⚠️ Streaming timeout detected, clearing stuck state');
         // Force clear streaming state if it's been too long
       }, 30000);
-      
       return () => clearTimeout(timeoutId);
     }
   }, [isStreaming, log]);
@@ -203,6 +237,121 @@ const ChatInterface = ({
     fewShotExamples: false,
   };
   const streamingMode = (globalSettings?.streaming_mode || 'smooth') as 'smooth' | 'instant';
+  // Style options for greeting bubble (mirror ChatMessages)
+  const aiBubbleColor = globalSettings?.ai_bubble_color || '#1f2937';
+  const aiBubbleOpacity = typeof globalSettings?.ai_bubble_opacity === 'number' ? globalSettings!.ai_bubble_opacity : 0.9;
+  const aiTextColor = globalSettings?.ai_text_color || '#E5E7EB';
+  const showCharacterAvatar = globalSettings?.show_character_avatar ?? true;
+  const fontSizeClass = (() => {
+    switch (globalSettings?.font_size) {
+      case 'small': return 'text-sm';
+      case 'large': return 'text-lg';
+      default: return 'text-base';
+    }
+  })();
+  const avatarStyle = (globalSettings?.avatar_style || 'classic') as 'classic' | 'bubble-bg' | 'portrait' | 'side-banner';
+  const hexToRgba = (hex: string, opacity: number) => {
+    const sanitized = hex.replace('#','');
+    const bigint = parseInt(sanitized.length === 3 ? sanitized.split('').map(c=>c+c).join('') : sanitized,16);
+    const r = (bigint >> 16) & 255; const g = (bigint >> 8) & 255; const b = bigint & 255;
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  };
+
+  // Ensure that once currentChatId is set we always leave pre-chat (defensive)
+  useEffect(() => {
+    if (currentChatId && isPreChatPhase) {
+      log.debug('🚪 Exiting pre-chat because currentChatId is now set', { currentChatId });
+      setIsPreChatPhase(false);
+    }
+  }, [currentChatId, isPreChatPhase, log]);
+
+  // Helper: create chat with chosen greeting THEN send first user message (reordered after dependencies)
+  const waitForGreetingPersistence = useCallback(async (newChatId: string, timeoutMs = 600) => {
+    // Shortened to reduce flicker window
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const { data } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('chat_id', newChatId)
+          .eq('is_ai_message', true)
+          .order('message_order', { ascending: true })
+          .limit(1);
+        if (data && data.length > 0) return true;
+      } catch {}
+      await new Promise(r => setTimeout(r, 120));
+    }
+    return false;
+  }, []);
+
+  const createChatAndSendFirstMessage = useCallback(async (userMessage: string) => {
+    if (!user || currentChatId || sendingFirstMessage) return;
+    // Transition immediately so UI can deterministically hide greeting
+    setChatPhase('creating');
+    setSendingFirstMessage(true);
+    setHasSentFirstUserMessage(true);
+    greetingDismissedStore.add(character.id);
+    try {
+      setIsCreatingChat(true);
+      const chosenGreeting = greetingVariants[selectedGreetingIndex] || null;
+      log.info('[FLOW 1] Deferred chat creation start', { chosenGreetingIndex: selectedGreetingIndex });
+      const { chatId: newChatId } = await createChat({
+        characterId: character.id,
+        characterName: character.name,
+        selectedPersonaId: propSelectedPersonaId || null,
+        greeting: chosenGreeting
+      });
+      log.info('[FLOW 2] Chat created', { newChatId });
+      setCurrentChatId(newChatId);
+      window.history.replaceState(null, '', `/chat/${character.id}/${newChatId}`);
+      onChatCreated?.(newChatId);
+
+      // (Optional) brief wait for greeting persistence
+      await waitForGreetingPersistence(newChatId);
+
+      log.info('[FLOW 3] Sending first user message');
+      // Optimistic user message insert BEFORE streaming to prevent bubble revival based on message heuristics
+      try {
+        const key = queryKeys.chat.messages(newChatId);
+        const previous: any = queryClient.getQueryData(key);
+        const optimisticId = `user-first-${Date.now()}`;
+        const optimisticMessage = { id: optimisticId, content: userMessage, isUser: true, is_ai_message: false, message_order: 1 }; // order not critical, will be realigned
+        if (previous?.pages?.length) {
+          queryClient.setQueryData(key, (old: any) => {
+            const first = old.pages[0];
+            const updatedFirst = { ...first, messages: [...first.messages, optimisticMessage] };
+            return { ...old, pages: [updatedFirst, ...old.pages.slice(1)] };
+          });
+        }
+      } catch (e) { log.debug('Optimistic first user message insert skipped', e); }
+
+      await sendMessage(
+        userMessage,
+        currentAddonSettings,
+        selectedPersonaId,
+        selectedWorldInfoId,
+        effectiveTrackedContext,
+        newChatId
+      );
+      log.info('[FLOW 4] First user message dispatched');
+      setIsFirstMessage(false);
+      setChatPhase('active');
+      onFirstMessage();
+    } catch (error: any) {
+      log.error('[FLOW X] Error in deferred creation path', error);
+      const chatError = handleChatError(error, 'creating chat', false);
+      toast({ title: 'Error', description: chatError.message, variant: 'destructive' });
+      // Rollback phase only if chat not created
+      if (!currentChatId) {
+        setChatPhase('greeting');
+        setHasSentFirstUserMessage(false);
+      }
+    } finally {
+      setIsCreatingChat(false);
+      setSendingFirstMessage(false);
+    }
+  }, [user, currentChatId, sendingFirstMessage, greetingVariants, selectedGreetingIndex, log, character.id, character.name, propSelectedPersonaId, createChat, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, onChatCreated, waitForGreetingPersistence, sendMessage, queryClient, onFirstMessage, toast]);
 
   // Sync tracked context with parent
   useEffect(() => {
@@ -240,8 +389,8 @@ const ChatInterface = ({
   // Initialize chat for existing chat
   useEffect(() => {
     if (existingChatId) {
-      setCurrentChatId(existingChatId);
-      setIsFirstMessage(false);
+      setHasSentFirstUserMessage(true);
+      setIsPreChatPhase(false);
     }
   }, [existingChatId]);
 
@@ -291,7 +440,19 @@ const ChatInterface = ({
   // Send message
   const handleSendMessage = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue.trim() || !user || !currentChatId) return;
+    if (!inputValue.trim() || !user) return;
+    if (!currentChatId) {
+      // Dismiss greeting deterministically before async
+      if (chatPhase === 'greeting') {
+        setChatPhase('creating');
+        greetingDismissedStore.add(character.id);
+      }
+      const firstMsg = inputValue;
+      setInputValue('');
+      await createChatAndSendFirstMessage(firstMsg);
+      return;
+    }
+    if (!currentChatId) return;
 
     // Check if user has enough credits
     if (creditsBalance < 1) {
@@ -323,6 +484,9 @@ const ChatInterface = ({
 
       if (isFirstMessage) {
         setIsFirstMessage(false);
+        setHasSentFirstUserMessage(true);
+        greetingDismissedStore.add(character.id);
+        setChatPhase('active');
         onFirstMessage();
       }
 
@@ -348,7 +512,19 @@ const ChatInterface = ({
         toast({ title: "Error", description: chatError.message, variant: "destructive" });
       }
     }
-  }, [inputValue, user, currentChatId, creditsBalance, sendMessage, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, isFirstMessage, onFirstMessage, toast, updateMetrics, onMessageSent]);
+  }, [inputValue, user, currentChatId, chatPhase, createChatAndSendFirstMessage, character.id, isFirstMessage, onFirstMessage, sendMessage, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, creditsBalance, toast, updateMetrics, onMessageSent]);
+
+  // Pre-chat greeting selection simply updates index; actual greeting persisted on create
+  const handleSelectGreeting = useCallback((idx: number) => {
+    setSelectedGreetingIndex(idx);
+  }, []);
+
+  // Debug info logging
+  useEffect(() => {
+    if (debugInfo) {
+      log.info('Debug Info:', debugInfo);
+    }
+  }, [debugInfo, log]);
 
   // Helper to trigger a variant generation (keeps previous AI message)
   const regenerateLastAI = useCallback(async (keepPrevious: boolean) => {
@@ -590,15 +766,264 @@ const ChatInterface = ({
 
   // Show loading state while chat is being initialized
   if (!currentChatId && !isLoadingMessages) {
+    // Removed early return to allow pre-chat greeting & input before chat creation
+  }
+
+  // Pre-chat carousel UI
+  const renderPreChatGreeting = () => {
+    if (!isPreChatPhase) return null;
+    if (greetingVariants.length === 0) return null;
+    const currentGreeting = greetingVariants[selectedGreetingIndex] || '';
+
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-white flex items-center gap-2">
-          <div className="w-4 h-4 border-2 border-[#FF7A00] border-t-transparent rounded-full animate-spin"></div>
-          Initializing chat...
+      <div className="px-4 pt-4">
+        <div className="flex items-start gap-3 max-w-3xl">
+          {/* Avatar placeholder to mimic AI bubble layout */}
+          <div className="w-10 h-10 rounded-xl overflow-hidden bg-[#1f1f1f] border border-white/10 flex items-center justify-center shrink-0">
+            <img
+              src={character.avatar}
+              alt={character.name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          </div>
+          <div className="flex-1">
+            <div className="inline-flex flex-col gap-2 bg-[#1f2937]/90 border border-white/10 rounded-2xl px-4 py-3 shadow-md relative group">
+              {hasMultipleGreetings && (
+                <div className="absolute -top-2 right-2 flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    onClick={handlePrevGreeting}
+                    disabled={isCreatingChat || sendingFirstMessage}
+                    className="text-xs px-2 py-1 rounded-md bg-black/40 hover:bg-black/60 border border-white/10 disabled:opacity-30"
+                    aria-label="Previous greeting"
+                  >
+                    ◀
+                  </button>
+                  <span className="text-[10px] text-gray-400 select-none">
+                    {selectedGreetingIndex + 1}/{greetingVariants.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNextGreeting}
+                    disabled={isCreatingChat || sendingFirstMessage}
+                    className="text-xs px-2 py-1 rounded-md bg-black/40 hover:bg-black/60 border border-white/10 disabled:opacity-30"
+                    aria-label="Next greeting"
+                  >
+                    ▶
+                  </button>
+                </div>
+              )}
+              <div className="text-sm whitespace-pre-wrap leading-relaxed text-gray-100">
+                {currentGreeting}
+              </div>
+              {hasMultipleGreetings && (
+                <div className="flex justify-center gap-1 pt-1">
+                  {greetingVariants.map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleSelectGreeting(i)}
+                      disabled={isCreatingChat || sendingFirstMessage}
+                      className={`h-1.5 w-1.5 rounded-full transition-colors ${i === selectedGreetingIndex ? 'bg-[#FF7A00]' : 'bg-gray-600 hover:bg-gray-500'}`}
+                      aria-label={`Select greeting variant ${i + 1}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="mt-1 ml-1 text-[10px] text-gray-500">
+              {isCreatingChat || sendingFirstMessage ? 'Creating chat…' : hasMultipleGreetings ? 'Pick a greeting (optional) and send your first message to start.' : 'Send your first message to start the chat.'}
+            </div>
+          </div>
         </div>
       </div>
     );
-  }
+  };
+
+  // Pre-chat (and pre-first-user-message) greeting bubble styled like AI message
+  const renderGreetingBubble = () => {
+    // New gating: ONLY phase === 'greeting'
+    if (chatPhase !== 'greeting') return null;
+    if (greetingDismissedStore.has(character.id)) return null; // safety
+    if (greetingVariants.length === 0) return null;
+    const currentGreeting = greetingVariants[selectedGreetingIndex] || '';
+    const helperText = isCreatingChat || sendingFirstMessage
+      ? 'Creating chat…'
+      : (hasMultipleGreetings
+          ? 'Pick a greeting (optional) and send your first message to start.'
+          : 'Send your first message to start the chat.');
+    // Derive name font size (message font +4px like normal AI messages)
+    const tailwindFontPx: Record<string, number> = { 'text-sm': 14, 'text-base': 16, 'text-lg': 18 };
+    const messageFontSizePx = tailwindFontPx[fontSizeClass] || 16;
+    const nameFontSizePx = messageFontSizePx + 4;
+    const rawName = character.name || '';
+    const truncatedName = rawName.length > 15 ? rawName.slice(0,15) + '…' : rawName;
+
+    // CLASSIC STYLE ---------------------------------------------------
+    if (avatarStyle === 'classic' || avatarStyle === 'portrait' || avatarStyle === 'side-banner') {
+      return (
+        <div className="px-4 pt-4">
+          <div className="flex items-start gap-3 max-w-3xl">
+            {showCharacterAvatar && (
+              <div className="hidden sm:flex w-16 h-16 rounded-full overflow-hidden bg-[#1f1f1f] border border-white/10 items-center justify-center shrink-0">
+                <img
+                  src={character.avatar}
+                  alt={character.name}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              </div>
+            )}
+            {/* Mobile avatar (matches MessageGroup) */}
+            {showCharacterAvatar && (
+              <div className="sm:hidden w-[3.3rem] h-[3.3rem] rounded-full overflow-hidden bg-[#1f1f1f] border border-white/10 flex items-center justify-center shrink-0">
+                <img
+                  src={character.avatar}
+                  alt={character.name}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              </div>
+            )}
+            <div className="flex-1">
+              <div
+                className={`inline-flex flex-col gap-2 border border-white/10 rounded-2xl px-4 py-3 shadow-md relative group ${fontSizeClass}`}
+                style={{ backgroundColor: hexToRgba(aiBubbleColor, aiBubbleOpacity), color: aiTextColor }}
+              >
+                <div className="font-semibold text-white/85 leading-none" style={{ fontSize: `${nameFontSizePx}px` }} title={rawName}>
+                  {truncatedName}
+                </div>
+                <div className="whitespace-pre-wrap leading-relaxed" style={{ color: aiTextColor }}>
+                  {currentGreeting}
+                </div>
+              </div>
+              {hasMultipleGreetings && (
+                <div className="mt-2 flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handlePrevGreeting}
+                      disabled={isCreatingChat || sendingFirstMessage}
+                      className="text-xs px-2 py-1 rounded-md bg-black/40 hover:bg-black/60 border border-white/10 disabled:opacity-30"
+                      aria-label="Previous greeting"
+                    >
+                      ◀
+                    </button>
+                    <span className="text-[10px] text-gray-400 select-none">
+                      {selectedGreetingIndex + 1}/{greetingVariants.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleNextGreeting}
+                      disabled={isCreatingChat || sendingFirstMessage}
+                      className="text-xs px-2 py-1 rounded-md bg-black/40 hover:bg-black/60 border border-white/10 disabled:opacity-30"
+                      aria-label="Next greeting"
+                    >
+                      ▶
+                    </button>
+                  </div>
+                  <div className="flex justify-center gap-1">
+                    {greetingVariants.map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleSelectGreeting(i)}
+                        disabled={isCreatingChat || sendingFirstMessage}
+                        className={`h-1.5 w-1.5 rounded-full transition-colors ${i === selectedGreetingIndex ? 'bg-[#FF7A00]' : 'bg-gray-600 hover:bg-gray-500'}`}
+                        aria-label={`Select greeting variant ${i + 1}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="mt-1 ml-1 text-[10px] text-gray-500">
+                {isCreatingChat || sendingFirstMessage ? 'Creating chat…' : hasMultipleGreetings ? 'Pick a greeting (optional) and send your first message to start.' : 'Send your first message to start the chat.'}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // BUBBLE-BG STYLE -------------------------------------------------
+    if (avatarStyle === 'bubble-bg') {
+      const bgColor = hexToRgba(aiBubbleColor, aiBubbleOpacity);
+      const showImagePanel = showCharacterAvatar && !!character.avatar;
+      const avatarMask = 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)';
+      return (
+        <div className="px-4 pt-4">
+          <div className="flex items-start gap-3 max-w-5xl">
+            <div
+              className={`relative ${fontSizeClass} border border-white/10 rounded-lg shadow-md w-full overflow-hidden`}
+              style={{ backgroundColor: bgColor }}
+            >
+              {showImagePanel && (
+                <div
+                  className="float-left w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7"
+                  style={{
+                    backgroundImage: `url(${character.avatar})`,
+                    maskImage: avatarMask as any,
+                    WebkitMaskImage: avatarMask as any,
+                  }}
+                />
+              )}
+              <div className={`${showImagePanel ? 'pt-2 pb-3 pr-4 pl-2 md:pl-4 min-h-[7rem]' : 'p-4'}`}>
+                <div className="font-bold text-white/85 leading-tight mb-2" style={{ fontSize: `${nameFontSizePx}px` }} title={rawName}>
+                  {truncatedName}
+                </div>
+                <div className="whitespace-pre-wrap leading-relaxed" style={{ color: aiTextColor }}>
+                  {currentGreeting}
+                </div>
+              </div>
+              <div className="clear-both" />
+            </div>
+            <div className="mt-1 ml-1 text-[10px] text-gray-500">
+              {helperText}
+            </div>
+          </div>
+          {hasMultipleGreetings && (
+            <div className="mt-2 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrevGreeting}
+                  disabled={isCreatingChat || sendingFirstMessage}
+                  className="text-xs px-2 py-1 rounded-md bg-black/40 hover:bg-black/60 border border-white/10 disabled:opacity-30"
+                  aria-label="Previous greeting"
+                >
+                  ◀
+                </button>
+                <span className="text-[10px] text-gray-300 select-none">
+                  {selectedGreetingIndex + 1}/{greetingVariants.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleNextGreeting}
+                  disabled={isCreatingChat || sendingFirstMessage}
+                  className="text-xs px-2 py-1 rounded-md bg-black/40 hover:bg-black/60 border border-white/10 disabled:opacity-30"
+                  aria-label="Next greeting"
+                >
+                  ▶
+                </button>
+              </div>
+              <div className="flex justify-center gap-1">
+                {greetingVariants.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSelectGreeting(i)}
+                    disabled={isCreatingChat || sendingFirstMessage}
+                    className={`h-1.5 w-1.5 rounded-full transition-colors ${i === selectedGreetingIndex ? 'bg-[#FF7A00]' : 'bg-gray-600 hover:bg-gray-500'}`}
+                    aria-label={`Select greeting variant ${i + 1}`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return null; // fallback
+  };
 
   return (
     <div className="relative h-full bg-transparent">
@@ -623,23 +1048,27 @@ const ChatInterface = ({
         
         {/* Messages Area - Mobile Responsive */}
         <div className="flex-1 overflow-hidden">
-          <ChatMessages 
-            chatId={currentChatId}
-            character={character}
-            trackedContext={effectiveTrackedContext}
-            streamingMessage={isStreaming ? streamingMessage : undefined}
-            isStreaming={isStreaming}
-            messages={messages}
-            hasMore={hasMore}
-            isFetchingNextPage={isFetchingNextPage}
-            isLoadingMessages={isLoadingMessages}
-            fetchNextPage={fetchNextPage}
-            isRealtimeConnected={isRealtimeConnected}
-            debugInfo={debugInfo}
-            renderBackground={false}
-            userAvatarUrlOverride={selectedPersonaData?.avatar_url || undefined}
-            regeneratingContentByMessageId={regeneratingContentById}
-          />
+          {/* Removed legacy greeting picker bar; unified into styled bubble */}
+          {renderGreetingBubble()}
+          {currentChatId && (
+            <ChatMessages 
+              chatId={currentChatId}
+              character={character}
+              trackedContext={effectiveTrackedContext}
+              streamingMessage={isStreaming ? streamingMessage : undefined}
+              isStreaming={isStreaming}
+              messages={messages}
+              hasMore={hasMore}
+              isFetchingNextPage={isFetchingNextPage}
+              isLoadingMessages={isLoadingMessages}
+              fetchNextPage={fetchNextPage}
+              isRealtimeConnected={isRealtimeConnected}
+              debugInfo={debugInfo}
+              renderBackground={false}
+              userAvatarUrlOverride={selectedPersonaData?.avatar_url || undefined}
+              regeneratingContentByMessageId={regeneratingContentById}
+            />
+          )}
         </div>
 
         {/* Typing Indicator (thin) */}
@@ -655,7 +1084,10 @@ const ChatInterface = ({
               <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
             </div>
             <span className="text-xs sm:text-sm">
-              {isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`}
+              {(() => {
+                const raw = isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`;
+                return raw.length > 50 ? raw.slice(0,47) + '…' : raw;
+              })()}
             </span>
           </div>
         </div>
@@ -669,14 +1101,14 @@ const ChatInterface = ({
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder={`Message ${character.name}...`}
+                placeholder={`Message ${character.name.length > 40 ? character.name.slice(0,37) + '…' : character.name}...`}
                 className="w-full bg-transparent outline-none text-sm sm:text-base text-white placeholder-gray-300"
-                disabled={isTyping || !currentChatId}
+                disabled={isTyping || isCreatingChat || sendingFirstMessage}
               />
             </div>
             <button
               type="submit"
-              disabled={!inputValue.trim() || isTyping || !currentChatId}
+              disabled={!inputValue.trim() || isTyping || isCreatingChat || sendingFirstMessage}
               className="backdrop-blur-md bg-[#FF7A00] hover:bg-[#FF7A00]/90 text-white disabled:opacity-50 disabled:cursor-not-allowed px-3 sm:px-4 py-2 sm:py-3 rounded-xl transition-colors h-auto shadow-lg shadow-black/30"
             >
               <Send className="w-4 h-4 sm:w-5 sm:h-5" />

@@ -93,8 +93,7 @@ const Onboarding = () => {
   const handleCharacterSelect = async (character: any) => {
     console.log('Selected character:', character);
     await completeOnboarding();
-    // Navigate to chat with selected character and replace history to prevent back navigation
-    navigate('/chat', { state: { selectedCharacter: character }, replace: true });
+    navigate(`/chat/${character.id}`, { state: { selectedCharacter: character, fromOnboarding: true, deferred: true }, replace: true });
   };
 
   const handleSkipCharacter = async () => {

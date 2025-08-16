@@ -240,7 +240,7 @@ export function DashboardContent() {
 
   // Memoized callback functions for better performance
   const handleContinueChat = useCallback((chat: any) => {
-    navigate('/chat', { 
+    navigate(`/chat/${chat.character.id}/${chat.id}`, { 
       state: { 
         selectedCharacter: chat.character, 
         existingChatId: chat.id 
@@ -270,7 +270,7 @@ export function DashboardContent() {
   }, []);
 
   const handleStartNewChat = useCallback((character: any) => {
-    navigate('/chat', { state: { selectedCharacter: character } });
+    navigate(`/chat/${character.id}`, { state: { selectedCharacter: character, deferred: true } });
   }, [navigate]);
 
   const handleDeleteSelectedChats = useCallback(async () => {

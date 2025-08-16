@@ -29,8 +29,9 @@ import PersonaCreateModal from './PersonaCreateModal';
 import PersonaEditModal from './PersonaEditModal';
 import { useWorldInfoSelection } from '@/hooks/chat/useWorldInfoSelection';
 import { usePersonaManager, personaKeys } from '@/hooks/chat/usePersonaManager';
-import { createChatWithGreeting } from '@/lib/chat-operations';
+import { createChat } from '@/lib/chat-operations';
 import { createMemory as createMemoryOp } from '@/lib/memory-operations';
+import { buildGreetingVariants } from '@/lib/greeting-utils';
 
 // ChatLayout component
 interface ChatLayoutProps {
@@ -52,6 +53,11 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [isLiked, setIsLiked] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
   const [isCreatingNewChat, setIsCreatingNewChat] = useState(false);
+  // Removed legacy pre-chat greeting selection state (now handled inside ChatInterface)
+  // const [greetingSelectionOpen, setGreetingSelectionOpen] = useState(false);
+  // const [greetingVariants, setGreetingVariants] = useState<string[]>([]);
+  // const [pendingGreetingIndex, setPendingGreetingIndex] = useState<number>(0);
+  // const [pendingChatModeAfterGreeting, setPendingChatModeAfterGreeting] = useState<'storytelling' | 'companion' | null>(null);
   const queryClient = useQueryClient();
 
   // Auth
@@ -479,55 +485,25 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
-  const handleCreateNewChatForMode = async () => {
-    if (!currentUser) return;
-    try {
-      await handleStartNewChat();
-      setShowMismatchModal(false);
-    } catch (error) {
-      logger.error('Error creating new chat:', error);
-      toast.error('Failed to create new chat');
-    }
-  };
-
-  const handleChangeCharacterMode = async () => {
-    if (!currentChat || !currentUser) return;
-    try {
-      await upsertUserCharacterSettings(currentUser.id, character.id, { chat_mode: currentChat.chat_mode });
-      setChatMode(currentChat.chat_mode);
-      setShowMismatchModal(false);
-      toast.success(`Character mode changed to ${currentChat.chat_mode}`, {
-        description: 'Mode updated to match this chat'
-      });
-      queryClient.invalidateQueries({ queryKey: ['user', 'character-settings', currentUser.id, character.id] });
-    } catch (error) {
-      logger.error('Error changing character mode:', error);
-      toast.error('Failed to change character mode');
-    }
-  };
-
-  // Start new chat function
+  // Start new chat now simply navigates to character route (deferred creation in ChatInterface)
   const handleStartNewChat = async () => {
-    if (!currentUser || isCreatingNewChat) return;
-    setIsCreatingNewChat(true);
-    try {
-      logger.info('🎯 ChatLayout: Creating new chat for character:', character.id);
-      const { chat_id } = await createChatWithGreeting({
-        characterId: character.id,
-        characterName: character.name,
-        selectedPersonaId: selectedPersona?.id || null,
-      });
-      logger.info('✅ ChatLayout: Chat created successfully:', chat_id);
-      navigate(`/chat/${character.id}/${chat_id}`);
-    } catch (error) {
-      logger.error('Error creating new chat:', error);
-      toast.error('Failed to start new chat');
-    } finally {
-      setIsCreatingNewChat(false);
-    }
+    if (!currentUser) return;
+    navigate(`/chat/${character.id}`);
+  };
+  const handleConfirmGreetingSelection = async () => {
+    // Removed: legacy greeting modal confirm (handled in ChatInterface)
+  };
+  const handleCancelGreetingSelection = () => {
+    // Removed: legacy greeting modal cancel
   };
 
-  // Enhanced Memory handler
+  // Derived flags (restored after refactor)
+  const isCharacterOwner = currentUser && characterDetails && currentUser.id === characterDetails.creator_id;
+  const loading = chatsLoading || (!characterDetailsOverride && characterDetailsQuery.isLoading);
+  const showMemoriesButton = (globalSettings?.enhanced_memory || (isActive && currentStep === 6)) && !!currentChatId;
+  const memoriesCount = memories?.length || 0;
+
+  // Memory creation handler (restored)
   const handleCreateMemory = async () => {
     if (!currentUser || !currentChatId || isCreatingMemory) return;
     setIsCreatingMemory(true);
@@ -538,7 +514,6 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         toast.success('Memory created successfully! 🧠', {
           description: `Conversation summarized with ${data.data?.messageCount || 0} messages processed. ${creditCost} credits deducted.`,
         });
-        // Invalidate credits and message count after memory creation
         queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(currentChatId), exact: true });
         if (currentUser?.id) {
           queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(currentUser.id), exact: true });
@@ -554,34 +529,30 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
-  const isCharacterOwner = currentUser && characterDetails && currentUser.id === characterDetails.creator_id;
-  const loading = chatsLoading || (!characterDetailsOverride && characterDetailsQuery.isLoading);
-
   return (
     <div className="flex flex-col md:flex-row min-h-[100dvh] md:h-full bg-[#121212] relative overflow-hidden">
-      {/* Mobile Header - Only visible on mobile */}
+      {/* Mobile Header */}
       <div className="md:hidden">
         <MobileHeader 
-          title={`Chat with ${character.name}`}
+          title="Chat" 
           userCredits={creditsBalance}
           username={currentUser?.email?.split('@')[0] || 'User'}
         />
       </div>
-      
-      {/* Desktop Sidebar - Only visible on desktop */}
+
+      {/* Desktop Sidebar */}
       <div className="hidden md:block">
         <AppSidebar />
       </div>
- 
-       {/* Main Chat Area - Takes full width on mobile, adjusts for sidebar on desktop */}
-       <div className="flex-1 flex flex-col h-full relative">
-        {/* Chat Header - extracted component */}
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col h-full relative">
         <ChatHeader
           character={character}
           characterDetails={characterDetails}
           creditsBalance={creditsBalance}
           currentUser={currentUser}
-          isCreatingMemory={isCreatingMemory}
+            isCreatingMemory={isCreatingMemory}
           currentChatId={currentChatId}
           onConfirmCreateMemory={handleCreateMemory}
           onToggleRightPanel={handleRightPanelToggle}
@@ -592,70 +563,87 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           messageCount={currentChatMessageCount}
           getMemoryCostText={getMemoryCostExplanation}
         />
- 
-         {/* Chat Content */}
-         <div className="flex-1 overflow-hidden" style={{ pointerEvents: disableInteractions ? 'none' : 'auto' }}>
-           {children}
-         </div>
-       </div>
- 
-       {/* Right Panel - Lazy */}
-       <Suspense fallback={null}>
-         <RightPanelLazy
-           open={rightPanelOpen}
-           onClose={() => setRightPanelOpen(false)}
-           onConfigTabClicked={() => handleStepAction('config-tab-clicked')}
-           // history props
-           loading={loading}
-           filteredChatHistory={filteredChatHistory}
-           searchQuery={searchQuery}
-           setSearchQuery={setSearchQuery}
-           currentChatId={currentChatId}
-           onSelectChat={(characterId: string, chatId: string) => {
-             if (chatId !== currentChatId) navigate(`/chat/${characterId}/${chatId}`);
-           }}
-           onDeleteChat={handleDeleteChat}
-           // details props
-           character={character}
-           characterDetails={characterDetails}
-           isCharacterOwner={!!isCharacterOwner}
-           onStartNewChat={handleStartNewChat}
-           isCreatingNewChat={isCreatingNewChat}
-           onEditCharacter={handleEditCharacter}
-           showMemoriesButton={!!(globalSettings?.enhanced_memory || (isActive && currentStep === 6))}
-           memoriesCount={memories.length}
-           onOpenMemories={() => {
-             setShowMemoriesDialog(true);
-             fetchMemories();
-           }}
-           isLiked={isLiked}
-           onLike={handleLike}
-           isFavorited={isFavorited}
-           onFavorite={handleFavorite}
-           currentUser={currentUser}
-           chatMode={chatMode}
-           onChatModeChange={handleChatModeChange}
-           chatModeLoading={chatModeLoading}
-           timeAwarenessEnabled={timeAwarenessEnabled}
-           onTimeAwarenessChange={handleTimeAwarenessChange}
-           timeAwarenessLoading={timeAwarenessLoading}
-           userTimezone={userTimezone}
-           // config props
-           worldInfoDropdownVisible={worldInfoDropdownVisible}
-           onWorldInfoSelect={handleWorldInfoSelect}
-           selectedWorldInfoId={selectedWorldInfoId}
-           currentUserId={currentUser?.id}
-           personas={personas}
-           selectedPersona={selectedPersona}
-           setSelectedPersona={setSelectedPersona}
-           setShowPersonaModal={setShowCreateModal}
-           setShowEditPersonaModal={setShowEditModal}
-           setPersonaToEdit={setPersonaToEdit}
-           onPersonaSaved={handlePersonaSaved}
-         />
-       </Suspense>
+        <div className="flex-1 overflow-hidden" style={{ pointerEvents: disableInteractions ? 'none' : 'auto' }}>
+          {children}
+        </div>
+      </div>
 
-      {/* Persona Creation Modal - Hook-driven */}
+      {/* Right Panel */}
+      <Suspense fallback={null}>
+        <RightPanelLazy
+          open={rightPanelOpen}
+          onClose={() => setRightPanelOpen(false)}
+          onConfigTabClicked={() => handleStepAction('config-tab-clicked')}
+          loading={loading}
+          filteredChatHistory={filteredChatHistory}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          currentChatId={currentChatId}
+          onSelectChat={(characterId: string, chatId: string) => { if (chatId !== currentChatId) navigate(`/chat/${characterId}/${chatId}`); }}
+          onDeleteChat={handleDeleteChat}
+          character={character}
+          characterDetails={characterDetails}
+          isCharacterOwner={!!isCharacterOwner}
+          onStartNewChat={handleStartNewChat}
+          isCreatingNewChat={isCreatingNewChat}
+          onEditCharacter={handleEditCharacter}
+          showMemoriesButton={showMemoriesButton}
+          memoriesCount={memoriesCount}
+          onOpenMemories={() => setShowMemoriesDialog(true)}
+          isLiked={isLiked}
+          onLike={handleLike}
+          isFavorited={isFavorited}
+          onFavorite={handleFavorite}
+          currentUser={currentUser}
+          chatMode={chatMode}
+          onChatModeChange={handleChatModeChange}
+          chatModeLoading={chatModeLoading}
+          timeAwarenessEnabled={timeAwarenessEnabled}
+          onTimeAwarenessChange={handleTimeAwarenessChange}
+          timeAwarenessLoading={timeAwarenessLoading}
+          userTimezone={userTimezone}
+          worldInfoDropdownVisible={worldInfoDropdownVisible}
+          onWorldInfoSelect={handleWorldInfoSelect}
+          selectedWorldInfoId={selectedWorldInfoId}
+          currentUserId={currentUser?.id}
+          personas={personas}
+          selectedPersona={selectedPersona}
+          setSelectedPersona={setSelectedPersona}
+          setShowPersonaModal={setShowCreateModal}
+          setShowEditPersonaModal={setShowEditModal}
+          setPersonaToEdit={setPersonaToEdit}
+          onPersonaSaved={handlePersonaSaved}
+        />
+      </Suspense>
+
+      {/* Memories Dialog */}
+      <MemoriesDialog
+        open={showMemoriesDialog}
+        onOpenChange={setShowMemoriesDialog}
+        memories={memories || []}
+        loading={memoriesLoading}
+        error={memoriesError || null}
+        characterName={character.name}
+        onRefresh={refreshMemories}
+      />
+
+      <ChatModeMismatchModal
+        isOpen={showMismatchModal}
+        onClose={() => setShowMismatchModal(false)}
+        chatMode={currentChat?.chat_mode || chatMode}
+        characterMode={chatMode}
+        onCreateNewChat={handleStartNewChat}
+        onChangeCharacterMode={() => handleChatModeChange(currentChat?.chat_mode || chatMode)}
+      />
+
+      <ChatModeChangeModal
+        isOpen={showChangeModal}
+        onClose={() => setShowChangeModal(false)}
+        newMode={pendingChatMode || chatMode}
+        onConfirm={handleConfirmChatModeChange}
+      />
+
+      {/* Persona create modal */}
       <PersonaCreateModal
         open={showCreateModal}
         onOpenChange={setShowCreateModal}
@@ -666,75 +654,17 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         onAvatarChange={handleAvatarChange}
       />
 
-      {/* Edit Persona Modal - Hook-driven */}
-      <PersonaEditModal
-        open={showEditModal}
-        onOpenChange={setShowEditModal}
-        personaToEdit={personaToEdit}
-        setPersonaToEdit={setPersonaToEdit}
-        isSaving={isCreatingPersona}
-        onSave={async () => {
-          if (!personaToEdit?.name.trim()) return;
-          try {
-            setIsCreatingPersona(true);
-            const { updatePersona } = await import('@/lib/persona-operations');
-            const updatedPersona = await updatePersona(personaToEdit.id, {
-              name: personaToEdit.name,
-              bio: personaToEdit.bio,
-              lore: personaToEdit.lore,
-              avatar_url: personaToEdit.avatar_url,
-            } as any);
-            // Update personas list cache
-            queryClient.setQueryData(personaKeys.all(currentUser?.id), (old: Persona[] = []) => old.map(p => p.id === updatedPersona.id ? updatedPersona : p));
-            if (selectedPersona?.id === updatedPersona.id) {
-              setSelectedPersona(updatedPersona);
-            }
-            setShowEditModal(false);
-            setPersonaToEdit(null);
-            toast.success('Persona updated successfully!');
-          } catch (error) {
-            logger.error('Error updating persona:', error);
-            toast.error('Failed to update persona');
-          } finally {
-            setIsCreatingPersona(false);
-          }
-        }}
-      />
-
-      {/* Memories Dialog */}
-      <MemoriesDialog
-        open={showMemoriesDialog}
-        onOpenChange={(open) => {
-          setShowMemoriesDialog(open);
-          if (open) fetchMemories();
-        }}
-        memories={memories}
-        loading={memoriesLoading}
-        error={memoriesError}
-        characterName={character.name}
-        onRefresh={() => { /* no-op, manual refresh removed */ }}
-      />
-
-      {/* Chat Mode Mismatch Modal */}
-      <ChatModeMismatchModal
-        isOpen={showMismatchModal}
-        onClose={() => setShowMismatchModal(false)}
-        chatMode={currentChat?.chat_mode || 'storytelling'}
-        characterMode={chatMode}
-        onCreateNewChat={handleCreateNewChatForMode}
-        onChangeCharacterMode={handleChangeCharacterMode}
-      />
-
-      {/* Chat Mode Change Modal */}
-      <ChatModeChangeModal
-        isOpen={showChangeModal}
-        onClose={() => {
-          setShowChangeModal(false);
-          setPendingChatMode(null);
-        }}
-        newMode={pendingChatMode || 'storytelling'}
-        onConfirm={handleConfirmChatModeChange}
-      />
+      {/* Persona edit modal */}
+      {personaToEdit && (
+        <PersonaEditModal
+          open={showEditModal}
+          onOpenChange={setShowEditModal}
+          personaToEdit={personaToEdit}
+          setPersonaToEdit={setPersonaToEdit}
+          isSaving={isCreatingPersona}
+          onSave={handlePersonaSaved}
+        />
+      )}
     </div>
   );
 };

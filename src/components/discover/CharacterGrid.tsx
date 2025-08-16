@@ -166,9 +166,9 @@ export function CharacterGrid({
 
   const handleStartChat = (character: PublicCharacter) => {
     if (!user) {
-      // Redirect to auth with signup mode
       navigate('/auth?mode=signup');
     } else {
+      // Deferred creation model: just navigate; ChatInterface will create on first message
       startChat(character);
     }
   };

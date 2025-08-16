@@ -78,7 +78,24 @@ const DEFAULT_AVATAR = '/default_avatar.jpg';
 export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions, userAvatarUrlOverride, regeneratingContentByMessageId = {}, canModify = false }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
 
+  // Truncated character display name (first 15 chars)
+  const rawCharacterName: string = character?.name || '';
+  const truncatedCharacterName = rawCharacterName.length > 15 ? rawCharacterName.slice(0, 15) + '…' : rawCharacterName;
+
   const sizeClass = fontSizeClass || 'text-base';
+  // Dynamic font size mapping for character name (always +4px over message font size)
+  const tailwindFontPx: Record<string, number> = {
+    'text-xs': 12,
+    'text-sm': 14,
+    'text-base': 16,
+    'text-lg': 18,
+    'text-xl': 20,
+    'text-2xl': 24,
+    'text-3xl': 30,
+    'text-4xl': 36,
+  };
+  const messageFontSizePx = tailwindFontPx[sizeClass.split(' ').find(c => c.startsWith('text-')) || 'text-base'] || 16;
+  const nameFontSizePx = messageFontSizePx + 4;
 
   // Access user profile for avatar
   const { profile } = useAuth();
@@ -91,6 +108,8 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
   
   // Compute avatar styles - doubled size for classic style
   const avatarSizeClass = 'w-16 h-16'; // Doubled from w-8 h-8
+  // Mobile reduction (20%) via responsive classes
+  const mobileAvatarSizeClass = 'w-[3.3rem] h-[3.3rem] sm:w-16 sm:h-16';
   const avatarShapeClass = 'rounded-full'; // Fixed to circular
 
   // Decide avatar visibility based on style
@@ -252,19 +271,34 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
           {formatMessageTime(group.timestamp)}
         </div>
       )}
-      
-      <div className={`flex gap-3`}>
-        {/* Left avatar for AI messages (classic style only) */}
-        {(!isUser && showLeftAvatar && avatarStyle === 'classic') && (
-          <Avatar className={`${avatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
+      {/* Top avatars for mobile (classic style) */}
+      {avatarStyle === 'classic' && !isUser && showLeftAvatar && (
+        <div className="sm:hidden mb-2 flex justify-start">
+          <Avatar className={`${mobileAvatarSizeClass} ${avatarShapeClass}`}>
             <AvatarImage src={character.avatar} alt={character.name} className="object-cover" />
-            <AvatarFallback>{character.fallback}</AvatarFallback>
+            <AvatarFallback>{character.name?.[0] || 'A'}</AvatarFallback>
+          </Avatar>
+        </div>
+      )}
+      {avatarStyle === 'classic' && isUser && showRightAvatar && (
+        <div className="sm:hidden mb-2 flex justify-end">
+          <Avatar className={`${mobileAvatarSizeClass} ${avatarShapeClass}`}>
+            <AvatarImage src={resolvedUserAvatarUrl} alt={profile?.username || 'User'} className="object-cover" />
+            <AvatarFallback>{(profile?.username || 'U')[0]}</AvatarFallback>
+          </Avatar>
+        </div>
+      )}
+      <div className={`flex gap-3 ${avatarStyle === 'classic' ? 'sm:flex-row flex-col' : ''}`}>
+        {/* Left avatar for AI messages (classic style only, hidden on mobile) */}
+        {(!isUser && showLeftAvatar && avatarStyle === 'classic') && (
+          <Avatar className={`hidden sm:flex ${mobileAvatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
+            <AvatarImage src={character.avatar} alt={character.name} className="object-cover" />
+            <AvatarFallback>{character.name?.[0] || 'A'}</AvatarFallback>
           </Avatar>
         )}
-        
-        <div className={`flex flex-col gap-1 max-w-[80%] ${isUser ? 'items-end ml-auto' : 'items-start'}`}>
+        <div className={`flex flex-col gap-1 max-w-[80%] sm:max-w-[80%] ${isUser ? 'items-end ml-auto' : 'items-start'} w-full`} style={{ maxWidth: '90%' }}>
           {messages.map((message, index) => {
-            // Special handling for bubble-bg style
+            // Bubble background style (avatar inside bubble). AI: float-left (wrap then full width). User: flex so text never goes under avatar.
             if (avatarStyle === 'bubble-bg') {
               const hasAvatar = isUser ? !!resolvedUserAvatarUrl : !!character.avatar;
               if (hasAvatar) {
@@ -272,102 +306,97 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   ? toRgba(styleOptions?.userBubbleColor, styleOptions?.userBubbleOpacity, '#FF7A00', 1)
                   : toRgba(styleOptions?.aiBubbleColor, styleOptions?.aiBubbleOpacity, '#1f2937', 0.9);
                 const imageUrl = isUser ? (resolvedUserAvatarUrl as string) : (character.avatar as string);
-
-                // Build avatar slice and text section, flip order and mask for user side
-                const avatarMask = isUser
-                  ? 'linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%)'
-                  : 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%)';
-
-                const AvatarSlice = (
-                  <div 
-                    className="relative flex-shrink-0 w-[5.6rem] h-[7rem] md:w-32 md:h-40"
-                    style={{
-                      backgroundImage: `url(${imageUrl})`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                      backgroundRepeat: 'no-repeat',
-                      maskImage: avatarMask as any,
-                      WebkitMaskImage: avatarMask as any,
-                    }}
-                  />
-                );
-
-                const TextSection = (
-                  <div className="flex-1 px-4 py-2 flex flex-col items-start">
-                    {!isUser && (
-                      <div className="text-[16px] font-bold text-white/85 leading-none mb-1">
-                        {character.name}
+                if (isUser) {
+                  // USER SIDE: avatar on right, text on left, no wrapping under avatar
+                  return (
+                    <div
+                      key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
+                      ref={(el) => { messageRefs.current[index] = el; }}
+                      className={`relative ${sizeClass} flex items-start justify-end ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
+                        index === 0 && index === messages.length - 1
+                          ? 'rounded-lg'
+                          : index === 0
+                            ? 'rounded-t-lg rounded-bl-lg rounded-br-sm'
+                            : index === messages.length - 1
+                              ? 'rounded-b-lg rounded-bl-lg rounded-br-sm'
+                              : 'rounded-bl-lg rounded-br-sm'
+                      }`}
+                      style={{ backgroundColor: bgColor }}
+                    >
+                      <div className="flex-1 min-w-0 px-4 py-3">
+                        <span style={textColor ? { color: textColor } : undefined}>
+                          <FormattedMessage
+                            content={message.content}
+                            className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                          />
+                        </span>
                       </div>
-                    )}
-                    {(!isUser && editingIndex === index) ? (
-                      <textarea
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={onKeyDownEditor}
-                        className="w-full min-h-[6rem] bg-transparent outline-none resize-none text-white/90 placeholder-white/50"
-                        autoFocus
+                      <div
+                        className="w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover ml-5 md:ml-7 shrink-0 rounded-tr-lg rounded-br-lg overflow-hidden"
+                        style={{
+                          backgroundImage: `url(${imageUrl})`,
+                          maskImage: 'linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)',
+                          WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)',
+                        }}
                       />
-                    ) : (
-                      <span style={textColor ? { color: textColor } : undefined}>
-                        <FormattedMessage 
-                          content={message.content}
-                          className="whitespace-pre-wrap select-text message-content"
-                        />
-                      </span>
-                    )}
-                  </div>
-                );
-
+                    </div>
+                  );
+                }
+                // AI SIDE (unchanged float-left behavior)
+                const avatarMask = 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)';
                 return (
                   <div
                     ref={(el) => { messageRefs.current[index] = el; }}
                     key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-                    className={`relative flex overflow-hidden ${sizeClass} ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
+                    className={`relative ${sizeClass} ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
                       index === 0 && index === messages.length - 1
                         ? 'rounded-lg'
                         : index === 0
-                        ? 'rounded-t-lg rounded-br-lg rounded-bl-sm'
-                        : index === messages.length - 1
-                        ? 'rounded-b-lg rounded-br-lg rounded-bl-sm'
-                        : 'rounded-br-lg rounded-bl-sm'
+                          ? 'rounded-t-lg rounded-br-lg rounded-bl-sm'
+                          : index === messages.length - 1
+                            ? 'rounded-b-lg rounded-br-lg rounded-bl-sm'
+                            : 'rounded-br-lg rounded-bl-sm'
                     }`}
-                    style={{ 
-                      backgroundColor: bgColor, 
+                    style={{
+                      backgroundColor: bgColor,
                       height: (!isUser && editingIndex === index && editingHeight) ? `${editingHeight}px` : undefined,
                       width: (!isUser && editingIndex === index && editingWidth) ? `${editingWidth}px` : undefined,
                     }}
                   >
-                    {isUser ? (
-                      <>
-                        {TextSection}
-                        {AvatarSlice}
-                      </>
-                    ) : (
-                      <>
-                        {AvatarSlice}
-                        {editingIndex === index ? (
-                          <div className="flex-1 px-4 py-2 flex flex-col items-start h-full">
-                            <div className="text-[16px] font-bold text-white/85 leading-none mb-1">
-                              {character.name}
-                            </div>
-                            <textarea
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              onKeyDown={onKeyDownEditor}
-                              className="w-full h-full bg-transparent outline-none resize-none text-white/90 placeholder-white/50"
-                              autoFocus
-                            />
-                          </div>
-                        ) : (
-                          TextSection
-                        )}
-                      </>
-                    )}
+                    <div
+                      className="float-left w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7"
+                      style={{
+                        backgroundImage: `url(${imageUrl})`,
+                        maskImage: avatarMask as any,
+                        WebkitMaskImage: avatarMask as any,
+                      }}
+                    />
+                    <div className="pt-2 pb-3 pr-4 pl-2 md:pl-4 min-h-[7rem]">
+                      <div className="font-bold text-white/85 leading-tight mb-2" style={{ fontSize: `${nameFontSizePx}px` }} title={rawCharacterName}>
+                        {truncatedCharacterName}
+                      </div>
+                      {(editingIndex === index) ? (
+                        <textarea
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onKeyDown={onKeyDownEditor}
+                          className="w-full min-h-[6rem] bg-transparent outline-none resize-none text-white/90 placeholder-white/50"
+                          autoFocus
+                        />
+                      ) : (
+                        <span style={textColor ? { color: textColor } : undefined}>
+                          <FormattedMessage
+                            content={message.content}
+                            className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                          />
+                        </span>
+                      )}
+                    </div>
+                    <div className="clear-both" />
                   </div>
                 );
               }
             }
-            
             // Default rendering for other styles
             return (
               <div
@@ -377,27 +406,27 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   index === 0 && index === messages.length - 1
                     ? 'rounded-lg'
                     : index === 0
-                    ? isUser
-                      ? 'rounded-t-lg rounded-bl-lg rounded-br-sm'
-                      : 'rounded-t-lg rounded-br-lg rounded-bl-sm'
-                    : index === messages.length - 1
-                    ? isUser
-                      ? 'rounded-b-lg rounded-bl-lg rounded-br-sm'
-                      : 'rounded-b-lg rounded-br-lg rounded-bl-sm'
-                    : isUser
-                    ? 'rounded-bl-lg rounded-br-sm'
-                    : 'rounded-br-lg rounded-bl-sm'
+                      ? isUser
+                        ? 'rounded-t-lg rounded-bl-lg rounded-br-sm'
+                        : 'rounded-t-lg rounded-br-lg rounded-bl-sm'
+                      : index === messages.length - 1
+                        ? isUser
+                          ? 'rounded-b-lg rounded-bl-lg rounded-br-sm'
+                          : 'rounded-b-lg rounded-br-lg rounded-bl-sm'
+                        : isUser
+                          ? 'rounded-bl-lg rounded-br-sm'
+                          : 'rounded-br-lg rounded-bl-sm'
                 }`}
-                style={{ 
-                  backgroundColor: bubbleBg, 
-                  ...bubbleStyle, 
+                style={{
+                  backgroundColor: bubbleBg,
+                  ...bubbleStyle,
                   height: (!isUser && editingIndex === index && editingHeight) ? `${editingHeight}px` : undefined,
                   width: (!isUser && editingIndex === index && editingWidth) ? `${editingWidth}px` : undefined,
                 }}
               >
                 {!isUser && (
-                  <div className="text-[11px] font-semibold text-white/85 leading-none mb-1">
-                    {character.name}
+                  <div className="font-semibold text-white/85 leading-none mb-1" style={{ fontSize: `${nameFontSizePx}px` }} title={rawCharacterName}>
+                    {truncatedCharacterName}
                   </div>
                 )}
                 {(!isUser && editingIndex === index) ? (
@@ -410,7 +439,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   />
                 ) : (
                   <span style={textColor ? { color: textColor } : undefined}>
-                    <FormattedMessage 
+                    <FormattedMessage
                       content={(() => {
                         const override = regeneratingContentByMessageId?.[(message as any).id];
                         if (typeof override === 'string') {
@@ -426,20 +455,14 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
             );
           })}
         </div>
-        
-        {/* Right-side avatar or spacer for user messages (classic style only) */}
-        {isUser && avatarStyle === 'classic' && (
-          (showRightAvatar ? (
-            <Avatar className={`${avatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
-              <AvatarImage src={resolvedUserAvatarUrl} alt="User" className="object-cover" />
-              <AvatarFallback>U</AvatarFallback>
-            </Avatar>
-          ) : (
-            <div className={`${avatarSizeClass} flex-shrink-0`} />
-          ))
+        {/* Right-side avatar for user messages (classic style only, hidden on mobile). Removed spacer so bubble can align fully right when avatar disabled */}
+        {isUser && avatarStyle === 'classic' && showRightAvatar && (
+          <Avatar className={`hidden sm:flex ${mobileAvatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
+            <AvatarImage src={resolvedUserAvatarUrl} alt={profile?.username || 'User'} className="object-cover" />
+            <AvatarFallback>{(profile?.username || 'U')[0]}</AvatarFallback>
+          </Avatar>
         )}
       </div>
-      
       {/* Show context display for AI messages with action icons */}
       {!isUser && (
         <div className="mt-3 ml-11">

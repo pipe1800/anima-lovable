@@ -71,6 +71,8 @@ export const ChatCard = React.memo(({
   };
 
   const lastMessage = chat.last_message || chat.lastMessage;
+  const rawCharacterName = chat.character.name || '';
+  const truncatedCharacterName = rawCharacterName.length > 15 ? rawCharacterName.slice(0, 15) + '…' : rawCharacterName;
 
   return (
     <Card 
@@ -107,8 +109,8 @@ export const ChatCard = React.memo(({
             {/* Header with Character Name and Badges */}
             <div className="flex items-start justify-between mb-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-white font-semibold text-base truncate">
-                  {chat.character.name}
+                <h3 className="text-white font-semibold text-base truncate" title={rawCharacterName}>
+                  {truncatedCharacterName}
                 </h3>
                 <div className="flex gap-1">
                   {chat.chat_mode && (

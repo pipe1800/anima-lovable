@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -350,253 +349,146 @@ export default function PublicWorldInfoProfile() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
-          {/* Header */}
-          
-          
-          {/* Content */}
-          <div className="flex-1 overflow-hidden">
-            <div className="h-full flex flex-col">
-          {/* Back button under TopBar */}
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <Button
               variant="ghost"
               onClick={() => navigate('/world-info')}
               className="text-gray-400 hover:text-white mb-4"
+              size="sm"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to World Info
+              Back
             </Button>
-          
-            {/* Header */}
-            <div className="border-b border-gray-700/50 pb-6">
-              <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-white">
-                  {worldInfo.name}
-                </h1>
-                <div className="flex gap-2">
-                  {/* Action Buttons */}
-                  <Button
-                    onClick={handleLike}
-                    variant={worldInfo.isLiked ? "default" : "outline"}
-                    disabled={isLiking}
-                    className="border-gray-600"
-                  >
-                    <Heart className={`mr-2 h-4 w-4 ${worldInfo.isLiked ? 'fill-current' : ''}`} />
-                    {worldInfo.likesCount} Likes
-                  </Button>
-                  <Button
-                    onClick={handleExport}
-                    variant="outline"
-                    className="border-gray-600"
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Export
-                  </Button>
-                  {isOwner && (
-                    <Button
-                      onClick={toggleVisibility}
-                      variant="outline"
-                      className="border-gray-600"
-                    >
-                      {worldInfo.visibility === 'public' ? <Globe className="mr-2 h-4 w-4" /> : <Lock className="mr-2 h-4 w-4" />}
-                      {worldInfo.visibility === 'public' ? 'Make Private' : 'Make Public'}
-                    </Button>
-                  )}
-                  {/* Collection toggle for non-owner or remove for owner */}
-                  {isOwner ? (
-                    <Button
-                      onClick={handleDelete}
-                      variant="destructive"
-                      className=""
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Delete
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={handleUseLorebook}
-                      variant={worldInfo.isUsed ? "outline" : "secondary"}
-                      disabled={isUsingLorebook}
-                      className="border-gray-600"
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      {worldInfo.isUsed ? "Remove from Collection" : "Add to Collection"}
-                    </Button>
-                  )}
-                  {canEdit && (
-                    <Button
-                      onClick={handleEdit}
-                      variant="outline"
-                      className="border-gray-600 text-gray-300 hover:bg-gray-800"
-                    >
-                      <Edit2 className="w-4 h-4 mr-2" />
-                      Edit
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-auto p-6">
-            <div className="max-w-4xl mx-auto space-y-6">
-              {/* World Info Details Card */}
-              <Card className="bg-gray-800/50 border-gray-700">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-white">
-                    <BookOpen className="w-5 h-5" />
-                    World Info Details
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Header Section */}
-                  <div className="flex items-start gap-6">
-                    <div className="relative">
-                      <Avatar className="h-24 w-24">
-                        {worldInfo.avatar_url ? (
-                          <AvatarImage src={worldInfo.avatar_url} alt="World Info Avatar" className="object-cover" />
-                        ) : (
-                          <AvatarFallback className="bg-gray-700 text-gray-300">
-                            <BookOpen className="w-8 h-8" />
-                          </AvatarFallback>
-                        )}
-                      </Avatar>
-                    </div>
-                    <div className="flex-1">
-                      <h1 className="text-4xl font-bold mb-2 text-white">{worldInfo.name}</h1>
-                      <p className="text-gray-400 mb-4">
-                        Created by{' '}
-                        <Link
-                          to={`/profile/${worldInfo.creator_id}`}
-                          className="font-medium text-primary hover:underline"
-                        >
-                          {worldInfo.creator?.username || 'Unknown'}
-                        </Link>
-                      </p>
-                      <div className="flex items-center gap-4 text-sm text-gray-400">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="h-4 w-4" />
-                          {new Date(worldInfo.created_at).toLocaleDateString()}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Eye className="h-4 w-4" />
-                          {worldInfo.interaction_count} views
-                        </div>
-                      </div>
+            <div className="space-y-6">
+              {/* Header / Hero */}
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                  <div className="flex items-start gap-4 flex-1">
+                    <Avatar className="h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0">
+                      {worldInfo.avatar_url ? (
+                        <AvatarImage src={worldInfo.avatar_url} alt={worldInfo.name} className="object-cover" />
+                      ) : (
+                        <AvatarFallback className="bg-gray-700 text-gray-300">
+                          <BookOpen className="w-8 h-8" />
+                        </AvatarFallback>
+                      )}
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <h1 className="text-2xl sm:text-3xl font-bold text-white break-words">{worldInfo.name}</h1>
                       {worldInfo.short_description && (
-                        <p className="text-lg text-gray-300 mt-4">{worldInfo.short_description}</p>
+                        <p className="text-gray-400 mt-2 text-sm sm:text-base leading-relaxed break-words">{worldInfo.short_description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-3 mt-3 text-xs sm:text-sm text-gray-400">
+                        <span className="flex items-center gap-1"><Calendar className="h-4 w-4" />{new Date(worldInfo.created_at).toLocaleDateString()}</span>
+                        <span className="flex items-center gap-1"><Eye className="h-4 w-4" />{worldInfo.interaction_count} views</span>
+                        <span className="flex items-center gap-1"><Heart className="h-4 w-4" />{worldInfo.likesCount} likes</span>
+                      </div>
+                      {worldInfo.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {worldInfo.tags.map(tag => (
+                            <Badge key={tag.id} variant="secondary" className="bg-gray-700 text-gray-300 text-xs">{tag.name}</Badge>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
+                  {/* Action Buttons */}
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleLike} variant={worldInfo.isLiked ? 'default' : 'outline'} size="sm" className="border-gray-600">
+                      <Heart className={`mr-2 h-4 w-4 ${worldInfo.isLiked ? 'fill-current' : ''}`} /> {worldInfo.likesCount}
+                    </Button>
+                    <Button onClick={handleExport} variant="outline" size="sm" className="border-gray-600">
+                      <Download className="mr-2 h-4 w-4" /> Export
+                    </Button>
+                    {isOwner && (
+                      <Button onClick={toggleVisibility} variant="outline" size="sm" className="border-gray-600">
+                        {worldInfo.visibility === 'public' ? <Globe className="mr-2 h-4 w-4" /> : <Lock className="mr-2 h-4 w-4" />}
+                        {worldInfo.visibility === 'public' ? 'Make Private' : 'Make Public'}
+                      </Button>
+                    )}
+                    {isOwner ? (
+                      <Button onClick={handleDelete} variant="destructive" size="sm">
+                        <Trash2 className="mr-2 h-4 w-4" /> Delete
+                      </Button>
+                    ) : (
+                      <Button onClick={handleUseLorebook} variant={worldInfo.isUsed ? 'outline' : 'secondary'} size="sm" className="border-gray-600">
+                        <Download className="mr-2 h-4 w-4" /> {worldInfo.isUsed ? 'Remove' : 'Add'}
+                      </Button>
+                    )}
+                    {canEdit && (
+                      <Button onClick={handleEdit} variant="outline" size="sm" className="border-gray-600 text-gray-300 hover:bg-gray-800">
+                        <Edit2 className="w-4 h-4 mr-2" /> Edit
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-                  {/* Tags Section */}
-                  <Separator className="bg-gray-700" />
-                  {worldInfo.tags.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-400 mb-2">Tags</h3>
-                      <div className="flex flex-wrap gap-2">
-                        {worldInfo.tags.map((tag) => (
-                          <Badge key={tag.id} variant="secondary" className="bg-gray-700 text-gray-300">
-                            {tag.name}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Lorebook Entries */}
-              <Card className="bg-gray-800/50 border-gray-700">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-white">
-                    <BookOpen className="w-5 h-5" />
-                    Lorebook Entries ({worldInfo.entries.length})
-                  </CardTitle>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+              {/* Entries Section */}
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold text-white flex items-center gap-2"><BookOpen className="w-5 h-5" /> Entries ({worldInfo.entries.length})</h2>
+                  <div className="relative w-full sm:w-72">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
                     <Input
-                      placeholder="Search entries by keyword..."
+                      placeholder="Search entries..."
                       value={entriesSearchQuery}
                       onChange={(e) => setEntriesSearchQuery(e.target.value)}
-                      className="pl-10 bg-gray-800/50 border-gray-600 text-white"
+                      className="pl-9 bg-gray-800/50 border-gray-600 text-white"
                     />
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Entries List */}
-                  {filteredEntries.length === 0 ? (
-                    <p className="text-gray-400 text-center py-8">
-                      {entriesSearchQuery ? 'No entries match your search.' : 'No lorebook entries found.'}
-                    </p>
-                  ) : (
-                    <div className="space-y-4">
-                      {filteredEntries.map((entry) => (
-                        <Card key={entry.id} className="bg-gray-700/50 border-gray-600">
-                          <CardContent className="p-4">
-                            <div className="space-y-3">
-                              <div className="flex flex-wrap gap-1">
-                                {entry.keywords.map((keyword, index) => (
-                                  <Badge key={index} variant="outline" className="text-xs border-gray-500 text-gray-300">
-                                    {keyword}
-                                  </Badge>
-                                ))}
-                              </div>
-                              <p className="text-sm text-gray-300 whitespace-pre-wrap">{entry.entry_text}</p>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                </div>
+                {filteredEntries.length === 0 ? (
+                  <p className="text-gray-400 text-center py-8 text-sm">{entriesSearchQuery ? 'No matching entries.' : 'No entries available.'}</p>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredEntries.map(entry => (
+                      <div key={entry.id} className={`p-4 rounded-md border ${entry.keywords.length === 0 || !entry.entry_text.trim() ? 'border-red-500/50 bg-red-500/10' : 'border-gray-700 bg-gray-800/40'}`}>
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {entry.keywords.length === 0 && <Badge variant="destructive" className="text-[10px]">No Keywords</Badge>}
+                          {!entry.entry_text.trim() && <Badge variant="destructive" className="text-[10px]">Empty Text</Badge>}
+                          {entry.keywords.map((k,i)=>(<Badge key={i} variant="outline" className="text-[10px] border-gray-500 text-gray-300">{k}</Badge>))}
+                        </div>
+                        <p className="text-xs sm:text-sm text-gray-300 whitespace-pre-wrap leading-relaxed break-words">{entry.entry_text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-              {/* Similar World Infos */}
+              {/* Similar Section */}
               {similarWorldInfos.length > 0 && (
-                <Card className="bg-gray-800/50 border-gray-700">
-                  <CardHeader>
-                    <CardTitle className="text-white">Similar World Infos</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {similarWorldInfos.map((similarWorldInfo) => (
-                        <Link
-                          key={similarWorldInfo.id}
-                          to={`/world-info-view/${similarWorldInfo.id}`}
-                          className="block border border-gray-700 rounded-lg p-4 hover:bg-gray-700/50 transition-colors"
-                        >
-                          <div className="flex items-start gap-3">
-                            <Avatar className="h-12 w-12">
-                              <AvatarFallback className="bg-gray-700 text-gray-300">
-                                <BookOpen className="w-6 h-6" />
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-medium truncate text-white">{similarWorldInfo.name}</h4>
-                              <p className="text-sm text-gray-400 truncate">
-                                by {similarWorldInfo.creator?.username || 'Unknown'}
-                              </p>
-                              {similarWorldInfo.short_description && (
-                                <p className="text-xs text-gray-400 mt-1 line-clamp-2">
-                                  {similarWorldInfo.short_description}
-                                </p>
-                              )}
-                            </div>
+                <div className="space-y-3">
+                  <h3 className="text-white font-semibold">Similar World Infos</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {similarWorldInfos.map(similarWorldInfo => (
+                      <Link
+                        key={similarWorldInfo.id}
+                        to={`/world-info-view/${similarWorldInfo.id}`}
+                        className="block border border-gray-700 rounded-lg p-4 hover:bg-gray-700/50 transition-colors"
+                      >
+                        <div className="flex items-start gap-3">
+                          <Avatar className="h-12 w-12">
+                            <AvatarFallback className="bg-gray-700 text-gray-300">
+                              <BookOpen className="w-6 h-6" />
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium truncate text-white">{similarWorldInfo.name}</h4>
+                            <p className="text-sm text-gray-400 truncate">by {similarWorldInfo.creator?.username || 'Unknown'}</p>
+                            {similarWorldInfo.short_description && (
+                              <p className="text-xs text-gray-400 mt-1 line-clamp-2">{similarWorldInfo.short_description}</p>
+                            )}
                           </div>
-                        </Link>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-        </div>
           </div>
         </div>
       </main>

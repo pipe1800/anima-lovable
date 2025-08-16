@@ -387,7 +387,7 @@ export default function CharacterProfile() {
       return;
     }
     if (character) {
-      await startChat(character);
+      await startChat(character); // Deferred creation model
     }
   };
 

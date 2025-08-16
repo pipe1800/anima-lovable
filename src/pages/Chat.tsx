@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { SidebarProvider } from '@/components/ui/sidebar';
@@ -41,6 +41,7 @@ const Chat = () => {
   });
   
   const log = logger.scoped('ChatPage');
+  const initialExtractionAttemptedRef = useRef(false);
 
   // React to auth changes via AuthContext (avoids duplicate subscriptions)
   useEffect(() => {
@@ -68,61 +69,88 @@ const Chat = () => {
     currentUser?.id || null
   );
 
-  const triggerInitialExtraction = useCallback(async () => {
-    log.info('🔄 Triggering initial context extraction for new chat...');
+  const triggerInitialExtraction = useCallback(async (forcedChatId?: string) => {
+    const activeChatId = forcedChatId || currentChatId || chatId;
+    if (!activeChatId || initialExtractionAttemptedRef.current) return;
+    // Basic guard: wait until at least one AI message exists (message_count > 0 where is_ai_message true)
     try {
-      log.debug('📥 Fetching user global settings...');
+      const { data: aiMsgs, error: aiErr } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('chat_id', activeChatId)
+        .eq('is_ai_message', true)
+        .limit(1);
+      if (aiErr) {
+        log.warn('AI message presence check failed', aiErr);
+        return; // try later
+      }
+      if (!aiMsgs || aiMsgs.length === 0) {
+        log.debug('⏳ Deferring extract-addon-context (no AI message yet)');
+        return; // will retry through effect below
+      }
+    } catch (e) {
+      log.warn('AI presence probe exception', e);
+      return;
+    }
+
+    log.info('🔄 Triggering initial context extraction for chat', activeChatId);
+    try {
       const { data: globalSettings, error: settingsError } = await supabase
         .from('user_global_chat_settings')
         .select('*')
         .eq('user_id', currentUser?.id as string)
         .single();
-
-      log.debug('⚙️ Global settings result:', { globalSettings, settingsError });
-
-      if (globalSettings) {
-        const addonSettings = {
-          moodTracking: globalSettings.mood_tracking,
-          clothingInventory: globalSettings.clothing_inventory,
-          locationTracking: globalSettings.location_tracking,
-          timeAndWeather: globalSettings.time_and_weather,
-          relationshipStatus: globalSettings.relationship_status,
-          characterPosition: globalSettings.character_position
-        };
-
-        log.debug('🎛️ Mapped addon settings:', addonSettings);
-
-        const anyEnabled = Object.values(addonSettings).some(Boolean);
-        if (!anyEnabled) {
-          log.debug('⏭️ All addons disabled; skipping extract-addon-context call');
-          return;
-        }
-
-        const { data, error } = await supabase.functions.invoke('extract-addon-context', {
-          body: {
-            chat_id: chatId,
-            character_id: characterId,
-            addon_settings: addonSettings,
-            mode: 'initial'
-          }
-        });
-
-        log.debug('📤 Function call result:', { data, error });
-      } else {
-        log.debug('⚠️ No global settings found - skipping context extraction');
+      if (settingsError) {
+        log.warn('Global settings fetch error', settingsError);
+        return;
       }
+      if (!globalSettings) {
+        log.debug('⚠️ No global settings found - skipping context extraction');
+        return;
+      }
+      const addonSettings = {
+        moodTracking: globalSettings.mood_tracking,
+        clothingInventory: globalSettings.clothing_inventory,
+        locationTracking: globalSettings.location_tracking,
+        timeAndWeather: globalSettings.time_and_weather,
+        relationshipStatus: globalSettings.relationship_status,
+        characterPosition: globalSettings.character_position
+      };
+      if (!Object.values(addonSettings).some(Boolean)) {
+        log.debug('⏭️ All addons disabled; skipping extract-addon-context call');
+        initialExtractionAttemptedRef.current = true;
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke('extract-addon-context', {
+        body: {
+          chat_id: activeChatId,
+          character_id: characterId,
+          addon_settings: addonSettings,
+          mode: 'initial'
+        }
+      });
+      if (error) {
+        log.warn('extract-addon-context error', error);
+        return;
+      }
+      log.debug('📤 extract-addon-context success', data);
+      initialExtractionAttemptedRef.current = true;
     } catch (error) {
       log.error('❌ Error in initial context extraction:', error);
     }
-  }, [characterId, chatId, currentUser?.id, log]);
+  }, [characterId, chatId, currentUser?.id, log, currentChatId]);
 
-  const handleMessageSent = useCallback(async () => {
-    log.debug('🔄 Message sent, context will be extracted by backend');
-    setTimeout(() => {
-      log.debug('🔄 Triggering context reload as backup');
-      reloadContext();
-    }, 2000);
-  }, [reloadContext, log]);
+  // Retry extraction after AI response event
+  useEffect(() => {
+    const handler = () => triggerInitialExtraction();
+    window.addEventListener('chat-ai-response-finished', handler);
+    return () => window.removeEventListener('chat-ai-response-finished', handler);
+  }, [triggerInitialExtraction]);
+
+  // Also attempt extraction when chatId changes (guarded)
+  useEffect(() => {
+    if (currentChatId) triggerInitialExtraction();
+  }, [currentChatId, triggerInitialExtraction]);
 
   // Dedupe: Prefer react-query for character details, avoid manual fetch
   const characterDetailsQuery = useQuery({
@@ -185,15 +213,14 @@ const Chat = () => {
 
   const handleChatCreated = useCallback((chatId: string) => {
     log.info('💬 Chat page: New chat created with ID:', chatId);
-    setCurrentChatId(chatId); // keep local state in sync
-    log.debug('🔍 Debug - Chat created context check:', {
-      chatId,
-      hasLoadedContext: !!loadedContext,
-    });
-    if (characterId && currentUser?.id) {
-      triggerInitialExtraction();
-    }
-  }, [characterId, currentUser?.id, triggerInitialExtraction, log, loadedContext]);
+    setCurrentChatId(chatId);
+    triggerInitialExtraction(chatId); // try immediately (guarded)
+  }, [triggerInitialExtraction, log]);
+
+  const handleMessageSent = useCallback(async () => {
+    log.debug('🔄 Message sent, scheduling context reload backup');
+    setTimeout(() => reloadContext(), 2000);
+  }, [reloadContext, log]);
 
   // Keep local state in sync with route param changes
   useEffect(() => {
@@ -253,6 +280,7 @@ const Chat = () => {
               selectedWorldInfoId={selectedWorldInfoId}
               onChatCreated={handleChatCreated}
               onMessageSent={handleMessageSent}
+              characterDetails={preloadedDetails}
             />
           </ChatLayout>
         </div>

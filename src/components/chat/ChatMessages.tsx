@@ -340,7 +340,7 @@ const ChatMessages = ({
           // Show empty state for chat with no messages yet
           <div className="flex items-center justify-center h-full">
             <div className="text-center text-gray-400">
-              <p className="text-lg">Your conversation with {character.name} will appear here</p>
+              <p className="text-lg">Your conversation with {character.name.length > 40 ? character.name.slice(0,37) + '…' : character.name} will appear here</p>
               <p className="text-sm mt-2">Send your first message to get started!</p>
             </div>
           </div>

@@ -10,7 +10,7 @@ export const useChatCreation = () => {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const startChat = async (character: Character) => {
+  const startChat = async (character: Character, options?: { personaId?: string | null; worldInfoId?: string | null }) => {
     // Prevent double-clicks and concurrent calls
     if (isCreating) {
       console.log('⏭️ Chat creation already in progress, ignoring duplicate call');
@@ -31,27 +31,18 @@ export const useChatCreation = () => {
     setIsCreating(true);
 
     try {
-      // Show loading toast
-      toast({
-        title: "Starting Chat",
-        description: `Opening conversation with ${character.name}...`,
-      });
-
       // Simple navigation - let the Chat page handle chat creation
-      navigate('/chat', {
+      navigate(`/chat/${character.id}`, {
         state: {
-          selectedCharacter: character
+          selectedCharacter: character,
+          selectedPersonaId: options?.personaId || null,
+          selectedWorldInfoId: options?.worldInfoId || null,
+          deferred: true
         }
       });
-    } catch (error: any) {
-      console.error('❌ Start chat failed:', error);
-      
-      // Show error toast
-      toast({
-        title: "Navigation Failed",
-        description: "Unable to start chat. Please try again.",
-        variant: "destructive",
-      });
+    } catch (error) {
+      console.error('❌ Start chat navigation failed:', error);
+      toast({ title: 'Navigation Failed', description: 'Unable to open chat.', variant: 'destructive' });
     } finally {
       setIsCreating(false);
     }

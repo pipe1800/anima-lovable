@@ -27,8 +27,8 @@ export const MobileHeader = ({
     navigate('/profile');
   };
   return (
-    <header className={`md:hidden p-3 sm:p-4 select-none ${className}`}>
-      <div className="flex items-center justify-between">
+    <header className={`md:hidden p-3 sm:p-4 select-none ${className} w-full overflow-hidden`}>
+      <div className="flex items-center justify-between w-full overflow-hidden">
         {/* Left: Mobile Menu */}
         <div className="flex-shrink-0">
           <MobileNavMenu 
@@ -38,14 +38,17 @@ export const MobileHeader = ({
             showFavoriteIcon={showFavoriteIcon}
           />
         </div>
-        
-        {/* Center: Page Title */}
-        <div className="flex-1 px-4">
-          <h1 className="text-white text-lg sm:text-xl font-semibold text-center truncate">
-            {title}
-          </h1>
+        {/* Center: Replace title with logo on mobile */}
+        <div className="flex-1 px-2 sm:px-4 min-w-0 flex items-center justify-center">
+          <img 
+            src="/assets/logo.png" 
+            alt="Anima" 
+            className="h-10 sm:h-7 w-auto pointer-events-none select-none" 
+            draggable={false}
+          />
+          {/* Keep original title for screen readers only */}
+          <span className="sr-only">{title}</span>
         </div>
-        
         {/* Right: User Avatar */}
         <div className="flex-shrink-0">
           <Avatar 

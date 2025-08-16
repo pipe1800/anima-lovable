@@ -78,8 +78,8 @@ export const OptimizedMessageFormatter: React.FC<OptimizedMessageFormatterProps>
         <div className="flex-1 min-w-0">
           <div className={`rounded-lg p-3 prose prose-sm max-w-none ${
             isAiMessage 
-              ? 'bg-secondary/30 text-foreground' 
-              : 'bg-primary/20 text-primary-foreground ml-auto max-w-[70%]'
+              ? 'bg-secondary/30 text-foreground max-w-[90%] sm:max-w-none' 
+              : 'bg-primary/20 text-primary-foreground ml-auto max-w-[90%] sm:max-w-[70%]'
           }`}>
             <div 
               className="whitespace-pre-wrap"

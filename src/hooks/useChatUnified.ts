@@ -526,7 +526,16 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // ==========================================================================
   const allMessages = useMemo(() => {
     const dbMessages = messagesQuery.data?.pages?.flatMap(page => page.messages) || [];
-    return dbMessages.sort((a, b) => (a.message_order || 0) - (b.message_order || 0));
+    const sorted = dbMessages.sort((a, b) => (a.message_order || 0) - (b.message_order || 0));
+    return sorted.map((m: any) => {
+      if (m && typeof m === 'object') {
+        const role = m.role || (m.is_ai_message ? 'assistant' : (m.isUser ? 'user' : undefined));
+        const is_ai_message = m.is_ai_message !== undefined ? m.is_ai_message : role === 'assistant';
+        const isUser = m.isUser !== undefined ? m.isUser : role === 'user';
+        return { ...m, role, is_ai_message, isUser };
+      }
+      return m;
+    });
   }, [messagesQuery.data?.pages]);
 
   // Extract context from latest AI message if available (restored)
@@ -555,15 +564,17 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     addonSettings?: any,
     selectedPersonaId?: string | null,
     selectedWorldInfoId?: string | null,
-    overrideContext?: TrackedContext
+    overrideContext?: TrackedContext,
+    overrideChatId?: string
   ) => {
-    if (!user || !chatId || !content.trim()) return;
+    const effectiveChatId = overrideChatId || chatId;
+    if (!user || !effectiveChatId || !content.trim()) return;
     if (creditsBalance < 1) throw new Error('Insufficient credits');
 
     dispatch({ type: 'SET_TYPING', payload: true });
     try {
       const result = await sendMessageMutation.mutateAsync({
-        chatId,
+        chatId: effectiveChatId,
         content,
         characterId,
         trackedContext: overrideContext || state.trackedContext,

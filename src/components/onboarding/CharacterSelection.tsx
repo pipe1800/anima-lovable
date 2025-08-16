@@ -47,10 +47,11 @@ const CharacterSelection = ({ selectedVibes, onCharacterSelect, onSkip }: Charac
 
   const handleCharacterSelect = (character: Character) => {
     onCharacterSelect(character);
-    navigate('/chat', { 
+    navigate(`/chat/${character.id}`, { 
       state: { 
         selectedCharacter: character,
-        fromOnboarding: true 
+        fromOnboarding: true,
+        deferred: true
       } 
     });
   };

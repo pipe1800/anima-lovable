@@ -37,24 +37,34 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   messageCount,
   getMemoryCostText,
 }) => {
+  // Force display name to first 15 characters
+  const rawName: string = character?.name || '';
+  const displayName = rawName.length > 15 ? rawName.slice(0, 15) + '…' : rawName;
   return (
-    <header className="bg-[#0f0f0f] border-b border-gray-700/50 p-3 sm:p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1">
+    <header className="bg-[#0f0f0f] border-b border-gray-700/50 p-3 sm:p-4 w-full">
+      <div className="flex items-center justify-between w-full overflow-hidden">
+        <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1 overflow-hidden">
           <Avatar className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0">
-            <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={character.name} className="object-cover" />
+            <AvatarImage src={character.avatar || characterDetails?.avatar_url} alt={rawName} className="object-cover" />
             <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-sm sm:text-base">
               {character.fallback}
             </AvatarFallback>
           </Avatar>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-white font-semibold text-sm sm:text-base truncate">{character.name}</h1>
-            <p className="text-gray-400 text-xs sm:text-sm truncate">
-              {(() => {
-                const t = character.tagline || '';
-                return t.length > 30 ? `${t.slice(0, 30)}…` : t;
-              })()}
-            </p>
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <h1
+              className="text-white font-semibold text-sm sm:text-base truncate block max-w-[55vw] sm:max-w-[32rem] overflow-hidden"
+              title={rawName}
+            >
+              {displayName}
+            </h1>
+            {character.tagline && (
+              <p
+                className="text-gray-400 text-xs sm:text-sm truncate max-w-[55vw] sm:max-w-[32rem] overflow-hidden"
+                title={character.tagline}
+              >
+                {character.tagline}
+              </p>
+            )}
           </div>
         </div>
 

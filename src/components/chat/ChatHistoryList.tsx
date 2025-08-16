@@ -67,7 +67,8 @@ const ChatHistoryListComponent: React.FC<ChatHistoryListProps> = ({
                   id: chat.id,
                   character: {
                     id: chat.character?.id,
-                    name: chat.character?.name || chat.title || 'Unknown',
+                    name: (() => { const n = chat.character?.name || chat.title || 'Unknown'; return n.length > 15 ? n.slice(0,15) + '…' : n; })(),
+                    avatar: chat.character?.avatar_url,
                     image: chat.character?.avatar_url,
                     tagline: chat.character?.tagline || chat.character?.short_description,
                   },

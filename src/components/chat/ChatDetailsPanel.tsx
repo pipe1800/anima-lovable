@@ -92,7 +92,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-white font-semibold text-base sm:text-lg truncate">{character.name}</h2>
+                <h2 className="text-white font-semibold text-base sm:text-lg truncate max-w-full" title={character.name}>{character.name}</h2>
                 <p className="text-gray-300/90 text-xs sm:text-sm line-clamp-2">
                   {character.tagline}
                 </p>
