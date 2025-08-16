@@ -3,6 +3,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Stable viewport height utilities to avoid layout jump when mobile keyboard opens */
+.h-screen-stable { height: 100vh; }
+.min-h-screen-stable { min-height: 100vh; }
+@supports (height: 100lvh) {
+  .h-screen-stable { height: 100lvh; }
+  .min-h-screen-stable { min-height: 100lvh; }
+}
+
 /* Utility classes */
 @layer utilities {
   .line-clamp-3 {

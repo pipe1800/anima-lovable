@@ -76,10 +76,10 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
           <Button 
             data-tutorial="sidebar-trigger" 
             variant="ghost" 
-            size="icon" 
-            className="md:hidden text-white hover:bg-gray-700 p-2"
+            aria-label="Open navigation menu"
+            className="md:hidden text-white hover:bg-gray-700 p-2 rounded-lg"
           >
-            <Menu className="h-7 w-7" />
+            <Menu className="w-10 h-10" strokeWidth={2.5} />
           </Button>
         </SheetTrigger>
       <SheetContent side="left" className="w-2/3 md:w-80 bg-[#121212] border-gray-700 p-0 [&>button]:hidden" data-tutorial="mobile-nav-sheet">

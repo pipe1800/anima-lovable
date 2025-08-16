@@ -258,7 +258,7 @@ const Chat = () => {
 
   return (
     <SidebarProvider>
-      <div className="flex h-[100dvh] w-full md:h-screen">
+      <div className="flex h-screen-stable w-full md:h-screen">
         {/* Main Chat Layout */}
         <div className="flex-1 flex flex-col h-full">
           <ChatLayout 

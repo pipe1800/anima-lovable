@@ -43,7 +43,7 @@ export const MobileHeader = ({
           <img 
             src="/assets/logo.png" 
             alt="Anima" 
-            className="h-10 sm:h-7 w-auto pointer-events-none select-none" 
+            className="h-12 sm:h-7 w-auto pointer-events-none select-none" 
             draggable={false}
           />
           {/* Keep original title for screen readers only */}

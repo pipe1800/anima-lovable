@@ -530,7 +530,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   };
 
   return (
-    <div className="flex flex-col md:flex-row min-h-[100dvh] md:h-full bg-[#121212] relative overflow-hidden">
+    <div className="flex flex-col md:flex-row min-h-screen-stable md:h-full bg-[#121212] relative overflow-hidden">
       {/* Mobile Header */}
       <div className="md:hidden">
         <MobileHeader 
