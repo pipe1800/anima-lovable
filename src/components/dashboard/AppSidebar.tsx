@@ -20,7 +20,8 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUserCredits } from '@/lib/supabase-queries';
+import { useUserCredits } from '@/queries/chatQueries';
+import { useOptionalChatBootstrap } from '@/contexts/ChatBootstrapContext';
 
 // Preload the logo image to prevent reloading
 const LOGO_URL = '/assets/logo.png';
@@ -39,6 +40,9 @@ const AppSidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile, signOut, loading, subscription: authSubscription } = useAuth();
+  const bootstrap = useOptionalChatBootstrap();
+  const creditsQuery = useUserCredits(user?.id, { enabled: !(bootstrap && bootstrap.hydrated) });
+  const creditsBalance = (bootstrap && bootstrap.creditsBalance !== undefined) ? bootstrap.creditsBalance : (creditsQuery.data ?? 0);
   const [userCredits, setUserCredits] = useState(0);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const currentPath = location.pathname;
@@ -93,22 +97,7 @@ const AppSidebar = () => {
     ];
   }, [authSubscription?.status, authSubscription?.plan]);
 
-  const fetchCredits = useCallback(async () => {
-    if (!user) return;
-    
-    try {
-      const creditsResult = await getUserCredits(user.id);
-      if (creditsResult.data && typeof creditsResult.data.balance === 'number') {
-        setUserCredits(creditsResult.data.balance);
-      }
-    } catch (error) {
-      console.error('Error fetching credits:', error);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    fetchCredits();
-  }, [fetchCredits]);
+  useEffect(() => { setUserCredits(creditsBalance); }, [creditsBalance]);
 
   const isActive = useCallback((path: string) => {
     if (path === '/profile') {

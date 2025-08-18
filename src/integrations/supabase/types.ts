@@ -1334,6 +1334,24 @@ export type Database = {
         Args: { p_world_info_id: string }
         Returns: Json
       }
+      get_user_chats_batched: {
+        Args: { p_user_id: string }
+        Returns: {
+          character_avatar_url: string
+          character_id: string
+            character_name: string
+          character_short_description: string
+          chat_id: string
+          chat_mode: string
+          created_at: string
+          last_message: string
+          last_message_at: string
+          last_message_is_ai: boolean
+          message_count: number
+          time_awareness_enabled: boolean
+          title: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

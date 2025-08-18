@@ -1,0 +1,212 @@
+[
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 971343518e43d64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/credits?select=balance&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "45fa2aec-680e-4f59-88d5-32158e098e0f",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/credits",
+    "search": "?select=balance&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539525375000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434eaf19d64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/personas?select=id%2Cname%2Cavatar_url%2Cupdated_at&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&order=updated_at.desc&limit=25 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "93cc4885-4f31-4ef2-95c5-64e81c9db12b",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/personas",
+    "search": "?select=id%2Cname%2Cavatar_url%2Cupdated_at&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&order=updated_at.desc&limit=25",
+    "status_code": 200,
+    "timestamp": 1755539524910000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434e5e51d64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/character_memories?select=id%2Cname%2Csummary_content%2Ccreated_at&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8&is_auto_summary=eq.true&order=created_at.desc&limit=1 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "58c43b58-5597-4bd0-acae-0e5f645000c9",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/character_memories",
+    "search": "?select=id%2Cname%2Csummary_content%2Ccreated_at&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8&is_auto_summary=eq.true&order=created_at.desc&limit=1",
+    "status_code": 200,
+    "timestamp": 1755539524868000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434dccfdd64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/messages?select=id%2Ccontent%2Cis_ai_message%2Ccreated_at%2Cmessage_order%2Ccurrent_context&chat_id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&order=message_order.asc&limit=30 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "928193f9-7270-4df6-bde8-390af15213da",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/messages",
+    "search": "?select=id%2Ccontent%2Cis_ai_message%2Ccreated_at%2Cmessage_order%2Ccurrent_context&chat_id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&order=message_order.asc&limit=30",
+    "status_code": 200,
+    "timestamp": 1755539524775000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434dccf8d64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/chat_context?select=current_context&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&chat_id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "cbe4aa52-f6e1-46cd-924c-0edcf4184d71",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/chat_context",
+    "search": "?select=current_context&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&chat_id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8",
+    "status_code": 200,
+    "timestamp": 1755539524774000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434d1b0dd64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/user_character_settings?select=*&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "98754ffa-1f9d-438e-a728-057ae9dcb156",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/user_character_settings",
+    "search": "?select=*&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8",
+    "status_code": 200,
+    "timestamp": 1755539524671000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434c89d0d64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/chats?select=selected_persona_id%2Cpersonas%3Aselected_persona_id%28name%2Cbio%2Clore%29&id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "840de51c-7359-4195-96af-464c4aeee97f",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/chats",
+    "search": "?select=selected_persona_id%2Cpersonas%3Aselected_persona_id%28name%2Cbio%2Clore%29&id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539524578000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434c89cbd64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/characters?select=id%2Cname%2Cavatar_url%2Ctagline%2Cshort_description%2Ccharacter_definitions%28personality_summary%2Cdescription%2Cscenario%2Cgreeting%29&id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "58fb2d8a-520a-4820-adec-4468359efff7",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/characters",
+    "search": "?select=id%2Cname%2Cavatar_url%2Ctagline%2Cshort_description%2Ccharacter_definitions%28personality_summary%2Cdescription%2Cscenario%2Cgreeting%29&id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8",
+    "status_code": 200,
+    "timestamp": 1755539524576000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434c89c5d64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/user_global_chat_settings?select=dynamic_world_info%2Cenhanced_memory%2Cmood_tracking%2Cclothing_inventory%2Clocation_tracking%2Ctime_and_weather%2Crelationship_status%2Ccharacter_position%2Cchain_of_thought%2Cfew_shot_examples%2Cstreaming_mode%2Cfont_size&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "7405a073-1d5b-4700-89ae-035216dcb6f3",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/user_global_chat_settings",
+    "search": "?select=dynamic_world_info%2Cenhanced_memory%2Cmood_tracking%2Cclothing_inventory%2Clocation_tracking%2Ctime_and_weather%2Crelationship_status%2Ccharacter_position%2Cchain_of_thought%2Cfew_shot_examples%2Cstreaming_mode%2Cfont_size&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539524575000
+  },
+  {
+    "event_message": "GET | 200 | 54.196.148.157 | 9713434c8af7c947 | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/character_memories?select=*&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&order=created_at.desc | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "d68e1399-44f0-4937-aab9-eb23bb5971a7",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/character_memories",
+    "search": "?select=*&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&order=created_at.desc",
+    "status_code": 200,
+    "timestamp": 1755539524573000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434c89bbd64d | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/profiles?select=username%2Ctimezone&id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "98b6b013-5ec5-43ee-b605-a3d7068eb601",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/profiles",
+    "search": "?select=username%2Ctimezone&id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539524573000
+  },
+  {
+    "event_message": "GET | 200 | 54.196.148.157 | 9713434bc89ac947 | https://rclpyipeytqbamiwcuih.supabase.co/auth/v1/user | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "ec1bd582-204c-427e-83e6-099b7470bf2b",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/auth/v1/user",
+    "search": null,
+    "status_code": 200,
+    "timestamp": 1755539524466000
+  },
+  {
+    "event_message": "GET | 200 | 35.153.103.138 | 9713434bafc4d64d | https://rclpyipeytqbamiwcuih.supabase.co/auth/v1/user | Deno/2.1.4 (variant; SupabaseEdgeRuntime/1.68.0-develop.36)",
+    "id": "30e81bac-0fbb-41e1-b34b-e04293dc15ae",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/auth/v1/user",
+    "search": null,
+    "status_code": 200,
+    "timestamp": 1755539524439000
+  },
+  {
+    "event_message": "GET | 200 | 190.62.88.165 | 9713434ac9c6340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/credits?select=balance&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "0c3830e3-45f0-4ca3-b5af-93a156c33646",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/credits",
+    "search": "?select=balance&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539524287000
+  },
+  {
+    "event_message": "GET | 200 | 190.62.88.165 | 971343492c3b340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/user_global_chat_settings?select=*&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "ed2e3f98-f393-45a8-b177-6c87ac967bcc",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/user_global_chat_settings",
+    "search": "?select=*&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539524035000
+  },
+  {
+    "event_message": "GET | 200 | 190.62.88.165 | 971343492c39340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/user_character_world_info_settings?select=world_info_id&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8 | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "33360466-2331-4b1c-8e98-85e6c6de251f",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/user_character_world_info_settings",
+    "search": "?select=world_info_id&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8",
+    "status_code": 200,
+    "timestamp": 1755539524034000
+  },
+  {
+    "event_message": "GET | 200 | 190.62.88.165 | 971343490beb340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/user_character_settings?select=*&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8 | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "e4e8248b-ffa3-445c-989d-cda21b071c7c",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/user_character_settings",
+    "search": "?select=*&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8",
+    "status_code": 200,
+    "timestamp": 1755539524021000
+  },
+  {
+    "event_message": "GET | 200 | 190.62.88.165 | 971343490bee340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/chats?select=chat_mode&id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "61c7cf8b-ffe6-4630-8bba-ed8a226655f9",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/chats",
+    "search": "?select=chat_mode&id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539524020000
+  },
+  {
+    "event_message": "POST | 200 | 190.62.88.165 | 971343490be7340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/rpc/get_user_chats_batched | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "125d413e-b295-4fd0-9da6-a7a206c96d7f",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "POST",
+    "path": "/rest/v1/rpc/get_user_chats_batched",
+    "search": null,
+    "status_code": 200,
+    "timestamp": 1755539524019000
+  },
+  {
+    "event_message": "GET | 200 | 190.62.88.165 | 971343490bd4340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/chat_context?select=current_context&chat_id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8 | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "b63a630a-36e0-4d13-8ed6-8ccad1364299",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/chat_context",
+    "search": "?select=current_context&chat_id=eq.322e584d-8a47-4c9e-b5eb-3ce99b1d78e5&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90&character_id=eq.6bc3c92d-e9e5-4161-864e-3aa718cf3da8",
+    "status_code": 200,
+    "timestamp": 1755539524017000
+  },
+  {
+    "event_message": "GET | 200 | 190.62.88.165 | 971343490bda340a | https://rclpyipeytqbamiwcuih.supabase.co/rest/v1/credits?select=balance&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90 | Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+    "id": "6d7482df-73ee-41e3-a051-a4438269c31f",
+    "identifier": "rclpyipeytqbamiwcuih",
+    "method": "GET",
+    "path": "/rest/v1/credits",
+    "search": "?select=balance&user_id=eq.bb0acf17-c3aa-429a-abdd-aef545216a90",
+    "status_code": 200,
+    "timestamp": 1755539524017000
+  }
+]

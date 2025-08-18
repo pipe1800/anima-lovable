@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { SidebarProvider } from '@/components/ui/sidebar';
@@ -11,6 +11,7 @@ import logger from '@/utils/logger';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { queryConfigs } from '@/queries/chatQueries';
+import { ChatBootstrapProvider } from '@/contexts/ChatBootstrapContext';
 
 const Chat = () => {
   const { user: currentUser } = useAuth();
@@ -41,7 +42,6 @@ const Chat = () => {
   });
   
   const log = logger.scoped('ChatPage');
-  const initialExtractionAttemptedRef = useRef(false);
 
   // React to auth changes via AuthContext (avoids duplicate subscriptions)
   useEffect(() => {
@@ -69,83 +69,9 @@ const Chat = () => {
     currentUser?.id || null
   );
 
-  const triggerInitialExtraction = useCallback(async (forcedChatId?: string) => {
-    const activeChatId = forcedChatId || currentChatId || chatId;
-    if (!activeChatId || initialExtractionAttemptedRef.current) return;
-    // Basic guard: wait until at least one AI message exists (message_count > 0 where is_ai_message true)
-    try {
-      const { data: aiMsgs, error: aiErr } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('chat_id', activeChatId)
-        .eq('is_ai_message', true)
-        .limit(1);
-      if (aiErr) {
-        log.warn('AI message presence check failed', aiErr);
-        return; // try later
-      }
-      if (!aiMsgs || aiMsgs.length === 0) {
-        log.debug('⏳ Deferring extract-addon-context (no AI message yet)');
-        return; // will retry through effect below
-      }
-    } catch (e) {
-      log.warn('AI presence probe exception', e);
-      return;
-    }
-
-    log.info('🔄 Triggering initial context extraction for chat', activeChatId);
-    try {
-      const { data: globalSettings, error: settingsError } = await supabase
-        .from('user_global_chat_settings')
-        .select('*')
-        .eq('user_id', currentUser?.id as string)
-        .single();
-      if (settingsError) {
-        log.warn('Global settings fetch error', settingsError);
-        return;
-      }
-      if (!globalSettings) {
-        log.debug('⚠️ No global settings found - skipping context extraction');
-        return;
-      }
-      const addonSettings = {
-        moodTracking: globalSettings.mood_tracking,
-        clothingInventory: globalSettings.clothing_inventory,
-        locationTracking: globalSettings.location_tracking,
-        timeAndWeather: globalSettings.time_and_weather,
-        relationshipStatus: globalSettings.relationship_status,
-        characterPosition: globalSettings.character_position
-      };
-      if (!Object.values(addonSettings).some(Boolean)) {
-        log.debug('⏭️ All addons disabled; skipping extract-addon-context call');
-        initialExtractionAttemptedRef.current = true;
-        return;
-      }
-      const { data, error } = await supabase.functions.invoke('extract-addon-context', {
-        body: {
-          chat_id: activeChatId,
-          character_id: characterId,
-          addon_settings: addonSettings,
-          mode: 'initial'
-        }
-      });
-      if (error) {
-        log.warn('extract-addon-context error', error);
-        return;
-      }
-      log.debug('📤 extract-addon-context success', data);
-      initialExtractionAttemptedRef.current = true;
-    } catch (error) {
-      log.error('❌ Error in initial context extraction:', error);
-    }
-  }, [characterId, chatId, currentUser?.id, log, currentChatId]);
-
-  // Retry extraction after AI response event
-  useEffect(() => {
-    const handler = () => triggerInitialExtraction();
-    window.addEventListener('chat-ai-response-finished', handler);
-    return () => window.removeEventListener('chat-ai-response-finished', handler);
-  }, [triggerInitialExtraction]);
+  const triggerInitialExtraction = useCallback(async (_forcedChatId?: string) => {
+    return; // extraction deferred
+  }, []);
 
   // Also attempt extraction when chatId changes (guarded)
   useEffect(() => {
@@ -164,8 +90,12 @@ const Chat = () => {
 
     // If a pre-selected character was passed via navigation state, use it directly
     if (selectedCharacter) {
-      setCharacterData(selectedCharacter);
-      setCharacterLoading(false);
+      setCharacterData({
+        id: selectedCharacter.id,
+        name: selectedCharacter.name,
+        tagline: selectedCharacter.tagline,
+        avatar_url: selectedCharacter.avatar_url,
+      });
       return;
     }
 
@@ -176,19 +106,12 @@ const Chat = () => {
     }
 
     // Use character details from react-query when available
-    setCharacterLoading(true);
     const d: any = characterDetailsQuery.data;
     if (d && (d.data || d.name)) {
       const details = d.data || d; // handle either wrapped or direct
-      setCharacterData({
-        id: details.id,
-        name: details.name,
-        tagline: details.tagline,
-        avatar_url: details.avatar_url,
-      });
-      setCharacterLoading(false);
+      setCharacterData({ id: details.id, name: details.name, tagline: details.tagline, avatar_url: details.avatar_url });
     }
-  }, [currentUser, loading, selectedCharacter, characterId, navigate, characterDetailsQuery.data]);
+  }, [characterId, selectedCharacter, characterDetailsQuery.data, navigate, currentUser, loading]);
 
   const handleFirstMessage = () => {
     setIsFirstMessage(false);
@@ -214,8 +137,7 @@ const Chat = () => {
   const handleChatCreated = useCallback((chatId: string) => {
     log.info('💬 Chat page: New chat created with ID:', chatId);
     setCurrentChatId(chatId);
-    triggerInitialExtraction(chatId); // try immediately (guarded)
-  }, [triggerInitialExtraction, log]);
+  }, [log]);
 
   const handleMessageSent = useCallback(async () => {
     log.debug('🔄 Message sent, scheduling context reload backup');
@@ -258,36 +180,35 @@ const Chat = () => {
 
   return (
     <SidebarProvider>
-      <div className="flex h-screen-stable w-full md:h-screen">
-        {/* Main Chat Layout */}
-        <div className="flex-1 flex flex-col h-full">
-          <ChatLayout 
-            character={character} 
-            currentChatId={currentChatId}
-            trackedContext={trackedContext}
-            onContextUpdate={setTrackedContext}
-            onPersonaChange={handlePersonaChange}
-            onWorldInfoChange={handleWorldInfoChange}
-            characterDetails={preloadedDetails}
-          >
-            <ChatInterface
-              character={character}
-              onFirstMessage={handleFirstMessage}
-              existingChatId={currentChatId}
+      <ChatBootstrapProvider chatId={currentChatId || undefined} characterId={characterId} enable={true}>
+        <div className="flex h-screen-stable w-full md:h-screen">
+          <div className="flex-1 flex flex-col h-full">
+            <ChatLayout 
+              character={character} 
+              currentChatId={currentChatId}
               trackedContext={trackedContext}
               onContextUpdate={setTrackedContext}
-              selectedPersonaId={selectedPersonaId}
-              selectedWorldInfoId={selectedWorldInfoId}
-              onChatCreated={handleChatCreated}
-              onMessageSent={handleMessageSent}
+              onPersonaChange={handlePersonaChange}
+              onWorldInfoChange={handleWorldInfoChange}
               characterDetails={preloadedDetails}
-            />
-          </ChatLayout>
+            >
+              <ChatInterface
+                character={character}
+                onFirstMessage={handleFirstMessage}
+                existingChatId={currentChatId}
+                trackedContext={trackedContext}
+                onContextUpdate={setTrackedContext}
+                selectedPersonaId={selectedPersonaId}
+                selectedWorldInfoId={selectedWorldInfoId}
+                onChatCreated={handleChatCreated}
+                onMessageSent={handleMessageSent}
+                characterDetails={preloadedDetails}
+              />
+            </ChatLayout>
+          </div>
+          <TutorialManager shouldStart={fromOnboarding && onboardingCompleted} />
         </div>
-
-        {/* Tutorial Manager */}
-        <TutorialManager shouldStart={fromOnboarding && onboardingCompleted} />
-      </div>
+      </ChatBootstrapProvider>
     </SidebarProvider>
   );
 };

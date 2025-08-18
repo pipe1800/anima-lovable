@@ -6,6 +6,7 @@ import { getCharacterDetails } from '@/lib/supabase-queries';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import { queryConfigs, infiniteQueryConfigs, invalidationHelpers, queryKeys } from '@/queries/chatQueries';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { useChatBootstrap } from '@/contexts/ChatBootstrapContext';
 import type { Message, TrackedContext, ChatState, ChatAction } from '@/types/chat';
 import logger from '@/utils/logger';
 import { StreamingMessageParser, parseSSEMessage } from '@/lib/streaming-utils';
@@ -87,17 +88,35 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const isStreamingRef = useRef(false);
   const channelRef = useRef<any>(null);
-  
+  const bootstrap = (() => { try { return useChatBootstrap(); } catch { return undefined; } })();
+
   // Get global chat settings for streaming preferences
   const { data: globalSettings } = useUserGlobalChatSettings();
 
   // ============================================================================
   // MESSAGE FETCHING (replaces useChatMessages)
   // ============================================================================
+  const bootstrapMessages = useMemo(() => {
+    const seeded: any = queryClient.getQueryData(queryKeys.chat.messages(chatId || '')); // may be undefined
+    const pages = (seeded as any)?.pages;
+    if (!pages || !pages.length) return null;
+    const flat = pages.flatMap((p: any) => p.messages || []);
+    return flat.length ? flat : null;
+  }, [queryClient, chatId]);
+
+  const bootstrapHydrated = !!bootstrapMessages && bootstrapMessages.length > 0;
+
   const messagesQuery = useInfiniteQuery({
     ...infiniteQueryConfigs.chatMessages(chatId || ''),
-    enabled: !!chatId
+    enabled: !!chatId && !bootstrapHydrated
   });
+
+  // If bootstrap hydrated but react-query query object disabled, synthesize a pseudo data shape from cache to drive memo below
+  const seededPages = useMemo(() => {
+    if (!bootstrapHydrated || !chatId) return undefined;
+    const cached: any = queryClient.getQueryData(queryKeys.chat.messages(chatId));
+    return cached?.pages;
+  }, [bootstrapHydrated, chatId, queryClient]);
 
   // Get credits balance
   const { data: creditsBalance = 0 } = useQuery({
@@ -108,7 +127,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // Get character details
   const { data: characterDetails } = useQuery({
     ...queryConfigs.characterDetails(characterId),
-    enabled: !!characterId
+    enabled: !!characterId && !bootstrap?.character, // skip when bootstrap data present
   });
 
   // ============================================================================
@@ -208,6 +227,22 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // ============================================================================
   const fetchAndUpdateContext = useCallback(async (chatIdLocal: string) => {
     if (!user) return;
+    if (!bootstrap?.hydrated) return; // wait for bootstrap
+    if (bootstrap?.context && bootstrap?.chatId === chatIdLocal) {
+      try {
+        const rawContext: any = bootstrap.context;
+        const convertedContext = {
+          moodTracking: rawContext?.mood || 'No context',
+          clothingInventory: rawContext?.clothing || 'No context',
+          locationTracking: rawContext?.location || 'No context',
+          timeAndWeather: rawContext?.time_weather || 'No context',
+          relationshipStatus: rawContext?.relationship || 'No context',
+          characterPosition: rawContext?.character_position || 'No context'
+        } as TrackedContext;
+        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
+        return; // skip fetch
+      } catch {}
+    }
     try {
       const { data: contextData, error } = await supabase
         .from('chat_context')
@@ -216,10 +251,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         .eq('user_id', user.id)
         .eq('character_id', characterId)
         .maybeSingle();
-
       if (!error && contextData?.current_context) {
-        logger.debug('Fresh context fetched', contextData.current_context);
-
         const rawContext = contextData.current_context as any;
         const convertedContext = {
           moodTracking: rawContext?.mood || 'No context',
@@ -229,14 +261,12 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           relationshipStatus: rawContext?.relationship || 'No context',
           characterPosition: rawContext?.character_position || 'No context'
         } as TrackedContext;
-
         dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
-        logger.debug('Context updated in UI immediately!');
       }
     } catch (err) {
       logger.error('Failed to fetch fresh context:', err);
     }
-  }, [user, characterId]);
+  }, [user, characterId, bootstrap]);
 
   // Helper to finalize streaming and refresh messages/context
   const finalizeStreaming = useCallback((chatIdParam: string) => {
@@ -346,8 +376,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       let fullMessage = '';
       const decoder = new TextDecoder();
       const parser = new StreamingMessageParser();
-      let pendingAppend: Promise<void> = Promise.resolve();
-
+      // Removed pendingAppend queue to prevent large backlog causing late flush
+      
       const scheduleAppend = async (text: string) => {
         if (!text) return;
         if (!showStreamingUpdates) {
@@ -359,7 +389,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           const part = text.slice(i, i + sliceSize);
           fullMessage += part;
           dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: fullMessage } });
-          // Yield to UI so updates paint progressively
+          // Yield so browser can paint
           await new Promise<void>(r => setTimeout(r, 16));
         }
       };
@@ -370,7 +400,6 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           const { done, value } = await reader.read();
           if (done) break;
           
-          // Accumulate SSE buffer and extract complete data lines
           const dataLines = parser.parseChunk(value);
           for (const data of dataLines) {
             const obj = parseSSEMessage(data);
@@ -379,27 +408,24 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
             if (obj.done === true) {
               logger.info(`${streamingMode} mode - Stream completed`);
               isStreamingRef.current = false;
-              // Ensure all pending UI appends are flushed before finalizing
-              await pendingAppend;
               finalizeStreaming(chatId);
               const endTime = Date.now();
               return { content: fullMessage };
             }
 
             if (typeof obj?.content === 'string' && obj.content.length > 0) {
-              pendingAppend = pendingAppend.then(() => scheduleAppend(obj.content));
+              await scheduleAppend(obj.content);
               continue;
             }
 
             if (obj?.choices?.[0]?.delta?.content) {
               const content = obj.choices[0].delta.content as string;
-              pendingAppend = pendingAppend.then(() => scheduleAppend(content));
+              await scheduleAppend(content);
               continue;
             }
           }
         }
-        // Stream ended without explicit done flag; flush and finalize
-        await pendingAppend;
+        // Stream ended without explicit done flag; finalize
         isStreamingRef.current = false;
         finalizeStreaming(chatId);
         return { content: fullMessage };
@@ -480,6 +506,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         id: optimisticId,
         content,
         isUser: true,
+        author_id: user?.id, // added author_id
         timestamp: new Date(),
         status: 'sending' as const,
         message_order: (() => {
@@ -521,18 +548,19 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   // COMBINED MESSAGE LIST WITH SORTING (restored)
   // ==========================================================================
   const allMessages = useMemo(() => {
-    const dbMessages = messagesQuery.data?.pages?.flatMap(page => page.messages) || [];
+    const source = bootstrapHydrated ? bootstrapMessages! : (messagesQuery.data?.pages?.flatMap(page => page.messages) || []);
+    const dbMessages = [...source];
     const sorted = dbMessages.sort((a, b) => (a.message_order || 0) - (b.message_order || 0));
-    return sorted.map((m: any) => {
+    return sorted.map((m: any, idx) => {
       if (m && typeof m === 'object') {
         const role = m.role || (m.is_ai_message ? 'assistant' : (m.isUser ? 'user' : undefined));
         const is_ai_message = m.is_ai_message !== undefined ? m.is_ai_message : role === 'assistant';
         const isUser = m.isUser !== undefined ? m.isUser : role === 'user';
-        return { ...m, role, is_ai_message, isUser };
+        return { id: m.id || `seeded-${idx}`, ...m, role, is_ai_message, isUser };
       }
       return m;
     });
-  }, [messagesQuery.data?.pages]);
+  }, [messagesQuery.data?.pages, bootstrapHydrated, bootstrapMessages]);
 
   // Extract context from latest AI message if available (restored)
   const extractedContext = useMemo(() => {
@@ -604,10 +632,10 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     
     creditsBalance,
     
-    isLoadingMessages: messagesQuery.isLoading,
-    hasMore: messagesQuery.hasNextPage,
-    isFetchingNextPage: messagesQuery.isFetchingNextPage,
-    fetchNextPage: messagesQuery.fetchNextPage,
+    isLoadingMessages: bootstrapHydrated ? false : messagesQuery.isLoading,
+    hasMore: bootstrapHydrated ? false : messagesQuery.hasNextPage,
+    isFetchingNextPage: bootstrapHydrated ? false : messagesQuery.isFetchingNextPage,
+    fetchNextPage: bootstrapHydrated ? (() => Promise.resolve()) as any : messagesQuery.fetchNextPage,
     
     clearChatState: () => dispatch({ type: 'CLEAR_STATE' }),
     
@@ -616,5 +644,6 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       connectionStatus: state.isRealtimeConnected ? 'connected' : 'disconnected',
       lastActivity: state.lastActivity,
     },
+    _source: bootstrapHydrated ? 'bootstrap' : 'query'
   };
 };

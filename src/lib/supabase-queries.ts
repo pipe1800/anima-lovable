@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client'
 import type { Profile, Character, Plan, Subscription, Credits, Chat, Message, OnboardingChecklistItem, UserOnboardingProgress } from '@/types/database'
+import { getUserPersonas } from '@/lib/persona-operations'
 
 // =============================================================================
 // SEARCH INTERFACES
@@ -673,242 +674,54 @@ export const completeOnboardingTask = async (userId: string, taskId: number) => 
  * Get user's chat sessions with pagination
  */
 export const getUserChatsPaginated = async (
-  userId: string, 
-  page: number = 1, 
+  userId: string,
+  page: number = 1,
   pageSize: number = 10
 ) => {
-  const offset = (page - 1) * pageSize;
-  
-  // First get total count for pagination
-  const { count: totalCount } = await supabase
-    .from('chats')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId);
-
-  // Then get paginated data (lighter payload - drop heavy character_definitions join)
-  const { data: chats, error } = await supabase
-    .from('chats')
-    .select(`
-      id,
-      title,
-      last_message_at,
-      created_at,
-      character_id,
-      character:characters(
-        id,
-        name,
-        avatar_url,
-        short_description
-      )
-    `)
-    .eq('user_id', userId)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .order('created_at', { ascending: false })
-    .range(offset, offset + pageSize - 1);
-
-  if (error || !chats) {
-    return { data: [], totalCount: 0, error };
-  }
-
-  const chatIds = chats.map((c) => c.id);
-  const characterIds = chats.map((c) => c.character_id).filter(Boolean);
-
-  // Batch fetch last messages for all chats (guard empty arrays to avoid PostgREST in() error)
-  let lastMsgsData: Array<{ chat_id: string; content: string; is_ai_message: boolean; created_at: string }> | undefined = [];
-  if (chatIds.length > 0) {
-    const { data } = await supabase
-      .from('messages')
-      .select('chat_id, content, is_ai_message, created_at')
-      .in('chat_id', chatIds as string[])
-      .eq('is_placeholder', false)
-      .order('created_at', { ascending: false });
-    lastMsgsData = data || [];
-  }
-
-  const lastMessageMap = new Map<string, { content: string; is_ai_message: boolean }>();
-  lastMsgsData?.forEach((m) => {
-    if (!lastMessageMap.has(m.chat_id)) {
-      lastMessageMap.set(m.chat_id, { content: m.content, is_ai_message: m.is_ai_message });
-    }
-  });
-
-  // Batch fetch message counts per chat (exclude placeholders)
-  const messageCounts = new Map<string, number>();
-  if (chatIds.length > 0) {
-    try {
-      const results = await Promise.all(
-        chatIds.map(async (id) => {
-          const { count, error } = await supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('chat_id', id)
-            .eq('is_placeholder', false);
-          if (error) {
-            console.warn('Per-chat count failed for', id, error);
-            return { id, count: 0 };
-          }
-          return { id, count: count || 0 };
-        })
-      );
-      results.forEach(({ id, count }) => messageCounts.set(id, count));
-    } catch (e) {
-      console.error('Per-chat count failed (paginated):', e);
-    }
-  }
-
-  // Batch fetch user character settings
-  const settingsMap = new Map<string, { chat_mode: string; time_awareness_enabled: boolean }>();
-  if (characterIds.length > 0) {
-    const { data: settingsData } = await supabase
-      .from('user_character_settings')
-      .select('character_id, chat_mode, time_awareness_enabled')
-      .eq('user_id', userId)
-      .in('character_id', characterIds as string[]);
-
-    settingsData?.forEach((row) => {
-      settingsMap.set(row.character_id, { 
-        chat_mode: row.chat_mode ?? 'storytelling', 
-        time_awareness_enabled: row.time_awareness_enabled ?? false 
-      });
-    });
-  }
-
-  // Compose result (provide messages array with last message for UI)
-  const chatsWithExtras = chats.map((chat) => {
-    const last = lastMessageMap.get(chat.id);
-    const userSettings = settingsMap.get(chat.character_id) || { chat_mode: 'storytelling', time_awareness_enabled: false };
-    return {
-      ...chat,
-      character: {
-        ...chat.character,
-        tagline: chat.character?.short_description || ''
-      },
-      messages: last ? [last] : [],
-      userSettings,
-      message_count: messageCounts.get(chat.id) || 0,
-    };
-  });
-
-  return { 
-    data: chatsWithExtras, 
-    totalCount: totalCount || 0,
+  // Deprecated: use getUserChatsBatched + client-side slice/pagination if needed.
+  // Keep returning structure to avoid runtime errors while migrating.
+  const batched = await getUserChatsBatched(userId);
+  const start = (page - 1) * pageSize;
+  const slice = batched.data.slice(start, start + pageSize);
+  return {
+    data: slice,
+    totalCount: batched.data.length,
     currentPage: page,
-    totalPages: Math.ceil((totalCount || 0) / pageSize),
-    error: null 
+    totalPages: Math.ceil(batched.data.length / pageSize),
+    error: batched.error || null
   };
 };
 
 /**
- * Get user's chat sessions with last message preview (legacy - keep for compatibility)
+ * Removed legacy getUserChats (replaced by getUserChatsBatched)
  */
-export const getUserChats = async (userId: string) => {
-  // Fetch chats with lighter character fields
-  const { data: chats, error } = await supabase
-    .from('chats')
-    .select(`
-      id,
-      title,
-      last_message_at,
-      created_at,
-      character_id,
-      character:characters(
-        id,
-        name,
-        avatar_url,
-        short_description
-      )
-    `)
-    .eq('user_id', userId)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .order('created_at', { ascending: false });
-
-  if (error || !chats) {
-    return { data: chats || [], error };
-  }
-
-  const chatIds = chats.map((c) => c.id);
-  const characterIds = chats.map((c) => c.character_id).filter(Boolean);
-
-  // Batch fetch last messages for all chats (guard empty arrays to avoid PostgREST in() error)
-  let lastMsgsData: Array<{ chat_id: string; content: string; is_ai_message: boolean; created_at: string }> | undefined = [];
-  if (chatIds.length > 0) {
-    const { data } = await supabase
-      .from('messages')
-      .select('chat_id, content, is_ai_message, created_at')
-      .in('chat_id', chatIds as string[])
-      .eq('is_placeholder', false)
-      .order('created_at', { ascending: false });
-    lastMsgsData = data || [];
-  }
-
-  const lastMessageMap = new Map<string, { content: string; is_ai_message: boolean }>();
-  lastMsgsData?.forEach((m) => {
-    if (!lastMessageMap.has(m.chat_id)) {
-      lastMessageMap.set(m.chat_id, { content: m.content, is_ai_message: m.is_ai_message });
+export const getUserChatsBatched = async (userId: string) => {
+  const { data, error } = await supabase.rpc('get_user_chats_batched', { p_user_id: userId });
+  if (error) return { data: [], error };
+  // Normalize to match legacy structure where possible
+  const mapped = (data || []).map((row: any) => ({
+    id: row.chat_id,
+    title: row.title,
+    last_message_at: row.last_message_at,
+    created_at: row.created_at,
+    character_id: row.character_id,
+    character: {
+      id: row.character_id,
+      name: row.character_name,
+      avatar_url: row.character_avatar_url,
+      short_description: row.character_short_description,
+      tagline: row.character_short_description || ''
+    },
+    lastMessage: row.last_message,
+    lastMessageIsAI: row.last_message_is_ai,
+    message_count: row.message_count,
+    userSettings: {
+      chat_mode: row.chat_mode || 'storytelling',
+      time_awareness_enabled: row.time_awareness_enabled || false
     }
-  });
-
-  // Batch fetch message counts per chat (exclude placeholders)
-  const messageCounts = new Map<string, number>();
-  if (chatIds.length > 0) {
-    try {
-      const results = await Promise.all(
-        chatIds.map(async (id) => {
-          const { count, error } = await supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('chat_id', id)
-            .eq('is_placeholder', false);
-          if (error) {
-            console.warn('Per-chat count failed for', id, error);
-            return { id, count: 0 };
-          }
-          return { id, count: count || 0 };
-        })
-      );
-      results.forEach(({ id, count }) => messageCounts.set(id, count));
-    } catch (e) {
-      console.error('Per-chat count failed (legacy):', e);
-    }
-  }
-
-  // Batch fetch user character settings
-  const settingsMap = new Map<string, { chat_mode: string; time_awareness_enabled: boolean }>();
-  if (characterIds.length > 0) {
-    const { data: settingsData } = await supabase
-      .from('user_character_settings')
-      .select('character_id, chat_mode, time_awareness_enabled')
-      .eq('user_id', userId)
-      .in('character_id', characterIds as string[]);
-
-    settingsData?.forEach((row) => {
-      settingsMap.set(row.character_id, { 
-        chat_mode: row.chat_mode ?? 'storytelling', 
-        time_awareness_enabled: row.time_awareness_enabled ?? false 
-      });
-    });
-  }
-
-  // Compose result
-  const chatsWithLastMessage = chats.map((chat) => {
-    const last = lastMessageMap.get(chat.id);
-    const userSettings = settingsMap.get(chat.character_id) || { chat_mode: 'storytelling', time_awareness_enabled: false };
-    return {
-      ...chat,
-      character: {
-        ...chat.character,
-        tagline: chat.character?.short_description || ''
-      },
-      lastMessage: last?.content || null,
-      lastMessageIsAI: last?.is_ai_message || false,
-      messages: last ? [last] : [],
-      userSettings,
-      message_count: messageCounts.get(chat.id) || 0,
-    };
-  });
-
-  return { data: chatsWithLastMessage, error: null };
-}
+  }));
+  return { data: mapped, error: null };
+};
 
 /**
  * Get messages for a chat with pagination
@@ -1636,13 +1449,9 @@ export const deleteAllUserChats = async (userId: string) => {
  * Get user's personas (only for own profile)
  */
 export const getUserPersonasForProfile = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('personas')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-
-  return { data: data || [], error }
+  // Use unified persona cache; still filter by user id for safety
+  const list = await getUserPersonas();
+  return { data: list.filter(p => (p as any).user_id === userId), error: null };
 }
 
 // =============================================================================

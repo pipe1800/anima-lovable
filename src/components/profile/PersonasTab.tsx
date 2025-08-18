@@ -7,12 +7,24 @@ import { Upload, Plus, User, X, Edit } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { toast } from 'sonner';
-import { createPersona, getUserPersonas, deletePersona, updatePersona, type Persona } from '@/lib/persona-operations';
+import { createPersona, deletePersona, updatePersona, type Persona } from '@/lib/persona-operations';
 import { useAuth } from '@/contexts/AuthContext';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { registerPersonaQueryClient, getUserPersonas } from '@/lib/persona-operations';
 
 export const PersonasTab = () => {
   const { user } = useAuth();
-  const [personas, setPersonas] = useState<Persona[]>([]);
+  const queryClient = useQueryClient();
+  useEffect(()=>{ registerPersonaQueryClient(queryClient); }, [queryClient]);
+  const personasQuery = useQuery({
+    queryKey: ['personas', user?.id],
+    queryFn: () => user ? getUserPersonas() : [],
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+  const personas = personasQuery.data || [];
+  const loadingPersonas = personasQuery.isLoading;
+
   const [showPersonaModal, setShowPersonaModal] = useState(false);
   const [editingPersona, setEditingPersona] = useState<Persona | null>(null);
   const [currentPersona, setCurrentPersona] = useState({
@@ -22,28 +34,6 @@ export const PersonasTab = () => {
     avatar_url: null as string | null
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingPersonas, setLoadingPersonas] = useState(true);
-
-  // Load personas on component mount
-  useEffect(() => {
-    const loadPersonas = async () => {
-      try {
-        const userPersonas = await getUserPersonas();
-        setPersonas(userPersonas);
-      } catch (error) {
-        console.error('Error loading personas:', error);
-        toast.error('Failed to load personas');
-      } finally {
-        setLoadingPersonas(false);
-      }
-    };
-
-    if (user) {
-      loadPersonas();
-    } else {
-      setLoadingPersonas(false);
-    }
-  }, [user]);
 
   const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -102,7 +92,6 @@ export const PersonasTab = () => {
           lore: currentPersona.lore.trim() || null,
           avatar_url: currentPersona.avatar_url
         });
-        setPersonas(prev => prev.map(p => p.id === editingPersona.id ? updatedPersona : p));
         toast.success('Persona updated successfully!');
       } else {
         // Create new persona
@@ -112,7 +101,6 @@ export const PersonasTab = () => {
           lore: currentPersona.lore.trim() || null,
           avatar_url: currentPersona.avatar_url
         });
-        setPersonas(prev => [newPersona, ...prev]);
         toast.success('Persona created successfully!');
       }
 
@@ -134,7 +122,6 @@ export const PersonasTab = () => {
   const handleRemovePersona = async (id: string) => {
     try {
       await deletePersona(id);
-      setPersonas(prev => prev.filter(p => p.id !== id));
       toast.success('Persona removed');
     } catch (error) {
       console.error('Error removing persona:', error);

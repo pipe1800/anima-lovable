@@ -14,10 +14,12 @@ import { createChat } from '@/lib/chat-operations';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import logger from '@/utils/logger';
 import { getPersonaById, type Persona } from '@/lib/persona-operations';
+import { queryConfigs, queryKeys } from '@/queries/chatQueries';
+import { useQuery } from '@tanstack/react-query';
+import { useChatBootstrap } from '@/contexts/ChatBootstrapContext';
 import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/queries/chatQueries';
 import { useNavigate } from 'react-router-dom';
-import { buildGreetingVariants } from '@/lib/greeting-utils'; // still used for initial variants (could swap to getGreetingVariants)
+import { getGreetingVariants } from '@/lib/chat-operations';
 import { supabase } from '@/integrations/supabase/client';
 
 // Debug components - Only load when needed
@@ -100,15 +102,27 @@ const ChatInterface = ({
   }, [currentChatId, chatPhase]);
 
   // Greeting variants (available before chat creation)
-  const greetingVariants = React.useMemo(() => buildGreetingVariants((characterDetails as any) || (character as any)), [characterDetails, character]);
+  const greetingVariants = React.useMemo(() => getGreetingVariants((characterDetails as any) || (character as any)), [characterDetails, character]);
   const hasMultipleGreetings = greetingVariants.length > 1;
 
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
-  const log = logger.scoped('ChatInterface');
+  const logRef = useRef(logger.scoped('ChatInterface'));
+  const log = logRef.current;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const bootstrap = (() => { try { return useChatBootstrap(); } catch { return null; }})();
+
+  // Unified avatar resolution (prop > prop.avatar_url > bootstrap.character.avatar_url > fallback)
+  const avatarUrl = React.useMemo(() => {
+    return (
+      (character as any).avatar ||
+      (character as any).avatar_url ||
+      (bootstrap?.character as any)?.avatar_url ||
+      '/default_avatar.jpg'
+    );
+  }, [character, bootstrap]);
 
   // Variant navigation state per AI message id (post-creation regenerations)
   const [variantIndexByMessage, setVariantIndexByMessage] = useState<Record<string, number>>({});
@@ -170,20 +184,20 @@ const ChatInterface = ({
     isRealtimeConnected,
     debugInfo,
     isStreaming,
-    streamingMessage
+    streamingMessage,
+    _source: messageSource
   } = useChatUnified(currentChatId, character.id);
+  useEffect(() => { log.debug('Message source:', messageSource); }, [messageSource, log]);
   // Reintroduce effectiveTrackedContext (was removed during duplicate cleanup)
   const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
   // Derived: whether any user message exists in this chat (used to lock greeting picker)
   const hasUserMessage = React.useMemo(() => {
     if (!messages || messages.length === 0) return false;
     return messages.some((m: any) => {
-      // Treat anything that is NOT explicitly an AI message as user (covers null / undefined backend values)
       if (m.is_ai_message === true) return false;
       if (m.isUser === true) return true;
       if (m.role === 'user') return true;
-      // If backend omits is_ai_message for user messages, count those with a user_id / without is_ai_message true
-      if (m.user_id && m.is_ai_message !== true) return true;
+      if (m.author_id && m.is_ai_message !== true) return true; // replaced user_id with author_id
       return false;
     });
   }, [messages]);
@@ -441,27 +455,21 @@ const ChatInterface = ({
       log.debug('🔄 ChatInterface: Persona prop changed to:', propSelectedPersonaId);
       setSelectedPersonaId(propSelectedPersonaId);
     }
-  }, [propSelectedPersonaId, log]);
+  }, [propSelectedPersonaId]);
 
-  // Fetch selected persona data (persona > profile > default precedence in chat)
+  // Manual guarded persona fetch removed in favor of react-query
+  const personaQuery = useQuery({
+    ...(selectedPersonaId ? queryConfigs.personaById(selectedPersonaId) : { queryKey: ['persona','none'], queryFn: async () => null }),
+    enabled: !!selectedPersonaId,
+  });
   useEffect(() => {
-    let active = true;
-    const loadPersona = async () => {
-      try {
-        if (selectedPersonaId) {
-          const persona = await getPersonaById(selectedPersonaId);
-          if (active) setSelectedPersonaData(persona as Persona);
-        } else {
-          if (active) setSelectedPersonaData(null);
-        }
-      } catch (e) {
-        if (active) setSelectedPersonaData(null);
-        log.warn('Failed to load selected persona for avatar override:', e);
-      }
-    };
-    loadPersona();
-    return () => { active = false; };
-  }, [selectedPersonaId, log]);
+    if (bootstrap?.selectedPersona && !propSelectedPersonaId && !selectedPersonaId) {
+      setSelectedPersonaId(bootstrap.selectedPersona.id);
+    }
+  }, [bootstrap, propSelectedPersonaId, selectedPersonaId]);
+  useEffect(() => {
+    if (personaQuery.data) setSelectedPersonaData(personaQuery.data as Persona);
+  }, [personaQuery.data]);
 
   // Send message
   const handleSendMessage = useCallback(async (e: React.FormEvent) => {
@@ -802,10 +810,11 @@ const ChatInterface = ({
           {/* Avatar placeholder to mimic AI bubble layout */}
           <div className="w-10 h-10 rounded-xl overflow-hidden bg-[#1f1f1f] border border-white/10 flex items-center justify-center shrink-0">
             <img
-              src={character.avatar}
+              src={avatarUrl}
               alt={character.name}
               className="w-full h-full object-cover"
               loading="lazy"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/default_avatar.jpg'; }}
             />
           </div>
           <div className="flex-1">
@@ -885,10 +894,11 @@ const ChatInterface = ({
             {showCharacterAvatar && (
               <div className="hidden sm:flex w-16 h-16 rounded-full overflow-hidden bg-[#1f1f1f] border border-white/10 items-center justify-center shrink-0">
                 <img
-                  src={character.avatar}
+                  src={avatarUrl}
                   alt={character.name}
                   className="w-full h-full object-cover"
                   loading="lazy"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/default_avatar.jpg'; }}
                 />
               </div>
             )}
@@ -896,10 +906,11 @@ const ChatInterface = ({
             {showCharacterAvatar && (
               <div className="sm:hidden w-[3.3rem] h-[3.3rem] rounded-full overflow-hidden bg-[#1f1f1f] border border-white/10 flex items-center justify-center shrink-0">
                 <img
-                  src={character.avatar}
+                  src={avatarUrl}
                   alt={character.name}
                   className="w-full h-full object-cover"
                   loading="lazy"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/default_avatar.jpg'; }}
                 />
               </div>
             )}
@@ -965,7 +976,7 @@ const ChatInterface = ({
     // BUBBLE-BG STYLE -------------------------------------------------
     if (avatarStyle === 'bubble-bg') {
       const bgColor = hexToRgba(aiBubbleColor, aiBubbleOpacity);
-      const showImagePanel = showCharacterAvatar && !!character.avatar;
+      const showImagePanel = showCharacterAvatar && !!avatarUrl;
       const avatarMask = 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)';
       return (
         <div className="px-4 pt-4">
@@ -978,7 +989,7 @@ const ChatInterface = ({
                 <div
                   className="float-left w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7"
                   style={{
-                    backgroundImage: `url(${character.avatar})`,
+                    backgroundImage: `url(${avatarUrl})`,
                     maskImage: avatarMask as any,
                     WebkitMaskImage: avatarMask as any,
                   }}
@@ -1061,7 +1072,9 @@ const ChatInterface = ({
       <div className="relative z-10 flex flex-col h-full">
         {/* Debug Panel - Lazy loaded for performance */}
         <Suspense fallback={<LoadingSpinner />}>
-          <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
+          {bootstrap?.featureFlags?.debugPanel ? (
+            <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
+          ) : null}
         </Suspense>
         
         {/* Messages Area - Mobile Responsive */}
@@ -1071,7 +1084,7 @@ const ChatInterface = ({
           {currentChatId && (
             <ChatMessages 
               chatId={currentChatId}
-              character={character}
+              character={{ ...character, avatar: avatarUrl }}
               trackedContext={effectiveTrackedContext}
               streamingMessage={isStreaming ? streamingMessage : undefined}
               isStreaming={isStreaming}

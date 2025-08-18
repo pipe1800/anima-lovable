@@ -1,10 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  getUserCredits, 
-  getUserCharacters,
-  getUserFavorites
-} from '@/lib/supabase-queries';
+import { queryKeys } from '@/queries/chatQueries';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 /**
@@ -14,29 +11,26 @@ import { supabase } from '@/integrations/supabase/client';
 export const useDashboardStats = () => {
   const { user, subscription: authSubscription } = useAuth();
   const userId = user?.id;
-
+  const qc = useQueryClient();
   return useQuery({
-    queryKey: ['dashboard', 'stats', userId],
+    queryKey: ['dashboard','stats', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-
-      const [creditsResult] = await Promise.all([
-        getUserCredits(userId)
-      ]);
-
-      return {
-        credits: creditsResult.data?.balance || 0,
-        subscription: authSubscription,
-        creditsUsed: 0,
-        errors: {
-          credits: creditsResult.error,
-          creditsUsage: null
-        }
-      };
+      let credits = qc.getQueryData(queryKeys.user.credits(userId)) as any;
+      if (credits === undefined) {
+        // Fallback direct lightweight fetch
+        const { data, error } = await supabase
+          .from('credits')
+          .select('balance')
+            .eq('user_id', userId)
+          .maybeSingle();
+        if (!error && data?.balance !== undefined) credits = data.balance; else credits = 0;
+      }
+      return { credits: credits || 0, subscription: authSubscription, creditsUsed: 0, errors: { credits: null, creditsUsage: null } };
     },
     enabled: !!userId,
-    staleTime: 60 * 1000, // 1 minute
-    gcTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
   });
 };
 

@@ -1,4 +1,4 @@
-export type ChatOperation = 'create-basic' | 'create-with-greeting' | 'extract-context' | 'send-message' | 'create-memory' | 'regenerate-message';
+export type ChatOperation = 'create-basic' | 'create-with-greeting' | 'extract-context' | 'send-message' | 'create-memory' | 'regenerate-message' | 'bootstrap' | 'list-chats-batched';
 
 export interface BaseChatRequest {
   operation: ChatOperation;
@@ -87,7 +87,17 @@ export interface RegenerateMessageRequest {
   addonSettings?: any;
 }
 
-export type ChatManagementRequest = CreateBasicChatRequest | CreateWithGreetingRequest | ExtractContextRequest | SendMessageRequest | CreateMemoryRequest | RegenerateMessageRequest;
+export interface BootstrapRequest {
+  operation: 'bootstrap';
+  chatId?: string;
+  characterId?: string;
+  includeMessages?: boolean;
+  messageLimit?: number;
+}
+
+export interface ListChatsBatchedRequest { operation: 'list-chats-batched'; }
+
+export type ChatManagementRequest = CreateBasicChatRequest | CreateWithGreetingRequest | ExtractContextRequest | SendMessageRequest | CreateMemoryRequest | RegenerateMessageRequest | BootstrapRequest | ListChatsBatchedRequest;
 
 export interface ChatResponse {
   success: boolean;

@@ -9,6 +9,7 @@ import {
   // getMonthlyCreditsUsage, // removed: not available, we'll fallback to 0
   getUserFavorites
 } from '@/lib/supabase-queries';
+import { queryConfigs, queryKeys } from '@/queries/chatQueries';
 
 export const useDashboardData = () => {
   const { user, subscription: authSubscription } = useAuth();
@@ -19,24 +20,19 @@ export const useDashboardData = () => {
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
 
-      const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
+      const [charactersResult, favoritesResult] = await Promise.all([
         getUserCharacters(userId),
-        getUserFavorites(userId),
-        getUserCredits(userId)
+        getUserFavorites(userId)
       ]);
-
+      const qc = useQueryClient();
+      const cachedCredits = qc.getQueryData(queryKeys.user.credits(userId));
       return {
         characters: charactersResult.data || [],
         favorites: favoritesResult.data || [],
-        credits: creditsResult.data?.balance || 0,
-        subscription: authSubscription, // Use subscription from AuthContext
-        creditsUsed: 0, // fallback until usage endpoint implemented
-        errors: {
-          characters: charactersResult.error,
-          favorites: favoritesResult.error,
-          credits: creditsResult.error,
-          creditsUsage: null
-        }
+        credits: (cachedCredits as any) ?? 0,
+        subscription: authSubscription,
+        creditsUsed: 0,
+        errors: { characters: charactersResult.error, favorites: favoritesResult.error, credits: null, creditsUsage: null }
       };
     },
     enabled: !!userId,
@@ -101,10 +97,10 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
     queryKey: ['user', 'chats', 'paginated', userId, page, limit],
     queryFn: async () => {
       if (!userId) return { data: [], totalCount: 0, currentPage: page, totalPages: 0 } as any;
+      // Now uses batched under the hood (deprecated path)
       const result = await getUserChatsPaginated(userId, page, limit);
       if (result.error) {
         console.error('Load chats failed:', result.error);
-        // Return safe fallback to keep UI alive
         return { data: [], totalCount: 0, currentPage: page, totalPages: 0, error: null } as any;
       }
       return result;
@@ -153,24 +149,6 @@ export const useUserCharacters = () => {
     enabled: !!userId,
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 15 * 60 * 1000,
-  });
-};
-
-export const useUserCredits = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'credits', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      const result = await getUserCredits(userId);
-      if (result.error) throw result.error;
-      return result.data?.balance || 0;
-    },
-    enabled: !!userId,
-    staleTime: 2 * 60 * 1000, // 2 minutes - credits change more frequently
-    gcTime: 10 * 60 * 1000,
   });
 };
 

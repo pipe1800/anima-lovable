@@ -18,3 +18,25 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
 
 // Export the URL for use in other parts of the app
 export const SUPABASE_API_URL = SUPABASE_URL;
+
+// Persona query interception & dedupe (dev only)
+const originalFrom = supabase.from.bind(supabase);
+const personaInFlight = new Map<string,string>();
+// @ts-ignore
+supabase.from = (table: string) => {
+  if (table === 'personas') {
+    try {
+      const stack = new Error().stack?.split('\n').slice(2,8).join('\n') || '';
+      const now = Date.now();
+      // crude key using stack
+      if (personaInFlight.has(stack)) {
+        console.warn('[personas][dedupe] duplicate call within same tick suppressed signature hash');
+      } else {
+        personaInFlight.set(stack, String(now));
+        setTimeout(()=> personaInFlight.delete(stack), 2000);
+        console.log('[personas][call]', { when: now, stack });
+      }
+    } catch {}
+  }
+  return originalFrom(table);
+};

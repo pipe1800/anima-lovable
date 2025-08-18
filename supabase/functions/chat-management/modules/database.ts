@@ -16,12 +16,15 @@ export async function fetchCharacterData(
   characterId: string,
   supabaseAdmin: SupabaseClient
 ): Promise<Character> {
-  // First attempt: fetch from characters with joined character_definitions to get name + definition fields
+  // First attempt: fetch from characters with joined character_definitions to get name + definition fields + avatar/tagline
   const { data: characterWithDef, error: charError } = await supabaseAdmin
     .from('characters')
     .select(`
       id,
       name,
+      avatar_url,
+      tagline,
+      short_description,
       character_definitions ( personality_summary, description, scenario, greeting )
     `)
     .eq('id', characterId)
@@ -32,12 +35,15 @@ export async function fetchCharacterData(
     return {
       id: characterWithDef.id,
       name: characterWithDef.name,
+      avatar_url: (characterWithDef as any).avatar_url,
+      tagline: (characterWithDef as any).tagline,
+      short_description: (characterWithDef as any).short_description,
       personality_summary: def?.personality_summary || undefined,
       description: def?.description || undefined,
       scenario: def?.scenario || undefined,
       greeting: def?.greeting || undefined,
       character_definitions: def || undefined
-    };
+    } as any;
   }
 
   // Fallback: previous logic (definitions table only) BUT do not select nonexistent name column
@@ -48,22 +54,24 @@ export async function fetchCharacterData(
     .single();
 
   if (definitionOnly && !defError) {
-    // Need separate fetch for name from characters table
+    // Need separate fetch for name + avatar_url + tagline from characters table
     const { data: charRow } = await supabaseAdmin
       .from('characters')
-      .select('name')
+      .select('name, avatar_url, tagline')
       .eq('id', characterId)
       .single();
 
     return {
-      id: definitionOnly.character_id,
-      name: charRow?.name, // may be undefined if not found
+      id: (definitionOnly as any).character_id,
+      name: charRow?.name,
+      avatar_url: (charRow as any)?.avatar_url,
+      tagline: (charRow as any)?.tagline,
       personality_summary: (definitionOnly as any).personality_summary,
       description: (definitionOnly as any).description,
       scenario: (definitionOnly as any).scenario,
       greeting: (definitionOnly as any).greeting,
       character_definitions: definitionOnly as any
-    };
+    } as any;
   }
 
   console.error('Character definition fetch errors:', { charError, defError });
@@ -77,7 +85,7 @@ export async function fetchConversationHistory(
 ): Promise<any[]> {
   const { data: messageHistory, error } = await supabase
     .from('messages')
-    .select('content, is_ai_message, created_at, message_order')
+    .select('id, content, is_ai_message, created_at, message_order, current_context') // added current_context
     .eq('chat_id', chatId)
     .order('message_order', { ascending: true })
     .limit(limit);

@@ -17,6 +17,8 @@ import {
 } from '@/lib/supabase-queries';
 import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
 import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
+import { getUserPersonas, getPersonaById } from '@/lib/persona-operations';
 
 // ============================================================================
 // QUERY KEY FACTORY - Prevents typos and ensures consistency
@@ -29,14 +31,17 @@ export const queryKeys = {
     context: (chatId: string, characterId: string) => ['chat', 'context', chatId, characterId] as const,
     messageCount: (chatId: string) => ['chat', 'message-count', chatId] as const,
   },
-  
+  // Personas
+  personas: {
+    list: (userId: string) => ['personas', userId] as const,
+    byId: (personaId: string) => ['persona', personaId] as const,
+  },
   // User queries  
   user: {
     all: ['user'] as const,
     credits: (userId: string) => ['user', 'credits', userId] as const,
     profile: (userId: string) => ['user', 'profile', userId] as const,
   },
-  
   // Character queries
   character: {
     all: ['character'] as const,
@@ -58,21 +63,22 @@ export const queryConfigs = {
     refetchOnReconnect: true, // Important for connectivity issues
   }),
   
-  // Lightweight message count per chat (for memory dialog)
-  chatMessageCount: (chatId: string) => ({
+  // Lightweight message count per chat (for memory dialog) - now opt-in via enabled flag passed externally
+  chatMessageCount: (chatId: string, opts?: { enabled?: boolean }) => ({
     queryKey: queryKeys.chat.messageCount(chatId),
     queryFn: async () => {
       const { count, error } = await supabase
         .from('messages')
         .select('id', { count: 'exact', head: true })
         .eq('chat_id', chatId)
-        .not('content', 'ilike', '%[PLACEHOLDER]%');
+        .eq('is_placeholder', false); // unified placeholder filter
       if (error) throw error;
       return count || 0;
     },
     staleTime: 2 * 60 * 1000, // 2 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
     refetchOnWindowFocus: false,
+    enabled: !!chatId && (opts?.enabled ?? false),
   }),
   
   // User credits - balanced updates with background refresh
@@ -96,6 +102,29 @@ export const queryConfigs = {
     gcTime: 30 * 60 * 1000, // 30 minutes (tripled)
     refetchOnWindowFocus: false, // ✅ PHASE 3: Character data rarely changes
     refetchOnReconnect: false,
+  }),
+  // Personas
+  personasList: (userId: string, opts?: { enabled?: boolean }) => ({
+    queryKey: queryKeys.personas.list(userId),
+    queryFn: async () => {
+      if (!userId) return [];
+      return getUserPersonas();
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    enabled: !!userId && (opts?.enabled ?? true),
+  }),
+  personaById: (personaId: string, opts?: { enabled?: boolean }) => ({
+    queryKey: queryKeys.personas.byId(personaId),
+    queryFn: async () => {
+      if (!personaId) return null;
+      return getPersonaById(personaId);
+    },
+    enabled: !!personaId && (opts?.enabled ?? true),
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
   }),
 } as const;
 
@@ -188,10 +217,21 @@ export type QueryKey =
   | ReturnType<typeof queryKeys.chat.messages>
   | ReturnType<typeof queryKeys.chat.messageCount>
   | ReturnType<typeof queryKeys.user.credits>
-  | ReturnType<typeof queryKeys.character.details>;
+  | ReturnType<typeof queryKeys.character.details>
+  | ReturnType<typeof queryKeys.personas.list>
+  | ReturnType<typeof queryKeys.personas.byId>;
 
 export type QueryConfig = 
   | ReturnType<typeof queryConfigs.chatMessages>
   | ReturnType<typeof queryConfigs.chatMessageCount>
   | ReturnType<typeof queryConfigs.userCredits>
-  | ReturnType<typeof queryConfigs.characterDetails>;
+  | ReturnType<typeof queryConfigs.characterDetails>
+  | ReturnType<typeof queryConfigs.personasList>
+  | ReturnType<typeof queryConfigs.personaById>;
+
+export const useUserCredits = (userId: string | undefined, opts?: { enabled?: boolean }) => {
+  return useQuery({
+    ...(queryConfigs.userCredits(userId || '')),
+    enabled: !!userId && (opts?.enabled ?? true),
+  });
+};

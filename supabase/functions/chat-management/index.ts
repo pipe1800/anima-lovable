@@ -7,6 +7,17 @@ import { handleCreateWithGreeting } from './modules/greeting-processor.ts';
 import { handleExtractContext } from './modules/extract-context-handler.ts';
 import { handleSendMessage } from './modules/send-message-handler.ts';
 import { handleCreateMemory } from './modules/memory-handler.ts';
+// Added imports for bootstrap
+import { 
+  fetchSelectedPersona, 
+  fetchChatSelectedPersona, 
+  fetchUserGlobalSettings, 
+  fetchUserProfile, 
+  fetchCurrentContext, 
+  fetchCharacterData, 
+  fetchConversationHistory, 
+  getLatestAutoSummary 
+} from './modules/database.ts';
 
 // Import types
 import type { 
@@ -99,6 +110,100 @@ globalThis.Deno.serve(async (req) => {
     let response: ChatResponse | Response;
 
     switch (operation) {
+      case 'bootstrap': {
+        console.log('🎯 Routing to bootstrap payload aggregation');
+        const { chatId, characterId, includeMessages = true, messageLimit = 30 } = (requestBody as any);
+
+        const basePromises: any[] = [
+          fetchUserProfile(user.id, supabase),
+          fetchUserGlobalSettings(user.id, supabaseAdmin as any),
+        ];
+        if (characterId) basePromises.push(fetchCharacterData(characterId, supabase as any));
+        if (chatId) basePromises.push(fetchChatSelectedPersona(chatId, user.id, supabase as any));
+
+        const [profile, globalSettings, characterDataOrUndefined, chatPersonaOrNull] = await Promise.all(basePromises);
+
+        let resolvedPersona: any = chatPersonaOrNull || null;
+        if (!resolvedPersona && (profile as any)?.default_persona_id) {
+          const { data: defaultPersona } = await (supabase as any)
+            .from('personas')
+            .select('id, name, bio, lore, avatar_url')
+            .eq('id', (profile as any).default_persona_id)
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (defaultPersona) resolvedPersona = defaultPersona;
+        }
+
+        const personasPromise = (supabase as any)
+          .from('personas')
+          .select('id, name, avatar_url, updated_at')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(25);
+
+        // NEW: user_character_settings (full) for this character to avoid duplicate fetches client-side
+        let userCharacterSettings: any = null;
+        if (characterId) {
+          const { data: ucs } = await (supabase as any)
+            .from('user_character_settings')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('character_id', characterId)
+            .maybeSingle();
+          userCharacterSettings = ucs || null;
+        }
+
+        let messages: any[] = [];
+        let context: any = {};
+        if (chatId && includeMessages) {
+          const [history, ctx] = await Promise.all([
+            fetchConversationHistory(chatId, supabase as any, messageLimit),
+            characterId ? fetchCurrentContext(user.id, chatId, characterId, supabase as any) : Promise.resolve({})
+          ]);
+          messages = history;
+          context = ctx;
+        }
+
+        let latestAutoSummary = null;
+        if (characterId) {
+          latestAutoSummary = await getLatestAutoSummary(characterId, supabase as any);
+        }
+
+        const { data: personasList, error: personasError } = await personasPromise;
+        if (personasError) console.warn('Personas list error', personasError);
+
+        // REPLACED: credit packs aggregation with direct credits table balance
+        let creditsBalance = 0;
+        try {
+          const { data: creditsRow, error: creditsError } = await (supabase as any)
+            .from('credits')
+            .select('balance')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (!creditsError && creditsRow?.balance != null) creditsBalance = creditsRow.balance;
+        } catch (e) {
+          console.warn('Credits fetch failed, defaulting to 0');
+        }
+
+        response = {
+          profile,
+          globalSettings,
+          character: characterDataOrUndefined ? { ...characterDataOrUndefined } : null,
+          selectedPersona: resolvedPersona,
+          personas: personasList || [],
+          chatId: chatId || null,
+          characterId: characterId || null,
+          messages,
+          context,
+          latestAutoSummary,
+          creditsBalance,
+          userCharacterSettings,
+          now: new Date().toISOString(),
+          featureFlags: { debugPanel: false },
+        } as any;
+        break;
+      }
+
       case 'create-basic':
         console.log('🎯 Routing to basic chat creation...');
         response = await handleCreateBasicChat(
@@ -163,6 +268,20 @@ globalThis.Deno.serve(async (req) => {
         );
         break;
 
+      case 'list-chats-batched': {
+        console.log('🎯 Routing to batched chats listing');
+        const userId = user?.id;
+        if (!userId) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+        try {
+          // Single query using lateral joins / aggregate subqueries for counts + last message
+          const { data, error } = await supabaseAdmin.rpc('get_user_chats_batched', { p_user_id: userId });
+          if (error) throw error;
+          return new Response(JSON.stringify({ chats: data || [] }), { status: 200 });
+        } catch (err: any) {
+          return new Response(JSON.stringify({ error: err.message || 'Failed to list chats' }), { status: 500 });
+        }
+      }
+
       default:
         console.error('❌ Unknown operation:', operation);
         return createErrorResponse(`Unknown operation: ${operation}`, 400);
@@ -192,3 +311,11 @@ globalThis.Deno.serve(async (req) => {
     );
   }
 });
+
+// Add to allowed operations type (search and extend if defined)
+// Assuming there is an Operation type union
+// type Operation = 'create-basic' | 'create-with-greeting' | 'send-message' | 'extract-context' | 'create-memory' | 'regenerate-message' | 'bootstrap';
+// Extend dynamically if type exists
+// @ts-ignore - augmenting at runtime
+// eslint-disable-next-line
+const allowedOps = ['create-basic','create-with-greeting','send-message','extract-context','create-memory','regenerate-message','bootstrap','list-chats-batched'];

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getUserPersonas, createPersona, deletePersona, type Persona } from '@/lib/persona-operations';
+import { getUserPersonas, createPersona, deletePersona, type Persona, registerPersonaQueryClient } from '@/lib/persona-operations';
 import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
 import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 import { supabase } from '@/integrations/supabase/client';
@@ -11,8 +11,11 @@ export const personaKeys = {
   chatSelected: (chatId?: string) => ['chat', 'persona', chatId] as const,
 };
 
-export function usePersonaManager(userId?: string, chatId?: string) {
+export function usePersonaManager(userId?: string, chatId?: string, opts?: { enabled?: boolean }) {
   const queryClient = useQueryClient();
+  useEffect(()=>{ registerPersonaQueryClient(queryClient); }, [queryClient]);
+  const enabled = !!userId && (opts?.enabled ?? true);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [personaToEdit, setPersonaToEdit] = useState<Persona | null>(null);
@@ -27,7 +30,7 @@ export function usePersonaManager(userId?: string, chatId?: string) {
       if (!userId) return [];
       return getUserPersonas();
     },
-    enabled: !!userId,
+    enabled,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
@@ -45,7 +48,7 @@ export function usePersonaManager(userId?: string, chatId?: string) {
       const list = personasQuery.data || [];
       return list.find(p => p.id === bestPersonaId) || null;
     },
-    enabled: (!!chatId && !!userId) || (!!userId && personasQuery.status === 'success'),
+    enabled: enabled && ((!!chatId && !!userId) || (!!userId && personasQuery.status === 'success')),
   });
 
   const selectedPersona = selectedPersonaQuery.data || null;

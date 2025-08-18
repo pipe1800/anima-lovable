@@ -1,41 +1,75 @@
 import { supabase } from '@/integrations/supabase/client';
-import { Tables, TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
+import type { Database } from '@/integrations/supabase/types';
+import { QueryClient } from '@tanstack/react-query';
 
-export type Persona = Tables<'personas'>;
-export type PersonaInsert = TablesInsert<'personas'>;
-export type PersonaUpdate = TablesUpdate<'personas'>;
+// Direct table-specific types avoid the generic helper requiring two parameters
+type PersonaRow = Database['public']['Tables']['personas']['Row'];
+type PersonaInsertRow = Database['public']['Tables']['personas']['Insert'];
+type PersonaUpdateRow = Database['public']['Tables']['personas']['Update'];
+
+// Simple in-memory caches (per browser tab) to suppress duplicate network calls
+// TTL keeps data reasonably fresh without hammering backend while user idles.
+const PERSONA_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
+interface CacheEntry<T> { value: T; expires: number }
+const personaByIdCache = new Map<string, CacheEntry<any>>();
+let userPersonasCache: CacheEntry<any[]> | null = null;
+
+const pendingListRef: { promise: Promise<any[]> | null } = { promise: null };
+const pendingByIdMap = new Map<string, Promise<any>>();
+
+export type Persona = PersonaRow;
+export type PersonaInsert = PersonaInsertRow;
+export type PersonaUpdate = PersonaUpdateRow;
 
 const DEFAULT_AVATAR = '/default_avatar.jpg';
 
-export async function createPersona(persona: Omit<PersonaInsert, 'user_id'>) {
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) {
-    throw new Error('User must be authenticated to create a persona');
-  }
+let lastFetchTs = 0;
+const MIN_FETCH_INTERVAL = 750; // ms
 
+export async function createPersona(persona: Omit<PersonaInsert, 'user_id'>) {
+  // Invalidate caches on write
+  userPersonasCache = null;
+  personaByIdCache.clear();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('User must be authenticated to create a persona');
   const { data, error } = await supabase
     .from('personas')
-    .insert([{
-      ...persona,
-      avatar_url: (persona as any).avatar_url || DEFAULT_AVATAR,
-      user_id: user.id
-    }])
+    .insert([{ ...persona, avatar_url: (persona as any).avatar_url || DEFAULT_AVATAR, user_id: user.id }])
     .select()
     .single();
-
   if (error) throw error;
   return data;
 }
 
-export async function getUserPersonas() {
-  const { data, error } = await supabase
-    .from('personas')
-    .select('*')
-    .order('created_at', { ascending: false });
+let externalQueryClient: QueryClient | null = null;
+export const registerPersonaQueryClient = (qc: QueryClient) => { externalQueryClient = qc; };
 
-  if (error) throw error;
-  return data || [];
+export async function getUserPersonas(forceRefresh = false) {
+  const now = Date.now();
+  const user = (await supabase.auth.getUser()).data.user;
+  const userId = user?.id;
+  const rqKey = userId ? ['personas', userId] : null;
+  if (!userId) return [];
+  if (!forceRefresh && userPersonasCache && userPersonasCache.expires > now) {
+    return userPersonasCache.value;
+  }
+  if (!forceRefresh && pendingListRef.promise) return pendingListRef.promise;
+  const p = (async () => {
+    const { data, error } = await supabase
+      .from('personas')
+      .select('id,name,bio,lore,avatar_url,updated_at,created_at,user_id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    console.log('[personas] Fetched list from network', { count: data?.length, ts: now });
+    if (error) throw error;
+    const list = data || [];
+    userPersonasCache = { value: list, expires: now + PERSONA_CACHE_TTL_MS };
+    list.forEach(p => personaByIdCache.set(p.id, { value: p, expires: now + PERSONA_CACHE_TTL_MS }));
+    if (rqKey && externalQueryClient) externalQueryClient.setQueryData(rqKey, list);
+    return list;
+  })();
+  pendingListRef.promise = p;
+  try { return await p; } finally { pendingListRef.promise = null; }
 }
 
 export async function updatePersona(id: string, updates: PersonaUpdate) {
@@ -45,8 +79,11 @@ export async function updatePersona(id: string, updates: PersonaUpdate) {
     .eq('id', id)
     .select()
     .single();
-
   if (error) throw error;
+  // Refresh caches for this id & list
+  const now = Date.now();
+  personaByIdCache.set(id, { value: data, expires: now + PERSONA_CACHE_TTL_MS });
+  userPersonasCache = null; // force refetch list next time to reflect ordering
   return data;
 }
 
@@ -55,17 +92,34 @@ export async function deletePersona(id: string) {
     .from('personas')
     .delete()
     .eq('id', id);
-
   if (error) throw error;
+  personaByIdCache.delete(id);
+  userPersonasCache = null;
 }
 
-export async function getPersonaById(id: string) {
-  const { data, error } = await supabase
-    .from('personas')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) throw error;
-  return data;
+export async function getPersonaById(id: string, forceRefresh = false) {
+  const now = Date.now();
+  // If list fetch in flight, await it first to leverage seeding
+  if (pendingListRef.promise) {
+    try { await pendingListRef.promise; } catch { /* ignore */ }
+  }
+  const cachedRQ = externalQueryClient?.getQueryData(['persona', id]) as any;
+  if (cachedRQ && !forceRefresh) return cachedRQ;
+  const cached = personaByIdCache.get(id);
+  if (!forceRefresh && cached && cached.expires > now) return cached.value;
+  if (!forceRefresh && pendingByIdMap.has(id)) return pendingByIdMap.get(id)!;
+  const prom = (async () => {
+    const { data, error } = await supabase
+      .from('personas')
+      .select('id,name,bio,lore,avatar_url,updated_at,created_at,user_id')
+      .eq('id', id)
+      .single();
+    console.log('[personas] Fetched persona by id from network', { id, ts: now });
+    if (externalQueryClient) externalQueryClient.setQueryData(['persona', id], data);
+    if (error) throw error;
+    personaByIdCache.set(id, { value: data, expires: now + PERSONA_CACHE_TTL_MS });
+    return data;
+  })();
+  pendingByIdMap.set(id, prom);
+  try { return await prom; } finally { pendingByIdMap.delete(id); }
 }

@@ -26,9 +26,12 @@ import { StatsBar } from './StatsBar';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
 import { BillingSettings } from '@/components/settings/categories/BillingSettings';
 import { supabase } from '@/integrations/supabase/client';
+import { getUserPersonas, registerPersonaQueryClient } from '@/lib/persona-operations';
 
 // Consolidated data fetching hook
 const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
+  const qc = useQueryClient();
+  React.useEffect(()=>{ registerPersonaQueryClient(qc); }, [qc]);
   return useQuery({
     queryKey: ['user-profile-complete', userId],
     queryFn: async () => {
@@ -53,7 +56,7 @@ const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
       const [charactersCount, favoritesCount, personasCount] = await Promise.allSettled([
         supabase.from('characters').select('id', { count: 'exact', head: true }).eq('creator_id', userId),
         supabase.from('character_favorites').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-        isOwnProfile ? supabase.from('personas').select('id', { count: 'exact', head: true }).eq('user_id', userId) : Promise.resolve({ count: 0 })
+        isOwnProfile ? Promise.resolve({ count: (await getUserPersonas()).length }) : Promise.resolve({ count: 0 })
       ]);
 
       return {

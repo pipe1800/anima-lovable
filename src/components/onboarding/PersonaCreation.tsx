@@ -5,8 +5,10 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Upload, Plus, User, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { createPersona, getUserPersonas, deletePersona, type Persona } from '@/lib/persona-operations';
+import { createPersona, deletePersona, type Persona } from '@/lib/persona-operations';
 import { useCurrentUser } from '@/hooks/useProfile';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { registerPersonaQueryClient, getUserPersonas } from '@/lib/persona-operations';
 
 interface CurrentPersona {
   name: string;
@@ -22,7 +24,17 @@ interface PersonaCreationProps {
 
 const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
   const { user } = useCurrentUser();
-  const [personas, setPersonas] = useState<Persona[]>([]);
+  const queryClient = useQueryClient();
+  useEffect(()=>{ registerPersonaQueryClient(queryClient); }, [queryClient]);
+  const personasQuery = useQuery({
+    queryKey: ['personas', user?.id],
+    queryFn: () => user ? getUserPersonas() : [],
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
+  const personas = personasQuery.data || [];
+  const loadingPersonas = personasQuery.isLoading;
+
   const [currentPersona, setCurrentPersona] = useState<CurrentPersona>({
     name: '',
     bio: '',
@@ -30,28 +42,6 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
     avatar_url: null
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingPersonas, setLoadingPersonas] = useState(true);
-
-  // Load existing personas on component mount
-  useEffect(() => {
-    const loadPersonas = async () => {
-      try {
-        const userPersonas = await getUserPersonas();
-        setPersonas(userPersonas);
-      } catch (error) {
-        console.error('Error loading personas:', error);
-        toast.error('Failed to load existing personas');
-      } finally {
-        setLoadingPersonas(false);
-      }
-    };
-
-    if (user) {
-      loadPersonas();
-    } else {
-      setLoadingPersonas(false);
-    }
-  }, [user]);
 
   const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -87,7 +77,12 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
         avatar_url: currentPersona.avatar_url
       });
 
-      setPersonas(prev => [newPersona, ...prev]);
+      // Optimistically update the query data
+      queryClient.setQueryData(['personas', user.id], (oldData: Persona[] | undefined) => {
+        if (!oldData) return [newPersona];
+        return [newPersona, ...oldData];
+      });
+
       setCurrentPersona({
         name: '',
         bio: '',
@@ -106,7 +101,11 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
   const handleRemovePersona = async (id: string) => {
     try {
       await deletePersona(id);
-      setPersonas(prev => prev.filter(p => p.id !== id));
+      // Optimistically update the query data
+      queryClient.setQueryData(['personas', user.id], (oldData: Persona[] | undefined) => {
+        if (!oldData) return [];
+        return oldData.filter(p => p.id !== id);
+      });
       toast.success('Persona removed');
     } catch (error) {
       console.error('Error removing persona:', error);

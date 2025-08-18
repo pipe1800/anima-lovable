@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
 import type { Tables } from '@/integrations/supabase/types';
 import { supabase, SUPABASE_API_URL } from '@/integrations/supabase/client';
 import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
+import { useUserCredits } from '@/queries/chatQueries';
+import { useOptionalChatBootstrap } from '@/contexts/ChatBootstrapContext';
 
 // Lazy load heavy components for better performance
 const FoundationStep = lazy(() => import('@/components/character-creator/FoundationStep'));
@@ -69,21 +71,10 @@ const CharacterCreator = () => {
   const [nsfwWarnings, setNsfwWarnings] = useState<string[]>([]);
   const [nsfwDetected, setNsfwDetected] = useState(false);
 
-  // Fetch user credits for mobile nav
-  useEffect(() => {
-    const fetchCredits = async () => {
-      if (!user) return;
-      try {
-        const creditsResult = await getUserCredits(user.id);
-        if (creditsResult.data?.balance) {
-          setUserCredits(creditsResult.data.balance);
-        }
-      } catch (error) {
-        console.error('Error fetching credits:', error);
-      }
-    };
-    fetchCredits();
-  }, [user]);
+  const bootstrap = useOptionalChatBootstrap();
+  const creditsQuery = useUserCredits(user?.id, { enabled: !bootstrap?.hydrated });
+  useEffect(() => { if (bootstrap?.creditsBalance !== undefined) setUserCredits(bootstrap.creditsBalance); }, [bootstrap?.creditsBalance]);
+  useEffect(() => { if (!bootstrap?.hydrated && typeof creditsQuery.data === 'number') setUserCredits(creditsQuery.data); }, [creditsQuery.data, bootstrap?.hydrated]);
 
   // Handle unsaved changes warning
   useEffect(() => {

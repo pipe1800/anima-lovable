@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { getUserPersonas } from '@/lib/persona-operations';
 
 /**
  * Get the user's last used persona ID from their most recent chat
@@ -45,10 +46,16 @@ export async function getUserDefaultPersona(userId: string): Promise<string | nu
     .limit(1)
     .maybeSingle();
 
-  if (error || !data) {
-    return null;
+  // replaced by cache-backed operation
+  // Fallback: first cached persona
+  if (error) {
+    const list = await getUserPersonas();
+    return list[0]?.id || null;
   }
-
+  if (!data) {
+    const list = await getUserPersonas();
+    return list[0]?.id || null;
+  }
   return data.id;
 }
 

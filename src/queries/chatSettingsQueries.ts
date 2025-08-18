@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserGlobalChatSettings, StreamingConfig } from '@/types/chatSettings';
+import { useChatBootstrap } from '@/contexts/ChatBootstrapContext';
 
 // Query key factory
 export const globalChatSettingsKeys = {
@@ -60,44 +61,29 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
 // Get user's global chat settings (includes ALL settings)
 export const useUserGlobalChatSettings = () => {
   const { user } = useAuth();
-  
+  const bootstrap = useChatBootstrap();
+  const bootstrapSettings = bootstrap?.globalSettings;
   return useQuery({
     queryKey: globalChatSettingsKeys.user(user?.id || ''),
     queryFn: async (): Promise<UserGlobalChatSettings> => {
-      if (!user?.id) throw new Error('User not authenticated');
-      
+      if (bootstrapSettings) return { ...defaultGlobalChatSettings, ...bootstrapSettings };
+      if (!user?.id) return { ...defaultGlobalChatSettings } as UserGlobalChatSettings;
       const { data, error } = await supabase
         .from('user_global_chat_settings')
         .select('*')
         .eq('user_id', user.id)
-        .single();
-      
-      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-        throw error;
-      }
-      
-      // If no settings exist, create default settings
+        .maybeSingle();
+      if (error && error.code !== 'PGRST116') throw error;
       if (!data) {
-        const { data: newSettings, error: insertError } = await supabase
-          .from('user_global_chat_settings')
-          .insert({
-            user_id: user.id,
-            ...defaultGlobalChatSettings,
-          })
-          .select()
-          .single();
-        
-        if (insertError) throw insertError;
-        // Ensure all fields present
-        return { ...defaultGlobalChatSettings, ...newSettings } as UserGlobalChatSettings;
+        // Return defaults (creation handled lazily elsewhere to avoid extra round-trip)
+        return { ...defaultGlobalChatSettings } as UserGlobalChatSettings;
       }
-      
-      // Merge defaults to ensure new fields exist for older rows
       return { ...defaultGlobalChatSettings, ...data } as UserGlobalChatSettings;
     },
-    enabled: !!user?.id,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
+    enabled: !!user?.id && !bootstrapSettings,
+    initialData: bootstrapSettings ? { ...defaultGlobalChatSettings, ...bootstrapSettings } : undefined,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 

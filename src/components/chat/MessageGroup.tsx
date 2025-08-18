@@ -298,6 +298,8 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
         )}
         <div className={`flex flex-col gap-1 max-w-[80%] sm:max-w-[80%] ${isUser ? 'items-end ml-auto' : 'items-start'} w-full`} style={{ maxWidth: '90%' }}>
           {messages.map((message, index) => {
+            const baseKey = message.id || `${group.id}-msg-${index}`;
+            const dynamicKey = message.id === 'streaming-temp' ? `${baseKey}-${message.content?.length || 0}` : baseKey;
             // Bubble background style (avatar inside bubble). AI: float-left (wrap then full width). User: flex so text never goes under avatar.
             if (avatarStyle === 'bubble-bg') {
               const hasAvatar = isUser ? !!resolvedUserAvatarUrl : !!character.avatar;
@@ -307,10 +309,9 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   : toRgba(styleOptions?.aiBubbleColor, styleOptions?.aiBubbleOpacity, '#1f2937', 0.9);
                 const imageUrl = isUser ? (resolvedUserAvatarUrl as string) : (character.avatar as string);
                 if (isUser) {
-                  // USER SIDE: avatar on right, text on left, no wrapping under avatar
                   return (
                     <div
-                      key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
+                      key={dynamicKey}
                       ref={(el) => { messageRefs.current[index] = el; }}
                       className={`relative ${sizeClass} flex items-start justify-end ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
                         index === 0 && index === messages.length - 1
@@ -342,12 +343,11 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                     </div>
                   );
                 }
-                // AI SIDE (unchanged float-left behavior)
                 const avatarMask = 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)';
                 return (
                   <div
                     ref={(el) => { messageRefs.current[index] = el; }}
-                    key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
+                    key={dynamicKey}
                     className={`relative ${sizeClass} ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
                       index === 0 && index === messages.length - 1
                         ? 'rounded-lg'

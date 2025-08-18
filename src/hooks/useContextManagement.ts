@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { TrackedContext } from '@/types/chat';
 import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
+import { useOptionalChatBootstrap } from '@/contexts/ChatBootstrapContext';
 
 export const useContextManagement = (
   chatId: string | null,
@@ -18,17 +19,20 @@ export const useContextManagement = (
   });
   const [isLoading, setIsLoading] = useState(false);
   const lastLoadedRef = useRef<string>('');
+  const bootstrap = (() => { try { return useOptionalChatBootstrap(); } catch { return undefined; } })();
 
   const loadContext = useCallback(async () => {
-    if (!chatId || !userId || !characterId) {
+    if (!chatId || !userId || !characterId) { return; }
+    if (bootstrap?.context && bootstrap?.chatId === chatId && bootstrap?.characterId === characterId) {
+      // Seed from bootstrap and skip fetch
+      const raw = bootstrap.context as any;
+      const converted = convertDatabaseContextToTrackedContext(raw);
+      if (converted) setContext(converted);
       return;
     }
-
     // Prevent duplicate calls
     const callKey = `${chatId}-${userId}-${characterId}`;
-    if (lastLoadedRef.current === callKey && !isLoading) {
-      return;
-    }
+    if (lastLoadedRef.current === callKey && !isLoading) { return; }
     lastLoadedRef.current = callKey;
 
     setIsLoading(true);
@@ -67,7 +71,7 @@ export const useContextManagement = (
     } finally {
       setIsLoading(false);
     }
-  }, [chatId, characterId, userId, isLoading]);
+  }, [chatId, characterId, userId, isLoading, bootstrap]);
 
   // Set up real-time subscription for context updates with debouncing
   useEffect(() => {
@@ -126,8 +130,9 @@ export const useContextManagement = (
 
   // Initial load when parameters change
   useEffect(() => {
+    if (!bootstrap?.hydrated) return; // wait for bootstrap
     loadContext();
-  }, [chatId, characterId, userId]); // Only reload when these core params change
+  }, [chatId, characterId, userId, bootstrap?.hydrated]); // Only reload when these core params change
 
   return {
     context: context,

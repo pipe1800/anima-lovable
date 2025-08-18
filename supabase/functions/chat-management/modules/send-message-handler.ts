@@ -11,7 +11,8 @@ import {
 import { 
   createStreamingErrorResponse,
   processStreamBuffer,
-  parseStreamChunk
+  parseStreamChunk,
+  createStreamingResponse
 } from './streaming.ts';
 import { 
   getUserPlanAndModel, 
@@ -567,16 +568,7 @@ export async function handleSendMessage(
        }
      });
 
-    return new Response(readable, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      },
-    });
+    return createStreamingResponse(readable);
 
   } catch (error) {
     console.error('💥 Error in handleSendMessage:', error);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { getUserChats, getCharacterDetails, deleteChat as deleteChatRpc } from '@/lib/supabase-queries';
+import { getCharacterDetails, deleteChat as deleteChatRpc } from '@/lib/supabase-queries';
 import type { Persona } from '@/lib/persona-operations';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { getUserCharacterSettings, upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
@@ -32,6 +32,7 @@ import { usePersonaManager, personaKeys } from '@/hooks/chat/usePersonaManager';
 import { createChat } from '@/lib/chat-operations';
 import { createMemory as createMemoryOp } from '@/lib/memory-operations';
 import { buildGreetingVariants } from '@/lib/greeting-utils';
+import { useChatBootstrap } from '@/contexts/ChatBootstrapContext';
 
 // ChatLayout component
 interface ChatLayoutProps {
@@ -63,13 +64,19 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // Auth
   const { user: currentUser } = useAuth();
 
+  // Bootstrap (safe access in case provider not mounted)
+  let bootstrap: ReturnType<typeof useChatBootstrap> | undefined;
+  try { bootstrap = useChatBootstrap(); } catch { bootstrap = undefined; }
+
   // Fetch user credits as single source of truth
   const { data: creditsBalance = 0 } = useQuery({
     ...queryConfigs.userCredits(currentUser?.id || ''),
     enabled: !!currentUser?.id,
   });
 
-  // Persona manager hook
+  // Persona manager hook (always call hooks unconditionally; gate via enabled flag)
+  const personaManagerEnabled = rightPanelOpen; // panel open gates data
+  const personaManager = usePersonaManager(currentUser?.id, currentChatId, { enabled: personaManagerEnabled });
   const {
     personas,
     selectedPersona,
@@ -84,7 +91,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     setCurrentPersonaDraft,
     createPersona: createPersonaAsync,
     deletePersona: deletePersonaAsync,
-  } = usePersonaManager(currentUser?.id, currentChatId);
+  } = personaManager;
   const [isCreatingPersona, setIsCreatingPersona] = useState(false);
 
   // Tutorial state
@@ -96,18 +103,20 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // Enhanced Memory state
   const { data: globalSettings } = useUserGlobalChatSettings();
   const [isCreatingMemory, setIsCreatingMemory] = useState(false);
+  const [showMemoriesDialog, setShowMemoriesDialog] = useState(false);
   const [currentChatMessageCount, setCurrentChatMessageCount] = useState(0);
+  // Gate message count query: only when memories dialog open (or other UI triggers)
+  const shouldLoadMessageCount = showMemoriesDialog && !!currentChatId;
   const { data: countedMessages = 0 as number, isLoading: messageCountLoading } = useQuery<number>({
-    ...(currentChatId ? (queryConfigs as any).chatMessageCount(currentChatId) : { queryKey: ['chat', 'message-count', 'none'], queryFn: async () => 0 }),
-    enabled: !!currentChatId
+    ...(currentChatId ? (queryConfigs as any).chatMessageCount(currentChatId, { enabled: shouldLoadMessageCount }) : { queryKey: ['chat', 'message-count', 'none'], queryFn: async () => 0 }),
+    enabled: shouldLoadMessageCount,
   });
   useEffect(() => {
-    if (currentChatId) setCurrentChatMessageCount(Number(countedMessages) || 0);
-    else setCurrentChatMessageCount(0);
-  }, [currentChatId, countedMessages]);
+    if (currentChatId && shouldLoadMessageCount) setCurrentChatMessageCount(Number(countedMessages) || 0);
+    else if (!shouldLoadMessageCount) setCurrentChatMessageCount(0);
+  }, [currentChatId, countedMessages, shouldLoadMessageCount]);
   
   // Memories Dialog state
-  const [showMemoriesDialog, setShowMemoriesDialog] = useState(false);
   const { memories, loading: memoriesLoading, error: memoriesError, refreshMemories, fetchMemories } = useCharacterMemories(
     character.id,
     currentUser?.id
@@ -183,10 +192,11 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     queryKey: ['user', 'chats', currentUser?.id],
     queryFn: async () => {
       if (!currentUser?.id) return [] as any[];
-      const { data } = await getUserChats(currentUser.id);
+      const { getUserChatsBatched } = await import('@/lib/supabase-queries');
+      const { data } = await getUserChatsBatched(currentUser.id);
       return data || [];
     },
-    enabled: !!currentUser?.id,
+    enabled: !!currentUser?.id && (rightPanelOpen || !!currentChatId),
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
@@ -212,7 +222,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         .maybeSingle();
       return !!data;
     },
-    enabled: !!currentUser?.id,
+    enabled: !!currentUser?.id && rightPanelOpen, // gated by panel visibility
   });
   useEffect(() => setIsLiked(!!likedQuery.data), [likedQuery.data]);
 
@@ -227,27 +237,28 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         .maybeSingle();
       return !!data;
     },
-    enabled: !!currentUser?.id,
+    enabled: !!currentUser?.id && rightPanelOpen, // gated by panel visibility
   });
   useEffect(() => setIsFavorited(!!favoritedQuery.data), [favoritedQuery.data]);
 
   // User character settings
   const userCharSettingsQuery = useQuery({
-    queryKey: ['user', 'character-settings', currentUser?.id, character.id],
+    queryKey: ['user','character-settings', currentUser?.id, character.id],
     queryFn: async () => currentUser ? getUserCharacterSettings(currentUser.id, character.id) : null,
-    enabled: !!currentUser?.id,
+    enabled: !!currentUser?.id && !bootstrap?.userCharacterSettings && bootstrap?.hydrated, // wait for bootstrap; skip if provided
+    staleTime: 5 * 60 * 1000,
   });
   useEffect(() => {
-    const settings: any = userCharSettingsQuery.data;
+    const settings: any = bootstrap?.userCharacterSettings || userCharSettingsQuery.data;
     if (settings) {
       setChatMode(settings.chat_mode);
       setTimeAwarenessEnabled(settings.time_awareness_enabled || false);
     }
-  }, [userCharSettingsQuery.data]);
+  }, [userCharSettingsQuery.data, bootstrap?.userCharacterSettings]);
 
   // Current chat metadata
   const currentChatModeQuery = useQuery({
-    queryKey: ['chat', 'mode', currentChatId, currentUser?.id],
+    queryKey: ['chat','mode', currentChatId, currentUser?.id],
     queryFn: async () => {
       if (!currentChatId || !currentUser?.id) return null;
       const { data } = await supabase
@@ -258,7 +269,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         .single();
       return data;
     },
-    enabled: !!currentChatId && !!currentUser?.id,
+    enabled: !!currentChatId && !!currentUser?.id && !bootstrap?.chatId && bootstrap?.hydrated,
+    staleTime: 5 * 60 * 1000,
   });
   useEffect(() => {
     const chatData: any = currentChatModeQuery.data;
@@ -529,6 +541,9 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
+  const personasSafe = personas || [];
+  const selectedPersonaSafe = selectedPersona || null;
+
   return (
     <div className="flex flex-col md:flex-row min-h-screen-stable md:h-full bg-[#121212] relative overflow-hidden">
       {/* Mobile Header */}
@@ -559,7 +574,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           isTutorialActive={isActive}
           currentStep={currentStep}
           startTutorial={startTutorial}
-          isMessageCountLoading={messageCountLoading}
+          isMessageCountLoading={messageCountLoading && shouldLoadMessageCount}
           messageCount={currentChatMessageCount}
           getMemoryCostText={getMemoryCostExplanation}
         />
@@ -606,8 +621,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           onWorldInfoSelect={handleWorldInfoSelect}
           selectedWorldInfoId={selectedWorldInfoId}
           currentUserId={currentUser?.id}
-          personas={personas}
-          selectedPersona={selectedPersona}
+          personas={personasSafe}
+          selectedPersona={selectedPersonaSafe}
           setSelectedPersona={setSelectedPersona}
           setShowPersonaModal={setShowCreateModal}
           setShowEditPersonaModal={setShowEditModal}
