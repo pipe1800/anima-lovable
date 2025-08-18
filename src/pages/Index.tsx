@@ -1,7 +1,6 @@
-
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from '@/contexts/AuthContext';
 import HeroSection from "@/components/HeroSection";
 import ValueProposition from "@/components/ValueProposition";
 import { LandingSubscriptionPlans } from "@/components/landing/LandingSubscriptionPlans";
@@ -12,24 +11,13 @@ import Footer from "@/components/Footer";
 
 const Index = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
-    const checkAuthStatus = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
-        
-        if (isOnboardingCompleted) {
-          navigate('/discover');
-        } else {
-          navigate('/onboarding');
-        }
-      }
-    };
-
-    checkAuthStatus();
-  }, [navigate]);
+    if (!user) return;
+    const isOnboardingCompleted = user.user_metadata?.onboarding_completed;
+    navigate(isOnboardingCompleted ? '/discover' : '/onboarding');
+  }, [user, navigate]);
 
   return (
     <div className="min-h-screen">

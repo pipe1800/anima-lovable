@@ -22,7 +22,7 @@ import { TopBar } from '@/components/ui/TopBar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useUserChatsPaginated } from '@/hooks/useDashboard';
-import { useDashboardStats, useDashboardCharacters } from '@/hooks/useDashboardProgressive';
+import { useDashboardData } from '@/hooks/useDashboard';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { 
   StatsCardSkeleton, 
@@ -90,41 +90,19 @@ export function DashboardContent() {
   // Enable real-time updates
   useRealtimeUpdates(user?.id);
   
-  // Use progressive loading hooks for better UX
-  const { 
-    data: statsData, 
-    isLoading: statsLoading, 
-    error: statsError,
-    refetch: refetchStats
-  } = useDashboardStats();
+  // Use single aggregated dashboard hook
+  const { data: dashboardData, isLoading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useDashboardData();
 
-  const { 
-    data: charactersData, 
-    isLoading: charactersLoading, 
-    error: charactersError,
-    refetch: refetchCharacters
-  } = useDashboardCharacters();
-
-  // Use separate hook for paginated chats
-  const {
-    data: chatsData,
-    isLoading: chatsLoading,
-    error: chatsError,
-    refetch: refetchChats
-  } = useUserChatsPaginated(currentPage, chatsPerPage);
-
-  // Memoize extracted data with fallbacks
+  // Chats now sourced separately via paginated hook; keep existing useUserChatsPaginated for recent chats
+  const { data: chatsData, isLoading: chatsLoading, error: chatsError, refetch: refetchChats } = useUserChatsPaginated(currentPage, chatsPerPage);
   const recentChats = useMemo(() => chatsData?.data || [], [chatsData?.data]);
   const totalChats = useMemo(() => chatsData?.totalCount || 0, [chatsData?.totalCount]);
   const totalPages = useMemo(() => chatsData?.totalPages || 1, [chatsData?.totalPages]);
-  const myCharacters = useMemo(() => charactersData?.characters || [], [charactersData?.characters]);
-  const favoriteCharacters = useMemo(() => charactersData?.favorites || [], [charactersData?.favorites]);
-  const userCredits = useMemo(() => statsData?.credits || 0, [statsData?.credits]);
-  
-  // Use subscription from AuthContext first, fallback to stats data
-  const subscription = useMemo(() => authSubscription || statsData?.subscription, [authSubscription, statsData?.subscription]);
-  
-  const creditsUsed = useMemo(() => statsData?.creditsUsed || 0, [statsData?.creditsUsed]);
+  const myCharacters = useMemo(() => dashboardData?.characters || [], [dashboardData?.characters]);
+  const favoriteCharacters = useMemo(() => dashboardData?.favorites || [], [dashboardData?.favorites]);
+  const userCredits = useMemo(() => dashboardData?.credits || 0, [dashboardData?.credits]);
+  const subscription = useMemo(() => authSubscription || dashboardData?.subscription, [authSubscription, dashboardData?.subscription]);
+  const creditsUsed = useMemo(() => dashboardData?.creditsUsed || 0, [dashboardData?.creditsUsed]);
   const monthlyAllowance = useMemo(() => subscription?.plan?.monthly_credits_allowance || 1000, [subscription?.plan?.monthly_credits_allowance]);
 
   // Get crown icon styling based on plan - MOVED BEFORE CONDITIONAL RETURNS
@@ -208,11 +186,9 @@ export function DashboardContent() {
   // Refresh data on mount and when user changes
   useEffect(() => {
     if (user) {
-      refetchStats();
-      refetchCharacters();
-      refetchChats();
+      refetchDashboard();
     }
-  }, [user, refetchStats, refetchCharacters, refetchChats]);
+  }, [user, refetchDashboard]);
 
   // Clear selections when page changes
   useEffect(() => {
@@ -304,9 +280,10 @@ export function DashboardContent() {
       // Perform actual deletions in the background
       const results = await deleteMultipleChats(chatIdsToDelete, user.id);
       console.log('Dashboard: Deletion results:', results);
+      const resultArray = results.data || [];
+      const errors = resultArray.filter((r: any) => r.error);
       
       // Check for any errors and revert optimistic updates if needed
-      const errors = results.filter(result => result.error);
       if (errors.length > 0) {
         console.error('Dashboard: Errors deleting chats:', errors);
         const failedChatIds = errors.map((_, index) => chatIdsToDelete[index]);
@@ -318,7 +295,7 @@ export function DashboardContent() {
           // We need to refetch to get the actual state, but for now just show error
           toast.error(`Failed to delete ${errors.length} chat(s). Refreshing...`);
           // Force a refresh to get correct state
-          setTimeout(() => refetchChats(), 1000);
+          setTimeout(() => refetchDashboard(), 1000);
           return oldData;
         });
         
@@ -332,7 +309,7 @@ export function DashboardContent() {
       }
       
       // Refetch to load new chats and maintain 10 visible chats
-      await refetchChats();
+      await refetchDashboard();
       
       // If we're on a page that's now empty, go to the previous page
       const newTotalChats = totalChats - successfulDeletions;
@@ -345,12 +322,12 @@ export function DashboardContent() {
       console.error('Dashboard: Error deleting chats:', error);
       toast.error('Failed to delete chats');
       // Revert optimistic updates by refetching
-      refetchChats();
+      refetchDashboard();
     } finally {
       setIsDeleting(false);
       setShowDeleteDialog(false);
     }
-  }, [selectedChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
+  }, [selectedChats, user, currentPage, chatsPerPage, queryClient, refetchDashboard]);
 
   const handleDeleteSingleChat = useCallback(async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -382,14 +359,14 @@ export function DashboardContent() {
       if (error) {
         // Revert optimistic update
         toast.error('Failed to delete chat. Refreshing...');
-        setTimeout(() => refetchChats(), 1000);
+        setTimeout(() => refetchDashboard(), 1000);
         return;
       }
       
       toast.success('Chat deleted successfully');
       
       // Refetch to load new chats and maintain 10 visible chats
-      await refetchChats();
+      await refetchDashboard();
       
       // If we're on a page that's now empty, go to the previous page
       const newTotalChats = totalChats - 1;
@@ -402,9 +379,9 @@ export function DashboardContent() {
       console.error('Error deleting chat:', error);
       toast.error('Failed to delete chat');
       // Revert optimistic updates by refetching
-      refetchChats();
+      refetchDashboard();
     }
-  }, [queryClient, user.id, currentPage, chatsPerPage, refetchChats]);
+  }, [queryClient, user.id, currentPage, chatsPerPage, refetchDashboard]);
 
   const handleDeleteAllChats = useCallback(async () => {
     if (totalChats === 0) {
@@ -441,7 +418,7 @@ export function DashboardContent() {
         console.error('Dashboard: Error deleting all chats:', result.error);
         toast.error(`Failed to delete all chats: ${result.error}`);
         // Revert optimistic update by refetching
-        setTimeout(() => refetchChats(), 1000);
+        setTimeout(() => refetchDashboard(), 1000);
         return;
       }
       
@@ -457,18 +434,18 @@ export function DashboardContent() {
       }
       
       // Refetch to get the actual current state
-      await refetchChats();
+      await refetchDashboard();
       
     } catch (error) {
       console.error('Dashboard: Error deleting all chats:', error);
       toast.error('Failed to delete all chats');
       // Revert optimistic updates by refetching
-      refetchChats();
+      refetchDashboard();
     } finally {
       setIsDeletingAll(false);
       setShowDeleteAllDialog(false);
     }
-  }, [totalChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
+  }, [totalChats, user, currentPage, chatsPerPage, queryClient, refetchDashboard]);
 
   // Ensure currentPage stays within valid bounds whenever totalPages changes
   useEffect(() => {
@@ -479,7 +456,7 @@ export function DashboardContent() {
     }
   }, [currentPage, totalPages]);
 
-  if (authLoading || statsLoading) {
+  if (authLoading || dashboardLoading) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-white">Loading your dashboard...</div>
@@ -496,8 +473,8 @@ export function DashboardContent() {
   }
 
   // Soft-handle data errors without crashing the page
-  if (statsError || charactersError || chatsError) {
-    console.error('Dashboard data load issues:', { statsError, charactersError, chatsError });
+  if (dashboardError) {
+    console.error('Dashboard data load issues:', dashboardError);
     // Proceed to render with safe fallbacks already applied above
   }
 
@@ -540,7 +517,7 @@ export function DashboardContent() {
       <div className="p-3 sm:p-6 md:p-6 space-y-4 sm:space-y-6">
         {/* Stats cards above Daily Message Limit */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
-          {statsLoading ? (
+          {dashboardLoading ? (
             // Show skeleton loading for stats
             <>
               {Array.from({ length: 4 }).map((_, index) => (
@@ -654,7 +631,7 @@ export function DashboardContent() {
 
                 <TabsContent value="recent-chats" className="mt-3 sm:mt-6">
                   <div className="space-y-2 sm:space-y-3">
-                    {chatsLoading ? (
+                    {dashboardLoading ? (
                       // Show skeleton loading for chats
                       <>
                         {Array.from({ length: 5 }).map((_, index) => (
@@ -712,7 +689,7 @@ export function DashboardContent() {
 
                 <TabsContent value="my-characters" className="mt-3 sm:mt-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {charactersLoading ? (
+                    {dashboardLoading ? (
                       // Show skeleton loading for characters
                       <>
                         {Array.from({ length: 6 }).map((_, index) => (
@@ -810,7 +787,7 @@ export function DashboardContent() {
 
                 <TabsContent value="favorites" className="mt-3 sm:mt-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {charactersLoading ? (
+                    {dashboardLoading ? (
                       // Show skeleton loading for favorite characters
                       <>
                         {Array.from({ length: 6 }).map((_, index) => (

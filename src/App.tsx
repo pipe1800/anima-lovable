@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { NSFWProvider } from "@/contexts/NSFWContext";
 import OnboardingGuard from "@/components/auth/OnboardingGuard";
@@ -38,6 +38,29 @@ import { UpgradeCallback } from "./pages/UpgradeCallback";
 import UpgradeVerification from "./pages/UpgradeVerification";
 import CreditPurchaseVerification from "./pages/CreditPurchaseVerification";
 import DialogueTestPage from "./pages/DialogueTestPage";
+import { useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/queries/chatQueries';
+import { getPublicProfile, getUserActiveSubscription, getUserFavorites, getUserCharacters } from '@/lib/supabase-queries';
+import { getUserPersonas } from '@/lib/persona-operations';
+import { getUserSnapshot, seedUserSnapshot } from '@/lib/snapshots';
+
+const PostAuthPrefetch = () => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+  useEffect(() => {
+    const run = async () => {
+      if (!user?.id) return;
+      const id = user.id;
+      const snap = await getUserSnapshot(id);
+      if (snap) seedUserSnapshot(qc, id, snap);
+      // TODO world info snapshot prefetch optional
+    };
+    run();
+  }, [user?.id, qc]);
+  return null;
+};
 
 const App = () => (
   <AuthProvider>
@@ -46,6 +69,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <PostAuthPrefetch />
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/characters" element={<PublicDiscover />} />
@@ -76,13 +100,7 @@ const App = () => (
                 </AuthenticatedLayout>
               </OnboardingGuard>
             } />
-            <Route path="/discover" element={
-              <OnboardingGuard requireOnboardingComplete={true}>
-                <AuthenticatedLayout>
-                  <Discover />
-                </AuthenticatedLayout>
-              </OnboardingGuard>
-            } />
+            <Route path="/discover" element={<Navigate to="/characters" replace />} />
             <Route path="/chat" element={
               <OnboardingGuard requireOnboardingComplete={true}>
                 <Chat />

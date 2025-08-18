@@ -9,6 +9,8 @@ import { Eye, EyeOff, Check, X } from 'lucide-react';
 import { preloadDashboardData } from '@/hooks/useDashboard';
 import { useQueryClient } from '@tanstack/react-query';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
+import { useAuth } from '@/contexts/AuthContext';
+
 const Auth = () => {
   const [searchParams] = useSearchParams();
   const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'signup');
@@ -18,7 +20,6 @@ const Auth = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [user, setUser] = useState<User | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
@@ -26,6 +27,7 @@ const Auth = () => {
   const [successUsername, setSuccessUsername] = useState('');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   // Password validation state
   const [passwordValidation, setPasswordValidation] = useState({
@@ -42,58 +44,24 @@ const Auth = () => {
       setEmail(savedEmail);
       setRememberMe(true);
     }
+  }, []);
 
-    // Check if user is already logged in
-    const {
-      data: {
-        subscription
-      }
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log('Auth state change:', event, session?.user?.email);
-      setUser(session?.user ?? null);
-      if (session?.user && !showSuccess) {
-        // Check if user has completed onboarding
-        const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
-        if (isOnboardingCompleted) {
-          // User already completed onboarding, go to discover
-          navigate('/discover');
-          // Preload dashboard data in background
-          if (session.user?.id) {
-            setTimeout(() => {
-              preloadDashboardData(session.user.id, queryClient);
-            }, 1000);
-          }
-        } else {
-          // New user or incomplete onboarding, go to onboarding
-          navigate('/onboarding');
+  useEffect(() => {
+    if (user && !showSuccess) {
+      const isOnboardingCompleted = user.user_metadata?.onboarding_completed;
+      if (isOnboardingCompleted) {
+        navigate('/discover');
+        // Preload dashboard data in background
+        if (user?.id) {
+          setTimeout(() => {
+            preloadDashboardData(user.id, queryClient);
+          }, 1000);
         }
+      } else {
+        navigate('/onboarding');
       }
-    });
-
-    // Check for existing session
-    supabase.auth.getSession().then(({
-      data: {
-        session
-      }
-    }) => {
-      setUser(session?.user ?? null);
-      if (session?.user && !showSuccess) {
-        const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
-        if (isOnboardingCompleted) {
-          navigate('/discover');
-          // Preload dashboard data in background
-          if (session.user?.id) {
-            setTimeout(() => {
-              preloadDashboardData(session.user.id, queryClient);
-            }, 1000);
-          }
-        } else {
-          navigate('/onboarding');
-        }
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [navigate, showSuccess]);
+    }
+  }, [user, showSuccess, navigate]);
 
   // Real-time password validation
   useEffect(() => {

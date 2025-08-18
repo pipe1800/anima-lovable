@@ -49,11 +49,11 @@ export async function getUserDefaultPersona(userId: string): Promise<string | nu
   // replaced by cache-backed operation
   // Fallback: first cached persona
   if (error) {
-    const list = await getUserPersonas();
+    const list = await getUserPersonas(userId);
     return list[0]?.id || null;
   }
   if (!data) {
-    const list = await getUserPersonas();
+    const list = await getUserPersonas(userId);
     return list[0]?.id || null;
   }
   return data.id;

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CharacterGrid } from './CharacterGrid';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDashboardData, preloadDashboardData } from '@/hooks/useDashboard';
 import { useQueryClient } from '@tanstack/react-query';
 import { NSFWToggle } from '@/components/NSFWToggle';
 import { useNSFW } from '@/contexts/NSFWContext';
@@ -26,15 +25,19 @@ import {
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useNavigate, useLocation } from 'react-router-dom';
+// Add sidebar imports
+import { SidebarProvider } from '@/components/ui/sidebar';
+import AppSidebar from '@/components/dashboard/AppSidebar';
 
 export function DiscoverContent() {
   const { user, profile } = useAuth();
   const { nsfwEnabled } = useNSFW();
-  const { data: dashboardData } = useDashboardData();
   const queryClient = useQueryClient();
   const { startChat, isCreating } = useChatCreation();
   const navigate = useNavigate();
   const location = useLocation();
+  // Sidebar collapsed state (only relevant when logged in)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const prefetchNextRef = useRef<boolean>(false);
   const hasIncrementedRef = useRef(false);
@@ -106,14 +109,14 @@ export function DiscoverContent() {
 
   const { data: searchResults, refetch: executeSearch, isFetching: isSearchFetching } = useSearchPublicCharacters(searchParams);
 
-  // Initial characters with offset
+  // Initial characters with offset (disabled when in search mode)
   const initialOffset = hasSearched ? 0 : (currentPage - 1) * 20;
   const { 
     data: initialCharacters = [], 
     isLoading: isInitialLoading,
     isFetching: isInitialFetching,
     isPlaceholderData: isInitialPlaceholder,
-  } = usePublicCharacters(20, initialOffset);
+  } = usePublicCharacters(20, initialOffset, !hasSearched);
 
   // Accumulate initial characters
   useEffect(() => {
@@ -208,27 +211,30 @@ export function DiscoverContent() {
     if (randomCharacter) await startChat(randomCharacter);
   };
 
-  // Defer dashboard preload so discover paints first
+  // Listen for sidebar state changes (mirror DashboardLayout logic) – avoids importing dashboard data
   useEffect(() => {
-    if (!user?.id) return;
-    const run = () => preloadDashboardData(user.id, queryClient);
-    const win: any = window as any;
-    const id = win.requestIdleCallback ? win.requestIdleCallback(run, { timeout: 1500 }) : setTimeout(run, 800);
-    return () => {
-      if (win.cancelIdleCallback && id) win.cancelIdleCallback(id);
-      else clearTimeout(id);
+    if (!user?.id) return; // only when logged in
+    const updateSidebarState = () => {
+      const savedState = localStorage.getItem('sidebarCollapsed');
+      if (savedState !== null) setSidebarCollapsed(JSON.parse(savedState));
     };
-  }, [user?.id, queryClient]);
+    updateSidebarState();
+    window.addEventListener('storage', updateSidebarState);
+    window.addEventListener('sidebarToggled', updateSidebarState as any);
+    return () => {
+      window.removeEventListener('storage', updateSidebarState);
+      window.removeEventListener('sidebarToggled', updateSidebarState as any);
+    };
+  }, [user?.id]);
 
-  // Display data
+  // Determine display set and loading state (moved above content for sidebar integration)
   const displayCharacters = hasSearched && searchResults?.data ? searchResults.data : (initialAccumulated.length ? initialAccumulated : initialCharacters);
-
-  // Determine grid loading state: show skeletons when fetching and nothing to display yet
   const isGridLoading = hasSearched
     ? (isSearchFetching && displayCharacters.length === 0)
     : ((isInitialLoading || isInitialFetching) && displayCharacters.length === 0);
 
-  return (
+  // Existing final JSX extracted to a variable so we can wrap conditionally with sidebar layout
+  const content = (
     <div className="min-h-screen bg-[#121212] w-full">
       {/* Header - Desktop Only */}
       <header className="bg-[#1a1a2e] border-b border-gray-700/50 p-3 sm:p-4 hidden md:block">
@@ -348,7 +354,6 @@ export function DiscoverContent() {
         </div>
       )}
 
-      {/* Character Grid */}
       <CharacterGrid 
         characters={displayCharacters}
         isLoading={isGridLoading}
@@ -357,10 +362,29 @@ export function DiscoverContent() {
         currentPage={currentPage}
         onPageChange={handlePageChange}
       />
-      {/* Sentinel for infinite scroll in initial mode - only when enabled by user */}
       {!hasSearched && autoLoadEnabled && (
         <div ref={sentinelRef} className="h-8" />
       )}
     </div>
   );
+
+  if (user?.id) {
+    return (
+      <SidebarProvider>
+        <div className="min-h-screen flex flex-col w-full bg-[#121212]">
+          <div className="flex flex-1">
+            {/* Desktop Sidebar */}
+            <div className="hidden md:block fixed left-0 top-0 h-full z-40">
+              <AppSidebar />
+            </div>
+            <main className={`flex-1 overflow-auto transition-all duration-300 ${sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'}`}>
+              {content}
+            </main>
+          </div>
+        </div>
+      </SidebarProvider>
+    );
+  }
+
+  return content;
 }

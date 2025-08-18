@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { 
   User, 
@@ -30,15 +30,16 @@ import {
   getPublicProfile, 
   getUserCharacters, 
   getUserFavorites,
-  getUserActiveSubscription,
-  getUserPersonasForProfile
+  getUserActiveSubscription
 } from '@/lib/supabase-queries';
+import { getUserPersonas } from '@/lib/persona-operations';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { queryKeys } from '@/queries/chatQueries';
 
 interface UserProfileData {
   profile: any;
@@ -56,65 +57,65 @@ interface UserProfileData {
 }
 
 // Consolidated data fetching hook
-const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
+const useUserProfileData = (userId: string | null | undefined, isOwnProfile: boolean) => {
+  const queryClient = useQueryClient();
   return useQuery({
-    queryKey: ['user-profile-complete', userId],
-    queryFn: async () => {
-      try {
-        // Parallel fetch all data
-        const promises = [
-          getPublicProfile(userId),
-          getUserCharacters(userId),
-          getUserFavorites(userId),
-          getUserActiveSubscription(userId),
-          supabase
-            .from('chats')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_id', userId)
-        ];
+    queryKey: ['user-profile-complete', userId, isOwnProfile],
+    enabled: !!userId, // do not run until we have a concrete id
+    staleTime: 1000 * 60 * 5,
+    queryFn: async (): Promise<UserProfileData> => {
+      if (!userId) throw new Error('No user id');
+      const promises = [
+        getPublicProfile(userId),
+        getUserCharacters(userId),
+        getUserFavorites(userId),
+        getUserActiveSubscription(userId),
+        supabase
+          .from('chats')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+      ];
+      const results = await Promise.allSettled(promises);
 
-        // Only fetch personas for own profile
-        if (isOwnProfile) {
-          promises.push(getUserPersonasForProfile(userId));
-        }
-
-        const results = await Promise.allSettled(promises);
-
-        // Extract results with proper type checking
-        const profile = results[0].status === 'fulfilled' && results[0].value.data ? results[0].value.data : null;
-        const characters = results[1].status === 'fulfilled' && Array.isArray(results[1].value.data) ? results[1].value.data : [];
-        const favorites = results[2].status === 'fulfilled' && Array.isArray(results[2].value.data) ? results[2].value.data : [];
-        const subscription = results[3].status === 'fulfilled' && results[3].value.data ? results[3].value.data : null;
-        
-        // Chat count extraction - need to check the structure
-        let chatCount = 0;
-        if (results[4].status === 'fulfilled' && results[4].value && 'count' in results[4].value) {
-          chatCount = results[4].value.count || 0;
-        }
-        
-        const personas = isOwnProfile && results[5] && results[5].status === 'fulfilled' && Array.isArray(results[5].value.data) ? results[5].value.data : [];
-
-        return {
-          profile,
-          characters,
-          favorites,
-          personas,
-          subscription,
-          stats: {
-            totalChats: chatCount,
-            totalCharacters: characters.length,
-            totalFavorites: favorites.length,
-            totalPersonas: personas.length,
-            memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
-          }
-        } as UserProfileData;
-      } catch (error) {
-        console.error('Error fetching profile data:', error);
-        throw error;
+      let personas: any[] = [];
+      if (isOwnProfile) {
+        try { personas = await getUserPersonas(userId); } catch { personas = []; }
       }
-    },
-    enabled: !!userId,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+
+      const profile = results[0].status === 'fulfilled' && results[0].value.data ? results[0].value.data : null;
+      const characters = results[1].status === 'fulfilled' && Array.isArray(results[1].value.data) ? results[1].value.data : [];
+      const favorites = results[2].status === 'fulfilled' && Array.isArray(results[2].value.data) ? results[2].value.data : [];
+      const subscription = results[3].status === 'fulfilled' && results[3].value.data ? results[3].value.data : null;
+      let chatCount = 0;
+      if (results[4].status === 'fulfilled' && results[4].value && 'count' in results[4].value) {
+        chatCount = (results[4].value as any).count || 0;
+      }
+
+      // Seed unified caches so other pages reuse data without refetch
+      if (profile) queryClient.setQueryData(queryKeys.user.profile(userId), profile);
+      queryClient.setQueryData(queryKeys.user.characters(userId), characters);
+      queryClient.setQueryData(queryKeys.user.favorites(userId), favorites);
+      if (subscription) queryClient.setQueryData(queryKeys.user.subscription(userId), subscription);
+      queryClient.setQueryData(queryKeys.user.chatsCount(userId), chatCount);
+      if (isOwnProfile) queryClient.setQueryData(queryKeys.personas.list(userId), personas);
+
+      return {
+        profile,
+        characters,
+        favorites,
+        personas,
+        subscription,
+        stats: {
+          totalChats: chatCount,
+          totalCharacters: characters.length,
+          totalFavorites: favorites.length,
+          totalPersonas: personas.length,
+          memberSince: (profile && typeof profile === 'object' && 'created_at' in profile)
+            ? (profile as any).created_at
+            : new Date().toISOString()
+        }
+      } as UserProfileData;
+    }
   });
 };
 
@@ -131,7 +132,7 @@ export const ProfileView = () => {
   // For public profile access, don't redirect to auth if no user is logged in
   const shouldRedirectToAuth = !profileUserId && !userId;
 
-  const { data, isLoading, error } = useUserProfileData(profileUserId!, isOwnProfile);
+  const { data, isLoading, error } = useUserProfileData(profileUserId, isOwnProfile);
 
   if (shouldRedirectToAuth) {
     navigate('/auth');
@@ -170,11 +171,18 @@ export const ProfileView = () => {
 
   const handleShare = () => {
     const url = `${window.location.origin}/profile/${profileUserId}`;
-    navigator.clipboard.writeText(url);
-    toast({
-      title: "Profile link copied!",
-      description: "Share this link with others to show your profile.",
-    });
+    if (navigator.share) {
+      navigator.share({ title: 'Profile', url }).catch(() => {/* ignore */});
+    } else {
+      navigator.clipboard.writeText(url).then(() => {
+        toast({
+          title: 'Profile link copied!',
+          description: 'Share this link with others to show your profile.',
+        });
+      }).catch(() => {
+        toast({ title: 'Unable to copy link', variant: 'destructive' });
+      });
+    }
   };
 
   const StatCard = ({ icon: Icon, label, value, color = "text-primary" }: any) => (
@@ -379,27 +387,31 @@ export const ProfileView = () => {
                 label="Favorites" 
                 value={data?.stats.totalFavorites || 0} 
               />
-              <StatCard 
-                icon={Users} 
-                label="Personas" 
-                value={data?.stats.totalPersonas || 0} 
-              />
+              {isOwnProfile && (
+                <StatCard 
+                  icon={Users} 
+                  label="Personas" 
+                  value={data?.stats.totalPersonas || 0} 
+                />
+              )}
             </>
           )}
         </div>
 
         {/* Content Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3 md:w-auto md:inline-grid">
+          <TabsList className={`grid w-full ${isOwnProfile ? 'grid-cols-3' : 'grid-cols-2'} md:w-auto md:inline-grid`}>
             <TabsTrigger value="characters">
               Characters ({data?.characters?.length || 0})
             </TabsTrigger>
             <TabsTrigger value="favorites">
               Favorites ({data?.favorites?.length || 0})
             </TabsTrigger>
-            <TabsTrigger value="personas">
-              Personas ({data?.personas?.length || 0})
-            </TabsTrigger>
+            {isOwnProfile && (
+              <TabsTrigger value="personas">
+                Personas ({data?.personas?.length || 0})
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="characters" className="space-y-4">
@@ -458,6 +470,7 @@ export const ProfileView = () => {
             )}
           </TabsContent>
 
+          {isOwnProfile && (
           <TabsContent value="personas" className="space-y-4">
             {isLoading ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -465,13 +478,6 @@ export const ProfileView = () => {
                   <Skeleton key={i} className="h-24" />
                 ))}
               </div>
-            ) : !isOwnProfile ? (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <Shield className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-muted-foreground">Personas are private</p>
-                </CardContent>
-              </Card>
             ) : data?.personas?.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center">
@@ -490,6 +496,7 @@ export const ProfileView = () => {
               </div>
             )}
           </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

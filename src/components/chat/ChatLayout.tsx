@@ -33,6 +33,7 @@ import { createChat } from '@/lib/chat-operations';
 import { createMemory as createMemoryOp } from '@/lib/memory-operations';
 import { buildGreetingVariants } from '@/lib/greeting-utils';
 import { useChatBootstrap } from '@/contexts/ChatBootstrapContext';
+import { useUserCharacterEngagementSets } from '@/hooks/useCharacters';
 
 // ChatLayout component
 interface ChatLayoutProps {
@@ -210,36 +211,13 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     );
   }, [chats, searchQuery]);
 
-  // Likes / Favorites
-  const likedQuery = useQuery({
-    queryKey: ['character', 'liked', currentUser?.id, character.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('character_likes')
-        .select('id')
-        .eq('character_id', character.id)
-        .eq('user_id', currentUser!.id)
-        .maybeSingle();
-      return !!data;
-    },
-    enabled: !!currentUser?.id && rightPanelOpen, // gated by panel visibility
-  });
-  useEffect(() => setIsLiked(!!likedQuery.data), [likedQuery.data]);
-
-  const favoritedQuery = useQuery({
-    queryKey: ['character', 'favorited', currentUser?.id, character.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('character_favorites')
-        .select('id')
-        .eq('character_id', character.id)
-        .eq('user_id', currentUser!.id)
-        .maybeSingle();
-      return !!data;
-    },
-    enabled: !!currentUser?.id && rightPanelOpen, // gated by panel visibility
-  });
-  useEffect(() => setIsFavorited(!!favoritedQuery.data), [favoritedQuery.data]);
+  // Likes / Favorites (replaced per-character queries with aggregate sets)
+  const engagement = useUserCharacterEngagementSets(currentUser?.id);
+  useEffect(() => {
+    if (!rightPanelOpen || !character?.id) return;
+    setIsLiked(!!engagement.likesSet?.has(character.id));
+    setIsFavorited(!!engagement.favoritesSet?.has(character.id));
+  }, [rightPanelOpen, character.id, engagement.likesSet, engagement.favoritesSet]);
 
   // User character settings
   const userCharSettingsQuery = useQuery({
@@ -302,47 +280,53 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   const handleLike = async () => {
     if (!currentUser) return;
-
     try {
-      if (isLiked) {
-        await supabase
-          .from('character_likes')
-          .delete()
-          .eq('character_id', character.id)
-          .eq('user_id', currentUser.id);
+      const currentlyLiked = engagement.likesSet?.has(character.id);
+      // Optimistic update
+      if (currentlyLiked) {
+        engagement.likesSet?.delete(character.id);
         setIsLiked(false);
-      } else {
         await supabase
           .from('character_likes')
-          .insert([{ character_id: character.id, user_id: currentUser.id }]);
+            .delete()
+            .eq('character_id', character.id)
+            .eq('user_id', currentUser.id);
+      } else {
+        engagement.likesSet?.add(character.id);
         setIsLiked(true);
+        await supabase
+          .from('character_likes')
+            .insert([{ character_id: character.id, user_id: currentUser.id }]);
       }
-      queryClient.invalidateQueries({ queryKey: ['character', 'liked', currentUser?.id, character.id] });
     } catch (error) {
       logger.error('Error updating like status:', error);
+      // Revert by refetching sets
+      engagement.likesQuery.refetch();
     }
   };
 
   const handleFavorite = async () => {
     if (!currentUser) return;
-
     try {
-      if (isFavorited) {
-        await supabase
-          .from('character_favorites')
-          .delete()
-          .eq('character_id', character.id)
-          .eq('user_id', currentUser.id);
+      const currentlyFavorited = engagement.favoritesSet?.has(character.id);
+      if (currentlyFavorited) {
+        engagement.favoritesSet?.delete(character.id);
         setIsFavorited(false);
-      } else {
         await supabase
           .from('character_favorites')
-          .insert([{ character_id: character.id, user_id: currentUser.id }]);
+            .delete()
+            .eq('character_id', character.id)
+            .eq('user_id', currentUser.id);
+      } else {
+        engagement.favoritesSet?.add(character.id);
         setIsFavorited(true);
+        await supabase
+          .from('character_favorites')
+            .insert([{ character_id: character.id, user_id: currentUser.id }]);
       }
-      queryClient.invalidateQueries({ queryKey: ['character', 'favorited', currentUser?.id, character.id] });
     } catch (error) {
       logger.error('Error updating favorite status:', error);
+      engagement.favoritesQuery.refetch();
     }
   };
 

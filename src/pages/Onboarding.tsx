@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { User } from '@supabase/supabase-js';
+import { useAuth } from '@/contexts/AuthContext';
 import VibeSelection from '@/components/onboarding/VibeSelection';
 import ProfileSetup from '@/components/onboarding/ProfileSetup';
 import PersonaCreation from '@/components/onboarding/PersonaCreation';
@@ -10,58 +10,18 @@ import OnboardingProgressBar from '@/components/onboarding/OnboardingProgressBar
 
 const Onboarding = () => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [user, setUser] = useState<User | null>(null);
   const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
-    // Check for existing session first
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      console.log('Onboarding session check:', session?.user?.email);
-      if (session?.user) {
-        setUser(session.user);
-        
-        // Check if user has completed onboarding
-        const isCompleted = session.user.user_metadata?.onboarding_completed;
-        console.log('Onboarding completed status:', isCompleted);
-        
-        if (isCompleted) {
-          // User already completed onboarding, redirect to discover
-          setOnboardingCompleted(true);
-          navigate('/discover');
-        } else {
-          // New user, go directly to first onboarding step
-          setCurrentStep(0);
-        }
-      } else {
-        // No user, redirect to auth
-        navigate('/auth');
-      }
-      setLoading(false);
-    });
-
-    // Then set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Onboarding auth change:', event, session?.user?.email);
-        if (session?.user) {
-          setUser(session.user);
-          
-          // Check onboarding status for new sessions
-          const isCompleted = session.user.user_metadata?.onboarding_completed;
-          if (isCompleted && !onboardingCompleted) {
-            navigate('/discover');
-          }
-        } else if (!loading && event !== 'INITIAL_SESSION') {
-          navigate('/auth');
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, [navigate, loading, onboardingCompleted]);
+    if (!user) { navigate('/auth'); return; }
+    const isCompleted = user.user_metadata?.onboarding_completed;
+    if (isCompleted) { navigate('/discover'); } else { setCurrentStep(0); }
+    setLoading(false);
+  }, [user, navigate]);
 
   const handleNext = () => {
     if (currentStep === 0 && selectedVibes.length === 0) return;
@@ -104,53 +64,32 @@ const Onboarding = () => {
   };
 
   const completeOnboarding = async () => {
-    // Mark onboarding as completed
     if (user) {
-      await supabase.auth.updateUser({
-        data: { onboarding_completed: true }
-      });
-      
-      // Also update the profiles table
-      await supabase
-        .from('profiles')
-        .update({ onboarding_completed: true })
-        .eq('id', user.id);
-
-      // Ensure avatar exists; if missing, upload default and set avatar_url
+      await supabase.auth.updateUser({ data: { onboarding_completed: true } });
+      await supabase.from('profiles').update({ onboarding_completed: true }).eq('id', user.id);
+      // Ensure avatar exists now (moved from refreshProfile)
       try {
-        const { data: profileRow } = await supabase
-          .from('profiles')
-          .select('avatar_url')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (!profileRow || !profileRow.avatar_url) {
-          // Fetch default avatar from public
+        const { data: profileRow } = await supabase.from('profiles').select('avatar_url').eq('id', user.id).maybeSingle();
+        if (!profileRow?.avatar_url) {
           const response = await fetch('/default_avatar.jpg');
           const blob = await response.blob();
-          const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
-
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('character-avatars')
-            .upload(`${user.id}/avatar-default.jpg`, file, { upsert: true });
-
-          let avatarUrlToSet: string = '/default_avatar.jpg';
-          if (!uploadError && uploadData?.path) {
-            const { data: pub } = await supabase.storage
+            const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
+            const storagePath = `${user.id}/avatar-default.jpg`;
+            const { data: uploadData, error: uploadError } = await supabase.storage
               .from('character-avatars')
-              .getPublicUrl(uploadData.path);
-            avatarUrlToSet = pub.publicUrl || avatarUrlToSet;
-          }
-
-          await supabase
-            .from('profiles')
-            .update({ avatar_url: avatarUrlToSet })
-            .eq('id', user.id);
+              .upload(storagePath, file, { upsert: true });
+            let avatarUrlToSet: string = '/default_avatar.jpg';
+            if (!uploadError && uploadData?.path) {
+              const { data: pub } = await supabase.storage
+                .from('character-avatars')
+                .getPublicUrl(uploadData.path);
+              avatarUrlToSet = pub.publicUrl || avatarUrlToSet;
+            }
+            await supabase.from('profiles').update({ avatar_url: avatarUrlToSet }).eq('id', user.id);
         }
-      } catch (e) {
-        console.error('Failed to ensure default avatar on onboarding complete:', e);
-      }
+      } catch (e) { console.error('Failed default avatar ensure:', e); }
     }
+    setOnboardingCompleted(true);
   };
 
   if (loading) {

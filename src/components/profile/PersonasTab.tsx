@@ -18,7 +18,7 @@ export const PersonasTab = () => {
   useEffect(()=>{ registerPersonaQueryClient(queryClient); }, [queryClient]);
   const personasQuery = useQuery({
     queryKey: ['personas', user?.id],
-    queryFn: () => user ? getUserPersonas() : [],
+    queryFn: () => user ? getUserPersonas(user.id) : [],
     enabled: !!user,
     staleTime: 10 * 60 * 1000,
   });
@@ -95,7 +95,7 @@ export const PersonasTab = () => {
         toast.success('Persona updated successfully!');
       } else {
         // Create new persona
-        const newPersona = await createPersona({
+        const newPersona = await createPersona(user.id, {
           name: currentPersona.name.trim(),
           bio: currentPersona.bio.trim() || null,
           lore: currentPersona.lore.trim() || null,

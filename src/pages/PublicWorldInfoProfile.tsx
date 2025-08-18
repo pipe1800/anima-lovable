@@ -80,7 +80,7 @@ export default function PublicWorldInfoProfile() {
 
       try {
         setLoading(true);
-        const data = await getPublicWorldInfoDetails(id);
+        const data = await getPublicWorldInfoDetails(user?.id || null, id);
         setWorldInfo(data as unknown as WorldInfoData);
         
         // Fetch similar world infos
@@ -123,13 +123,11 @@ export default function PublicWorldInfoProfile() {
     };
 
     fetchWorldInfoData();
-  }, [id]);
+  }, [id, user?.id]);
 
   const handleLike = async () => {
     if (!worldInfo || isLiking) return;
-
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) {
+    if (!user) {
       toast({
         title: "Authentication Required",
         description: "Please log in to like this world info",
@@ -146,7 +144,7 @@ export default function PublicWorldInfoProfile() {
           .from('world_info_user_likes')
           .delete()
           .eq('world_info_id', worldInfo.id)
-          .eq('user_id', user.user.id);
+          .eq('user_id', user.id);
 
         if (error) throw error;
 
@@ -175,7 +173,7 @@ export default function PublicWorldInfoProfile() {
           .from('world_info_user_likes')
           .insert({
             world_info_id: worldInfo.id,
-            user_id: user.user.id
+            user_id: user.id
           });
 
         if (error) throw error;
@@ -222,7 +220,7 @@ export default function PublicWorldInfoProfile() {
     try {
       if (worldInfo.isUsed) {
         // Use the proper function that handles interaction count
-        await removeWorldInfoFromCollection(worldInfo.id);
+        await removeWorldInfoFromCollection(user.id, worldInfo.id);
         
         setWorldInfo(prev => prev ? {
           ...prev,
@@ -236,7 +234,7 @@ export default function PublicWorldInfoProfile() {
         });
       } else {
         // Use the proper function that handles interaction count
-        await addWorldInfoToCollection(worldInfo.id);
+        await addWorldInfoToCollection(user.id, worldInfo.id);
         
         setWorldInfo(prev => prev ? {
           ...prev,

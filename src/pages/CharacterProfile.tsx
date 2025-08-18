@@ -36,7 +36,7 @@ import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-
+import { useUserCharacterEngagementSets } from '@/hooks/useCharacters';
 
 // Types
 interface CharacterFullData {
@@ -168,37 +168,15 @@ const useCharacterFullProfile = (characterId?: string) => {
 // User interaction hooks
 const useUserCharacterInteractions = (characterId?: string) => {
   const { user } = useAuth();
-  
-  return useQuery({
-    queryKey: ['user-character-interactions', characterId, user?.id],
-    queryFn: async () => {
-      if (!characterId || !user) return { isFavorited: false, isLiked: false };
-
-      const [favoriteResult, likeResult] = await Promise.all([
-        supabase
-          .from('character_favorites')
-          .select('id')
-          .eq('character_id', characterId)
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle(),
-        
-        supabase
-          .from('character_likes')
-          .select('id')
-          .eq('character_id', characterId)
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle()
-      ]);
-
-      return {
-        isFavorited: !!favoriteResult?.data,
-        isLiked: !!likeResult?.data
-      };
+  const engagement = useUserCharacterEngagementSets(user?.id);
+  return {
+    data: {
+      isFavorited: !!(characterId && engagement.favoritesSet?.has(characterId)),
+      isLiked: !!(characterId && engagement.likesSet?.has(characterId))
     },
-    enabled: !!characterId && !!user,
-  });
+    isLoading: engagement.likesQuery.isLoading || engagement.favoritesQuery.isLoading,
+    refetch: async () => { await Promise.all([engagement.likesQuery.refetch(), engagement.favoritesQuery.refetch()]); }
+  } as const;
 };
 export default function CharacterProfile() {
   const { characterId } = useParams<{ characterId: string }>();

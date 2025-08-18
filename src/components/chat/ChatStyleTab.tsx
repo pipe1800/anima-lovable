@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Upload, X, Type, Image as ImageIcon } from 'lucide-react';
 import { useUserGlobalChatSettings, useUpdateGlobalChatSettings, useUpdateBackgroundImage } from '@/queries/chatSettingsQueries';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ChatStyleTabProps {
   currentChatId?: string | null;
@@ -19,6 +20,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUns
   const { data: settings } = useUserGlobalChatSettings();
   const updateGlobalSettings = useUpdateGlobalChatSettings();
   const updateBackground = useUpdateBackgroundImage();
+  const { user } = useAuth();
 
   const [saving, setSaving] = useState(false);
   const [pending, setPending] = useState<Partial<{
@@ -98,8 +100,7 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUns
       setSaving(true);
       // Upload to storage now so preview works, but do not persist DB setting until Save
       const ext = file.name.split('.').pop() || 'png';
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user?.id;
+      const userId = user?.id;
       if (!userId) throw new Error('Not authenticated');
       const path = `backgrounds/${userId}.${ext}`;
       const uploadRes = await supabase.storage.from('user-style').upload(path, file, { upsert: true, contentType: file.type });

@@ -28,7 +28,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
   useEffect(()=>{ registerPersonaQueryClient(queryClient); }, [queryClient]);
   const personasQuery = useQuery({
     queryKey: ['personas', user?.id],
-    queryFn: () => user ? getUserPersonas() : [],
+    queryFn: () => user ? getUserPersonas(user.id) : [],
     enabled: !!user,
     staleTime: 10 * 60 * 1000,
   });
@@ -70,7 +70,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
 
     setIsLoading(true);
     try {
-      const newPersona = await createPersona({
+      const newPersona = await createPersona(user.id, {
         name: currentPersona.name.trim(),
         bio: currentPersona.bio.trim() || null,
         lore: currentPersona.lore.trim() || null,

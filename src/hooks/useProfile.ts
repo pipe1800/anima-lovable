@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client'
@@ -7,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { Profile } from '@/types/database'
 
 export const useProfile = (userId?: string) => {
+  const { user: currentUser } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -16,57 +16,28 @@ export const useProfile = (userId?: string) => {
       try {
         setLoading(true)
         setError(null)
-
-        if (!userId) {
-          setProfile(null)
-          return
-        }
-
-        // Get current user to determine if this is their own profile
-        const { data: { user } } = await supabase.auth.getUser()
-        const isOwnProfile = user?.id === userId
-
-        // Use appropriate query based on whether it's the user's own profile
-        const { data, error } = isOwnProfile 
-          ? await getPrivateProfile(userId)
-          : await getPublicProfile(userId)
-
+        if (!userId) { setProfile(null); return }
+        const isOwnProfile = currentUser?.id === userId
+        const { data, error } = isOwnProfile ? await getPrivateProfile(userId) : await getPublicProfile(userId)
         if (error) throw error
-        
         setProfile(data as Profile)
       } catch (err) {
         console.error('Error fetching profile:', err)
         setError(err as Error)
-      } finally {
-        setLoading(false)
-      }
+      } finally { setLoading(false) }
     }
-
     fetchProfile()
-  }, [userId])
+  }, [userId, currentUser?.id])
 
   const refetch = async () => {
     if (!userId) return
-    
     try {
-      setLoading(true)
-      setError(null)
-
-      const { data: { user } } = await supabase.auth.getUser()
-      const isOwnProfile = user?.id === userId
-
-      const { data, error } = isOwnProfile 
-        ? await getPrivateProfile(userId)
-        : await getPublicProfile(userId)
-
+      setLoading(true); setError(null)
+      const isOwnProfile = currentUser?.id === userId
+      const { data, error } = isOwnProfile ? await getPrivateProfile(userId) : await getPublicProfile(userId)
       if (error) throw error
       setProfile(data as Profile)
-    } catch (err) {
-      console.error('Error fetching profile:', err)
-      setError(err as Error)
-    } finally {
-      setLoading(false)
-    }
+    } catch (err) { console.error('Error fetching profile:', err); setError(err as Error) } finally { setLoading(false) }
   }
 
   return { profile, loading, error, refetch }
@@ -113,41 +84,35 @@ export const useCurrentUserOptimized = () => {
 // Profile stats query
 export const useProfileStats = () => {
   const { user } = useAuth();
-  
+  const queryClient = useQueryClient?.();
   return useQuery({
     queryKey: ['profile-stats', user?.id],
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
-      
-      // Get character count
-      const { count: characterCount } = await supabase
-        .from('characters')
-        .select('*', { count: 'exact', head: true })
-        .eq('creator_id', user.id);
-
-      // Get total chat count  
-      const { count: chatCount } = await supabase
-        .from('chats')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id);
-
-      // Get credits balance
-      const { data: credits } = await supabase
-        .from('credits')
-        .select('balance')
-        .eq('user_id', user.id)
-        .single();
-
+      // Try reuse composite profile cache
+      const composite: any = queryClient?.getQueryData(['user-profile-complete', user.id, true]);
+      if (composite?.stats) return {
+        characterCount: composite.stats.totalCharacters,
+        chatCount: composite.stats.totalChats,
+        creditsBalance: (await supabase.from('credits').select('balance').eq('user_id', user.id).maybeSingle()).data?.balance || 0,
+        followersCount: 0
+      };
+      // Fallback lightweight queries (no HEAD counts): fetch IDs minimal
+      const [charactersRes, chatsRes] = await Promise.all([
+        supabase.from('characters').select('id').eq('creator_id', user.id),
+        supabase.from('chats').select('id').eq('user_id', user.id)
+      ]);
+      const { data: credits } = await supabase.from('credits').select('balance').eq('user_id', user.id).maybeSingle();
       return {
-        characterCount: characterCount || 0,
-        chatCount: chatCount || 0,
+        characterCount: charactersRes.data?.length || 0,
+        chatCount: chatsRes.data?.length || 0,
         creditsBalance: credits?.balance || 0,
-        followersCount: 0, // TODO: Implement when followers system is ready
+        followersCount: 0,
       };
     },
     enabled: !!user,
-    staleTime: 1000 * 60 * 2, // 2 minutes
-    gcTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 };
 

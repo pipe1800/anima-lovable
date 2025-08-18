@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { searchPublicWorldInfos, SearchParams } from '@/lib/supabase-queries';
 import { supabase } from '@/integrations/supabase/client';
+import { getWorldInfoSnapshot } from '@/lib/snapshots';
 
 export interface WorldInfoWithDetails {
   id: string;
@@ -97,34 +98,30 @@ const fetchUserWorldInfoCollection = async (userId: string): Promise<WorldInfoWi
 
 export const useUserWorldInfos = () => {
   const { user } = useAuth();
-  
   return useQuery({
-    queryKey: ['user-world-infos', user?.id],
+    queryKey: ['user-world-infos-snapshot', user?.id],
     queryFn: async () => {
-      if (!user) return [];
-      
-      // Get user's own world infos
-      const ownWorldInfosPromise = fetchUserWorldInfos(user.id);
-      
-      // Get user's collected world infos
-      const collectionPromise = fetchUserWorldInfoCollection(user.id);
-      
-      const [ownWorldInfos, collectionWorldInfos] = await Promise.all([
-        ownWorldInfosPromise,
-        collectionPromise
-      ]);
-      
-      // Combine both lists and remove duplicates
-      const allWorldInfos = [...ownWorldInfos, ...collectionWorldInfos];
-      const uniqueWorldInfos = allWorldInfos.filter((worldInfo, index, self) => 
-        index === self.findIndex(w => w.id === worldInfo.id)
-      );
-      
-      return uniqueWorldInfos;
+      if (!user?.id) return [];
+      const snap = await getWorldInfoSnapshot(user.id, 50, 0);
+      if (!snap) return [];
+      const favorited = new Set((snap.favorited_ids||[]).map((r:any)=>r.id));
+      const used = new Set((snap.used_ids||[]).map((r:any)=>r.id));
+      // Merge owned with public slice to avoid duplicates
+      const publicMap = new Map((snap.public||[]).map(w=>[w.id,w]));
+      (snap.owned||[]).forEach(o=>{ if(!publicMap.has(o.id)) publicMap.set(o.id,o); });
+      return Array.from(publicMap.values()).map(w=>({
+        ...w,
+        favorited: favorited.has(w.id),
+        used: used.has(w.id),
+        tags: (snap.tags && snap.tags[w.id]) || [],
+        likes_count: snap.counts?.[w.id]?.likes || 0,
+        favorites_count: snap.counts?.[w.id]?.favorites || 0,
+        usage_count: snap.counts?.[w.id]?.usage || 0
+      }));
     },
-    enabled: !!user,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 10, // 10 minutes
+    enabled: !!user?.id,
+    staleTime: 5*60*1000,
+    gcTime: 15*60*1000,
   });
 };
 
@@ -197,43 +194,20 @@ export const useAllTags = () => {
 // Public world infos query
 export const usePublicWorldInfos = () => {
   return useQuery({
-    queryKey: ['public-world-infos'],
+    queryKey: ['public-world-infos-snapshot'],
     queryFn: async () => {
-      const { data: worldInfos, error } = await supabase
-        .from('world_infos')
-        .select(`
-          *,
-          world_info_entries(id),
-          world_info_tags(
-            tags(id, name)
-          )
-        `)
-        .eq('visibility', 'public')
-        .order('created_at', { ascending: false });
-      if (error) throw new Error('Failed to fetch public world infos');
-
-      if (!worldInfos || worldInfos.length === 0) return [];
-
-      // Get creator profiles separately
-      const creatorIds = [...new Set(worldInfos.map(w => w.creator_id))];
-      const { data: creators } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .in('id', creatorIds);
-
-      const creatorsMap = new Map(creators?.map(c => [c.id, c]) || []);
-
-      return worldInfos.map(worldInfo => ({
-        ...worldInfo,
-        creator: creatorsMap.get(worldInfo.creator_id),
-        entriesCount: worldInfo.world_info_entries?.length || 0,
-        likesCount: worldInfo.likes_count || 0,
-        tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || [],
-        usage_count: worldInfo.interaction_count
+      const snap = await getWorldInfoSnapshot(null, 50, 0);
+      if (!snap) return [];
+      return (snap.public||[]).map(w=>({
+        ...w,
+        tags: (snap.tags && snap.tags[w.id]) || [],
+        likes_count: snap.counts?.[w.id]?.likes || 0,
+        favorites_count: snap.counts?.[w.id]?.favorites || 0,
+        usage_count: snap.counts?.[w.id]?.usage || 0
       }));
     },
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    gcTime: 1000 * 60 * 10, // 10 minutes
+    staleTime: 5*60*1000,
+    gcTime: 15*60*1000,
   });
 };
 

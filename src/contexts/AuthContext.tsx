@@ -41,6 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const lastSubFetchAtRef = useRef<number>(0);
   const profileInFlightRef = useRef<Promise<void> | null>(null);
   const timezoneLoggedRef = useRef<boolean>(false);
+  const refreshTimeoutRef = useRef<number | null>(null);
 
   const refreshProfile = async () => {
     if (!user) {
@@ -55,37 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data } = await getPrivateProfile(user.id);
         let current = data || null;
         setProfile(current);
-
-        // If no avatar is set, upload and assign the default avatar once
-        if (current && !current.avatar_url) {
-          try {
-            const response = await fetch('/default_avatar.jpg');
-            const blob = await response.blob();
-            const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
-            const storagePath = `${user.id}/avatar-default.jpg`;
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('character-avatars')
-              .upload(storagePath, file, { upsert: true });
-
-            let avatarUrlToSet: string = '/default_avatar.jpg';
-            if (!uploadError && uploadData?.path) {
-              const { data: pub } = await supabase.storage
-                .from('character-avatars')
-                .getPublicUrl(uploadData.path);
-              avatarUrlToSet = pub.publicUrl || avatarUrlToSet;
-            }
-
-            await supabase
-              .from('profiles')
-              .update({ avatar_url: avatarUrlToSet })
-              .eq('id', user.id);
-
-            // Update local state
-            setProfile(prev => prev ? { ...prev, avatar_url: avatarUrlToSet } as Profile : prev);
-          } catch (e) {
-            console.error('Failed to ensure default avatar on profile refresh:', e);
-          }
-        }
+        // (Default avatar assignment moved to onboarding completion)
       } catch (error) {
         console.error('Profile fetch failed:', error);
         setProfile(null);
@@ -207,10 +178,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       const newUser = session?.user ?? null;
-      // Only update if changed
       if (newUser?.id !== currentUserIdRef.current) {
         setSession(session);
         setUser(newUser);
@@ -219,7 +188,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    // Listen for auth changes
     const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.debug('Auth state change:', event, session?.user?.id);
       const newUser = session?.user ?? null;
@@ -238,25 +206,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    // Token refresh monitor
-    const refreshInterval = setInterval(async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      if (currentSession) {
-        const expiresAt = currentSession.expires_at;
-        const currentTime = Math.floor(Date.now() / 1000);
-        const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
-        if (timeUntilExpiry > 0 && timeUntilExpiry < 600) {
-          console.debug('Proactively refreshing token...');
-          await supabase.auth.refreshSession();
-        }
-      }
-    }, 5 * 60 * 1000);
-
-    return () => {
-      authSub.unsubscribe();
-      clearInterval(refreshInterval);
-    };
+    return () => { authSub.unsubscribe(); if (refreshTimeoutRef.current) window.clearTimeout(refreshTimeoutRef.current); };
   }, []);
+
+  // Dynamic token refresh scheduled once per expiry cycle
+  useEffect(() => {
+    if (!session?.expires_at) return;
+    if (refreshTimeoutRef.current) window.clearTimeout(refreshTimeoutRef.current);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const safety = 90; // seconds before expiry to refresh
+    const delayMs = Math.max((session.expires_at - safety - nowSec) * 1000, 10_000);
+    refreshTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        const { data: { session: fresh } } = await supabase.auth.refreshSession();
+        if (fresh) {
+          setSession(fresh);
+          setUser(fresh.user ?? null);
+          currentUserIdRef.current = fresh.user?.id || null;
+        }
+      } catch (e) {
+        console.warn('Token refresh failed', e);
+      }
+    }, delayMs);
+    return () => { if (refreshTimeoutRef.current) window.clearTimeout(refreshTimeoutRef.current); };
+  }, [session?.expires_at]);
 
   // Fetch profile and subscription when user changes (dedup by user id)
   useEffect(() => {

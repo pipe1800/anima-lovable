@@ -5,6 +5,7 @@ export interface WorldInfoCreationData {
   name: string;
   short_description?: string;
   visibility: 'public' | 'unlisted' | 'private';
+  avatar_url?: string | null; // allow passing avatar when creating/updating
 }
 
 export interface WorldInfoEntryData {
@@ -12,17 +13,17 @@ export interface WorldInfoEntryData {
   entry_text: string;
 }
 
-export const createWorldInfo = async (worldInfoData: WorldInfoCreationData) => {
+export const createWorldInfo = async (userId: string, worldInfoData: WorldInfoCreationData) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     const worldInfoInsert: TablesInsert<'world_infos'> = {
-      creator_id: user.user.id,
+      creator_id: userId,
       name: worldInfoData.name,
       short_description: worldInfoData.short_description,
-      visibility: worldInfoData.visibility
-    };
+      visibility: worldInfoData.visibility,
+      // avatar_url removed (not in table type)
+    } as any;
 
     const { data: worldInfo, error } = await supabase
       .from('world_infos')
@@ -42,15 +43,14 @@ export const createWorldInfo = async (worldInfoData: WorldInfoCreationData) => {
   }
 };
 
-export const getWorldInfosByUser = async () => {
+export const getWorldInfosByUser = async (userId: string) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     const { data: worldInfos, error } = await supabase
       .from('world_infos')
       .select('*')
-      .eq('creator_id', user.user.id)
+      .eq('creator_id', userId)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -101,10 +101,9 @@ export const getWorldInfosByUser = async () => {
   }
 };
 
-export const getUserWorldInfoCollection = async () => {
+export const getUserWorldInfoCollection = async (userId: string) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // Get world infos that the user has added to their collection
     const { data: collectionData, error } = await supabase
@@ -112,7 +111,7 @@ export const getUserWorldInfoCollection = async () => {
       .select(`
         world_info:world_infos(*)
       `)
-      .eq('user_id', user.user.id)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -173,10 +172,9 @@ export const getUserWorldInfoCollection = async () => {
   }
 };
 
-export const getWorldInfoWithEntries = async (worldInfoId: string) => {
+export const getWorldInfoWithEntries = async (userId: string, worldInfoId: string) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // Get world info
     const { data: worldInfo, error: worldInfoError } = await supabase
@@ -212,22 +210,20 @@ export const getWorldInfoWithEntries = async (worldInfoId: string) => {
   }
 };
 
-export const updateWorldInfo = async (worldInfoId: string, worldInfoData: WorldInfoCreationData) => {
+export const updateWorldInfo = async (userId: string, worldInfoId: string, worldInfoData: WorldInfoCreationData) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
-
+    if (!userId) throw new Error('Not authenticated');
     const worldInfoUpdate: TablesUpdate<'world_infos'> = {
       name: worldInfoData.name,
       short_description: worldInfoData.short_description,
-      visibility: worldInfoData.visibility
-    };
-
+      visibility: worldInfoData.visibility,
+      // avatar_url removed (not in table type)
+    } as any;
     const { data: worldInfo, error } = await supabase
       .from('world_infos')
       .update(worldInfoUpdate)
       .eq('id', worldInfoId)
-      .eq('creator_id', user.user.id) // Ensure user owns the world info
+      .eq('creator_id', userId)
       .select()
       .single();
 
@@ -243,10 +239,9 @@ export const updateWorldInfo = async (worldInfoId: string, worldInfoData: WorldI
   }
 };
 
-export const deleteWorldInfo = async (worldInfoId: string) => {
+export const deleteWorldInfo = async (userId: string, worldInfoId: string) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // Ensure ownership
     const { data: worldInfo } = await supabase
@@ -255,7 +250,7 @@ export const deleteWorldInfo = async (worldInfoId: string) => {
       .eq('id', worldInfoId)
       .single();
 
-    if (!worldInfo || worldInfo.creator_id !== user.user.id) {
+    if (!worldInfo || worldInfo.creator_id !== userId) {
       throw new Error('Not authorized to delete');
     }
 
@@ -274,10 +269,9 @@ export const deleteWorldInfo = async (worldInfoId: string) => {
   }
 };
 
-export const addWorldInfoEntry = async (worldInfoId: string, entryData: WorldInfoEntryData) => {
+export const addWorldInfoEntry = async (userId: string, worldInfoId: string, entryData: WorldInfoEntryData) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // First verify the user owns the world info
     const { data: worldInfo } = await supabase
@@ -286,7 +280,7 @@ export const addWorldInfoEntry = async (worldInfoId: string, entryData: WorldInf
       .eq('id', worldInfoId)
       .single();
 
-    if (!worldInfo || worldInfo.creator_id !== user.user.id) {
+    if (!worldInfo || worldInfo.creator_id !== userId) {
       throw new Error('Unauthorized to add entries to this world info');
     }
 
@@ -314,10 +308,9 @@ export const addWorldInfoEntry = async (worldInfoId: string, entryData: WorldInf
   }
 };
 
-export const updateWorldInfoEntry = async (entryId: string, entryData: WorldInfoEntryData) => {
+export const updateWorldInfoEntry = async (userId: string, entryId: string, entryData: WorldInfoEntryData) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // First verify the user owns the world info that contains this entry
     const { data: entry } = await supabase
@@ -326,7 +319,7 @@ export const updateWorldInfoEntry = async (entryId: string, entryData: WorldInfo
       .eq('id', entryId)
       .single();
 
-    if (!entry || entry.world_infos.creator_id !== user.user.id) {
+    if (!entry || entry.world_infos.creator_id !== userId) {
       throw new Error('Unauthorized to update this entry');
     }
 
@@ -354,10 +347,9 @@ export const updateWorldInfoEntry = async (entryId: string, entryData: WorldInfo
   }
 };
 
-export const deleteWorldInfoEntry = async (entryId: string) => {
+export const deleteWorldInfoEntry = async (userId: string, entryId: string) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // First verify the user owns the world info that contains this entry
     const { data: entry } = await supabase
@@ -366,7 +358,7 @@ export const deleteWorldInfoEntry = async (entryId: string) => {
       .eq('id', entryId)
       .single();
 
-    if (!entry || entry.world_infos.creator_id !== user.user.id) {
+    if (!entry || entry.world_infos.creator_id !== userId) {
       throw new Error('Unauthorized to delete this entry');
     }
 
@@ -431,61 +423,35 @@ export const getWorldInfoTags = async (worldInfoId: string) => {
   }
 };
 
-export const addWorldInfoTag = async (worldInfoId: string, tagId: number) => {
-  try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
-
+export const addWorldInfoTag = async (userId: string, worldInfoId: string, tagId: number) => {
+  try { if (!userId) throw new Error('Not authenticated');
     const { error } = await supabase
       .from('world_info_tags')
-      .insert({
-        world_info_id: worldInfoId,
-        tag_id: tagId
-      });
-
-    if (error) {
-      console.error('Error adding world info tag:', error);
-      throw new Error('Failed to add tag to world info');
-    }
-
+      .insert({ world_info_id: worldInfoId, tag_id: tagId });
+    if (error) { console.error('Error adding world info tag:', error); throw new Error('Failed to add tag to world info'); }
     return true;
-  } catch (error) {
-    console.error('Error in addWorldInfoTag:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error in addWorldInfoTag:', error); throw error; }
 };
 
-export const removeWorldInfoTag = async (worldInfoId: string, tagId: number) => {
-  try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
-
+export const removeWorldInfoTag = async (userId: string, worldInfoId: string, tagId: number) => {
+  try { if (!userId) throw new Error('Not authenticated');
     const { error } = await supabase
       .from('world_info_tags')
       .delete()
       .eq('world_info_id', worldInfoId)
       .eq('tag_id', tagId);
-
-    if (error) {
-      console.error('Error removing world info tag:', error);
-      throw new Error('Failed to remove tag from world info');
-    }
-
+    if (error) { console.error('Error removing world info tag:', error); throw new Error('Failed to remove tag from world info'); }
     return true;
-  } catch (error) {
-    console.error('Error in removeWorldInfoTag:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error in removeWorldInfoTag:', error); throw error; }
 };
 
 // =============================================================================
 // PUBLIC WORLD INFO OPERATIONS
 // =============================================================================
 
-export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
+export const getPublicWorldInfoDetails = async (userId: string | null, worldInfoId: string) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    const isAuthenticated = !!user.user;
+    const isAuthenticated = !!userId;
 
     // Fetch the world info with creator profile
     const { data: worldInfo, error: worldInfoError } = await supabase
@@ -500,7 +466,7 @@ export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
       throw new Error('World info not found');
     }
 
-    const isOwner = isAuthenticated && worldInfo.creator_id === user.user.id;
+    const isOwner = isAuthenticated && worldInfo.creator_id === userId;
     if (worldInfo.visibility !== 'public' && !isOwner) {
       throw new Error('World info not found or not public');
     }
@@ -550,7 +516,7 @@ export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
         .from('world_info_user_likes')
         .select('user_id')
         .eq('world_info_id', worldInfoId)
-        .eq('user_id', user.user.id)
+        .eq('user_id', userId!)
         .maybeSingle();
 
       // Ignore errors for likes check, just default to false
@@ -561,7 +527,7 @@ export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
         .from('world_info_users')
         .select('id')
         .eq('world_info_id', worldInfoId)
-        .eq('user_id', user.user.id)
+        .eq('user_id', userId!)
         .maybeSingle();
 
       isUsed = !!usageData;
@@ -589,228 +555,105 @@ export const getPublicWorldInfoDetails = async (worldInfoId: string) => {
 // LIKES AND COLLECTION MANAGEMENT
 // =============================================================================
 
-export const toggleWorldInfoLike = async (worldInfoId: string) => {
-  try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
-
-    // Check if already liked - using correct table name
+export const toggleWorldInfoLike = async (userId: string, worldInfoId: string) => {
+  try { if (!userId) throw new Error('Not authenticated');
     const { data: existingLike } = await supabase
       .from('world_info_user_likes')
       .select('*')
       .eq('world_info_id', worldInfoId)
-      .eq('user_id', user.user.id)
+      .eq('user_id', userId)
       .single();
-
     if (existingLike) {
-      // Unlike - using correct delete approach for composite key table
       const { error } = await supabase
         .from('world_info_user_likes')
         .delete()
         .eq('world_info_id', worldInfoId)
-        .eq('user_id', user.user.id);
-
-      if (error) {
-        console.error('Error removing like:', error);
-        throw new Error('Failed to remove like');
-      }
-
-      // Decrement likes_count
+        .eq('user_id', userId);
+      if (error) { console.error('Error removing like:', error); throw new Error('Failed to remove like'); }
       const { data: currentData } = await supabase
         .from('world_infos')
         .select('likes_count')
         .eq('id', worldInfoId)
         .single();
-      
       if (currentData) {
         await supabase
           .from('world_infos')
           .update({ likes_count: Math.max(currentData.likes_count - 1, 0) })
           .eq('id', worldInfoId);
       }
-
       return { isLiked: false };
     } else {
-      // Like
       const { error } = await supabase
         .from('world_info_user_likes')
-        .insert({
-          world_info_id: worldInfoId,
-          user_id: user.user.id
-        });
-
-      if (error) {
-        console.error('Error adding like:', error);
-        throw new Error('Failed to add like');
-      }
-
-      // Increment likes_count
+        .insert({ world_info_id: worldInfoId, user_id: userId });
+      if (error) { console.error('Error adding like:', error); throw new Error('Failed to add like'); }
       const { data: currentData } = await supabase
         .from('world_infos')
         .select('likes_count')
         .eq('id', worldInfoId)
         .single();
-      
       if (currentData) {
         await supabase
           .from('world_infos')
           .update({ likes_count: currentData.likes_count + 1 })
           .eq('id', worldInfoId);
       }
-
       return { isLiked: true };
     }
-  } catch (error) {
-    console.error('Error in toggleWorldInfoLike:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error in toggleWorldInfoLike:', error); throw error; }
 };
 
-export const addWorldInfoToCollection = async (worldInfoId: string) => {
-  try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
-
-    console.log('=== START addWorldInfoToCollection ===');
-    console.log('WorldInfo ID:', worldInfoId);
-    console.log('User ID:', user.user.id);
-
-    // Check if already in collection
+export const addWorldInfoToCollection = async (userId: string, worldInfoId: string) => {
+  try { if (!userId) throw new Error('Not authenticated');
     const { data: existingUsage } = await supabase
       .from('world_info_users')
       .select('id')
       .eq('world_info_id', worldInfoId)
-      .eq('user_id', user.user.id)
+      .eq('user_id', userId)
       .maybeSingle();
-
-    if (existingUsage) {
-      console.log('Already in collection, returning early');
-      return { isUsed: true };
-    }
-
-    // Add to collection
+    if (existingUsage) { return { isUsed: true }; }
     const { error } = await supabase
       .from('world_info_users')
-      .insert({
-        world_info_id: worldInfoId,
-        user_id: user.user.id
-      });
-
-    if (error) {
-      console.error('Error adding to collection:', error);
-      throw new Error('Failed to add to collection');
-    }
-
-    console.log('Successfully added to world_info_users table');
-
-    // Get current interaction_count before RPC
+      .insert({ world_info_id: worldInfoId, user_id: userId });
+    if (error) { console.error('Error adding to collection:', error); throw new Error('Failed to add to collection'); }
     const { data: beforeData } = await supabase
       .from('world_infos')
       .select('interaction_count')
       .eq('id', worldInfoId)
       .single();
-    
-    console.log('Interaction count BEFORE RPC:', beforeData?.interaction_count);
-
-    // Use RPC function for atomic increment
-    console.log('Calling RPC with params:', { world_info_id: worldInfoId });
-    
-    const { data: rpcData, error: rpcError } = await supabase.rpc('increment_world_info_interaction_count', {
-      world_info_id: worldInfoId
-    });
-
-    console.log('RPC Response - Data:', rpcData);
-    console.log('RPC Response - Error:', rpcError);
-
+    const { error: rpcError } = await supabase.rpc('increment_world_info_interaction_count', { world_info_id: worldInfoId });
     if (rpcError) {
-      console.error('RPC FAILED! Full error object:', {
-        message: rpcError.message,
-        details: rpcError.details,
-        hint: rpcError.hint,
-        code: rpcError.code
-      });
-      
-      // Try direct update as fallback
-      console.log('Attempting direct UPDATE as fallback...');
-      
       const { data: updateData, error: updateError } = await supabase
         .from('world_infos')
         .update({ interaction_count: (beforeData?.interaction_count || 0) + 1 })
         .eq('id', worldInfoId)
         .select('interaction_count')
         .single();
-      
-      if (updateError) {
-        console.error('Direct UPDATE also failed:', {
-          message: updateError.message,
-          details: updateError.details,
-          hint: updateError.hint,
-          code: updateError.code
-        });
-      } else {
-        console.log('Direct UPDATE succeeded! New count:', updateData?.interaction_count);
-      }
+      if (updateError) { console.error('Direct UPDATE also failed:', updateError); }
     }
-
-    // Get interaction_count after RPC
-    const { data: afterData } = await supabase
-      .from('world_infos')
-      .select('interaction_count')
-      .eq('id', worldInfoId)
-      .single();
-    
-    console.log('Interaction count AFTER RPC:', afterData?.interaction_count);
-    console.log('=== END addWorldInfoToCollection ===');
-
     return { isUsed: true };
-  } catch (error) {
-    console.error('Error in addWorldInfoToCollection:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error in addWorldInfoToCollection:', error); throw error; }
 };
 
-export const removeWorldInfoFromCollection = async (worldInfoId: string) => {
-  try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
-
-    // Check if it's in the collection before removing
+export const removeWorldInfoFromCollection = async (userId: string, worldInfoId: string) => {
+  try { if (!userId) throw new Error('Not authenticated');
     const { data: existingUsage } = await supabase
       .from('world_info_users')
       .select('id')
       .eq('world_info_id', worldInfoId)
-      .eq('user_id', user.user.id)
+      .eq('user_id', userId)
       .maybeSingle();
-
-    if (!existingUsage) {
-      return { isUsed: false };
-    }
-
+    if (!existingUsage) { return { isUsed: false }; }
     const { error } = await supabase
       .from('world_info_users')
       .delete()
       .eq('world_info_id', worldInfoId)
-      .eq('user_id', user.user.id);
-
-    if (error) {
-      console.error('Error removing from collection:', error);
-      throw new Error('Failed to remove from collection');
-    }
-
-    // Use RPC function for atomic decrement
-    const { error: rpcError } = await supabase.rpc('decrement_world_info_interaction_count', {
-      world_info_id: worldInfoId
-    });
-
-    if (rpcError) {
-      console.error('Error decrementing interaction count:', rpcError);
-    }
-
+      .eq('user_id', userId);
+    if (error) { console.error('Error removing from collection:', error); throw new Error('Failed to remove from collection'); }
+    const { error: rpcError } = await supabase.rpc('decrement_world_info_interaction_count', { world_info_id: worldInfoId });
+    if (rpcError) { console.error('Error decrementing interaction count:', rpcError); }
     return { isUsed: false };
-  } catch (error) {
-    console.error('Error in removeWorldInfoFromCollection:', error);
-    throw error;
-  }
+  } catch (error) { console.error('Error in removeWorldInfoFromCollection:', error); throw error; }
 };
 
 export const importWorldInfo = async (jsonData: any, userId: string) => {
@@ -825,7 +668,7 @@ export const importWorldInfo = async (jsonData: any, userId: string) => {
     const rawEntries = jsonData?.entries || jsonData?.data?.entries || [];
 
     // Create the world info first (user can edit later)
-    const worldInfo = await createWorldInfo({
+    const worldInfo = await createWorldInfo(userId, {
       name: worldInfoName,
       short_description: jsonData?.description || jsonData?.data?.description || '',
       visibility: 'private'
@@ -849,7 +692,7 @@ export const importWorldInfo = async (jsonData: any, userId: string) => {
       const entryText = entry.entry_text || entry.content || entry.text || entry.entry || '';
 
       if (keywords.length > 0 && entryText) {
-        await addWorldInfoEntry(worldInfo.id, {
+        await addWorldInfoEntry(userId, worldInfo.id, {
           keywords: keywords.filter((k: string) => k && k.trim()),
             entry_text: entryText
         });
@@ -864,11 +707,7 @@ export const importWorldInfo = async (jsonData: any, userId: string) => {
 };
 
 export const exportWorldInfo = (worldInfo: { name: string; short_description?: string | null; entries: Array<{ keywords: string[]; entry_text: string }> }) => {
-  const data = {
-    name: worldInfo.name,
-    description: worldInfo.short_description || '',
-    entries: worldInfo.entries
-  };
+  const data = { name: worldInfo.name, description: worldInfo.short_description || '', entries: worldInfo.entries };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

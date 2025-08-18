@@ -306,7 +306,7 @@ export function useCharacterCreation() {
            }
          });
          
-         character = await updateCharacter(editingCharacterId, updatedCharacterData as CharacterCreationData);
+         character = await updateCharacter(user.id, editingCharacterId, updatedCharacterData as CharacterCreationData);
          
          console.log('✅ Character updated successfully:', character);
          
@@ -348,7 +348,7 @@ export function useCharacterCreation() {
            }
          };
          
-         character = await createCharacter(updatedCharacterData as CharacterCreationData);
+         character = await createCharacter(user.id, updatedCharacterData as CharacterCreationData);
          
          // Save chat mode for new character (time awareness is now handled in createCharacter)
         if (character.id && effective.chatMode) {

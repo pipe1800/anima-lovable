@@ -4,7 +4,7 @@ import { useNSFW } from '@/contexts/NSFWContext';
 import { getPublicCharacters, searchPublicCharacters, SearchParams } from '@/lib/supabase-queries';
 import { supabase } from '@/integrations/supabase/client';
 
-export const usePublicCharacters = (limit = 50, offset = 0) => {
+export const usePublicCharacters = (limit = 50, offset = 0, enabled: boolean = true) => {
   const { nsfwEnabled } = useNSFW();
   
   return useQuery({
@@ -14,6 +14,7 @@ export const usePublicCharacters = (limit = 50, offset = 0) => {
       if (result.error) throw result.error;
       return result.data || [];
     },
+    enabled,
     staleTime: 60 * 1000, // 1 minute for discovery freshness
     gcTime: 15 * 60 * 1000, // 15 minutes
     placeholderData: (prev) => prev ?? [],
@@ -31,152 +32,118 @@ export const useSearchPublicCharacters = (params: SearchParams) => {
   });
 };
 
+export const useUserCharacterEngagementSets = (userId?: string) => {
+  const enabled = !!userId;
+  const likesQuery = useQuery({
+    queryKey: ['user','likes','characterIds', userId],
+    queryFn: async () => {
+      if (!userId) return new Set<string>();
+      const { data, error } = await supabase
+        .from('character_likes')
+        .select('character_id')
+        .eq('user_id', userId);
+      if (error) throw error;
+      return new Set((data||[]).map(r=>r.character_id as string));
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const favoritesQuery = useQuery({
+    queryKey: ['user','favorites','characterIds', userId],
+    queryFn: async () => {
+      if (!userId) return new Set<string>();
+      const { data, error } = await supabase
+        .from('character_favorites')
+        .select('character_id')
+        .eq('user_id', userId);
+      if (error) throw error;
+      return new Set((data||[]).map(r=>r.character_id as string));
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  return { likesSet: likesQuery.data, favoritesSet: favoritesQuery.data, likesQuery, favoritesQuery };
+};
+
 export const useCharacterLike = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-
-  const checkLikeStatus = (characterId: string) => {
-    return useQuery({
-      queryKey: ['character', 'like-status', characterId, user?.id],
-      queryFn: async () => {
-        if (!user) return false;
-        
-        const { data } = await supabase
-          .from('character_likes')
-          .select('id')
-          .eq('character_id', characterId)
-          .eq('user_id', user.id)
-          .single();
-        
-        return !!data;
-      },
-      enabled: !!user && !!characterId,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      gcTime: 10 * 60 * 1000,
-    });
-  };
-
+  const engagement = useUserCharacterEngagementSets(user?.id);
+  const checkLikeStatus = (characterId: string) => ({
+    data: !!engagement.likesSet?.has(characterId),
+    isLoading: engagement.likesQuery.isLoading,
+    refetch: engagement.likesQuery.refetch,
+  });
   const toggleLike = useMutation({
     mutationFn: async ({ characterId, isLiked }: { characterId: string; isLiked: boolean }) => {
       if (!user) throw new Error('User not authenticated');
-
       if (isLiked) {
-        // Remove like
         const { error } = await supabase
           .from('character_likes')
           .delete()
           .eq('character_id', characterId)
           .eq('user_id', user.id);
-        
-        if (error) throw error;
-        return false;
+        if (error) throw error; return false;
       } else {
-        // Add like
         const { error } = await supabase
           .from('character_likes')
           .insert([{ character_id: characterId, user_id: user.id }]);
-        
-        if (error) throw error;
-        return true;
+        if (error) throw error; return true;
       }
     },
-    onSuccess: (newLikeStatus, { characterId }) => {
-      // Update like status cache
-      queryClient.setQueryData(
-        ['character', 'like-status', characterId, user?.id],
-        newLikeStatus
-      );
-
-      // Invalidate character profile data to update likes count
-      queryClient.invalidateQueries({
-        queryKey: ['character', 'profile', characterId]
+    onSuccess: (newStatus, { characterId }) => {
+      queryClient.setQueryData(['user','likes','characterIds', user?.id], (prev: Set<string> | undefined) => {
+        const next = new Set(prev || []);
+        if (newStatus) next.add(characterId); else next.delete(characterId);
+        return next;
       });
-
-      // Invalidate public characters to update likes count in grids
-      queryClient.invalidateQueries({
-        queryKey: ['characters', 'public']
-      });
+      queryClient.invalidateQueries({ queryKey: ['characters','public'] });
     },
   });
-
-  return {
-    checkLikeStatus,
-    toggleLike,
-  };
+  return { checkLikeStatus, toggleLike };
 };
 
 export const useCharacterFavorite = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-
-  const checkFavoriteStatus = (characterId: string) => {
-    return useQuery({
-      queryKey: ['character', 'favorite-status', characterId, user?.id],
-      queryFn: async () => {
-        if (!user) return false;
-        
-        const { data } = await supabase
-          .from('character_favorites')
-          .select('id')
-          .eq('character_id', characterId)
-          .eq('user_id', user.id)
-          .single();
-        
-        return !!data;
-      },
-      enabled: !!user && !!characterId,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      gcTime: 10 * 60 * 1000,
-    });
-  };
-
+  const engagement = useUserCharacterEngagementSets(user?.id);
+  const checkFavoriteStatus = (characterId: string) => ({
+    data: !!engagement.favoritesSet?.has(characterId),
+    isLoading: engagement.favoritesQuery.isLoading,
+    refetch: engagement.favoritesQuery.refetch,
+  });
   const toggleFavorite = useMutation({
     mutationFn: async ({ characterId, isFavorited }: { characterId: string; isFavorited: boolean }) => {
       if (!user) throw new Error('User not authenticated');
-
       if (isFavorited) {
-        // Remove favorite
         const { error } = await supabase
           .from('character_favorites')
           .delete()
           .eq('character_id', characterId)
           .eq('user_id', user.id);
-        
-        if (error) throw error;
-        return false;
+        if (error) throw error; return false;
       } else {
-        // Add favorite
         const { error } = await supabase
           .from('character_favorites')
           .insert([{ character_id: characterId, user_id: user.id }]);
-        
-        if (error) throw error;
-        return true;
+        if (error) throw error; return true;
       }
     },
-    onSuccess: (newFavoriteStatus, { characterId }) => {
-      // Update favorite status cache
-      queryClient.setQueryData(
-        ['character', 'favorite-status', characterId, user?.id],
-        newFavoriteStatus
-      );
-
-      // Invalidate user favorites to update dashboard
-      queryClient.invalidateQueries({
-        queryKey: ['user', 'favorites', user?.id]
+    onSuccess: (newStatus, { characterId }) => {
+      queryClient.setQueryData(['user','favorites','characterIds', user?.id], (prev: Set<string> | undefined) => {
+        const next = new Set(prev || []);
+        if (newStatus) next.add(characterId); else next.delete(characterId);
+        return next;
       });
-
-      // Invalidate dashboard data
-      queryClient.invalidateQueries({
-        queryKey: ['dashboard']
-      });
+      queryClient.invalidateQueries({ queryKey: ['characters','public'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
-
-  return {
-    checkFavoriteStatus,
-    toggleFavorite,
-  };
+  return { checkFavoriteStatus, toggleFavorite };
 };
 
 // Hook to invalidate character-related queries

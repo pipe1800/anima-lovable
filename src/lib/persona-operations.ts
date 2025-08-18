@@ -26,33 +26,24 @@ const DEFAULT_AVATAR = '/default_avatar.jpg';
 let lastFetchTs = 0;
 const MIN_FETCH_INTERVAL = 750; // ms
 
-export async function createPersona(persona: Omit<PersonaInsert, 'user_id'>) {
-  // Invalidate caches on write
-  userPersonasCache = null;
-  personaByIdCache.clear();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('User must be authenticated to create a persona');
+export async function createPersona(userId: string, persona: Omit<PersonaInsert, 'user_id'>) {
+  userPersonasCache = null; personaByIdCache.clear();
+  if (!userId) throw new Error('User must be authenticated to create a persona');
   const { data, error } = await supabase
     .from('personas')
-    .insert([{ ...persona, avatar_url: (persona as any).avatar_url || DEFAULT_AVATAR, user_id: user.id }])
+    .insert([{ ...persona, avatar_url: (persona as any).avatar_url || DEFAULT_AVATAR, user_id: userId }])
     .select()
     .single();
-  if (error) throw error;
-  return data;
+  if (error) throw error; return data;
 }
 
 let externalQueryClient: QueryClient | null = null;
 export const registerPersonaQueryClient = (qc: QueryClient) => { externalQueryClient = qc; };
 
-export async function getUserPersonas(forceRefresh = false) {
+export async function getUserPersonas(userId: string, forceRefresh = false) {
   const now = Date.now();
-  const user = (await supabase.auth.getUser()).data.user;
-  const userId = user?.id;
-  const rqKey = userId ? ['personas', userId] : null;
   if (!userId) return [];
-  if (!forceRefresh && userPersonasCache && userPersonasCache.expires > now) {
-    return userPersonasCache.value;
-  }
+  if (!forceRefresh && userPersonasCache && userPersonasCache.expires > now) return userPersonasCache.value;
   if (!forceRefresh && pendingListRef.promise) return pendingListRef.promise;
   const p = (async () => {
     const { data, error } = await supabase
@@ -65,11 +56,11 @@ export async function getUserPersonas(forceRefresh = false) {
     const list = data || [];
     userPersonasCache = { value: list, expires: now + PERSONA_CACHE_TTL_MS };
     list.forEach(p => personaByIdCache.set(p.id, { value: p, expires: now + PERSONA_CACHE_TTL_MS }));
-    if (rqKey && externalQueryClient) externalQueryClient.setQueryData(rqKey, list);
+    const rqKey = ['personas', userId];
+    if (externalQueryClient) externalQueryClient.setQueryData(rqKey, list);
     return list;
   })();
-  pendingListRef.promise = p;
-  try { return await p; } finally { pendingListRef.promise = null; }
+  pendingListRef.promise = p; try { return await p; } finally { pendingListRef.promise = null; }
 }
 
 export async function updatePersona(id: string, updates: PersonaUpdate) {

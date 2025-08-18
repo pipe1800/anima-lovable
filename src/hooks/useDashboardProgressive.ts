@@ -5,10 +5,16 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 /**
+ * DEPRECATED: Progressive dashboard hooks replaced by single aggregated useDashboardData to reduce duplicate network calls.
+ */
+export const useDashboardStats = () => ({ data: undefined, isLoading: false, error: null, refetch: () => Promise.resolve() });
+export const useDashboardCharacters = () => ({ data: { characters: [], favorites: [] }, isLoading: false, error: null, refetch: () => Promise.resolve() });
+
+/**
  * Hook for loading dashboard stats independently
  * This loads first to show the user basic information immediately
  */
-export const useDashboardStats = () => {
+export const useDashboardStatsDeprecated = () => {
   const { user, subscription: authSubscription } = useAuth();
   const userId = user?.id;
   const qc = useQueryClient();
@@ -38,7 +44,7 @@ export const useDashboardStats = () => {
  * Hook for loading dashboard characters independently
  * This loads after stats to show user's characters and favorites
  */
-export const useDashboardCharacters = () => {
+export const useDashboardCharactersDeprecated = () => {
   const { user } = useAuth();
   const userId = user?.id;
 

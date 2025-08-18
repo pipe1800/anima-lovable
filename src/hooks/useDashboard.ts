@@ -14,18 +14,17 @@ import { queryConfigs, queryKeys } from '@/queries/chatQueries';
 export const useDashboardData = () => {
   const { user, subscription: authSubscription } = useAuth();
   const userId = user?.id;
+  const queryClient = useQueryClient();
 
   return useQuery({
     queryKey: ['dashboard', 'overview', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-
       const [charactersResult, favoritesResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId)
       ]);
-      const qc = useQueryClient();
-      const cachedCredits = qc.getQueryData(queryKeys.user.credits(userId));
+      const cachedCredits = queryClient.getQueryData(queryKeys.user.credits(userId));
       return {
         characters: charactersResult.data || [],
         favorites: favoritesResult.data || [],

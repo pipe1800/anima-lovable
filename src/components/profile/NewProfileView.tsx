@@ -56,7 +56,7 @@ const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
       const [charactersCount, favoritesCount, personasCount] = await Promise.allSettled([
         supabase.from('characters').select('id', { count: 'exact', head: true }).eq('creator_id', userId),
         supabase.from('character_favorites').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-        isOwnProfile ? Promise.resolve({ count: (await getUserPersonas()).length }) : Promise.resolve({ count: 0 })
+        isOwnProfile ? Promise.resolve({ count: (await getUserPersonas(userId)).length }) : Promise.resolve({ count: 0 })
       ]);
 
       return {

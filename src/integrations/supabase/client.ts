@@ -8,13 +8,26 @@ const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
+// Ensure singleton (avoid multiple realtime websockets)
+// @ts-ignore
+const globalAny: any = typeof window !== 'undefined' ? window : global;
+// @ts-ignore
+if (!globalAny.__ANIMA_SUPABASE__) {
+  // @ts-ignore
+  globalAny.__ANIMA_SUPABASE__ = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: {
+      storage: localStorage,
+      persistSession: true,
+      autoRefreshToken: true,
+    }
+  });
+} else {
+  if (process.env.NODE_ENV === 'development') {
+    console.debug('[supabase] Reusing existing singleton instance');
   }
-});
+}
+// @ts-ignore
+export const supabase = globalAny.__ANIMA_SUPABASE__ as ReturnType<typeof createClient<Database>>;
 
 // Export the URL for use in other parts of the app
 export const SUPABASE_API_URL = SUPABASE_URL;
@@ -28,7 +41,6 @@ supabase.from = (table: string) => {
     try {
       const stack = new Error().stack?.split('\n').slice(2,8).join('\n') || '';
       const now = Date.now();
-      // crude key using stack
       if (personaInFlight.has(stack)) {
         console.warn('[personas][dedupe] duplicate call within same tick suppressed signature hash');
       } else {

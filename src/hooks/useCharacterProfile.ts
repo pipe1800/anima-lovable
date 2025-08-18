@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { useUserCharacterEngagementSets } from '@/hooks/useCharacters';
 
 const sbAny: any = supabase;
 
@@ -126,23 +127,12 @@ export const useCharacterProfile = (characterId: string | undefined) => {
 
 export const useCharacterLikeStatus = (characterId: string | undefined) => {
   const { user } = useAuth();
-
-  return useQuery({
-    queryKey: ['character', 'like-status', characterId, user?.id],
-    queryFn: async () => {
-      if (!user || !characterId) return false;
-      const { data } = await supabase
-        .from('character_likes')
-        .select('id')
-        .eq('character_id', characterId)
-        .eq('user_id', user.id)
-        .single();
-      return !!data;
-    },
-    enabled: !!user && !!characterId,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-  });
+  const engagement = useUserCharacterEngagementSets(user?.id);
+  return {
+    data: characterId ? !!engagement.likesSet?.has(characterId) : false,
+    isLoading: engagement.likesQuery.isLoading,
+    refetch: engagement.likesQuery.refetch,
+  } as const;
 };
 
 export const useToggleCharacterLike = () => {

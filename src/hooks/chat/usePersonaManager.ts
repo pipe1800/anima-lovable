@@ -28,7 +28,7 @@ export function usePersonaManager(userId?: string, chatId?: string, opts?: { ena
     queryKey: personaKeys.all(userId),
     queryFn: async () => {
       if (!userId) return [];
-      return getUserPersonas();
+      return getUserPersonas(userId);
     },
     enabled,
     staleTime: 5 * 60 * 1000,
@@ -57,7 +57,8 @@ export function usePersonaManager(userId?: string, chatId?: string, opts?: { ena
   // Create persona
   const createMutation = useMutation({
     mutationFn: async (payload: { name: string; bio: string | null; lore: string | null; avatar_url: string | null }) => {
-      return createPersona(payload);
+      if (!userId) throw new Error('No user');
+      return createPersona(userId, payload);
     },
     onSuccess: (newPersona) => {
       queryClient.setQueryData(personaKeys.all(userId), (old: Persona[] = []) => [newPersona, ...old]);

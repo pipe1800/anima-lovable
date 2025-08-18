@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Camera, Upload, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ImageUploaderProps {
   currentImage?: string;
@@ -23,6 +24,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user } = useAuth();
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -43,9 +45,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     setIsUploading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/${type}_${Date.now()}.${fileExt}`;
 

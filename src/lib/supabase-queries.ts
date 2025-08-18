@@ -26,6 +26,15 @@ export interface SearchResult<T> {
   error?: any;
 }
 
+// Generic in-flight deduper for singleton or high-frequency queries
+const fetchOnceMap = new Map<string, Promise<any>>();
+const fetchOnce = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+  if (fetchOnceMap.has(key)) return fetchOnceMap.get(key)! as Promise<T>;
+  const p = fn().finally(() => { fetchOnceMap.delete(key); });
+  fetchOnceMap.set(key, p);
+  return p;
+};
+
 // =============================================================================
 // MONETIZATION QUERIES - Plans, Models, Credit Packs
 // =============================================================================
@@ -76,19 +85,21 @@ export const getActiveCreditPacks = async () => {
  * Get user's current active subscription
  */
 export const getUserActiveSubscription = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .select(`
-      *,
-      plan:plans(*)
-    `)
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  return fetchOnce(`active-subscription:${userId}`, async () => {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select(`
+        *,
+        plan:plans(*)
+      `)
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-  return { data, error }
+    return { data, error }
+  })
 }
 
 // =============================================================================
@@ -100,13 +111,15 @@ export const getUserActiveSubscription = async (userId: string) => {
  * NEVER use SELECT * on profiles in public contexts!
  */
 export const getPublicProfile = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url, banner_url, bio, created_at, timezone')
-    .eq('id', userId)
-    .maybeSingle()
+  return fetchOnce(`public-profile:${userId}`, async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, username, avatar_url, banner_url, bio, created_at, timezone')
+      .eq('id', userId)
+      .maybeSingle()
 
-  return { data, error }
+    return { data, error }
+  })
 }
 
 /**
@@ -141,306 +154,125 @@ export const updateProfile = async (userId: string, updates: Partial<Profile>) =
 // =============================================================================
 
 /**
- * Get public characters (for discovery page) with enhanced data
+ * In-flight dedupe for public characters queries (now backed by character_profile_view)
  */
-export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = true) => {
-  const { data, error } = await supabase
-    .from('characters')
-    .select(`
-      id,
-      name,
-      short_description,
-      avatar_url,
-      interaction_count,
-      created_at,
-      creator_id
-    `)
-    .eq('visibility', 'public')
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1)
+const inFlightPublicCharacters = new Map<string, Promise<any>>();
 
-  if (error || !data) {
-    return { data: [], error }
-  }
-
-  let filteredData = data;
-
-  // Apply NSFW filtering based on tags
-  if (nsfwEnabled === false) {
-    const { data: nsfwCharacters } = await supabase
-      .from('character_tags')
-      .select('character_id')
-      .eq('tag_id', 24);
-
-    if (nsfwCharacters?.length) {
-      const nsfwIds = new Set(nsfwCharacters.map(c => c.character_id));
-      filteredData = filteredData.filter(char => !nsfwIds.has(char.id));
-    }
-  }
-
-  if (filteredData.length === 0) return { data: [], error: null };
-
-  // Batch fetch related data
-  const ids = filteredData.map(c => c.id);
-  const creatorIds = [...new Set(filteredData.map(c => c.creator_id))];
-
-  const [creatorsRes, chatsRes, likesRes, favsRes, tagsRes] = await Promise.all([
-    supabase.from('profiles').select('id, username, avatar_url').in('id', creatorIds),
-    supabase.from('chats').select('character_id, id'),
-    supabase.from('character_likes').select('character_id, id'),
-    supabase.from('character_favorites').select('character_id, id'),
-    supabase.from('character_tags').select('character_id, tags(id, name)')
-  ]);
-
-  const creatorsMap = new Map((creatorsRes.data || []).map(c => [c.id, c]));
-  const chatCounts = new Map<string, number>();
-  const likeCounts = new Map<string, number>();
-  const favCounts = new Map<string, number>();
-  const tagMap = new Map<string, Array<{ id: number; name: string }>>();
-
-  (chatsRes.data || []).forEach((r: any) => chatCounts.set(r.character_id, (chatCounts.get(r.character_id) || 0) + 1));
-  (likesRes.data || []).forEach((r: any) => likeCounts.set(r.character_id, (likeCounts.get(r.character_id) || 0) + 1));
-  (favsRes.data || []).forEach((r: any) => favCounts.set(r.character_id, (favCounts.get(r.character_id) || 0) + 1));
-  (tagsRes.data || []).forEach((r: any) => tagMap.set(r.character_id, (r as any).tags ? [(r as any).tags] : []));
-
-  const charactersWithCreators = filteredData.map((character) => ({
-    ...character,
-    creator: creatorsMap.get(character.creator_id),
-    chats_count: chatCounts.get(character.id) || 0,
-    likes_count: likeCounts.get(character.id) || 0,
-    favorites_count: favCounts.get(character.id) || 0,
-    tags: tagMap.get(character.id) || []
+// Helper to map rows from character_profile_view adding creator profile in batch
+async function hydrateCharacterProfiles(rows: any[]) {
+  if (!rows.length) return [];
+  const creatorIds = [...new Set(rows.map(r => r.creator_id))];
+  const { data: creators } = await supabase
+    .from('profiles')
+    .select('id, username, avatar_url')
+    .in('id', creatorIds);
+  const creatorsMap = new Map((creators || []).map(c => [c.id, c]));
+  return rows.map(r => ({
+    ...r,
+    creator: creatorsMap.get(r.creator_id) || null,
+    tags: (r.tags || []).map((t: any) => t),
   }));
-
-  return { data: charactersWithCreators, error: null }
 }
+
+export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = true) => {
+  const key = JSON.stringify({ limit, offset, nsfwEnabled });
+  if (inFlightPublicCharacters.has(key)) return inFlightPublicCharacters.get(key)!;
+  const p = (async () => {
+    const { data, error } = await supabase
+      .from('character_profile_view')
+      .select('*')
+      .eq('visibility', 'public')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error || !data) return { data: [], error };
+    let rows: any[] = data as any[]; // cast to any for computed view columns
+    if (!nsfwEnabled) rows = rows.filter(r => !r.is_nsfw);
+    const hydrated = await hydrateCharacterProfiles(rows);
+    return { data: hydrated, error: null };
+  })();
+  inFlightPublicCharacters.set(key, p);
+  try { return await p; } finally { inFlightPublicCharacters.delete(key); }
+};
 
 /**
- * Enhanced character search with server-side filtering and pagination
+ * In-flight dedupe map for search queries (character search via view)
  */
+const inFlightSearchPublicCharacters = new Map<string, Promise<SearchResult<any>>>();
+
 export const searchPublicCharacters = async (params: SearchParams): Promise<SearchResult<any>> => {
-  const { searchQuery, sortBy, filters, limit, offset } = params;
+  const key = JSON.stringify(params);
+  if (inFlightSearchPublicCharacters.has(key)) return inFlightSearchPublicCharacters.get(key)!;
+  const prom = (async () => {
+    const { searchQuery, sortBy, filters, limit, offset } = params;
+    let query = supabase
+      .from('character_profile_view')
+      .select('*', { count: 'exact' })
+      .eq('visibility', 'public');
 
-  // Build the base query
-  let query = supabase
-    .from('characters')
-    .select(`
-      id,
-      name,
-      short_description,
-      avatar_url,
-      interaction_count,
-      created_at,
-      creator_id
-    `, { count: 'exact' })
-    .eq('visibility', 'public');
-
-  // Apply text search if provided
-  if (searchQuery && searchQuery.trim()) {
-    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
-  }
-
-  // Don't apply NSFW filter in the query - we'll handle it after fetching
-
-  // Apply creator filter if specified
-  if (filters.creator && filters.creator.trim()) {
-    // First get creator IDs that match the username
-    const { data: creators } = await supabase
-      .from('profiles')
-      .select('id')
-      .ilike('username', `%${filters.creator}%`);
-    
-    if (creators && creators.length > 0) {
-      const creatorIds = creators.map(c => c.id);
-      query = query.in('creator_id', creatorIds);
-    } else {
-      // No matching creators found, return empty result
-      return { data: [], total: 0, hasMore: false };
+    if (searchQuery && searchQuery.trim()) {
+      // Use ilike on name/short_description (definition fields optional)
+      query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
     }
-  }
 
-  // Apply sorting
-  switch (sortBy) {
-    case 'newest':
-      query = query.order('created_at', { ascending: false });
-      break;
-    case 'conversations':
-    case 'popular':
-    default:
-      query = query.order('interaction_count', { ascending: false });
-      break;
-  }
-
-  // Apply pagination
-  query = query.range(offset, offset + limit - 1);
-
-  const { data, error, count } = await query;
-
-  if (error || !data) {
-    return { data: [], total: 0, hasMore: false, error };
-  }
-
-  let filteredData = data;
-
-  // Apply NSFW filtering based on tags
-  if (filters.nsfw === false) {
-    // User has NSFW disabled - exclude characters with NSFW tag
-    // First get all character IDs that have the NSFW tag
-    const { data: nsfwCharacters } = await supabase
-      .from('character_tags')
-      .select('character_id')
-      .eq('tag_id', 24); // NSFW tag ID
-
-    if (nsfwCharacters && nsfwCharacters.length > 0) {
-      const nsfwCharacterIds = new Set(nsfwCharacters.map(c => c.character_id));
-      filteredData = filteredData.filter(char => !nsfwCharacterIds.has(char.id));
-    }
-  }
-  // If NSFW is true, show all content (no filtering needed)
-
-  // If we have tag filters, we need to filter by tags
-  if (filters.tags && filters.tags.length > 0) {
-    // Get characters that have at least one of the specified tags
-    const { data: characterTags } = await supabase
-      .from('character_tags')
-      .select(`
-        character_id,
-        tag:tags(name)
-      `)
-      .in('character_id', filteredData.map(c => c.id));
-
-    const charactersWithTags = new Set<string>();
-    characterTags?.forEach(ct => {
-      if (ct.tag && filters.tags!.includes(ct.tag.name)) {
-        charactersWithTags.add(ct.character_id);
-      }
-    });
-
-    filteredData = filteredData.filter(c => charactersWithTags.has(c.id));
-  }
-
-  // Fetch additional data for filtered characters
-  const charactersWithDetails = await Promise.all(
-    filteredData.map(async (character) => {
-      // Get creator profile
-      const { data: creatorData } = await supabase
+    // Creator username filter (needs lookup)
+    if (filters.creator && filters.creator.trim()) {
+      const { data: creators } = await supabase
         .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('id', character.creator_id)
-        .maybeSingle();
+        .select('id')
+        .ilike('username', `%${filters.creator}%`);
+      if (!creators?.length) return { data: [], total: 0, hasMore: false };
+      query = query.in('creator_id', creators.map(c => c.id));
+    }
 
-      // Get actual chat count
-      const { count: chatCount } = await supabase
-        .from('chats')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id);
+    // Sorting
+    switch (sortBy) {
+      case 'newest':
+        query = query.order('created_at', { ascending: false });
+        break;
+      case 'conversations':
+        query = query.order('chats_count', { ascending: false });
+        break;
+      case 'popular':
+      default:
+        query = query.order('interaction_count', { ascending: false });
+        break;
+    }
 
-      // Get likes count
-      const { count: likesCount } = await supabase
-        .from('character_likes')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id);
+    query = query.range(offset, offset + limit - 1);
+    const { data, error, count } = await query;
+    if (error || !data) return { data: [], total: 0, hasMore: false, error };
+    let rows: any[] = data as any[]; // cast to any for view-specific fields
+    if (filters.nsfw === false) rows = rows.filter(r => !r.is_nsfw);
+    if (filters.tags && filters.tags.length) {
+      rows = rows.filter(r => (r.tag_names || []).some((t: string) => filters.tags!.includes(t)));
+    }
+    const hydrated = await hydrateCharacterProfiles(rows);
 
-      // Get favorites count
-      const { count: favoritesCount } = await supabase
-        .from('character_favorites')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id);
+    // Post-sort override (if needed for conversations which is already sorted by chats_count server-side)
+    if (sortBy === 'conversations') {
+      hydrated.sort((a, b) => (b.chats_count || 0) - (a.chats_count || 0));
+    }
 
-      // Get character tags
-      const { data: tagsData } = await supabase
-        .from('character_tags')
-        .select(`
-          tag:tags(id, name)
-        `)
-        .eq('character_id', character.id);
-
-      return {
-        ...character,
-        creator: creatorData,
-        chats_count: chatCount || 0,
-        likes_count: likesCount || 0,
-        favorites_count: favoritesCount || 0,
-        tags: tagsData?.map(t => t.tag) || []
-      };
-    })
-  );
-
-  // Apply conversations sorting if specified (now that we have chat counts)
-  if (sortBy === 'conversations') {
-    charactersWithDetails.sort((a, b) => (b.chats_count || 0) - (a.chats_count || 0));
-  }
-
-  const total = count || 0;
-  const hasMore = offset + limit < total;
-
-  return {
-    data: charactersWithDetails,
-    total,
-    hasMore
-  };
-}
+    const total = count || 0;
+    const hasMore = offset + limit < total;
+    return { data: hydrated, total, hasMore };
+  })();
+  inFlightSearchPublicCharacters.set(key, prom);
+  try { return await prom; } finally { inFlightSearchPublicCharacters.delete(key); }
+};
 
 /**
  * Get user's own characters (all visibility levels)
  */
 export const getUserCharacters = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('characters')
-    .select(`
-      id,
-      name,
-      short_description,
-      tagline,
-      avatar_url,
-      visibility,
-      interaction_count,
-      created_at,
-      updated_at,
-      character_definitions!inner(
-        personality_summary,
-        scenario
-      )
-    `)
-    .eq('creator_id', userId)
-    .order('updated_at', { ascending: false })
-
-  if (error || !data) {
-    return { data: data || [], error }
-  }
-
-  // Get actual chat counts and likes for each character
-  const charactersWithCounts = await Promise.all(
-    data.map(async (character) => {
-      // Get actual chat count
-      const { count: chatCount } = await supabase
-        .from('chats')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id)
-
-      // Get likes count
-      const { count: likesCount } = await supabase
-        .from('character_likes')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id)
-
-      return {
-        ...character,
-        chats_count: chatCount || 0,
-        likes_count: likesCount || 0,
-        tagline: (() => {
-          try {
-            const personalitySummary = JSON.parse(character.character_definitions?.personality_summary || '{}');
-            return personalitySummary.title || (character.character_definitions?.scenario as any)?.title || character.short_description || '';
-          } catch {
-            return (character.character_definitions?.scenario as any)?.title || character.short_description || '';
-          }
-        })()
-      }
-    })
-  )
-
-  return { data: charactersWithCounts, error: null }
+  return fetchOnce(`user-characters:${userId}`, async () => {
+    const { data, error } = await supabase
+      .from('characters')
+      .select(`id, name, short_description, avatar_url, visibility, interaction_count, chats_count, likes_count, created_at, updated_at`)
+      .eq('creator_id', userId)
+      .order('updated_at', { ascending: false });
+    return { data: data || [], error };
+  });
 }
 
 /**
@@ -527,7 +359,7 @@ export const getCharacterWasPublic = async (characterId: string): Promise<boolea
 /**
  * Create a new character
  */
-export const createCharacter = async (characterData: {
+export const createCharacter = async (userId: string, characterData: {
   name: string
   short_description?: string
   avatar_url?: string
@@ -536,41 +368,29 @@ export const createCharacter = async (characterData: {
   greeting?: string
   long_description?: string
 }) => {
-  const { data: user } = await supabase.auth.getUser()
-  if (!user.user) throw new Error('Not authenticated')
-
-  // Create character
+  if (!userId) throw new Error('Not authenticated');
   const { data: character, error: characterError } = await supabase
     .from('characters')
     .insert({
-      creator_id: user.user.id,
+      creator_id: userId,
       name: characterData.name,
       short_description: characterData.short_description,
       avatar_url: characterData.avatar_url,
       visibility: characterData.visibility || 'private'
     })
     .select()
-    .single()
-
-  if (characterError || !character) return { data: null, error: characterError }
-
-  // Create character definition
+    .single();
+  if (characterError || !character) return { data: null, error: characterError };
   const { error: definitionError } = await supabase
     .from('character_definitions')
     .insert({
       character_id: character.id,
       personality_summary: characterData.definition,
       greeting: characterData.greeting,
-      description: characterData.long_description
-    })
-
-  if (definitionError) {
-    // Cleanup: delete the character if definition creation failed
-    await supabase.from('characters').delete().eq('id', character.id)
-    return { data: null, error: definitionError }
-  }
-
-  return { data: character, error: null }
+      long_description: characterData.long_description || ''
+    });
+  if (definitionError) return { data: null, error: definitionError };
+  return { data: character, error: null };
 }
 
 // =============================================================================
@@ -695,32 +515,37 @@ export const getUserChatsPaginated = async (
 /**
  * Removed legacy getUserChats (replaced by getUserChatsBatched)
  */
+let inFlightUserChats = new Map<string, Promise<{ data: any[]; error: any }>>();
 export const getUserChatsBatched = async (userId: string) => {
-  const { data, error } = await supabase.rpc('get_user_chats_batched', { p_user_id: userId });
-  if (error) return { data: [], error };
-  // Normalize to match legacy structure where possible
-  const mapped = (data || []).map((row: any) => ({
-    id: row.chat_id,
-    title: row.title,
-    last_message_at: row.last_message_at,
-    created_at: row.created_at,
-    character_id: row.character_id,
-    character: {
-      id: row.character_id,
-      name: row.character_name,
-      avatar_url: row.character_avatar_url,
-      short_description: row.character_short_description,
-      tagline: row.character_short_description || ''
-    },
-    lastMessage: row.last_message,
-    lastMessageIsAI: row.last_message_is_ai,
-    message_count: row.message_count,
-    userSettings: {
-      chat_mode: row.chat_mode || 'storytelling',
-      time_awareness_enabled: row.time_awareness_enabled || false
-    }
-  }));
-  return { data: mapped, error: null };
+  if (inFlightUserChats.has(userId)) return inFlightUserChats.get(userId)!;
+  const prom = (async () => {
+    const { data, error } = await supabase.rpc('get_user_chats_batched', { p_user_id: userId });
+    if (error) return { data: [], error };
+    const mapped = (data || []).map((row: any) => ({
+      id: row.chat_id,
+      title: row.title,
+      last_message_at: row.last_message_at,
+      created_at: row.created_at,
+      character_id: row.character_id,
+      character: {
+        id: row.character_id,
+        name: row.character_name,
+        avatar_url: row.character_avatar_url,
+        short_description: row.character_short_description,
+        tagline: row.character_short_description || ''
+      },
+      lastMessage: row.last_message,
+      lastMessageIsAI: row.last_message_is_ai,
+      message_count: row.message_count,
+      userSettings: {
+        chat_mode: row.chat_mode || 'storytelling',
+        time_awareness_enabled: row.time_awareness_enabled || false
+      }
+    }));
+    return { data: mapped, error: null };
+  })();
+  inFlightUserChats.set(userId, prom);
+  try { return await prom; } finally { inFlightUserChats.delete(userId); }
 };
 
 /**
@@ -909,66 +734,12 @@ export async function getMonthlyCreditsUsage(userId: string): Promise<{ data: { 
 // =============================================================================
 
 /**
- * Get public world infos (for discovery page)
+ * DEPRECATED: getPublicWorldInfos replaced by world info snapshot RPC
  */
 export const getPublicWorldInfos = async (limit = 20, offset = 0) => {
-  const { data, error } = await supabase
-    .from('world_infos')
-    .select(`
-      id,
-      name,
-      short_description,
-      interaction_count,
-      created_at,
-      creator_id
-    `)
-    .eq('visibility', 'public')
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1)
-
-  if (error || !data) {
-    return { data: [], error }
-  }
-
-  // Fetch creator profiles and counts separately for each world info
-  const worldInfosWithCreators = await Promise.all(
-    data.map(async (worldInfo) => {
-      // Get creator profile
-      const { data: creatorData } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('id', worldInfo.creator_id)
-        .maybeSingle()
-
-      // Get likes count
-      const { count: likesCount } = await supabase
-        .from('world_info_user_likes')
-        .select('*', { count: 'exact' })
-        .eq('world_info_id', worldInfo.id)
-
-      // Get favorites count
-      const { count: favoritesCount } = await (supabase as any)
-        .from('world_info_favorites')
-        .select('id', { count: 'exact' })
-        .eq('world_info_id', worldInfo.id)
-
-      // Get usage count (how many users are using this world info)
-      const { count: usageCount } = await supabase
-        .from('world_info_users')
-        .select('id', { count: 'exact' })
-        .eq('world_info_id', worldInfo.id)
-
-      return {
-        ...worldInfo,
-        creator: creatorData,
-        likes_count: likesCount || 0,
-        favorites_count: favoritesCount || 0,
-        usage_count: usageCount || 0
-      }
-    })
-  )
-
-  return { data: worldInfosWithCreators, error: null }
+  const { getWorldInfoSnapshot } = await import('@/lib/snapshots');
+  const snap = await getWorldInfoSnapshot(null, limit, offset);
+  return { data: snap?.public || [], error: null };
 }
 
 /**
@@ -1233,35 +1004,32 @@ export const getRecommendedCharacters = async (tags: string[], limit = 4) => {
         created_at,
         character_definitions!inner(greeting)
       `)
-      .eq('visibility', 'public')
+      .eq('visibility', 'public');
 
-    // If we have tags, try to filter by them first
     if (tags.length > 0) {
       const { data: tagIds } = await supabase
         .from('tags')
         .select('id')
-        .in('name', tags)
-
+        .in('name', tags);
       if (tagIds && tagIds.length > 0) {
         const { data: characterIds } = await supabase
           .from('character_tags')
           .select('character_id')
-          .in('tag_id', tagIds.map(tag => tag.id))
-
+          .in('tag_id', tagIds.map(tag => tag.id));
         if (characterIds && characterIds.length > 0) {
-          charactersQuery = charactersQuery.in('id', characterIds.map(ct => ct.character_id))
+          charactersQuery = charactersQuery.in('id', characterIds.map(ct => ct.character_id));
         }
       }
     }
 
     const { data: characters, error } = await charactersQuery
       .order('interaction_count', { ascending: false })
-      .limit(limit)
+      .limit(limit);
+    if (error) throw error;
 
-    if (error) throw error
+    let finalCharacters = characters || [];
 
-    // If we don't have enough characters from tags, fallback to most popular
-    if (!characters || characters.length < limit) {
+    if (!finalCharacters || finalCharacters.length < limit) {
       const { data: popularCharacters, error: popularError } = await supabase
         .from('characters')
         .select(`
@@ -1275,54 +1043,31 @@ export const getRecommendedCharacters = async (tags: string[], limit = 4) => {
         `)
         .eq('visibility', 'public')
         .order('interaction_count', { ascending: false })
-        .limit(limit)
-
-      if (popularError) throw popularError
-      
-      // Combine and deduplicate
-      const allCharacters = characters || []
-      const existingIds = new Set(allCharacters.map(c => c.id))
-      
+        .limit(limit);
+      if (popularError) throw popularError;
+      const existingIds = new Set(finalCharacters.map(c => c.id));
       popularCharacters?.forEach(char => {
-        if (!existingIds.has(char.id) && allCharacters.length < limit) {
-          allCharacters.push(char)
+        if (!existingIds.has(char.id) && finalCharacters.length < limit) {
+          finalCharacters.push(char);
         }
-      })
-
-      // Get likes count for all characters
-      const charactersWithCounts = await Promise.all(
-        allCharacters.map(async (character) => {
-          const { count: likesCount } = await supabase
-            .from('character_likes')
-            .select('id', { count: 'exact' })
-            .eq('character_id', character.id)
-
-          return {
-            ...character,
-            likes_count: likesCount || 0
-          }
-        })
-      )
-
-      return { data: charactersWithCounts.slice(0, limit), error: null }
+      });
     }
 
-    // Get likes count for tag-filtered characters
-    const charactersWithCounts = await Promise.all(
-      characters.map(async (character) => {
-        const { count: likesCount } = await supabase
-          .from('character_likes')
-          .select('id', { count: 'exact' })
-          .eq('character_id', character.id)
+    if (finalCharacters.length === 0) return { data: [], error: null };
 
-        return {
-          ...character,
-          likes_count: likesCount || 0
-        }
-      })
-    )
+    // Batch likes counts
+    const { data: likesRows } = await supabase
+      .from('character_likes')
+      .select('character_id, id')
+      .in('character_id', finalCharacters.map(c => c.id));
+    const likeCounts = new Map<string, number>();
+    (likesRows||[]).forEach(r => likeCounts.set(r.character_id, (likeCounts.get(r.character_id)||0)+1));
+    const charactersWithCounts = finalCharacters.map(c => ({
+      ...c,
+      likes_count: likeCounts.get(c.id) || 0,
+    }));
 
-    return { data: charactersWithCounts, error: null }
+    return { data: charactersWithCounts.slice(0, limit), error: null };
   } catch (error) {
     console.error('Error getting recommended characters:', error)
     return { data: [], error }
@@ -1354,122 +1099,75 @@ export const deleteChat = async (chatId: string, userId: string) => {
  */
 export const deleteMultipleChats = async (chatIds: string[], userId: string) => {
   console.log(`Starting deletion of ${chatIds.length} chats:`, chatIds);
-  const results: Array<{ data: any; error: any }> = [];
-
-  // Process deletions in smaller batches to avoid overwhelming the database
-  const batchSize = 3; // Process 3 at a time
-
+  const results: Array<{ data: any; error: any; chatId: string }> = [];
+  const batchSize = 3;
   for (let i = 0; i < chatIds.length; i += batchSize) {
     const batch = chatIds.slice(i, i + batchSize);
     console.log(`Processing batch ${Math.floor(i / batchSize) + 1}:`, batch);
-
-    // Process current batch in parallel
     const batchPromises = batch.map(async (chatId) => {
       try {
         console.log(`Deleting chat ${chatId}...`);
         const result = await deleteChat(chatId, userId);
-        if (result.error) {
-          console.error(`Failed to delete chat ${chatId}:`, result.error);
-        } else {
-          console.log(`Successfully deleted chat ${chatId}`);
-        }
+        results.push({ ...result, chatId });
         return result;
-      } catch (error) {
-        console.error(`Error deleting chat ${chatId}:`, error);
-        return { data: null, error };
+      } catch (err) {
+        console.error(`Failed to delete chat ${chatId}:`, err);
+        const failure = { data: null, error: err, chatId };
+        results.push(failure);
+        return failure;
       }
     });
-
-    const batchResults = await Promise.all(batchPromises);
-    results.push(...batchResults);
-
-    // Small delay between batches to prevent rate limiting
-    if (i + batchSize < chatIds.length) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
+    await Promise.all(batchPromises);
   }
-
-  const successCount = results.filter((r) => !r.error).length;
-  const errorCount = results.filter((r) => r.error).length;
-  console.log(`Deletion complete: ${successCount} successful, ${errorCount} failed`);
-
-  return results;
+  const failures = results.filter(r => r.error);
+  if (failures.length) {
+    console.warn(`deleteMultipleChats completed with ${failures.length} failures.`);
+  }
+  return { data: results, error: null };
 };
 
-/**
- * Delete ALL chats for a user (DEV ONLY - DANGEROUS!)
- */
 export const deleteAllUserChats = async (userId: string) => {
-  console.log(`⚠️ DELETING ALL CHATS for user ${userId}`);
-
   try {
-    // Get all chat IDs for the user
-    const { data: allChats, error: fetchError } = await supabase
+    // Fetch all chat ids for user first (batched RPC already optimized)
+    const { data: chatsData, error: chatsError } = await supabase
       .from('chats')
       .select('id')
       .eq('user_id', userId);
-
-    if (fetchError) {
-      console.error('Error fetching chats:', fetchError);
-      return { success: false, error: fetchError, deletedCount: 0 };
+    if (chatsError) return { success: false, error: chatsError.message, deletedCount: 0 };
+    const ids = (chatsData||[]).map(c=>c.id);
+    if (!ids.length) return { success: true, error: null, deletedCount: 0 };
+    // Delete in manageable batches
+    const batchSize = 50;
+    let deleted = 0;
+    for (let i=0; i<ids.length; i+=batchSize) {
+      const batch = ids.slice(i,i+batchSize);
+      const { error } = await supabase.from('chats').delete().in('id', batch).eq('user_id', userId);
+      if (error) return { success: false, error: error.message, deletedCount: deleted };
+      deleted += batch.length;
     }
-
-    if (!allChats || allChats.length === 0) {
-      console.log('No chats to delete');
-      return { success: true, error: null, deletedCount: 0 };
-    }
-
-    const chatIds = allChats.map((chat) => chat.id);
-    console.log(`Found ${chatIds.length} chats to delete`);
-
-    // Delete them using the existing batch delete function
-    const results = await deleteMultipleChats(chatIds, userId);
-
-    const successCount = results.filter((r) => !r.error).length;
-    const errorCount = results.filter((r) => r.error).length;
-
-    console.log(`✅ Deleted ${successCount} chats, ❌ Failed: ${errorCount}`);
-
-    return {
-      success: errorCount === 0,
-      error: errorCount > 0 ? `Failed to delete ${errorCount} chats` : null,
-      deletedCount: successCount,
-    };
-  } catch (err) {
-    console.error('Error in deleteAllUserChats:', err);
-    return { success: false, error: err, deletedCount: 0 };
+    return { success: true, error: null, deletedCount: deleted };
+  } catch (e:any) {
+    return { success: false, error: e?.message || String(e), deletedCount: 0 };
   }
 };
 
-// =============================================================================
-// PERSONA QUERIES
-// =============================================================================
-
-/**
- * Get user's personas (only for own profile)
- */
-export const getUserPersonasForProfile = async (userId: string) => {
-  // Use unified persona cache; still filter by user id for safety
-  const list = await getUserPersonas();
-  return { data: list.filter(p => (p as any).user_id === userId), error: null };
-}
-
-// =============================================================================
-// CHARACTER DELETION (private-only)
-// =============================================================================
-
-/**
- * Delete a character that has never been public. Also deletes the user's chats with it.
- * Server enforces ownership and visibility rules.
- */
 export const deletePrivateCharacter = async (characterId: string) => {
   try {
-    const { data, error } = await (supabase as any).rpc('delete_private_character', {
-      p_character_id: characterId,
-    });
-    return { data, error };
-  } catch (err) {
-    console.error('Error in deletePrivateCharacter:', err);
-    return { data: null, error: err };
+    const { data: character, error: fetchError } = await supabase
+      .from('characters')
+      .select('id, visibility, was_public')
+      .eq('id', characterId)
+      .maybeSingle<any>();
+    if (fetchError) return { error: fetchError };
+    if (!character) return { error: new Error('Character not found') };
+    const wasPublicFlag = (character as any).was_public;
+    if (character.visibility !== 'private' || wasPublicFlag) {
+      return { error: new Error('Character cannot be deleted (not private or was previously public)') };
+    }
+    await supabase.from('character_definitions').delete().eq('character_id', characterId);
+    const { error } = await supabase.from('characters').delete().eq('id', characterId).eq('visibility','private');
+    return { error };
+  } catch (e:any) {
+    return { error: e };
   }
 };

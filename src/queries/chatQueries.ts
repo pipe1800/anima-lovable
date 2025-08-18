@@ -36,11 +36,21 @@ export const queryKeys = {
     list: (userId: string) => ['personas', userId] as const,
     byId: (personaId: string) => ['persona', personaId] as const,
   },
-  // User queries  
+  // User queries  (extended Phase 3)
   user: {
     all: ['user'] as const,
     credits: (userId: string) => ['user', 'credits', userId] as const,
     profile: (userId: string) => ['user', 'profile', userId] as const,
+    favorites: (userId: string) => ['user', 'favorites', userId] as const,
+    characters: (userId: string) => ['user', 'characters', userId] as const,
+    subscription: (userId: string) => ['user', 'subscription', userId] as const,
+    chatsCount: (userId: string) => ['user', 'chats', 'count', userId] as const,
+  },
+  // Static taxonomy / monetization
+  static: {
+    tags: ['static', 'tags'] as const,
+    plans: ['static', 'plans'] as const,
+    creditPacks: ['static', 'credit-packs'] as const,
   },
   // Character queries
   character: {
@@ -57,30 +67,64 @@ export const queryConfigs = {
   // Chat message queries - simplified caching with real-time updates
   chatMessages: (chatId: string) => ({
     queryKey: queryKeys.chat.messages(chatId),
-    staleTime: 30 * 1000, // 30 seconds - shorter for real-time feel 
-    gcTime: 5 * 60 * 1000, // 5 minutes 
-    refetchOnWindowFocus: false, // Let real-time handle updates
-    refetchOnReconnect: true, // Important for connectivity issues
-  }),
-  
-  // Lightweight message count per chat (for memory dialog) - now opt-in via enabled flag passed externally
-  chatMessageCount: (chatId: string, opts?: { enabled?: boolean }) => ({
-    queryKey: queryKeys.chat.messageCount(chatId),
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('chat_id', chatId)
-        .eq('is_placeholder', false); // unified placeholder filter
-      if (error) throw error;
-      return count || 0;
-    },
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
-    enabled: !!chatId && (opts?.enabled ?? false),
+    refetchOnReconnect: true,
   }),
-  
+  // Deprecated: direct head count query removed; use deriveMessageCount util fed from paginated cache
+  // User favorites
+  userFavorites: (userId: string) => ({
+    queryKey: queryKeys.user.favorites(userId),
+    queryFn: async () => {
+      if (!userId) return [];
+      const { getUserFavorites } = await import('@/lib/supabase-queries');
+      const { data } = await getUserFavorites(userId);
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  }),
+  // User characters
+  userCharacters: (userId: string) => ({
+    queryKey: queryKeys.user.characters(userId),
+    queryFn: async () => {
+      if (!userId) return [];
+      const { getUserCharacters } = await import('@/lib/supabase-queries');
+      const { data } = await getUserCharacters(userId);
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  }),
+  // User subscription
+  userSubscription: (userId: string) => ({
+    queryKey: queryKeys.user.subscription(userId),
+    queryFn: async () => {
+      if (!userId) return null;
+      const { getUserActiveSubscription } = await import('@/lib/supabase-queries');
+      const { data } = await getUserActiveSubscription(userId);
+      return data || null;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  }),
+  // Chats count derived (placeholder until snapshot RPC)
+  userChatsCount: (userId: string) => ({
+    queryKey: queryKeys.user.chatsCount(userId),
+    queryFn: async () => {
+      if (!userId) return 0;
+      const { getUserChatsBatched } = await import('@/lib/supabase-queries');
+      const { data } = await getUserChatsBatched(userId);
+      return data.length;
+    },
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  }),
   // User credits - balanced updates with background refresh
   userCredits: (userId: string) => ({
     queryKey: queryKeys.user.credits(userId),
@@ -89,9 +133,9 @@ export const queryConfigs = {
       if (result.error) throw result.error;
       return result.data?.balance || 0;
     },
-    staleTime: 60 * 1000, // 1 minute (increased from 30s)
-    gcTime: 5 * 60 * 1000, // 5 minutes (increased)
-    refetchOnWindowFocus: false, // ✅ PHASE 3: Prevent excessive credit checks
+    staleTime: 5 * 60 * 1000, // increased to 5m
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
   }),
   
   // Character details - aggressive caching for static data
@@ -108,7 +152,7 @@ export const queryConfigs = {
     queryKey: queryKeys.personas.list(userId),
     queryFn: async () => {
       if (!userId) return [];
-      return getUserPersonas();
+      return getUserPersonas(userId);
     },
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
@@ -217,17 +261,28 @@ export type QueryKey =
   | ReturnType<typeof queryKeys.chat.messages>
   | ReturnType<typeof queryKeys.chat.messageCount>
   | ReturnType<typeof queryKeys.user.credits>
+  | ReturnType<typeof queryKeys.user.profile>
+  | ReturnType<typeof queryKeys.user.favorites>
+  | ReturnType<typeof queryKeys.user.characters>
+  | ReturnType<typeof queryKeys.user.subscription>
+  | ReturnType<typeof queryKeys.user.chatsCount>
+  | typeof queryKeys.static.tags
+  | typeof queryKeys.static.plans
+  | typeof queryKeys.static.creditPacks
   | ReturnType<typeof queryKeys.character.details>
   | ReturnType<typeof queryKeys.personas.list>
   | ReturnType<typeof queryKeys.personas.byId>;
 
 export type QueryConfig = 
   | ReturnType<typeof queryConfigs.chatMessages>
-  | ReturnType<typeof queryConfigs.chatMessageCount>
   | ReturnType<typeof queryConfigs.userCredits>
   | ReturnType<typeof queryConfigs.characterDetails>
   | ReturnType<typeof queryConfigs.personasList>
-  | ReturnType<typeof queryConfigs.personaById>;
+  | ReturnType<typeof queryConfigs.personaById>
+  | ReturnType<typeof queryConfigs.userFavorites>
+  | ReturnType<typeof queryConfigs.userCharacters>
+  | ReturnType<typeof queryConfigs.userSubscription>
+  | ReturnType<typeof queryConfigs.userChatsCount>;
 
 export const useUserCredits = (userId: string | undefined, opts?: { enabled?: boolean }) => {
   return useQuery({

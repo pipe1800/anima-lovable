@@ -43,14 +43,13 @@ export interface CharacterCreationData {
   };
 }
 
-export const createCharacter = async (characterData: CharacterCreationData) => {
+export const createCharacter = async (userId: string, characterData: CharacterCreationData) => {
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // Create character record
     const characterInsert: TablesInsert<'characters'> = {
-      creator_id: user.user.id,
+      creator_id: userId,
       name: characterData.name,
       short_description: characterData.description,
       avatar_url: characterData.avatar,
@@ -155,7 +154,7 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
       
       console.log('⏰ Setting time awareness for new character:', {
         characterId: character.id,
-        userId: user.user.id,
+        userId: userId,
         time_awareness_enabled: timeAwarenessValue
       });
 
@@ -163,7 +162,7 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
       const { error: settingsError } = await supabase
         .from('user_character_settings')
         .upsert({
-          user_id: user.user.id,
+          user_id: userId,
           character_id: character.id,
           time_awareness_enabled: timeAwarenessValue,
           created_at: new Date().toISOString(),
@@ -186,7 +185,7 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
   }
 };
 
-export const updateCharacter = async (characterId: string, characterData: CharacterCreationData) => {
+export const updateCharacter = async (userId: string, characterId: string, characterData: CharacterCreationData) => {
   console.log('🔄 updateCharacter called with:', {
     characterId,
     title_field: characterData.title,
@@ -196,8 +195,7 @@ export const updateCharacter = async (characterId: string, characterData: Charac
   });
 
   try {
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) throw new Error('Not authenticated');
+    if (!userId) throw new Error('Not authenticated');
 
     // Update character record
     const characterUpdate: TablesUpdate<'characters'> = {
@@ -220,7 +218,7 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       .from('characters')
       .update(characterUpdate)
       .eq('id', characterId)
-      .eq('creator_id', user.user.id) // Ensure user owns the character
+      .eq('creator_id', userId) // Ensure user owns the character
       .select()
       .single();
 
@@ -249,7 +247,7 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       
       console.log('⏰ Updating time awareness setting:', {
         characterId,
-        userId: user.user.id,
+        userId: userId,
         time_awareness_enabled: timeAwarenessValue,
         value_type: typeof timeAwarenessValue
       });
@@ -258,7 +256,7 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       const { error: settingsError } = await supabase
         .from('user_character_settings')
         .upsert({
-          user_id: user.user.id,
+          user_id: userId,
           character_id: characterId,
           time_awareness_enabled: timeAwarenessValue,
           updated_at: new Date().toISOString()
