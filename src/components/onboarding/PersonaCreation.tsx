@@ -36,7 +36,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
   useEffect(() => {
     const loadPersonas = async () => {
       try {
-        const userPersonas = await getUserPersonas();
+  const userPersonas = await getUserPersonas(user.id);
         setPersonas(userPersonas);
       } catch (error) {
         console.error('Error loading personas:', error);

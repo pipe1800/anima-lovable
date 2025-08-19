@@ -25,11 +25,13 @@ export function usePersonaManager(userId?: string, chatId?: string) {
     queryKey: personaKeys.all(userId),
     queryFn: async () => {
       if (!userId) return [];
-      return getUserPersonas();
+      return getUserPersonas(userId);
     },
     enabled: !!userId,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
   });
 
   // Selected persona for current chat (or best default for new chat)

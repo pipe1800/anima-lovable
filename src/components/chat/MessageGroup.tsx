@@ -264,6 +264,23 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
   const iconClass = "w-4 h-4 text-white/60 hover:text-white transition-colors";
   const iconButtonClass = "p-1 rounded hover:bg-white/5 active:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed";
 
+  // Determine if latest AI message in this group is regenerating
+  const latestMessage = messages[messages.length - 1];
+  const regenOverride = latestMessage && regeneratingContentByMessageId[latestMessage.id];
+  const isRegenerating = regenOverride !== undefined;
+  const [animationStage, setAnimationStage] = React.useState(0);
+  React.useEffect(() => {
+    if (!isRegenerating) return;
+    const id = setInterval(() => setAnimationStage(s => (s + 1) % 3), 450);
+    return () => clearInterval(id);
+  }, [isRegenerating]);
+  const displayContentFor = (msg: any) => {
+    const override = regeneratingContentByMessageId[msg.id];
+    if (override === undefined) return msg.content;
+    if (override.length === 0) return `Regenerating${'.'.repeat(animationStage + 1)}`;
+    return override;
+  };
+
   return (
     <div className="mb-6">
       {showTimestamp && (
@@ -326,7 +343,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                       <div className="flex-1 min-w-0 px-4 py-3">
                         <span style={textColor ? { color: textColor } : undefined}>
                           <FormattedMessage
-                            content={message.content}
+                            content={displayContentFor(message)}
                             className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
                           />
                         </span>
@@ -386,7 +403,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                       ) : (
                         <span style={textColor ? { color: textColor } : undefined}>
                           <FormattedMessage
-                            content={message.content}
+                            content={displayContentFor(message)}
                             className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
                           />
                         </span>
@@ -440,13 +457,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                 ) : (
                   <span style={textColor ? { color: textColor } : undefined}>
                     <FormattedMessage
-                      content={(() => {
-                        const override = regeneratingContentByMessageId?.[(message as any).id];
-                        if (typeof override === 'string') {
-                          return override; // show live regenerated stream
-                        }
-                        return message.content;
-                      })()}
+                      content={displayContentFor(message)}
                       className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
                     />
                   </span>

@@ -240,6 +240,7 @@ const ChatMessages = ({
     return !finalContent.includes(displayedStream);
   }, [isStreaming, displayedStream, lastAiMessage?.content]);
 
+
   // ✅ PHASE 3: Optimized auto-scroll with better performance
   useEffect(() => {
     const shouldAutoScroll = () => {
@@ -345,6 +346,7 @@ const ChatMessages = ({
             </div>
           </div>
         )}
+
 
         {/* Live streaming bubble for smooth mode without flicker */}
         {showStreamingBubble && (

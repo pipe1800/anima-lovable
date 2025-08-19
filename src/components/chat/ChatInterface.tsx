@@ -103,10 +103,20 @@ const ChatInterface = ({
   const greetingVariants = React.useMemo(() => buildGreetingVariants((characterDetails as any) || (character as any)), [characterDetails, character]);
   const hasMultipleGreetings = greetingVariants.length > 1;
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Input ref now supports textarea for multi-line user input (chat-like behavior)
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
-  const log = logger.scoped('ChatInterface');
+  // Stable logger instance so effects depending on it don't re-run every render
+  const log = React.useRef(logger.scoped('ChatInterface')).current;
+  // Track whether the user intentionally dismissed the keyboard (mobile UX smoothing)
+  const userDismissedKeyboardRef = useRef(false);
+  const programmaticFocusRef = useRef(false);
+  const isProbablyMobile = React.useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    return /Mobi|Android|iPhone|iPad|iPod/i.test(ua) || window.innerWidth < 768;
+  }, []);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -420,20 +430,15 @@ const ChatInterface = ({
     }
   }, [existingChatId]);
 
-  // Focus input on mount
+  // Focus input on mount only on desktop (avoid auto keyboard pop on mobile like WhatsApp)
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!isProbablyMobile) {
+      inputRef.current?.focus();
+    }
+  }, [isProbablyMobile]);
 
-  // Refocus input when AI finishes responding to keep flow fluent
-  useEffect(() => {
-    const onAiFinished = () => {
-      // Delay a tick to ensure DOM settles
-      setTimeout(() => inputRef.current?.focus(), 50);
-    };
-    window.addEventListener('chat-ai-response-finished', onAiFinished as any);
-    return () => window.removeEventListener('chat-ai-response-finished', onAiFinished as any);
-  }, []);
+  // Removed: automatic refocus after AI finishes (prevents unwanted keyboard reopen on mobile)
+  // If needed for desktop later, can reintroduce gated by !userDismissedKeyboardRef.current && !isProbablyMobile
 
   // Sync selected persona when prop changes
   useEffect(() => {
@@ -448,11 +453,13 @@ const ChatInterface = ({
     let active = true;
     const loadPersona = async () => {
       try {
+        // Avoid refetch if already loaded same persona id
         if (selectedPersonaId) {
+          if (selectedPersonaData?.id === selectedPersonaId) return;
           const persona = await getPersonaById(selectedPersonaId);
           if (active) setSelectedPersonaData(persona as Persona);
         } else {
-          if (active) setSelectedPersonaData(null);
+          if (active && selectedPersonaData !== null) setSelectedPersonaData(null);
         }
       } catch (e) {
         if (active) setSelectedPersonaData(null);
@@ -461,17 +468,30 @@ const ChatInterface = ({
     };
     loadPersona();
     return () => { active = false; };
-  }, [selectedPersonaId, log]);
+  }, [selectedPersonaId, selectedPersonaData, log]);
 
   // Send message
   const handleSendMessage = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || !user) return;
+    // Capture if user wanted keyboard open at send time
+    const wasFocused = document.activeElement === inputRef.current && !userDismissedKeyboardRef.current;
+    const focusBackIfNeeded = () => {
+      if (!wasFocused) return; // user had dismissed or not focused -> don't resurrect
+      if (userDismissedKeyboardRef.current) return; // user dismissed in interim
+      programmaticFocusRef.current = true;
+      requestAnimationFrame(() => {
+        if (!userDismissedKeyboardRef.current) {
+          inputRef.current?.focus();
+        }
+        programmaticFocusRef.current = false;
+      });
+    };
     if (!currentChatId) {
       const firstMsg = inputValue;
       setInputValue('');
-      // Keep greeting bubble visible (disabled) until persistence; do not pre-dismiss
       await createChatAndSendFirstMessage(firstMsg);
+      focusBackIfNeeded();
       return;
     }
     if (!currentChatId) return;
@@ -495,8 +515,8 @@ const ChatInterface = ({
         effectiveTrackedContext
       );
 
-      // Immediately refocus after sending
-      requestAnimationFrame(() => inputRef.current?.focus());
+  // Only refocus if user had keyboard open
+  focusBackIfNeeded();
 
       if (onMessageSent) await onMessageSent();
 
@@ -626,25 +646,26 @@ const ChatInterface = ({
 
   // Regeneration UI map: messageId -> streaming content
   const [regeneratingContentById, setRegeneratingContentById] = useState<Record<string, string>>({});
+  // Ref mirror for async watchers
+  const regeneratingContentByIdRef = useRef(regeneratingContentById);
+  useEffect(() => { regeneratingContentByIdRef.current = regeneratingContentById; }, [regeneratingContentById]);
+  // Track start times for regeneration attempts (for fallback timeouts)
+  const regenerationStartRef = useRef<Record<string, number>>({});
 
   const regenerateMessageById = useCallback(async (aiMessageId: string) => {
     if (!user || !currentChatId) return;
-    if (creditsBalance < 1) {
-      setShowInsufficientCreditsModal(true);
-      return;
-    }
+    if (creditsBalance < 1) { setShowInsufficientCreditsModal(true); return; }
     try {
+      // Show placeholder
       setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: '' }));
+  regenerationStartRef.current[aiMessageId] = Date.now();
 
-      // Delete AI message in backend first (frontend will overlay until refresh)
-      await supabase.from('messages').delete().eq('id', aiMessageId);
-
-      // Auth token
+      // Auth
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !sessionData?.session?.access_token) throw new Error('Authentication failed');
       const token = sessionData.session.access_token;
 
-      // Start regenerate stream
+      // Request
       const { SUPABASE_API_URL } = await import('@/integrations/supabase/client');
       const resp = await fetch(`${SUPABASE_API_URL}/functions/v1/chat-management`, {
         method: 'POST',
@@ -663,74 +684,129 @@ const ChatInterface = ({
           selectedWorldInfoId: selectedWorldInfoId ?? null,
         }),
       });
-
       if (!resp.ok || !resp.body) {
         const text = await resp.text();
         throw new Error(text || `Regenerate failed: ${resp.status}`);
       }
 
-      // Stream handling (smooth or instant)
+      // Stream
       const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
       const { StreamingMessageParser, parseSSEMessage } = await import('@/lib/streaming-utils');
       const parser = new StreamingMessageParser();
       let full = '';
-
       const scheduleAppend = async (text: string) => {
         if (!text) return;
         if (streamingMode !== 'smooth') { full += text; return; }
-        const size = 24;
-        for (let i = 0; i < text.length; i += size) {
-          full += text.slice(i, i + size);
+        const chunk = 24;
+        for (let i = 0; i < text.length; i += chunk) {
+          full += text.slice(i, i + chunk);
           setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
           await new Promise(r => setTimeout(r, 16));
         }
       };
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const dataLines = parser.parseChunk(value);
-          for (const data of dataLines) {
-            const obj = parseSSEMessage(data);
+      const startTime = Date.now();
+      let doneFlag = false;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const dataLines = parser.parseChunk(value);
+        for (const data of dataLines) {
+          const obj = parseSSEMessage(data);
             if (!obj) continue;
-            if (obj.done === true) {
-              // Flush for instant mode
-              if (streamingMode !== 'smooth' && full) {
-                setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
-              }
-              // Let realtime update, then refresh cache
-              setTimeout(() => {
-                if (currentChatId) {
-                  queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
-                  if (user?.id) queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
-                }
-                setRegeneratingContentById(prev => {
-                  const { [aiMessageId]: _, ...rest } = prev; return rest;
-                });
-              }, 300);
-              return;
-            }
-            if (typeof obj?.content === 'string' && obj.content) {
-              await scheduleAppend(obj.content);
-            } else if (obj?.choices?.[0]?.delta?.content) {
-              await scheduleAppend(obj.choices[0].delta.content as string);
-            }
-          }
+            if (obj.done === true) { doneFlag = true; if (streamingMode === 'instant' && full) setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full })); break; }
+            if (typeof obj?.content === 'string') await scheduleAppend(obj.content);
+            else if (obj?.choices?.[0]?.delta?.content) await scheduleAppend(obj.choices[0].delta.content as string);
         }
-      } catch (e) {
-        throw e;
+        if (doneFlag) break;
+        if (Date.now() - startTime > 30000) { console.warn('Regeneration stream timeout'); break; }
+      }
+      // Ensure full content is stored in override (final streamed text)
+      if (full) {
+        setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
+      }
+
+      // Optimistically patch React Query cache so the updated content appears immediately
+      if (currentChatId && full) {
+        const key = queryKeys.chat.messages(currentChatId);
+        queryClient.setQueryData(key, (old: any) => {
+          if (!old) return old;
+            // Support both paginated (infinite) and flat shapes
+            if (Array.isArray(old)) {
+              return old.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m);
+            }
+            if (old.pages) {
+              return {
+                ...old,
+                pages: old.pages.map((p: any) => ({
+                  ...p,
+                  messages: p.messages?.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
+                }))
+              };
+            }
+            if (old.messages) {
+              return {
+                ...old,
+                messages: old.messages.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
+              };
+            }
+          return old;
+        });
+      }
+
+      // Schedule override removal shortly after optimistic patch so pulse/animation stops
+      setTimeout(() => {
+        setRegeneratingContentById(prev => {
+          if (!(aiMessageId in prev)) return prev;
+          const { [aiMessageId]: _, ...rest } = prev;
+          return rest;
+        });
+      }, 300);
+
+      // Background invalidate to reconcile with backend authoritative state (non-blocking)
+      if (currentChatId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
+        if (user?.id) queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
       }
     } catch (err: any) {
       console.error('Regenerate failed:', err);
-      setRegeneratingContentById(prev => {
-        const { [aiMessageId]: _, ...rest } = prev; return rest;
+      // Clear override on failure
+      setRegeneratingContentById(prev => { 
+        const { [aiMessageId]: _, ...rest } = prev; 
+        return rest; 
       });
-      if (err?.message?.includes('credits')) setShowInsufficientCreditsModal(true);
-      else toast({ title: 'Error', description: err.message || 'Failed to regenerate message', variant: 'destructive' });
+      if (err?.message?.includes('credits')) {
+        setShowInsufficientCreditsModal(true);
+      } else {
+        toast({ 
+          title: 'Error', 
+          description: err.message || 'Failed to regenerate message', 
+          variant: 'destructive' 
+        });
+      }
     }
   }, [user, currentChatId, creditsBalance, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, character.id, streamingMode, queryClient, toast]);
+
+  // Reconcile regeneration overrides: clear when message matches or vanished or timeout
+  useEffect(() => {
+    if (!messages || !messages.length) return;
+    setRegeneratingContentById(prev => {
+      if (!prev || Object.keys(prev).length === 0) return prev;
+      let changed = false;
+      const next = { ...prev };
+      for (const id of Object.keys(prev)) {
+        const msg = (messages as any).find((m: any) => m.id === id);
+        const override = prev[id];
+        if (!msg) { delete next[id]; changed = true; continue; }
+        // If backend content now equals our override (final persisted) OR backend has any content while override was placeholder
+        if ((override === '' && msg.content && msg.content.length > 0) || (override && msg.content === override)) {
+          delete next[id]; changed = true; continue; }
+        // Safety timeout (25s)
+        const started = regenerationStartRef.current[id];
+        if (started && Date.now() - started > 25000) { delete next[id]; changed = true; continue; }
+      }
+      return changed ? next : prev;
+    });
+  }, [messages]);
 
   // Keep latest regenerate function in a ref to avoid stale closures in global event listeners
   const regenerateLastAIRef = useRef(regenerateLastAI);
@@ -1089,38 +1165,60 @@ const ChatInterface = ({
           )}
         </div>
 
-        {/* Typing Indicator (thin) */}
-        <div className="px-2 sm:px-3 py-1 flex items-center">
-          <div 
-            className={`flex items-center space-x-2 text-gray-400 transition-all duration-300 ${
-              (isTyping || isStreaming) ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
-            }`}
-          >
-            <div className="flex space-x-1">
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-            </div>
-            <span className="text-sm sm:text-base">
-              {(() => {
-                const raw = isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`;
-                return raw.length > 50 ? raw.slice(0,47) + '…' : raw;
-              })()}
-            </span>
-          </div>
-        </div>
-
-        {/* Input Area */}
+        {/* Input & Typing Indicator Container (anchored bottom) */}
         <div className="p-3 sm:p-4 bg-transparent">
-          <form onSubmit={handleSendMessage} className="flex items-center gap-2 sm:gap-3">
+          <div className="flex flex-col gap-1">
+            <div
+              aria-live="polite"
+              role="status"
+              className={`flex items-center gap-2 text-gray-400 px-1 transition-all duration-200 ease-out origin-bottom ${
+                (isTyping || isStreaming)
+                  ? 'opacity-100 h-5 translate-y-0'
+                  : 'opacity-0 h-0 -translate-y-1 pointer-events-none'
+              }`}
+            >
+              <div className="flex space-x-1">
+                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.12s' }}></div>
+                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.24s' }}></div>
+              </div>
+              <span className="text-xs sm:text-sm select-none">
+                {isStreaming ? `${character.name} is responding...` : `${character.name} is typing...`}
+              </span>
+            </div>
+            <form onSubmit={handleSendMessage} className="flex items-end gap-2 sm:gap-3">
             <div className="flex-1 backdrop-blur-md bg-black/30 border border-white/10 rounded-xl px-3 sm:px-4 py-2 sm:py-3 shadow-lg shadow-black/30">
-              <input
-                ref={inputRef}
-                type="text"
+              <textarea
+                ref={inputRef as React.RefObject<HTMLTextAreaElement>}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => {
+                  setInputValue(e.target.value);
+                  // Auto-grow (reset height then set to scrollHeight)
+                  const el = e.currentTarget;
+                  el.style.height = 'auto';
+                  el.style.height = Math.min(el.scrollHeight, 180) + 'px'; // cap ~6 lines
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    // Send message on Enter (like WhatsApp); Shift+Enter inserts newline
+                    e.preventDefault();
+                    // Trigger form submit
+                    (e.currentTarget.closest('form') as HTMLFormElement)?.requestSubmit();
+                  }
+                }}
+                onFocus={() => { userDismissedKeyboardRef.current = false; }}
+                onBlur={() => {
+                  if (!programmaticFocusRef.current) {
+                    userDismissedKeyboardRef.current = true;
+                  }
+                }}
                 placeholder={`Message ${character.name.length > 40 ? character.name.slice(0,37) + '…' : character.name}...`}
-                className="w-full bg-transparent outline-none text-sm sm:text-base text-white placeholder-gray-300"
+                rows={1}
+                autoComplete="off"
+                autoCorrect="on"
+                autoCapitalize="sentences"
+                inputMode="text"
+                className={`w-full bg-transparent outline-none resize-none overflow-y-auto leading-relaxed ${fontSizeClass} text-white placeholder-gray-300 max-h-[180px]`}
                 disabled={isTyping || isCreatingChat || sendingFirstMessage}
               />
             </div>
@@ -1131,7 +1229,8 @@ const ChatInterface = ({
             >
               <Send className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
-          </form>
+            </form>
+          </div>
         </div>
 
         {/* Modals */}
