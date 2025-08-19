@@ -97,13 +97,23 @@ globalThis.Deno.serve(async (req) => {
     // REQUEST PARSING & VALIDATION
     // ============================================================================
   console.log('📥 Parsing request body (body size guarded)...');
-    let rawBody: any;
+  let rawBody: any;
     try {
       rawBody = await req.json();
     } catch {
       return createErrorResponse('Invalid JSON body', 400);
     }
     sanitizePayload(rawBody);
+    // Backward compatibility shim: legacy clients may send characterId + characterName instead of charactersData
+    if (rawBody && typeof rawBody === 'object') {
+      if (!rawBody.charactersData && rawBody.characterId && rawBody.characterName) {
+        rawBody.charactersData = [{ id: rawBody.characterId, name: rawBody.characterName }];
+      }
+      // Some even older versions used just characterId and we infer name later – supply placeholder
+      if (!rawBody.charactersData && rawBody.characterId) {
+        rawBody.charactersData = [{ id: rawBody.characterId, name: 'Unknown' }];
+      }
+    }
     const parsed = safeParse(chatRequestUnion, rawBody);
     if (parsed.success === false) {
       return createErrorResponse(`Invalid request: ${parsed.error}`, 400);

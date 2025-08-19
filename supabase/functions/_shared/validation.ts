@@ -111,17 +111,40 @@ export const baseChatRequestSchema = z.object({
   client_ts: z.number().int().positive().optional(),
 });
 
+// Shared minimal character descriptor used by current edge function handlers.
+const characterDescriptorSchema = z.object({
+  id: z.string().uuid(),
+  name: safeText(1, 200),
+  // Optional descriptive fields (kept permissive – trimmed & size‑bounded by sanitizePayload)
+  description: safeText(1, 4000).optional(),
+  image_url: z.string().url().optional(),
+  scenario: safeText(1, 4000).optional(),
+  example_conversations: safeText(1, 8000).optional(),
+  voice_id: safeText(1, 200).optional(),
+  creator_notes: safeText(1, 4000).optional(),
+  creator_id: z.string().uuid().optional(),
+  is_nsfw: z.boolean().optional(),
+  personality: safeText(1, 8000).optional(),
+  first_message: safeText(1, 4000).optional(),
+  message_example: safeText(1, 8000).optional(),
+  context: safeText(1, 8000).optional(),
+  scenario_context: safeText(1, 8000).optional(),
+}).strip();
+
+const charactersDataSchema = z.array(characterDescriptorSchema).min(1).max(5); // hard cap to avoid huge payloads
+
 export const createBasicChatSchema = baseChatRequestSchema.extend({
   operation: z.literal('create-basic'),
-  characterId: z.string().uuid(),
-  initialMessage: safeText(1, 4000).optional(),
+  charactersData: charactersDataSchema,
+  selectedPersonaId: z.string().uuid().nullable().optional(),
 });
 
 export const createWithGreetingSchema = baseChatRequestSchema.extend({
   operation: z.literal('create-with-greeting'),
-  characterId: z.string().uuid(),
-  greetingTemplate: safeText(1, 8000),
-  userIntro: safeText(1, 4000).optional(),
+  charactersData: charactersDataSchema,
+  greeting: safeText(1, 8000).optional(), // matches handler expectation (greeting?)
+  selectedPersonaId: z.string().uuid().nullable().optional(),
+  chatMode: z.enum(['storytelling', 'companion']).optional(),
 });
 
 export const sendMessageSchema = baseChatRequestSchema.extend({
