@@ -1,24 +1,12 @@
 import { supabase } from '@/integrations/supabase/client'
 import type { Profile, Character, Plan, Subscription, Credits, Chat, Message, OnboardingChecklistItem, UserOnboardingProgress } from '@/types/database'
 import { getUserPersonas } from '@/lib/persona-operations'
+import type { SearchParams } from '@/types/search'
 
 // =============================================================================
-// SEARCH INTERFACES
+// SEARCH INTERFACES (relocated to @/types/search)
 // =============================================================================
-
-export interface SearchParams {
-  searchQuery?: string;
-  sortBy: string;
-  filters: {
-    tags?: string[];
-    creator?: string;
-    nsfw?: boolean;
-    gender?: string;
-  };
-  limit: number;
-  offset: number;
-}
-
+// SearchResult kept locally for generic typing
 export interface SearchResult<T> {
   data: T[];
   total: number;
@@ -36,24 +24,24 @@ const fetchOnce = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
 };
 
 // =============================================================================
-// MONETIZATION QUERIES - Plans, Models, Credit Packs
+// MONETIZATION QUERIES - Plans, Models, Credit Packs (snapshot-first; legacy removed)
 // =============================================================================
 
 /**
- * Get all active subscription plans
+ * Get all active subscription plans (new canonical table: plans)
+ * NOTE: Prefer using snapshot (bootstrapStore.subscription.plan) for the current user's plan.
  */
 export const getActivePlans = async () => {
   const { data, error } = await supabase
     .from('plans')
     .select('*')
     .eq('is_active', true)
-    .order('price_monthly', { ascending: true })
-
-  return { data, error }
-}
+    .order('price_monthly', { ascending: true });
+  return { data, error };
+};
 
 /**
- * Get all active AI models
+ * Get all active AI models (joins to min required plan by new plans table)
  */
 export const getActiveModels = async () => {
   const { data, error } = await supabase
@@ -63,43 +51,43 @@ export const getActiveModels = async () => {
       min_plan:plans(name, price_monthly)
     `)
     .eq('is_active', true)
-    .order('credit_multiplier', { ascending: true })
-
-  return { data, error }
-}
+    .order('credit_multiplier', { ascending: true });
+  return { data, error };
+};
 
 /**
- * Get all active credit packs
+ * Get all active credit packs (unchanged)
  */
 export const getActiveCreditPacks = async () => {
   const { data, error } = await supabase
     .from('credit_packs')
     .select('*')
     .eq('is_active', true)
-    .order('price', { ascending: true })
-
-  return { data, error }
-}
+    .order('price', { ascending: true });
+  return { data, error };
+};
 
 /**
- * Get user's current active subscription
+ * (Deprecated shim) Get user's current active subscription.
+ * Snapshot (bootstrapStore.subscription) should be used. This now queries new canonical tables only
+ * if snapshot not yet hydrated.
  */
 export const getUserActiveSubscription = async (userId: string) => {
   return fetchOnce(`active-subscription:${userId}`, async () => {
-    const { data, error } = await supabase
+    const { bootstrapStore } = await import('@/state/bootstrap-store');
+    if (bootstrapStore.subscription && bootstrapStore.userId === userId) {
+      return { data: bootstrapStore.subscription, error: null } as any;
+    }
+    const { data: sub, error } = await supabase
       .from('subscriptions')
-      .select(`
-        *,
-        plan:plans(*)
-      `)
+      .select(`id, user_id, plan_id, status, current_period_end, created_at, plan:plans(*)`)
       .eq('user_id', userId)
-      .eq('status', 'active')
+      .in('status', ['active','trialing'])
       .order('created_at', { ascending: false })
       .limit(1)
-      .maybeSingle()
-
-    return { data, error }
-  })
+      .maybeSingle();
+    return { data: sub, error };
+  });
 }
 
 // =============================================================================
@@ -122,17 +110,21 @@ export const getPublicProfile = async (userId: string) => {
   })
 }
 
-/**
- * Get complete profile data (only for the current user's own profile)
- */
+// DEPRECATED: getPrivateProfile removed in favor of snapshot (BootstrapStore.profile)
+// Attempted legacy imports should be migrated. Keeping shim for transitional compatibility.
 export const getPrivateProfile = async (userId: string) => {
+  console.warn('[deprecated] getPrivateProfile: use bootstrap store profile instead');
+  const { bootstrapStore } = await import('@/state/bootstrap-store');
+  if (bootstrapStore.profile && bootstrapStore.profile.id === userId) {
+    return { data: bootstrapStore.profile, error: null } as any;
+  }
+  // Fallback minimal fetch (should not normally occur)
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', userId)
-    .maybeSingle()
-
-  return { data, error }
+    .maybeSingle();
+  return { data, error };
 }
 
 /**
@@ -158,22 +150,6 @@ export const updateProfile = async (userId: string, updates: Partial<Profile>) =
  */
 const inFlightPublicCharacters = new Map<string, Promise<any>>();
 
-// Helper to map rows from character_profile_view adding creator profile in batch
-async function hydrateCharacterProfiles(rows: any[]) {
-  if (!rows.length) return [];
-  const creatorIds = [...new Set(rows.map(r => r.creator_id))];
-  const { data: creators } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url')
-    .in('id', creatorIds);
-  const creatorsMap = new Map((creators || []).map(c => [c.id, c]));
-  return rows.map(r => ({
-    ...r,
-    creator: creatorsMap.get(r.creator_id) || null,
-    tags: (r.tags || []).map((t: any) => t),
-  }));
-}
-
 export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = true) => {
   const key = JSON.stringify({ limit, offset, nsfwEnabled });
   if (inFlightPublicCharacters.has(key)) return inFlightPublicCharacters.get(key)!;
@@ -185,10 +161,9 @@ export const getPublicCharacters = async (limit = 20, offset = 0, nsfwEnabled = 
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
     if (error || !data) return { data: [], error };
-    let rows: any[] = data as any[]; // cast to any for computed view columns
+    let rows = data as any[];
     if (!nsfwEnabled) rows = rows.filter(r => !r.is_nsfw);
-    const hydrated = await hydrateCharacterProfiles(rows);
-    return { data: hydrated, error: null };
+    return { data: rows, error: null };
   })();
   inFlightPublicCharacters.set(key, p);
   try { return await p; } finally { inFlightPublicCharacters.delete(key); }
@@ -241,21 +216,17 @@ export const searchPublicCharacters = async (params: SearchParams): Promise<Sear
     query = query.range(offset, offset + limit - 1);
     const { data, error, count } = await query;
     if (error || !data) return { data: [], total: 0, hasMore: false, error };
-    let rows: any[] = data as any[]; // cast to any for view-specific fields
+    let rows = data as any[];
     if (filters.nsfw === false) rows = rows.filter(r => !r.is_nsfw);
     if (filters.tags && filters.tags.length) {
       rows = rows.filter(r => (r.tag_names || []).some((t: string) => filters.tags!.includes(t)));
     }
-    const hydrated = await hydrateCharacterProfiles(rows);
-
-    // Post-sort override (if needed for conversations which is already sorted by chats_count server-side)
     if (sortBy === 'conversations') {
-      hydrated.sort((a, b) => (b.chats_count || 0) - (a.chats_count || 0));
+      rows.sort((a, b) => (b.chats_count || 0) - (a.chats_count || 0));
     }
-
     const total = count || 0;
     const hasMore = offset + limit < total;
-    return { data: hydrated, total, hasMore };
+    return { data: rows, total, hasMore };
   })();
   inFlightSearchPublicCharacters.set(key, prom);
   try { return await prom; } finally { inFlightSearchPublicCharacters.delete(key); }
@@ -279,67 +250,22 @@ export const getUserCharacters = async (userId: string) => {
  * Get character with full details (respects visibility rules)
  */
 export const getCharacterDetails = async (characterId: string) => {
-
   const { data, error } = await supabase
-    .from('characters')
-    .select(`
-      id,
-      name,
-      short_description,
-      tagline,
-      avatar_url,
-      visibility,
-      interaction_count,
-      created_at,
-      creator_id
-    `)
+    .from('character_profile_view')
+    .select('*')
     .eq('id', characterId)
-    .maybeSingle()
-
+    .maybeSingle();
   if (error || !data) {
-    console.error('❌ Failed to fetch character:', error)
-    return { data: null, error }
+    return { data: null, error };
   }
-
-  // Fetch creator profile separately
-  const { data: creatorData, error: creatorError } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url')
-    .eq('id', data.creator_id)
-    .maybeSingle()
-
-  console.log('👤 Creator query result:', { creatorData, creatorError })
-
-  // Fetch character definition separately
-  const { data: definitionData, error: definitionError } = await supabase
-    .from('character_definitions')
-    .select('greeting, description, personality_summary, scenario')
-    .eq('character_id', characterId)
-    .maybeSingle()
-
-  console.log('📄 Definition query result:', { definitionData, definitionError })
-
-  // Fetch character tags separately
-  const { data: tagsData, error: tagsError } = await supabase
-    .from('character_tags')
-    .select(`
-      tag:tags(id, name)
-    `)
-    .eq('character_id', characterId)
-
-  console.log('🏷️ Tags query result:', { tagsData, tagsError })
-
-  // Combine the data
-  const characterWithDetails = {
-    ...data,
-    creator: creatorData,
-    character_definitions: definitionData,
-    definition: definitionData ? [definitionData] : [],
-    tags: tagsData?.map(t => t.tag).filter(Boolean) || []
-  }
-
-
-  return { data: characterWithDetails, error: null }
+  const row: any = data as any; // view-specific dynamic fields
+  const enriched = {
+    ...row,
+    creator: row.creator_username ? { id: row.creator_id, username: row.creator_username, avatar_url: row.creator_avatar_url } : null,
+    definition: row.personality_summary || row.greeting ? [{ greeting: row.greeting, personality_summary: row.personality_summary }] : [],
+    tags: row.tags || []
+  };
+  return { data: enriched, error: null };
 }
 
 // Helper: fetch sticky publish flag without strict typing constraints
@@ -394,50 +320,26 @@ export const createCharacter = async (userId: string, characterData: {
 }
 
 // =============================================================================
-// BILLING QUERIES
+// BILLING QUERIES (legacy removed in favor of snapshot + canonical tables)
 // =============================================================================
 
 /**
- * Get available subscription plans
+ * (Removed legacy) getSubscriptionPlans => use getActivePlans.
+ * (Removed legacy) getUserSubscription => use snapshot or getUserActiveSubscription.
+ * (Removed legacy) getUserCredits => use bootstrapStore.credits (snapshot) or direct 'credits' table.
  */
-export const getSubscriptionPlans = async () => {
-  const { data, error } = await supabase
-    .from('plans')
-    .select('*')
-    .eq('is_active', true)
-    .order('price_monthly', { ascending: true })
 
-  return { data: data || [], error }
-}
+// DEPRECATED: getUserSubscription replaced by snapshot (BootstrapStore.subscription)
+export const getUserSubscription = async (_userId: string) => {
+  console.warn('[removed] getUserSubscription: use bootstrap snapshot instead');
+  return { data: null, error: null } as any;
+};
 
-/**
- * Get user's current subscription
- */
-export const getUserSubscription = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .select(`
-      *,
-      plan:plans(*)
-    `)
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  return { data, error }
-}
-
-/**
- * Get user's credit balance
- */
-export const getUserCredits = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('credits')
-    .select('balance')
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  return { data, error }
-}
+// DEPRECATED: getUserCredits replaced by snapshot (BootstrapStore.credits.balance)
+export const getUserCredits = async (_userId: string) => {
+  console.warn('[removed] getUserCredits: use bootstrap snapshot instead');
+  return { data: null, error: null } as any;
+};
 
 // =============================================================================
 // ONBOARDING QUERIES
@@ -697,14 +599,19 @@ export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder:
 /**
  * Consume credits for a user
  */
-export async function consumeCredits(userId: string, credits: number): Promise<{ data: boolean | null, error: any }> {
+export async function consumeCredits(userId: string, credits: number): Promise<{ data: { success: boolean; balance: number } | null, error: any }> {
   const { data, error } = await supabase
     .rpc('consume_credits', { 
       user_id_param: userId,
       credits_to_consume: credits 
-    })
+    });
 
-  return { data, error }
+  if (error) return { data: null, error };
+
+  // Normalize response (data should already be JSON object from RPC)
+  const success = !!(data as any)?.success;
+  const balance = (data as any)?.balance ?? null;
+  return { data: { success, balance }, error: null };
 }
 
 /**
@@ -730,180 +637,9 @@ export async function getMonthlyCreditsUsage(userId: string): Promise<{ data: { 
 }
 
 // =============================================================================
-// WORLD INFO QUERIES
+// WORLD INFO QUERIES (legacy removed - use snapshots & hooks)
 // =============================================================================
-
-/**
- * DEPRECATED: getPublicWorldInfos replaced by world info snapshot RPC
- */
-export const getPublicWorldInfos = async (limit = 20, offset = 0) => {
-  const { getWorldInfoSnapshot } = await import('@/lib/snapshots');
-  const snap = await getWorldInfoSnapshot(null, limit, offset);
-  return { data: snap?.public || [], error: null };
-}
-
-/**
- * Enhanced world info search with server-side filtering and pagination
- */
-export const searchPublicWorldInfos = async (params: SearchParams): Promise<SearchResult<any>> => {
-  const { searchQuery, sortBy, filters, limit, offset } = params;
-
-  // Build the base query
-  let query = supabase
-    .from('world_infos')
-    .select(`
-      id,
-      name,
-      short_description,
-      interaction_count,
-      created_at,
-      creator_id
-    `, { count: 'exact' })
-    .eq('visibility', 'public');
-
-  // Apply text search if provided
-  if (searchQuery && searchQuery.trim()) {
-    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
-  }
-
-  // Apply creator filter if specified
-  if (filters.creator && filters.creator.trim()) {
-    // First get creator IDs that match the username
-    const { data: creators } = await supabase
-      .from('profiles')
-      .select('id')
-      .ilike('username', `%${filters.creator}%`);
-    
-    if (creators && creators.length > 0) {
-      const creatorIds = creators.map(c => c.id);
-      query = query.in('creator_id', creatorIds);
-    } else {
-      // No matching creators found, return empty result
-      return { data: [], total: 0, hasMore: false };
-    }
-  }
-
-  // Apply sorting
-  switch (sortBy) {
-    case 'newest':
-      query = query.order('created_at', { ascending: false });
-      break;
-    case 'conversations':
-    case 'popular':
-    default:
-      query = query.order('interaction_count', { ascending: false });
-      break;
-  }
-
-  // Apply pagination
-  query = query.range(offset, offset + limit - 1);
-
-  const { data, error, count } = await query;
-
-  if (error || !data) {
-    return { data: [], total: 0, hasMore: false, error };
-  }
-
-  let filteredData = data;
-
-  // Apply NSFW filtering based on tags
-  if (filters.nsfw === false) {
-    // User has NSFW disabled - exclude world infos with NSFW tag
-    const { data: nsfwWorldInfos } = await supabase
-      .from('world_info_tags')
-      .select('world_info_id')
-      .eq('tag_id', 24); // NSFW tag ID
-
-    if (nsfwWorldInfos && nsfwWorldInfos.length > 0) {
-      const nsfwWorldInfoIds = new Set(nsfwWorldInfos.map(w => w.world_info_id));
-      filteredData = filteredData.filter(worldInfo => !nsfwWorldInfoIds.has(worldInfo.id));
-    }
-  }
-  // If NSFW is true, show all content (no filtering needed)
-
-  // If we have tag filters, we need to filter by tags
-  if (filters.tags && filters.tags.length > 0) {
-    // Get world infos that have at least one of the specified tags
-    const { data: worldInfoTags } = await supabase
-      .from('world_info_tags')
-      .select(`
-        world_info_id,
-        tag:tags(name)
-      `)
-      .in('world_info_id', filteredData.map(w => w.id));
-
-    const worldInfosWithTags = new Set<string>();
-    worldInfoTags?.forEach(wt => {
-      if (wt.tag && filters.tags!.includes(wt.tag.name)) {
-        worldInfosWithTags.add(wt.world_info_id);
-      }
-    });
-
-    filteredData = filteredData.filter(w => worldInfosWithTags.has(w.id));
-  }
-
-  // Fetch additional data for filtered world infos
-  const worldInfosWithDetails = await Promise.all(
-    filteredData.map(async (worldInfo) => {
-      // Get creator profile
-      const { data: creatorData } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('id', worldInfo.creator_id)
-        .maybeSingle();
-
-      // Get likes count
-      const { count: likesCount } = await supabase
-        .from('world_info_user_likes')
-        .select('*', { count: 'exact' })
-        .eq('world_info_id', worldInfo.id);
-
-      // Get favorites count
-      const { count: favoritesCount } = await (supabase as any)
-        .from('world_info_favorites')
-        .select('id', { count: 'exact' })
-        .eq('world_info_id', worldInfo.id);
-
-      // Get usage count (how many users are using this world info)
-      const { count: usageCount } = await supabase
-        .from('world_info_users')
-        .select('id', { count: 'exact' })
-        .eq('world_info_id', worldInfo.id);
-
-      // Get world info tags
-      const { data: tagsData } = await supabase
-        .from('world_info_tags')
-        .select(`
-          tag:tags(id, name)
-        `)
-        .eq('world_info_id', worldInfo.id);
-
-      return {
-        ...worldInfo,
-        creator: creatorData,
-        likes_count: likesCount || 0,
-        favorites_count: favoritesCount || 0,
-        usage_count: usageCount || 0,
-        tags: tagsData?.map(t => t.tag).filter(Boolean) || []
-      };
-    })
-  );
-
-  // Apply conversations/usage sorting if specified (now that we have usage counts)
-  if (sortBy === 'conversations') {
-    worldInfosWithDetails.sort((a, b) => b.usage_count - a.usage_count);
-  }
-
-  const total = count || 0;
-  const hasMore = offset + limit < total;
-
-  return {
-    data: worldInfosWithDetails,
-    total,
-    hasMore
-  };
-}
-
+// Removed getPublicWorldInfos & searchPublicWorldInfos in favor of snapshot-driven hooks.
 // =============================================================================
 // CHARACTER FAVORITES QUERIES
 // =============================================================================
@@ -980,12 +716,10 @@ export const getUserFavorites = async (userId: string) => {
 
   // Preserve the favorite order
   const orderMap = new Map(ids.map((id, idx) => [id, idx]));
-  const sorted = [...rows].sort(
+  const sortedFavorites = [...rows].sort(
     (a: any, b: any) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0)
   );
-
-  // Return as-is (view already provides creator, tags, and counters)
-  return { data: sorted, error: null };
+  return { data: sortedFavorites, error: null };
 }
 
 /**
@@ -993,84 +727,30 @@ export const getUserFavorites = async (userId: string) => {
  */
 export const getRecommendedCharacters = async (tags: string[], limit = 4) => {
   try {
-    let charactersQuery = supabase
-      .from('characters')
-      .select(`
-        id,
-        name,
-        short_description,
-        avatar_url,
-        interaction_count,
-        created_at,
-        character_definitions!inner(greeting)
-      `)
+    let query = supabase
+      .from('character_profile_view')
+      .select('*')
       .eq('visibility', 'public');
 
-    if (tags.length > 0) {
-      const { data: tagIds } = await supabase
-        .from('tags')
-        .select('id')
-        .in('name', tags);
-      if (tagIds && tagIds.length > 0) {
-        const { data: characterIds } = await supabase
-          .from('character_tags')
-          .select('character_id')
-          .in('tag_id', tagIds.map(tag => tag.id));
-        if (characterIds && characterIds.length > 0) {
-          charactersQuery = charactersQuery.in('id', characterIds.map(ct => ct.character_id));
-        }
-      }
-    }
-
-    const { data: characters, error } = await charactersQuery
-      .order('interaction_count', { ascending: false })
-      .limit(limit);
-    if (error) throw error;
-
-    let finalCharacters = characters || [];
-
-    if (!finalCharacters || finalCharacters.length < limit) {
-      const { data: popularCharacters, error: popularError } = await supabase
-        .from('characters')
-        .select(`
-          id,
-          name,
-          short_description,
-          avatar_url,
-          interaction_count,
-          created_at,
-          character_definitions!inner(greeting)
-        `)
-        .eq('visibility', 'public')
+    if (tags.length) {
+      // Filter client-side after fetch if small limit: fetch a little extra
+      const fetchLimit = Math.min(limit * 3, 60);
+      query = query.order('interaction_count', { ascending: false }).limit(fetchLimit);
+      const { data, error } = await query;
+      if (error || !data) return { data: [], error };
+      const filtered = (data as any[]).filter(r => (r.tag_names || []).some((t: string) => tags.includes(t)))
+        .slice(0, limit);
+      const finalRows = filtered.length ? filtered : data.slice(0, limit);
+      return { data: finalRows, error: null };
+    } else {
+      const { data, error } = await query
         .order('interaction_count', { ascending: false })
         .limit(limit);
-      if (popularError) throw popularError;
-      const existingIds = new Set(finalCharacters.map(c => c.id));
-      popularCharacters?.forEach(char => {
-        if (!existingIds.has(char.id) && finalCharacters.length < limit) {
-          finalCharacters.push(char);
-        }
-      });
+      return { data: data || [], error };
     }
-
-    if (finalCharacters.length === 0) return { data: [], error: null };
-
-    // Batch likes counts
-    const { data: likesRows } = await supabase
-      .from('character_likes')
-      .select('character_id, id')
-      .in('character_id', finalCharacters.map(c => c.id));
-    const likeCounts = new Map<string, number>();
-    (likesRows||[]).forEach(r => likeCounts.set(r.character_id, (likeCounts.get(r.character_id)||0)+1));
-    const charactersWithCounts = finalCharacters.map(c => ({
-      ...c,
-      likes_count: likeCounts.get(c.id) || 0,
-    }));
-
-    return { data: charactersWithCounts.slice(0, limit), error: null };
   } catch (error) {
-    console.error('Error getting recommended characters:', error)
-    return { data: [], error }
+    console.error('Error getting recommended characters:', error);
+    return { data: [], error };
   }
 };
 
@@ -1171,3 +851,5 @@ export const deletePrivateCharacter = async (characterId: string) => {
     return { error: e };
   }
 };
+
+// TODO: Implement server-side world info search RPC (get_world_info_search_snapshot) and remove client-side filtering in useWorldInfos.

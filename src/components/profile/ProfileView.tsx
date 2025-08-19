@@ -502,3 +502,5 @@ export const ProfileView = () => {
     </div>
   );
 };
+
+// LEGACY: This component is deprecated and will be removed. Use NewProfileView.

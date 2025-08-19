@@ -1,7 +1,7 @@
 -- get_user_snapshot RPC: returns consolidated user dashboard data
 -- Safe for authenticated user only (enforces user id match via SECURITY DEFINER + RLS checks inside)
 -- Includes: profile (private), subscription+plan, credits balance, counts (characters, chats, favorites),
--- lightweight character summaries, personas list.
+-- lightweight character summaries, personas list, favorite character ids.
 
 create or replace function public.get_user_snapshot(p_user_id uuid)
 returns json
@@ -18,6 +18,7 @@ declare
   v_counts json;
   v_favorites_count int;
   v_chats_count int;
+  v_favorite_ids json;
 begin
   -- Basic auth check (ensure caller is same user)
   if auth.uid() is distinct from p_user_id then
@@ -57,11 +58,26 @@ begin
     limit 100 -- safety cap
   ) x;
 
-  select json_agg(row_to_json(pn)) into v_personas
-  from personas pn
-  where pn.user_id = p_user_id
-  order by pn.updated_at desc
-  limit 100;
+  -- FIX: use subquery for personas to apply order/limit before aggregation
+  select json_agg(row_to_json(pn_sub)) into v_personas
+  from (
+    select pn.id, pn.user_id, pn.name, pn.bio, pn.lore, pn.avatar_url,
+           pn.created_at, pn.updated_at
+    from personas pn
+    where pn.user_id = p_user_id
+    order by pn.updated_at desc
+    limit 100
+  ) pn_sub;
+
+  select json_agg(row_to_json(f)) into v_favorite_ids
+  from (
+    select cf.character_id as id, cf.created_at
+    from character_favorites cf
+    join characters c on c.id = cf.character_id and c.visibility = 'public'
+    where cf.user_id = p_user_id
+    order by cf.created_at desc
+    limit 200
+  ) f;
 
   v_counts := json_build_object(
     'favorites', coalesce(v_favorites_count,0),
@@ -76,7 +92,8 @@ begin
     'credits', coalesce(v_credits,0),
     'counts', v_counts,
     'characters', coalesce(v_characters,'[]'::json),
-    'personas', coalesce(v_personas,'[]'::json)
+    'personas', coalesce(v_personas,'[]'::json),
+    'favorite_character_ids', coalesce(v_favorite_ids,'[]'::json)
   );
 end;
 $$;

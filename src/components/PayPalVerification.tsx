@@ -93,7 +93,7 @@ export const PayPalVerification = () => {
 
           // Invalidate user credits/profile to reflect new plan/credits
           if (user?.id) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+            // Removed credits invalidate; profile invalidation sufficient
             queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
           }
           

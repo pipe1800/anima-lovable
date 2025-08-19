@@ -41,8 +41,7 @@ export const getWorldInfoSnapshot = async (userId: string | null, limit = 24, of
 // Helper to seed user snapshot into react-query cache
 export const seedUserSnapshot = (qc: any, userId: string, snap: UserSnapshot) => {
   qc.setQueryData(queryKeys.user.profile(userId), snap.profile);
-  qc.setQueryData(queryKeys.user.subscription(userId), snap.subscription);
-  qc.setQueryData(queryKeys.user.credits(userId), snap.credits);
+  // subscription & credits now snapshot-store only; no react-query keys
   qc.setQueryData(queryKeys.user.characters(userId), snap.characters || []);
   qc.setQueryData(queryKeys.user.favorites(userId), []); // counts only; detailed favorites loaded lazily
   qc.setQueryData(queryKeys.personas.list(userId), snap.personas || []);

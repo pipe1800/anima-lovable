@@ -59,6 +59,7 @@ import {
   Eye,
   Trash2
 } from 'lucide-react';
+import { useCredits, useSubscriptionInfo, getBootstrapState, useSnapshotLoading, ensureSnapshotLoaded } from '@/state/bootstrap-store';
 
 export function DashboardContent() {
   const { user, profile, loading: authLoading, subscription: authSubscription } = useAuth();
@@ -92,44 +93,41 @@ export function DashboardContent() {
   
   // Use single aggregated dashboard hook
   const { data: dashboardData, isLoading: dashboardLoading, error: dashboardError, refetch: refetchDashboard } = useDashboardData();
-
-  // Chats now sourced separately via paginated hook; keep existing useUserChatsPaginated for recent chats
+  const { balance } = useCredits();
+  const { subscription: snapshotSubscription } = useSubscriptionInfo();
+  const { loaded: snapshotLoaded, loading: snapshotLoading } = useSnapshotLoading();
+  const subscription = snapshotSubscription; // ensure defined before use
+  useEffect(() => { console.log('[Dashboard] flags', { authLoading, snapshotLoading, snapshotLoaded }); }, [authLoading, snapshotLoading, snapshotLoaded]);
+  // Kick off snapshot if somehow not started
+  useEffect(() => {
+    if (user && !snapshotLoaded && !snapshotLoading) {
+      console.log('[Dashboard] forcing ensureSnapshotLoaded');
+      ensureSnapshotLoaded();
+    }
+  }, [user, snapshotLoaded, snapshotLoading]);
+  // Updated debug logging: log whenever credits or subscription change AFTER hydration
+  useEffect(() => {
+    if (!snapshotLoading) {
+      const st: any = getBootstrapState();
+      console.log('[Dashboard Debug] post-hydrate', {
+        credits: st.credits,
+        subscription: st.subscription?.plan?.name,
+        status: st.subscription?.status,
+        loaded: st.loaded,
+      });
+    }
+  }, [balance, subscription, snapshotLoading]);
   const { data: chatsData, isLoading: chatsLoading, error: chatsError, refetch: refetchChats } = useUserChatsPaginated(currentPage, chatsPerPage);
   const recentChats = useMemo(() => chatsData?.data || [], [chatsData?.data]);
   const totalChats = useMemo(() => chatsData?.totalCount || 0, [chatsData?.totalCount]);
   const totalPages = useMemo(() => chatsData?.totalPages || 1, [chatsData?.totalPages]);
   const myCharacters = useMemo(() => dashboardData?.characters || [], [dashboardData?.characters]);
   const favoriteCharacters = useMemo(() => dashboardData?.favorites || [], [dashboardData?.favorites]);
-  const userCredits = useMemo(() => dashboardData?.credits || 0, [dashboardData?.credits]);
-  const subscription = useMemo(() => authSubscription || dashboardData?.subscription, [authSubscription, dashboardData?.subscription]);
-  const creditsUsed = useMemo(() => dashboardData?.creditsUsed || 0, [dashboardData?.creditsUsed]);
-  const monthlyAllowance = useMemo(() => subscription?.plan?.monthly_credits_allowance || 1000, [subscription?.plan?.monthly_credits_allowance]);
-
-  // Get crown icon styling based on plan - MOVED BEFORE CONDITIONAL RETURNS
-  const getCrownIconStyle = useMemo(() => {
-    if (!subscription || subscription.status !== 'active') {
-      return 'text-gray-400';
-    }
-    
-    const planName = subscription.plan?.name?.toLowerCase();
-    if (planName?.includes('whale')) {
-      return 'text-yellow-500 fill-yellow-500'; // Gold filled crown for Whale
-    } else if (planName?.includes('true fan')) {
-      return 'text-gray-300 fill-gray-300'; // Silver filled crown for True Fan
-    }
-    
-    return 'text-gray-400'; // Default for other plans
-  }, [subscription]);
-
-  // Get the correct subscription tier
-  const userTier = useMemo(() => {
-    if (!subscription || subscription.status !== 'active') {
-      return "Guest Pass";
-    }
-    return subscription.plan?.name || "Guest Pass";
-  }, [subscription]);
-
-  const isGuestPass = userTier === "Guest Pass";
+  const userCredits = balance;
+  const monthlyAllowance = useMemo(() => subscription?.plan?.monthly_credits_allowance ?? 1000, [subscription?.plan?.monthly_credits_allowance]);
+  const getCrownIconStyle = useMemo(() => { const planName = subscription?.plan?.name?.toLowerCase(); if (!planName) return 'text-gray-400'; if (planName.includes('whale')) return 'text-yellow-500 fill-yellow-500'; if (planName.includes('true fan')) return 'text-gray-300 fill-gray-300'; return 'text-gray-400'; }, [subscription?.plan?.name]);
+  const userTier = useMemo(() => subscription?.plan?.name ?? 'Guest Pass', [subscription?.plan?.name]);
+  const isGuestPass = userTier === 'Guest Pass';
   const username = profile?.username || user?.email?.split('@')[0] || 'User';
 
   // Memoize formatted data for performance
@@ -456,20 +454,15 @@ export function DashboardContent() {
     }
   }, [currentPage, totalPages]);
 
-  if (authLoading || dashboardLoading) {
+  if (authLoading || (user && snapshotLoading)) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-white">Loading your dashboard...</div>
       </div>
     );
   }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-[#121212] flex items-center justify-center">
-        <div className="text-white">Please sign in to access your ANIMA dashboard.</div>
-      </div>
-    );
+  if (user && !snapshotLoaded && !snapshotLoading) {
+    console.warn('[Dashboard] snapshot not loaded but not loading – proceeding to render fallback');
   }
 
   // Soft-handle data errors without crashing the page
@@ -480,7 +473,6 @@ export function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-[#121212]">
-      {/* Standardized TopBar */}
       <TopBar
         title={`Welcome back to ANIMA, ${username}`}
         subtitle="Ready to continue your digital adventures?"
@@ -493,9 +485,9 @@ export function DashboardContent() {
               className="p-0 hover:ring-2 hover:ring-[#FF7A00]/50 rounded-full transition-all"
             >
               <Avatar className="w-8 h-8 sm:w-12 sm:h-12 ring-2 ring-[#FF7A00]/50 cursor-pointer">
-                <AvatarImage 
-                  src={profile?.avatar_url || '/default_avatar.jpg'} 
-                  alt={profile?.username || 'User'} 
+                <AvatarImage
+                  src={profile?.avatar_url || '/default_avatar.jpg'}
+                  alt={profile?.username || 'User'}
                   className="object-cover"
                 />
                 <AvatarFallback className="bg-[#FF7A00] text-white font-bold text-xs sm:text-base">
@@ -503,22 +495,16 @@ export function DashboardContent() {
                 </AvatarFallback>
               </Avatar>
             </Button>
-            
-            {/* Username */}
             <div className="text-right hidden md:block">
-              <p className="text-white text-sm sm:text-lg font-bold">
-                {username}
-              </p>
+              <p className="text-white text-sm sm:text-lg font-bold">{username}</p>
             </div>
           </div>
         }
       />
 
       <div className="p-3 sm:p-6 md:p-6 space-y-4 sm:space-y-6">
-        {/* Stats cards above Daily Message Limit */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
           {dashboardLoading ? (
-            // Show skeleton loading for stats
             <>
               {Array.from({ length: 4 }).map((_, index) => (
                 <StatsCardSkeleton key={index} />
@@ -532,22 +518,19 @@ export function DashboardContent() {
                 icon={MessageCircle}
                 onClick={() => navigate('/chat')}
               />
-
               <StatsCard
                 title="Characters"
                 value={formatNumberWithK(myCharacters.length)}
                 icon={Users}
                 onClick={() => navigate('/character-creator')}
               />
-
               <StatsCard
                 title="Credits"
                 value={userCredits.toLocaleString()}
                 icon={Zap}
                 onClick={() => navigate('/subscription')}
-                largeValue={true}
+                largeValue
               />
-
               <StatsCard
                 title="Plan"
                 value={userTier}
@@ -559,14 +542,11 @@ export function DashboardContent() {
           )}
         </div>
 
-
         <Card className="bg-[#1a1a2e] border-gray-700/50 md:mx-0 -mx-3 md:rounded-lg rounded-none border-x-0 md:border-x" style={{ minHeight: 'calc(100vh - 250px)' }}>
           <CardHeader className="pb-2 sm:pb-4 px-3 sm:px-6">
             <div className="flex items-center justify-between">
               <CardTitle className="text-white text-xl sm:text-2xl">Your Dashboard</CardTitle>
-              
               <div className="flex items-center space-x-2">
-                {/* Delete All Button - Dev Only and only on Recent Chats tab */}
                 {process.env.NODE_ENV === 'development' && totalChats > 0 && activeTab === 'recent-chats' && (
                   <Button
                     onClick={() => setShowDeleteAllDialog(true)}
@@ -575,16 +555,10 @@ export function DashboardContent() {
                     className="bg-transparent border-red-600 text-red-400 hover:bg-red-600 hover:text-white transition-colors"
                     disabled={isDeletingAll || isDeleting}
                   >
-                    {isDeletingAll ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4 mr-2" />
-                    )}
+                    {isDeletingAll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
                     Delete All ({totalChats})
                   </Button>
                 )}
-                
-                {/* Bulk Delete Button - Shows when chats are selected */}
                 {selectedChats.size > 0 && (
                   <Button
                     onClick={() => setShowDeleteDialog(true)}
@@ -593,11 +567,7 @@ export function DashboardContent() {
                     className="bg-red-600 hover:bg-red-700 text-white"
                     disabled={isDeleting || isDeletingAll}
                   >
-                    {isDeleting ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Trash2 className="w-4 h-4 mr-2" />
-                    )}
+                    {isDeleting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
                     Delete {selectedChats.size} Chat{selectedChats.size > 1 ? 's' : ''}
                   </Button>
                 )}
@@ -605,363 +575,233 @@ export function DashboardContent() {
             </div>
           </CardHeader>
           <CardContent className="p-3 sm:p-6">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3 bg-[#121212] border border-gray-700/50 h-auto">
-                  <TabsTrigger 
-                    value="recent-chats" 
-                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
-                  >
-                    <span className="hidden sm:inline">Recent Chats</span>
-                    <span className="sm:hidden">Chats</span>
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="my-characters" 
-                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
-                  >
-                    <span className="hidden sm:inline">My Characters</span>
-                    <span className="sm:hidden">Characters</span>
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="favorites" 
-                    className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
-                  >
-                    Favorites
-                  </TabsTrigger>
-                </TabsList>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-3 bg-[#121212] border border-gray-700/50 h-auto">
+                <TabsTrigger value="recent-chats" className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2">
+                  <span className="hidden sm:inline">Recent Chats</span>
+                  <span className="sm:hidden">Chats</span>
+                </TabsTrigger>
+                <TabsTrigger value="my-characters" className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2">
+                  <span className="hidden sm:inline">My Characters</span>
+                  <span className="sm:hidden">Characters</span>
+                </TabsTrigger>
+                <TabsTrigger value="favorites" className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2">
+                  Favorites
+                </TabsTrigger>
+              </TabsList>
 
-                <TabsContent value="recent-chats" className="mt-3 sm:mt-6">
-                  <div className="space-y-2 sm:space-y-3">
-                    {dashboardLoading ? (
-                      // Show skeleton loading for chats
-                      <>
-                        {Array.from({ length: 5 }).map((_, index) => (
-                          <ChatCardSkeleton key={index} />
-                        ))}
-                      </>
-                    ) : formattedRecentChats.length > 0 ? (
-                      <>
-                        {formattedRecentChats.map((chat) => (
-                          <ChatCard
-                            key={chat.id}
-                            chat={chat}
-                            isSelected={selectedChats.has(chat.id)}
-                            onSelect={handleChatSelection}
-                            onContinue={handleContinueChat}
-                            showSelection={true}
-                          />
-                        ))}
-                        
-                        {/* Pagination Controls */}
-                        {totalPages > 1 && (
-                          <div data-chat-section className="flex justify-center items-center space-x-2 mt-4">
-                            <Button
-                              onClick={() => handlePageChange(currentPage - 1)}
-                              disabled={currentPage === 1}
-                              variant="outline"
-                              size="sm"
-                              className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"
-                            >
-                              Previous
-                            </Button>
-                            <span className="text-gray-400 text-sm">
-                              Page {currentPage} of {totalPages}
-                            </span>
-                            <Button
-                              onClick={() => handlePageChange(currentPage + 1)}
-                              disabled={currentPage === totalPages}
-                              variant="outline"
-                              size="sm"
-                              className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"
-                            >
-                              Next
-                            </Button>
+              <TabsContent value="recent-chats" className="mt-3 sm:mt-6">
+                <div className="space-y-2 sm:space-y-3">
+                  {dashboardLoading ? (
+                    <>
+                      {Array.from({ length: 5 }).map((_, index) => (
+                        <ChatCardSkeleton key={index} />
+                      ))}
+                    </>
+                  ) : formattedRecentChats.length > 0 ? (
+                    <>
+                      {formattedRecentChats.map(chat => (
+                        <ChatCard
+                          key={chat.id}
+                          chat={chat}
+                          isSelected={selectedChats.has(chat.id)}
+                          onSelect={handleChatSelection}
+                          onContinue={handleContinueChat}
+                          showSelection
+                        />
+                      ))}
+                      {totalPages > 1 && (
+                        <div data-chat-section className="flex justify-center items-center space-x-2 mt-4">
+                          <Button
+                            onClick={() => handlePageChange(currentPage - 1)}
+                            disabled={currentPage === 1}
+                            variant="outline"
+                            size="sm"
+                            className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"
+                          >
+                            Previous
+                          </Button>
+                          <span className="text-gray-400 text-sm">Page {currentPage} of {totalPages}</span>
+                          <Button
+                            onClick={() => handlePageChange(currentPage + 1)}
+                            disabled={currentPage === totalPages}
+                            variant="outline"
+                            size="sm"
+                            className="border-gray-700 text-gray-400 hover:text-white disabled:opacity-50"
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <MessageCircle className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+                      <p className="text-gray-400">No recent chats. Start a conversation!</p>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="my-characters" className="mt-3 sm:mt-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
+                  {dashboardLoading ? (
+                    <>
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <CharacterCardSkeleton key={index} />
+                      ))}
+                    </>
+                  ) : formattedMyCharacters.length > 0 ? (
+                    formattedMyCharacters.map(character => (
+                      <Card
+                        key={character.id}
+                        className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group"
+                        onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
+                      >
+                        <CardContent className="p-0 relative h-full">
+                          <img src={character.image} alt={character.name} className="absolute inset-0 w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+                          <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
+                            <div className="flex flex-col gap-2">
+                              <Button size="sm" variant="outline" className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 bg-black/40" onClick={() => navigate(`/character/${character.id}`)}>
+                                <Eye className="w-4 h-4 mr-2" /> View
+                              </Button>
+                              <Button size="sm" variant="outline" className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 bg-black/40" onClick={() => handleEditCharacter(character.originalCharacter)}>
+                                <Edit className="w-4 h-4 mr-2" /> Edit
+                              </Button>
+                              <Button size="sm" disabled={isCreating} className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50" onClick={() => startChat(character.originalCharacter as any)}>
+                                <MessageCircle className="w-4 h-4 mr-2" /> {isCreating ? 'Creating...' : 'Start Chat'}
+                              </Button>
+                            </div>
                           </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="text-center py-8">
-                        <MessageCircle className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-                        <p className="text-gray-400">No recent chats. Start a conversation!</p>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
+                          <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 z-20 pointer-events-none">
+                            <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate" title={character.name}>{character.name}</h3>
+                            {character.tagline && <p className="text-gray-400 text-sm sm:text-base mb-2 truncate">{character.tagline}</p>}
+                            <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-sm sm:text-base">
+                              <div className="flex items-center space-x-1 text-gray-300">
+                                <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
+                                <span>{formatNumberWithK(character.totalChats)}</span>
+                              </div>
+                              <div className="flex items-center space-x-1 text-gray-300">
+                                <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
+                                <span>{formatNumberWithK(character.likesCount)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                  ) : (
+                    <div className="col-span-full text-center py-8">
+                      <Users className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+                      <p className="text-gray-400 mb-4">No characters created yet.</p>
+                      <Button onClick={() => navigate('/character-creator')} className="bg-[#FF7A00] hover:bg-[#FF7A00]/80">
+                        <Plus className="w-4 h-4 mr-2" /> Create Your First Character
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
 
-                <TabsContent value="my-characters" className="mt-3 sm:mt-6">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {dashboardLoading ? (
-                      // Show skeleton loading for characters
-                      <>
-                        {Array.from({ length: 6 }).map((_, index) => (
-                          <CharacterCardSkeleton key={index} />
-                        ))}
-                      </>
-                    ) : formattedMyCharacters.length > 0 ? (
-                      formattedMyCharacters.map((character) => (
-                        <Card
-                          key={character.id}
-                          className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group"
-                          onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
-                        >
-                          <CardContent className="p-0 relative h-full">
-                            <img 
-                              src={character.image} 
-                              alt={character.name}
-                              className="absolute inset-0 w-full h-full object-cover"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-                            
-                            {/* Middle section with stacked buttons - desktop only */}
-                            <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
-                              <div className="flex flex-col gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 bg-black/40"
-                                  onClick={() => navigate(`/character/${character.id}`)}
-                                >
-                                  <Eye className="w-4 h-4 mr-2" />
-                                  View
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 bg-black/40"
-                                  onClick={() => handleEditCharacter(character.originalCharacter)}
-                                >
-                                  <Edit className="w-4 h-4 mr-2" />
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  disabled={isCreating}
-                                  className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50"
-                                  onClick={() => startChat(character.originalCharacter as any)}
-                                >
-                                  <MessageCircle className="w-4 h-4 mr-2" />
-                                  {isCreating ? 'Creating...' : 'Start Chat'}
-                                </Button>
+              <TabsContent value="favorites" className="mt-3 sm:mt-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
+                  {dashboardLoading ? (
+                    <>
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <FavoriteCharacterSkeleton key={index} />
+                      ))}
+                    </>
+                  ) : formattedFavoriteCharacters.length > 0 ? (
+                    formattedFavoriteCharacters.map(character => (
+                      <Card
+                        key={character.id}
+                        className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group"
+                        onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
+                      >
+                        <CardContent className="p-0 relative h-full">
+                          <img src={character.image} alt={character.name} className="absolute inset-0 w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+                          <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
+                            <div className="flex flex-col gap-2">
+                              <Button size="sm" variant="outline" className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 bg-black/40" onClick={() => navigate(`/character/${character.id}`)}>
+                                <Eye className="w-4 h-4 mr-2" /> View
+                              </Button>
+                              <Button size="sm" disabled={isCreating} className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50" onClick={() => startChat(character.originalCharacter as any)}>
+                                <MessageCircle className="w-4 h-4 mr-2" /> {isCreating ? 'Creating...' : 'Start Chat'}
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 z-20 pointer-events-none">
+                            <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate" title={character.name}>{character.name}</h3>
+                            {character.tagline && <p className="text-gray-400 text-sm sm:text-base mb-2 truncate">{character.tagline}</p>}
+                            <p className="text-gray-400 text-sm mb-2">by @{character.creatorUsername}</p>
+                            <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-sm sm:text-base">
+                              <div className="flex items-center space-x-1 text-gray-300">
+                                <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
+                                <span>{formatNumberWithK(character.totalChats)}</span>
+                              </div>
+                              <div className="flex items-center space-x-1 text-gray-300">
+                                <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
+                                <span>{formatNumberWithK(character.likesCount)}</span>
                               </div>
                             </div>
-                            
-                            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 z-20 pointer-events-none">
-                              <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate" title={character.name}>
-                                {character.name}
-                              </h3>
-                              
-                              {character.tagline && (
-                                <p className="text-gray-400 text-sm sm:text-base mb-2 truncate">
-                                  {character.tagline}
-                                </p>
-                              )}
-                              
-                              <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-sm sm:text-base">
-                                <div className="flex items-center space-x-1 text-gray-300">
-                                  <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{formatNumberWithK(character.totalChats)}</span>
-                                </div>
-                                <div className="flex items-center space-x-1 text-gray-300">
-                                  <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{formatNumberWithK(character.likesCount)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))
-                    ) : (
-                      <div className="col-span-full text-center py-8">
-                        <Users className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-                        <p className="text-gray-400 mb-4">No characters created yet.</p>
-                        <Button 
-                          onClick={() => navigate('/character-creator')}
-                          className="bg-[#FF7A00] hover:bg-[#FF7A00]/80"
-                        >
-                          <Plus className="w-4 h-4 mr-2" />
-                          Create Your First Character
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="favorites" className="mt-3 sm:mt-6">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {dashboardLoading ? (
-                      // Show skeleton loading for favorite characters
-                      <>
-                        {Array.from({ length: 6 }).map((_, index) => (
-                          <FavoriteCharacterSkeleton key={index} />
-                        ))}
-                      </>
-                    ) : formattedFavoriteCharacters.length > 0 ? (
-                      formattedFavoriteCharacters.map((character) => (
-                        <Card
-                          key={character.id}
-                          className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group"
-                          onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
-                        >
-                          <CardContent className="p-0 relative h-full">
-                            <img 
-                              src={character.image} 
-                              alt={character.name}
-                              className="absolute inset-0 w-full h-full object-cover"
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-                            
-                            {/* Middle section with stacked buttons - desktop only */}
-                            <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-30">
-                              <div className="flex flex-col gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="border-[#FF7A00]/50 text-[#FF7A00] hover:bg-[#FF7A00]/10 bg-black/40"
-                                  onClick={() => navigate(`/character/${character.id}`)}
-                                >
-                                  <Eye className="w-4 h-4 mr-2" />
-                                  View
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  disabled={isCreating}
-                                  className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50"
-                                  onClick={() => startChat(character.originalCharacter as any)}
-                                >
-                                  <MessageCircle className="w-4 h-4 mr-2" />
-                                  {isCreating ? 'Creating...' : 'Start Chat'}
-                                </Button>
-                              </div>
-                            </div>
-                            
-                            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 z-20 pointer-events-none">
-                              <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate" title={character.name}>
-                                {character.name}
-                              </h3>
-                              
-                              {character.tagline && (
-                                <p className="text-gray-400 text-sm sm:text-base mb-2 truncate">
-                                  {character.tagline}
-                                </p>
-                              )}
-                              
-                              <p className="text-gray-400 text-sm mb-2">
-                                by @{character.creatorUsername}
-                              </p>
-                              
-                              <div className="flex items-center justify-center space-x-3 sm:space-x-4 text-sm sm:text-base">
-                                <div className="flex items-center space-x-1 text-gray-300">
-                                  <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{formatNumberWithK(character.totalChats)}</span>
-                                </div>
-                                <div className="flex items-center space-x-1 text-gray-300">
-                                  <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
-                                  <span>{formatNumberWithK(character.likesCount)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))
-                    ) : (
-                      <div className="col-span-full text-center py-8">
-                        <Star className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-                        <p className="text-gray-400">No favorite characters yet. Explore and favorite some characters!</p>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
-              </Tabs>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                  ) : (
+                    <div className="col-span-full text-center py-8">
+                      <Star className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+                      <p className="text-gray-400">No favorite characters yet. Explore and favorite some characters!</p>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
+        <AlertDialogContent className="bg-[#121212] border-gray-700">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-white">Delete Selected Chats</AlertDialogTitle>
             <AlertDialogDescription className="text-gray-300">
-              Are you sure you want to delete {selectedChats.size} chat{selectedChats.size > 1 ? 's' : ''}? 
-              This will permanently delete all messages, context, and memories associated with {selectedChats.size > 1 ? 'these chats' : 'this chat'}.
-              This action cannot be undone.
+              Are you sure you want to delete {selectedChats.size} chat{selectedChats.size > 1 ? 's' : ''}? This will permanently delete all messages, context, and memories associated.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleDeleteSelectedChats}
-              disabled={isDeleting}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                'Delete'
-              )}
+            <AlertDialogCancel className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteSelectedChats} disabled={isDeleting} className="bg-red-600 hover:bg-red-700 text-white">
+              {isDeleting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Deleting...</> : 'Delete'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Delete All Confirmation Dialog - Dev Only */}
-      <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
-        <AlertDialogContent className="bg-[#1a1a2e] border-gray-700">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-white flex items-center">
-              <span className="bg-red-600 text-white text-xs px-2 py-1 rounded mr-2">DEV</span>
-              Delete All Chats
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-300">
-              <div className="space-y-2">
-                <p className="font-semibold text-red-400">⚠️ DANGER: This will delete ALL {totalChats} of your chats!</p>
-                <p>
-                  This will permanently delete all messages, context, and memories associated with every chat in your account.
-                  This action cannot be undone and is intended for development purposes only.
-                </p>
-                <p className="text-sm text-gray-400 italic">
-                  This button is only visible in development mode.
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleDeleteAllChats}
-              disabled={isDeletingAll}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {isDeletingAll ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Deleting All...
-                </>
-              ) : (
-                `Delete All ${totalChats} Chats`
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {process.env.NODE_ENV === 'development' && (
+        <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
+          <AlertDialogContent className="bg-[#121212] border-gray-700">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-white flex items-center">
+                <span className="bg-red-600 text-white text-xs px-2 py-1 rounded mr-2">DEV</span>Delete All Chats
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-gray-300">
+                This will permanently delete all chats. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="bg-gray-600 hover:bg-gray-700 text-white border-gray-600">Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteAllChats} disabled={isDeletingAll} className="bg-red-600 hover:bg-red-700 text-white">
+                {isDeletingAll ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Deleting All...</> : `Delete All ${totalChats} Chats`}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
 
-// Memoized version for performance
-const MemoizedDashboardContent = React.memo(DashboardContent);
-
-// Wrapped with error boundary
-export default function DashboardContentWithErrorBoundary() {
-  return (
-    <DashboardErrorBoundary>
-      <MemoizedDashboardContent />
-    </DashboardErrorBoundary>
-  );
-}
+export default DashboardContent;

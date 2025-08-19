@@ -17,56 +17,41 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { 
   getPublicProfile, 
-  getPrivateProfile,
-  getUserActiveSubscription,
+  // getPrivateProfile, (deprecated)
+  // getUserActiveSubscription, (deprecated)
   updateProfile
 } from '@/lib/supabase-queries';
-import { ProfileHeader } from './NewProfileHeader';
-import { StatsBar } from './StatsBar';
+import { ProfileHeader } from './ProfileHeader';
+import { ProfileStats } from './ProfileStats';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
 import { BillingSettings } from '@/components/settings/categories/BillingSettings';
 import { supabase } from '@/integrations/supabase/client';
 import { getUserPersonas, registerPersonaQueryClient } from '@/lib/persona-operations';
+import { useUserProfile, useSubscriptionInfo, useBootstrap } from '@/state/bootstrap-store';
 
 // Consolidated data fetching hook
 const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
   const qc = useQueryClient();
   React.useEffect(()=>{ registerPersonaQueryClient(qc); }, [qc]);
+  const { profile: ownProfile } = useUserProfile();
+  const { subscription } = useSubscriptionInfo();
+  const { stats } = useBootstrap();
   return useQuery({
     queryKey: ['user-profile-complete', userId],
     queryFn: async () => {
-      // Use private profile for own profile, public for others
-      const profileQuery = isOwnProfile ? getPrivateProfile(userId) : getPublicProfile(userId);
-      
-      // Parallel fetch profile data and subscription
-      const [profileResult, subscriptionResult, chatCountResult] = await Promise.allSettled([
+      const profileQuery = isOwnProfile ? Promise.resolve({ data: ownProfile }) : getPublicProfile(userId);
+      const [profileResult] = await Promise.allSettled([
         profileQuery,
-        getUserActiveSubscription(userId),
-        supabase
-          .from('chats')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', userId)
       ]);
-
-      const profile = profileResult.status === 'fulfilled' ? profileResult.value.data : null;
-      const subscription = subscriptionResult.status === 'fulfilled' ? subscriptionResult.value.data : null;
-      const chatCount = chatCountResult.status === 'fulfilled' ? chatCountResult.value.count : 0;
-
-      // Get additional stats in parallel
-      const [charactersCount, favoritesCount, personasCount] = await Promise.allSettled([
-        supabase.from('characters').select('id', { count: 'exact', head: true }).eq('creator_id', userId),
-        supabase.from('character_favorites').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-        isOwnProfile ? Promise.resolve({ count: (await getUserPersonas(userId)).length }) : Promise.resolve({ count: 0 })
-      ]);
-
+      const profile = profileResult.status === 'fulfilled' ? (profileResult.value as any).data : null;
       return {
         profile,
         subscription,
         stats: {
-          totalChats: chatCount || 0,
-          totalCharacters: charactersCount.status === 'fulfilled' ? charactersCount.value.count || 0 : 0,
-          totalFavorites: favoritesCount.status === 'fulfilled' ? favoritesCount.value.count || 0 : 0,
-          totalPersonas: personasCount.status === 'fulfilled' ? personasCount.value.count || 0 : 0,
+          totalChats: stats.total_chats,
+          totalCharacters: stats.total_characters,
+          totalFavorites: stats.total_favorites,
+          totalPersonas: stats.total_personas,
           memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
         }
       };
@@ -216,7 +201,6 @@ export const NewProfileView = () => {
           ) : (
             <ProfileHeader
               profile={data?.profile}
-              subscription={data?.subscription}
               isOwnProfile={isOwnProfile}
               isEditing={isEditing}
               onEditToggle={() => setIsEditing(!isEditing)}
@@ -227,7 +211,7 @@ export const NewProfileView = () => {
 
         {/* Stats Bar */}
         {data?.stats && (
-          <StatsBar stats={data.stats} />
+          <ProfileStats stats={data.stats} />
         )}
 
         {/* Settings Tabs - Only for Own Profile */}

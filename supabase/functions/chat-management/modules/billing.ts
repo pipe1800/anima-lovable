@@ -32,7 +32,7 @@ export async function getUserPlanAndModel(
 ): Promise<{ plan: string; model: string; maxContextTokens: number; modelIdentifier: string }> {
   // Check for active subscription
   const { data: userSubscription } = await supabaseAdmin
-    .from('subscriptions')
+    .from('subscriptions_legacy')
     .select('plan_id, status, current_period_end')
     .eq('user_id', userId)
     .eq('status', 'active')
@@ -42,7 +42,7 @@ export async function getUserPlanAndModel(
   if (userSubscription) {
     // Get plan details
     const { data: planData } = await supabaseAdmin
-      .from('plans')
+      .from('plans_legacy')
       .select('name')
       .eq('id', userSubscription.plan_id)
       .single();
@@ -107,8 +107,7 @@ export async function consumeCredits(
 ): Promise<boolean> {
   console.log(`💰 Credit calculation: Base(${creditInfo.baseCost}) + ${creditInfo.addonPercentage}% addon increase = Total(${creditInfo.totalCost})`);
 
-  // Check and consume credits
-  const { data: creditCheckResult, error: creditError } = await supabaseAdmin.rpc('consume_credits', {
+  const { data: creditResult, error: creditError } = await supabaseAdmin.rpc('consume_credits', {
     user_id_param: userId,
     credits_to_consume: creditInfo.totalCost
   });
@@ -118,12 +117,14 @@ export async function consumeCredits(
     throw new Error('Failed to process credits');
   }
 
-  if (!creditCheckResult) {
-    console.log('❌ Insufficient credits for user:', userId);
+  // creditResult is expected to be { success: boolean, balance: number }
+  const success = !!creditResult?.success;
+  if (!success) {
+    console.log('❌ Insufficient credits for user:', userId, 'balance:', creditResult?.balance);
     return false;
   }
 
-  console.log(`✅ Credits consumed successfully: ${creditInfo.totalCost} credits deducted`);
+  console.log(`✅ Credits consumed successfully: ${creditInfo.totalCost} credits deducted. New balance: ${creditResult?.balance}`);
   return true;
 }
 

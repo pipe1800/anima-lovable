@@ -712,7 +712,7 @@ const ChatInterface = ({
               setTimeout(() => {
                 if (currentChatId) {
                   queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
-                  if (user?.id) queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
+                  // Removed credits invalidate (snapshot + realtime)
                 }
                 setRegeneratingContentById(prev => {
                   const { [aiMessageId]: _, ...rest } = prev; return rest;

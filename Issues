@@ -1,0 +1,196 @@
+Collecting workspace informationBelow is a focused, comprehensive review (no code) of the duplicated network requests surfaced in resquest.txt, the current data‑fetch architecture, the snapshot approach, and how to optimize.
+
+## 1. High‑Churn / Duplicated Endpoints Observed
+
+Repeated (often back‑to‑back or on every route change / component mount):
+
+- profiles (variants: username, timezone, default_persona_id, banner fields, full profile)  
+  Functions: `getUserProfile`
+- subscriptions (with joined plan)  
+  Functions: `getUserSubscription`
+- credits (balance)  
+  Functions: `getUserCredits`
+- plans (active plans list)  
+  Functions: `getActivePlans`
+- models (active models)  
+  Functions: `getActiveModels`
+- personas list (multiple parameter variants: id,name,avatar_url,updated_at; full bio/lore)  
+  Likely via persona utilities + direct selects (not fully centralized)
+- character_profile_view (public characters listing + per‑character detail)
+  Functions: `getPublicCharacters` and search / recommendation flows
+- chat bootstrap data: chats (selected_persona_id join), messages (recent), character_memories (auto + non-auto)
+  Functions: `getRecentChatMessages` (portion of `supabase-queries.ts`) and edge function responses
+- user_global_chat_settings (repeated for each chat view open / refresh)
+- character_memories (both is_auto_summary=true & false in quick succession)
+- character latest auto summary (duplicated: same limit=1 query)
+- credit_pack_purchases & credit_packs (likely both listing + detail pages causing overlap)
+- tags (static taxonomy)
+- world_infos / world_info_* (early exploratory fetches?)
+- RPC get_user_snapshot (called once early, but its returned payload is not leveraged to suppress later atomized calls)
+
+## 2. Root Causes of Duplication
+
+| Cause | Details |
+|-------|---------|
+| Fragmented data consumption | Components independently call small “slice” queries instead of hydrating from a shared store. |
+| Partial in‑flight dedupe | A local `fetchOnceMap` exists in `supabase-queries.ts` but only applied to a subset (e.g. public character queries); many getters (profile, credits, subscription, personas) do not use it. |
+| Missing snapshot wiring | Snapshot RPC `get_user_snapshot` returns profile, subscription, credits, counts, characters, personas, favorites—but the frontend still re-fetches each individually afterward. |
+| Edge function overlap | The chat-management edge function (supabase/functions/chat-management/index.ts) already returns personas list and creditsBalance, but the UI still dispatches separate queries. |
+| Granular profile field queries | Multiple narrow selects (username only, timezone only, default_persona_id only) instead of a memoized full profile object cached client-side. |
+| Non-coalesced memory fetches | Separate requests for non-auto and auto summaries in tight sequence (see queries in supabase/functions/chat-management/modules/database.ts) then again from UI. |
+| Lack of TTL / reactive subscription strategy | Poll/duplicate on navigation instead of subscribing to tables (only some real-time aspects implemented for context). |
+| Static reference data uncached | plans, models, tags, credit_packs seldom change but are refetched repeatedly. |
+
+## 3. Snapshot RPC Review
+
+File: `get_user_snapshot`
+
+Current payload includes:
+- profile (private)
+- latest subscription + plan id (but not expanded plan object)
+- credits balance
+- counts: favorites, chats, characters, personas
+- lightweight character list
+- personas list
+- favorite_character_ids
+
+Gaps vs. what the UI still re-fetches:
+- Missing expanded plan info (plan fields)
+- Missing active plans list (pricing page)
+- Missing models list (for model selector)
+- Missing user_global_chat_settings
+- Missing tags (for character filters)
+- Missing default_persona enrichment (profile join output could inline persona summary)
+- Missing last few chats or chat summaries for dashboard quick load
+- Missing user age verification / feature flags (if gating UI)
+- Missing aggregated credit_pack_purchases summary (recent purchases count/value)
+
+Because these are absent, downstream components fall back to individual queries.
+
+## 4. Edge Function (chat-management) Bootstrapping
+
+File: index.ts
+
+Provides:
+- messages (optional)
+- context (via `fetchCurrentContext`)
+- latestAutoSummary
+- personasList
+- creditsBalance
+
+Issues:
+- UI appears to still call separate personas, credits, subscription, settings after receiving this bundle.
+- No strong client contract / hydration layer to persist the result to a global store (e.g. Zustand/Redux/react context).
+- Memory queries inside modules/database.ts already perform multi-branch fetch (non-auto + auto) with dedupe, but UI duplicates again through direct REST queries to `character_memories`.
+
+## 5. Context / Memory Layer Interaction
+
+- `character_memories` fetched multiple times (auto & non-auto) plus separate latest auto summary.
+- Could unify: latest auto summary derivable from ordered list already returned.
+- Migrations (`memory_phase1/phase2`) add indexes for composite fetches—good—but network layer not consolidated.
+
+## 6. Specific Optimization Opportunities
+
+1. Single Early Hydration  
+   Call `get_user_snapshot` immediately after auth, store result in a client global cache (e.g. `userBootstrapStore`). Extend snapshot to include:
+   - active subscription plan expanded
+   - user_global_chat_settings
+   - tags (or moved to a separate static preload RPC)
+   - active plans list (optional second RPC if large)
+   - models list (if required on most pages)
+   - default persona summary
+   - minimal recent chats (id, title, last_message_at, character_id, last snippet)
+
+2. Snapshot Extension vs. Secondary RPC  
+   If payload risk grows, create a tiered approach:
+   - RPC A: `get_user_snapshot` (existing + settings + plan expansion + tags)
+   - RPC B: `get_user_catalog_static` (plans, models, tags) with long cache TTL
+
+3. Replace Per-Field Profile Queries  
+   Consolidate to one profile fetch; remove narrow `profiles?select=username`, `timezone`, `default_persona_id` calls.
+
+4. Enforce Fetch Dedup (Universal)  
+   Wrap all exported query functions in a standard `fetchOnce(key, fn)` (already present in `supabase-queries.ts` but underused). Apply to:
+   - `getUserProfile`
+   - `getUserCredits`
+   - `getUserSubscription`
+   - personas getter(s)
+   - global chat settings
+   - tags/plans/models
+
+5. Client Cache with Invalidation  
+   - Store snapshot data with version / etag.
+   - Invalidate on events: subscription status change, persona CRUD, plan purchase, credit consumption (observe via returned mutation results instead of refetch storm).
+
+6. Edge Function Response Utilization  
+   - When opening a chat, if chat-management response already includes personas + credits + latest auto summary, skip secondary REST calls (gate them behind “if not in cache”).
+
+7. Memory Fetch Consolidation  
+   - Do not separately fetch latest auto summary and auto + non-auto lists; rely on a single unified memory fetch (already deduped in edge function).  
+   - If UI sometimes needs only a snippet, pass a lightweight flag to edge function to reduce payload size.
+
+8. Static Reference Data Strategy  
+   - Plans, models, tags: prefetch once per session, cache in memory and (optionally) localStorage with a short TTL (e.g. 1h). Provide a “warm” hydration via snapshot RPC or a secondary batch RPC.
+
+9. Personas Fetch Reduction  
+   - Personas list appears across pages; ensure only one canonical store. On persona create/update/delete, mutate local store instead of refetching entire list.
+
+10. Credits & Subscription Polling  
+    - Avoid repeated fetch after every navigation; rely on:
+      - consumeCredits RPC (`consume_credits` via `consumeCredits`) returning new balance (extend RPC to return updated balance).
+      - Webhook or periodic (long interval) soft refresh if necessary.
+
+11. Global Chat Settings  
+    - Include them in snapshot; remove per-chat repeated GET unless user opens settings panel (lazy refetch if stale).
+
+12. Character Profile Dupes  
+    - On character detail page: reuse previously fetched row from listing (`character_profile_view`) if present; only refetch if fields missing (e.g. extended definition info).  
+    - Introduce a normalized character cache keyed by id.
+
+13. Context & Chat Context 406s  
+    - 406 responses to `/rest/v1/chat_context` suggest Accept header or RLS/table existence mismatch; now that context consolidated into messages.current_context, remove legacy fetch attempts still coded in hooks/components.
+
+14. Progressive Rendering  
+    - For chat open: first render with cached snapshot (personas, profile, credits), then fire only messages + memory fetch via edge function.
+
+15. Avoid Redundant Auth `/auth/v1/user` calls  
+    - Supabase client can cache session; suppress explicit user fetch if session already resolved.
+
+## 7. Prioritized Action Plan (Impact vs. Effort)
+
+1. Extend snapshot RPC (or add second batch RPC) to include missing high-frequency entities.
+2. Introduce a central “BootstrapStore” that hydrates from snapshot and supplies selectors (profile, credits, subscription, personas, settings).
+3. Refactor components to consume BootstrapStore instead of firing queries on mount.
+4. Apply `fetchOnce` wrapper to every remaining ad-hoc getter still needed after hydration.
+5. Consolidate chat open logic: rely on chat-management edge function; remove overlapping REST calls (personas, credits, latest auto summary).
+6. Remove legacy context table queries still attempting `/chat_context`.
+7. Add memory fetch gating: only fetch if panel/memory-dependent feature opened (lazy load).
+8. Add TTL caching for static catalogs (plans, models, tags).
+9. Modify `consume_credits` RPC to return new balance, update cache locally—eliminating follow-up GET.
+10. Add lightweight invalidation events (e.g. on persona CRUD, push update into store).
+
+## 8. Metrics to Verify Improvement
+
+Track (before vs after):
+- Number of network requests from initial dashboard load to first chat open.
+- Duplicate request ratio (same endpoint+params within 5s).
+- Total payload KB prior to first interactive paint.
+- Time to interactive for chat page (remove blocking redundant fetches).
+- Cache hit rate for snapshot-derived data.
+
+## 9. Risks / Considerations
+
+- Enlarging snapshot may increase single payload size; mitigate with selective field projection and optional sections.
+- Need clear invalidation (otherwise stale subscription/credits).
+- Real-time channels could further reduce refetch (e.g., listen to credits, subscriptions, personas tables) but may be unnecessary if mutation flows are authoritative.
+
+## 10. Summary of Key Files to Refactor
+
+- Snapshot SQL: 20250818093000_get_user_snapshot.sql
+- Central queries module: supabase-queries.ts (add universal dedupe + reduce exports actually used post-snapshot)
+- Edge bootstrap: index.ts and modules/database.ts (ensure response doc & client usage)
+- Context legacy cleanup (remove obsolete chat_context fetch attempts in hooks/components)
+- Persona operations (not shown here but referenced via imports)
+- Consume credits flow: `consumeCredits` (adjust RPC return)
+
+Let me know when you want a concrete change list or code refactor plan.

@@ -12,7 +12,7 @@
 import { 
   getRecentChatMessages, 
   getEarlierChatMessages,
-  getUserCredits,
+  // getUserCredits, (deprecated snapshot)
   getCharacterDetails
 } from '@/lib/supabase-queries';
 import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
@@ -36,23 +36,21 @@ export const queryKeys = {
     list: (userId: string) => ['personas', userId] as const,
     byId: (personaId: string) => ['persona', personaId] as const,
   },
-  // User queries  (extended Phase 3)
+  // User queries (credits/subscription now snapshot-backed, keep keys for potential refetch triggers)
   user: {
     all: ['user'] as const,
-    credits: (userId: string) => ['user', 'credits', userId] as const,
     profile: (userId: string) => ['user', 'profile', userId] as const,
     favorites: (userId: string) => ['user', 'favorites', userId] as const,
     characters: (userId: string) => ['user', 'characters', userId] as const,
-    subscription: (userId: string) => ['user', 'subscription', userId] as const,
     chatsCount: (userId: string) => ['user', 'chats', 'count', userId] as const,
+    // Added back for backward compatibility with legacy invalidations; no dedicated queryFn (snapshot-backed)
+    credits: (userId: string) => ['user', 'credits', userId] as const,
   },
-  // Static taxonomy / monetization
   static: {
     tags: ['static', 'tags'] as const,
     plans: ['static', 'plans'] as const,
     creditPacks: ['static', 'credit-packs'] as const,
   },
-  // Character queries
   character: {
     all: ['character'] as const,
     details: (characterId: string) => ['character', 'details', characterId] as const,
@@ -71,6 +69,23 @@ export const queryConfigs = {
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
+  }),
+  // Restored: lightweight head count query (used by ChatLayout for memory cost calc)
+  chatMessageCount: (chatId: string, opts?: { enabled?: boolean }) => ({
+    queryKey: queryKeys.chat.messageCount(chatId),
+    queryFn: async () => {
+      if (!chatId) return 0;
+      const { count, error } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('chat_id', chatId);
+      if (error) throw error;
+      return count || 0;
+    },
+    enabled: !!chatId && (opts?.enabled ?? true),
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   }),
   // Deprecated: direct head count query removed; use deriveMessageCount util fed from paginated cache
   // User favorites
@@ -99,19 +114,6 @@ export const queryConfigs = {
     gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: false,
   }),
-  // User subscription
-  userSubscription: (userId: string) => ({
-    queryKey: queryKeys.user.subscription(userId),
-    queryFn: async () => {
-      if (!userId) return null;
-      const { getUserActiveSubscription } = await import('@/lib/supabase-queries');
-      const { data } = await getUserActiveSubscription(userId);
-      return data || null;
-    },
-    staleTime: 5 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  }),
   // Chats count derived (placeholder until snapshot RPC)
   userChatsCount: (userId: string) => ({
     queryKey: queryKeys.user.chatsCount(userId),
@@ -125,19 +127,6 @@ export const queryConfigs = {
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
   }),
-  // User credits - balanced updates with background refresh
-  userCredits: (userId: string) => ({
-    queryKey: queryKeys.user.credits(userId),
-    queryFn: async () => {
-      const result = await getUserCredits(userId);
-      if (result.error) throw result.error;
-      return result.data?.balance || 0;
-    },
-    staleTime: 5 * 60 * 1000, // increased to 5m
-    gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  }),
-  
   // Character details - aggressive caching for static data
   characterDetails: (characterId: string) => ({
     queryKey: queryKeys.character.details(characterId),
@@ -230,27 +219,12 @@ export const invalidationHelpers = {
     queryClient.invalidateQueries({ queryKey: queryKeys.chat.context(chatId, '') });
     queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatId) });
   },
-  
-  // Invalidate user-related queries  
-  invalidateUserData: (queryClient: any, userId: string) => {
-    queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(userId) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(userId) });
+  invalidateUserData: (_queryClient: any, _userId: string) => {
+    // Credits now snapshot-backed: no react-query key to invalidate
   },
-  
-  // Smart invalidation - only invalidate what's needed
-  invalidateAfterMessage: (queryClient: any, chatId: string, userId: string) => {
-    queryClient.invalidateQueries({ 
-      queryKey: queryKeys.chat.messages(chatId),
-      exact: true 
-    });
-    queryClient.invalidateQueries({ 
-      queryKey: queryKeys.user.credits(userId),
-      exact: true 
-    });
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.chat.messageCount(chatId),
-      exact: true
-    });
+  invalidateAfterMessage: (queryClient: any, chatId: string, _userId: string) => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(chatId), exact: true });
+    queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatId), exact: true });
   }
 } as const;
 
@@ -260,12 +234,11 @@ export const invalidationHelpers = {
 export type QueryKey = 
   | ReturnType<typeof queryKeys.chat.messages>
   | ReturnType<typeof queryKeys.chat.messageCount>
-  | ReturnType<typeof queryKeys.user.credits>
   | ReturnType<typeof queryKeys.user.profile>
   | ReturnType<typeof queryKeys.user.favorites>
   | ReturnType<typeof queryKeys.user.characters>
-  | ReturnType<typeof queryKeys.user.subscription>
   | ReturnType<typeof queryKeys.user.chatsCount>
+  | ReturnType<typeof queryKeys.user.credits>
   | typeof queryKeys.static.tags
   | typeof queryKeys.static.plans
   | typeof queryKeys.static.creditPacks
@@ -275,18 +248,23 @@ export type QueryKey =
 
 export type QueryConfig = 
   | ReturnType<typeof queryConfigs.chatMessages>
-  | ReturnType<typeof queryConfigs.userCredits>
+  | ReturnType<typeof queryConfigs.chatMessageCount>
   | ReturnType<typeof queryConfigs.characterDetails>
   | ReturnType<typeof queryConfigs.personasList>
   | ReturnType<typeof queryConfigs.personaById>
   | ReturnType<typeof queryConfigs.userFavorites>
   | ReturnType<typeof queryConfigs.userCharacters>
-  | ReturnType<typeof queryConfigs.userSubscription>
   | ReturnType<typeof queryConfigs.userChatsCount>;
 
-export const useUserCredits = (userId: string | undefined, opts?: { enabled?: boolean }) => {
-  return useQuery({
-    ...(queryConfigs.userCredits(userId || '')),
-    enabled: !!userId && (opts?.enabled ?? true),
-  });
+// Snapshot-backed credits hook mimic react-query response shape
+import { useCredits } from '@/state/bootstrap-store';
+export const useUserCredits = (_userId: string | undefined, _opts?: { enabled?: boolean }) => {
+  const { balance } = useCredits();
+  return {
+    data: balance,
+    isLoading: false,
+    isFetching: false,
+    error: undefined as undefined,
+    refetch: async () => ({ data: balance }),
+  } as const;
 };

@@ -1,5 +1,4 @@
--- Enriched character_profile_view consolidating counts, tags, nsfw flag, and definition snippet
--- Safely replace existing view (previous definition had extra columns; need full drop to remove them)
+-- Update character_profile_view to embed creator username & avatar to avoid extra profile fetch
 DROP VIEW IF EXISTS public.character_profile_view CASCADE;
 
 CREATE VIEW public.character_profile_view AS
@@ -10,6 +9,8 @@ SELECT
   c.avatar_url,
   c.visibility,
   c.creator_id,
+  p.username          AS creator_username,
+  p.avatar_url        AS creator_avatar_url,
   c.interaction_count,
   c.created_at,
   c.updated_at,
@@ -22,6 +23,7 @@ SELECT
   COALESCE(t.tag_names, ARRAY[]::text[]) AS tag_names,
   (t.nsfw_count > 0)              AS is_nsfw
 FROM characters c
+LEFT JOIN profiles p ON p.id = c.creator_id
 LEFT JOIN character_definitions cd ON cd.character_id = c.id
 LEFT JOIN (
   SELECT character_id, COUNT(*) chat_count
@@ -49,7 +51,7 @@ LEFT JOIN (
   GROUP BY ct.character_id
 ) t ON t.character_id = c.id;
 
--- Cannot index a normal view; add helpful indexes on underlying tables instead
+-- Supporting indexes (base tables)
 CREATE INDEX IF NOT EXISTS idx_characters_visibility_created_at ON characters (visibility, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_characters_visibility_interaction ON characters (visibility, interaction_count DESC);
 CREATE INDEX IF NOT EXISTS idx_characters_lower_name ON characters (LOWER(name));

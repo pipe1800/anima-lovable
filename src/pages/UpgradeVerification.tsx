@@ -81,7 +81,7 @@ const UpgradeVerification = () => {
 
           // Invalidate credits/profile to refresh plan benefits
           if (user?.id) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+            // Removed credits invalidate (snapshot-backed)
             queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
           }
           

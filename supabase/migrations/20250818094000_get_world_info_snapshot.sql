@@ -38,13 +38,8 @@ begin
       limit 100
     ) o;
 
-    select json_agg(row_to_json(f)) into v_favorited_ids
-    from (
-      select wif.world_info_id as id
-      from world_info_favorites wif
-      join world_infos wi on wi.id = wif.world_info_id and wi.visibility = 'public'
-      where wif.user_id = p_user_id
-    ) f;
+    -- Favorites table not present in current schema; return empty until implemented
+    v_favorited_ids := '[]'::json;
 
     select json_agg(row_to_json(u)) into v_used_ids
     from (
@@ -70,22 +65,19 @@ begin
     group by world_info_id
   ) agg;
 
-  -- aggregated counts per world info (likes, favorites, usage) for page
+  -- aggregated counts per world info (likes, favorites placeholder=0, usage) for page
   with page_ids as (
     select (elem->>'id')::uuid as id from json_array_elements(coalesce(v_public,'[]'::json)) elem
   ), likes as (
     select world_info_id, count(*)::int c from world_info_user_likes where world_info_id in (select id from page_ids) group by world_info_id
-  ), favs as (
-    select world_info_id, count(*)::int c from world_info_favorites where world_info_id in (select id from page_ids) group by world_info_id
   ), usage as (
     select world_info_id, count(*)::int c from world_info_users where world_info_id in (select id from page_ids) group by world_info_id
   )
-  select json_object_agg(id, json_build_object('likes', coalesce(l.c,0), 'favorites', coalesce(f.c,0), 'usage', coalesce(u.c,0))) into v_counts
+  select json_object_agg(id, json_build_object('likes', coalesce(l.c,0), 'favorites', 0, 'usage', coalesce(u.c,0))) into v_counts
   from (
     select id from page_ids
   ) ids
   left join likes l on l.world_info_id = ids.id
-  left join favs f on f.world_info_id = ids.id
   left join usage u on u.world_info_id = ids.id;
 
   return json_build_object(

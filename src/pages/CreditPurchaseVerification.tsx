@@ -92,7 +92,7 @@ const CreditPurchaseVerification = () => {
 
           // Invalidate user credits and profile so balance updates everywhere
           if (user?.id) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+            // Removed credits invalidate (snapshot-backed)
             queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
           }
           

@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { searchPublicWorldInfos, SearchParams } from '@/lib/supabase-queries';
 import { supabase } from '@/integrations/supabase/client';
 import { getWorldInfoSnapshot } from '@/lib/snapshots';
+import type { SearchParams } from '@/types/search';
+
+// TODO: Replace client-side world info search filtering with server RPC (get_world_info_search_snapshot) for large datasets/pagination.
 
 export interface WorldInfoWithDetails {
   id: string;
@@ -213,15 +215,66 @@ export const usePublicWorldInfos = () => {
 
 export const useSearchPublicWorldInfos = (searchParams: SearchParams) => {
   return useQuery({
-    queryKey: ['world-infos', 'search', searchParams],
+    queryKey: ['world-infos', 'search-snapshot', searchParams],
     queryFn: async () => {
-      const result = await searchPublicWorldInfos(searchParams);
-      if (result.error) throw result.error;
-      return result;
+      // Fetch base snapshot (first page large enough for filtering)
+      const snap = await getWorldInfoSnapshot(null, 200, 0);
+      if (!snap) return { data: [], total: 0, hasMore: false };
+      let list: any[] = snap.public || [];
+      const { searchQuery, filters, sortBy, limit, offset } = searchParams;
+      if (searchQuery && searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        list = list.filter(w => (w.name||'').toLowerCase().includes(q) || (w.short_description||'').toLowerCase().includes(q));
+      }
+      if (filters.creator && filters.creator.trim()) {
+        // Need creator usernames; fetch profiles for involved creator_ids once
+        const creatorIds = [...new Set(list.map(w=>w.creator_id))];
+        const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', creatorIds);
+        const profileMap = new Map((profiles||[]).map(p=>[p.id, p.username?.toLowerCase()]));
+        const creatorSearch = filters.creator.toLowerCase();
+        list = list.filter(w => (profileMap.get(w.creator_id)||'').includes(creatorSearch));
+      }
+      if (filters.nsfw === false && snap.tags) {
+        // Exclude those with nsfw tag id 24
+        const nsfwIds = Object.entries(snap.tags).filter(([_, tags]: any) => (tags as any[]).some(t=>t.id===24)).map(([id])=>id);
+        const nsfwSet = new Set(nsfwIds);
+        list = list.filter(w => !nsfwSet.has(w.id));
+      }
+      if (filters.tags && filters.tags.length && snap.tags) {
+        list = list.filter(w => {
+          const wt = snap.tags[w.id] || [];
+            return wt.some((t:any)=>filters.tags!.includes(t.name));
+        });
+      }
+      // Augment counts & tags
+      list = list.map(w => ({
+        ...w,
+        tags: (snap.tags && snap.tags[w.id]) || [],
+        likes_count: snap.counts?.[w.id]?.likes || 0,
+        favorites_count: snap.counts?.[w.id]?.favorites || 0,
+        usage_count: snap.counts?.[w.id]?.usage || 0
+      }));
+      // Sorting
+      switch (sortBy) {
+        case 'newest':
+          list.sort((a,b)=> new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          break;
+        case 'conversations':
+          list.sort((a,b)=>(b.usage_count||0)-(a.usage_count||0));
+          break;
+        case 'popular':
+        default:
+          list.sort((a,b)=>(b.interaction_count||0)-(a.interaction_count||0));
+          break;
+      }
+      const total = list.length;
+      const sliced = list.slice(offset, offset+limit);
+      const hasMore = offset + limit < total;
+      return { data: sliced, total, hasMore };
     },
-    enabled: false, // Only run when manually triggered
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000, // 15 minutes
+    enabled: false,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
   });
 };
 

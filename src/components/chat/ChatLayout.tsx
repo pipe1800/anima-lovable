@@ -34,6 +34,7 @@ import { createMemory as createMemoryOp } from '@/lib/memory-operations';
 import { buildGreetingVariants } from '@/lib/greeting-utils';
 import { useChatBootstrap } from '@/contexts/ChatBootstrapContext';
 import { useUserCharacterEngagementSets } from '@/hooks/useCharacters';
+import { useCredits } from '@/state/bootstrap-store';
 
 // ChatLayout component
 interface ChatLayoutProps {
@@ -69,11 +70,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   let bootstrap: ReturnType<typeof useChatBootstrap> | undefined;
   try { bootstrap = useChatBootstrap(); } catch { bootstrap = undefined; }
 
-  // Fetch user credits as single source of truth
-  const { data: creditsBalance = 0 } = useQuery({
-    ...queryConfigs.userCredits(currentUser?.id || ''),
-    enabled: !!currentUser?.id,
-  });
+  // Fetch user credits from snapshot store instead of react-query
+  const { balance: creditsBalance } = useCredits();
 
   // Persona manager hook (always call hooks unconditionally; gate via enabled flag)
   const personaManagerEnabled = rightPanelOpen; // panel open gates data
@@ -511,9 +509,6 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           description: `Conversation summarized with ${data.data?.messageCount || 0} messages processed. ${creditCost} credits deducted.`,
         });
         queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(currentChatId), exact: true });
-        if (currentUser?.id) {
-          queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(currentUser.id), exact: true });
-        }
       } else {
         throw new Error(data?.message || data?.error || 'Failed to create memory');
       }

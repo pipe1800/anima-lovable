@@ -4,33 +4,32 @@ import { useAuth } from '@/contexts/AuthContext';
 import { 
   getUserChatsPaginated,
   getUserCharacters, 
-  getUserCredits, 
   getUserSubscription,
-  // getMonthlyCreditsUsage, // removed: not available, we'll fallback to 0
   getUserFavorites
 } from '@/lib/supabase-queries';
 import { queryConfigs, queryKeys } from '@/queries/chatQueries';
+import { useBootstrap } from '@/state/bootstrap-store'
 
 export const useDashboardData = () => {
-  const { user, subscription: authSubscription } = useAuth();
+  const { user } = useAuth();
+  const { credits, subscription, snapshotVersion } = useBootstrap();
   const userId = user?.id;
   const queryClient = useQueryClient();
 
   return useQuery({
-    queryKey: ['dashboard', 'overview', userId],
+    queryKey: ['dashboard', 'overview', userId, snapshotVersion], // include snapshot version so credits/sub refresh after hydrate
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
       const [charactersResult, favoritesResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId)
       ]);
-      const cachedCredits = queryClient.getQueryData(queryKeys.user.credits(userId));
       return {
         characters: charactersResult.data || [],
         favorites: favoritesResult.data || [],
-        credits: (cachedCredits as any) ?? 0,
-        subscription: authSubscription,
-        creditsUsed: 0,
+        credits: credits?.balance || 0,
+        subscription: subscription, // from bootstrap snapshot
+        creditsUsed: 0, // monthly_used deprecated; implement real usage separately
         errors: { characters: charactersResult.error, favorites: favoritesResult.error, credits: null, creditsUsage: null }
       };
     },
@@ -235,29 +234,20 @@ export const useDashboardMutations = () => {
 // Preload function for dashboard data
 export const preloadDashboardData = async (userId: string, queryClient: QueryClient) => {
   if (!userId) return;
-  
-  // Prefetch all dashboard data in the background
   return queryClient.prefetchQuery({
-    queryKey: ['dashboard', 'overview', userId],
+    queryKey: ['dashboard', 'overview', userId, null],
     queryFn: async () => {
-      const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
+      const [charactersResult, favoritesResult] = await Promise.all([
         getUserCharacters(userId),
-        getUserFavorites(userId),
-        getUserCredits(userId)
+        getUserFavorites(userId)
       ]);
-
       return {
         characters: charactersResult.data || [],
         favorites: favoritesResult.data || [],
-        credits: creditsResult.data?.balance || 0,
-        subscription: null, // Will use from AuthContext
-        creditsUsed: 0, // fallback until usage endpoint implemented
-        errors: {
-          characters: charactersResult.error,
-          favorites: favoritesResult.error,
-          credits: creditsResult.error,
-          creditsUsage: null
-        }
+        credits: 0,
+        subscription: null,
+        creditsUsed: 0,
+        errors: { characters: charactersResult.error, favorites: favoritesResult.error, credits: null, creditsUsage: null }
       };
     },
     staleTime: 5 * 60 * 1000, // 5 minutes

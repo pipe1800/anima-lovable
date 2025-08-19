@@ -7,6 +7,7 @@ import { handleChatError } from '@/utils/chatErrorHandling';
 import { queryConfigs, infiniteQueryConfigs, invalidationHelpers, queryKeys } from '@/queries/chatQueries';
 import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { useChatBootstrap } from '@/contexts/ChatBootstrapContext';
+import { useCredits } from '@/state/bootstrap-store';
 import type { Message, TrackedContext, ChatState, ChatAction } from '@/types/chat';
 import logger from '@/utils/logger';
 import { StreamingMessageParser, parseSSEMessage } from '@/lib/streaming-utils';
@@ -118,11 +119,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     return cached?.pages;
   }, [bootstrapHydrated, chatId, queryClient]);
 
-  // Get credits balance
-  const { data: creditsBalance = 0 } = useQuery({
-    ...queryConfigs.userCredits(user?.id || ''),
-    enabled: !!user,
-  });
+  // Get credits balance from snapshot store instead of react-query
+  const { balance: creditsBalance } = useCredits();
 
   // Get character details
   const { data: characterDetails } = useQuery({
@@ -138,11 +136,25 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     dispatch({ type: 'ADD_DEBUG_INFO', payload: info });
   }, []);
 
+  const lastFinalizeRef = useRef<number>(0);
+  const lastInvalidateRef = useRef<number>(0);
+  const DEBOUNCE_MS = 250;
+  const debouncedInvalidateChat = useCallback((cid: string) => {
+    const now = Date.now();
+    if (now - lastInvalidateRef.current < DEBOUNCE_MS) return; // coalesce bursts
+    lastInvalidateRef.current = now;
+    invalidationHelpers.invalidateChatData(queryClient, cid);
+  }, [queryClient]);
+
   useEffect(() => {
     if (!chatId || !user) {
       dispatch({ type: 'SET_REALTIME_STATUS', payload: false });
       return;
     }
+    // Guard against React StrictMode double-mount
+    const mountedRef = { current: false } as any;
+    if ((channelRef as any)._initialized) return; // already set up
+    (channelRef as any)._initialized = true;
     
     addDebugInfo(`Setting up real-time for chat ${chatId.slice(0, 8)}...`);
     
@@ -155,51 +167,22 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       .channel(`chat-${chatId}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `chat_id=eq.${chatId}`
-        },
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
         (payload) => {
-          // ✅ Refined: allow initial greeting (message_order === 1) to invalidate even during streaming
-          if (isStreamingRef.current && !(payload.new.is_ai_message && payload.new.message_order === 1)) {
-            addDebugInfo('Skipping real-time update - streaming active (non-greeting)');
-            return;
-          }
-          if (payload.new.is_placeholder || !payload.new.content?.trim()) {
-            addDebugInfo('Skipping empty/placeholder message');
-            return;
-          }
-          addDebugInfo(`New message: ${payload.new.is_ai_message ? 'AI' : 'User'}`);
-          setTimeout(() => {
-            invalidationHelpers.invalidateChatData(queryClient, chatId);
-            addDebugInfo('Real-time chat data invalidated');
-          }, 100);
+          if (isStreamingRef.current && !(payload.new.is_ai_message && payload.new.message_order === 1)) return;
+          if (payload.new.is_placeholder || !payload.new.content?.trim()) return;
+          // Skip if just finalized (backend already consistent)
+            if (Date.now() - lastFinalizeRef.current < 400) return;
+          setTimeout(() => { debouncedInvalidateChat(chatId); }, 80);
         }
       )
       .on(
         'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `chat_id=eq.${chatId}`
-        },
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
         (payload) => {
-          // ✅ Handle context updates to messages
-          if (isStreamingRef.current) {
-            addDebugInfo('Skipping real-time update - streaming active');
-            return;
-          }
-          
-          addDebugInfo(`Message updated: ${payload.new.is_ai_message ? 'AI' : 'User'} context`);
-          
-          // Invalidate to pick up context updates
-          setTimeout(() => {
-            invalidationHelpers.invalidateChatData(queryClient, chatId);
-            addDebugInfo('Real-time context invalidated');
-          }, 100);
+          if (isStreamingRef.current) return;
+          if (Date.now() - lastFinalizeRef.current < 400) return; // avoid duplicate right after finalize
+          setTimeout(() => { debouncedInvalidateChat(chatId); }, 80);
         }
       )
       .subscribe((status) => {
@@ -220,7 +203,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         channelRef.current = null;
       }
     };
-  }, [chatId, user, addDebugInfo, queryClient]);
+  }, [chatId, user, addDebugInfo, queryClient, debouncedInvalidateChat]);
 
   // ============================================================================
   // STREAMING AI RESPONSES (replaces useChatStreaming)
@@ -270,23 +253,14 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
 
   // Helper to finalize streaming and refresh messages/context
   const finalizeStreaming = useCallback((chatIdParam: string) => {
-    // Clear streaming state
     dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
-    // Refresh messages to show final result
-    invalidationHelpers.invalidateChatData(queryClient, chatIdParam);
-    // Also refresh credits and message count explicitly
-    if (user?.id) {
-      queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
-    }
-    queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatIdParam), exact: true });
-    // Fetch context shortly after backend finishes
-    setTimeout(() => fetchAndUpdateContext(chatIdParam), 1000);
-    // Notify UI that AI response is done
-    try {
-      const ev = new CustomEvent('chat-ai-response-finished');
-      window.dispatchEvent(ev);
-    } catch {}
-  }, [queryClient, fetchAndUpdateContext, user?.id]);
+    lastFinalizeRef.current = Date.now();
+    debouncedInvalidateChat(chatIdParam);
+    // Remove credits invalidation (snapshot + realtime handles it)
+    // Context fetch (single) – remove delayed refetch, rely on realtime UPDATE or explicit fetch below
+    setTimeout(() => fetchAndUpdateContext(chatIdParam), 600);
+    try { window.dispatchEvent(new CustomEvent('chat-ai-response-finished')); } catch {}
+  }, [debouncedInvalidateChat, fetchAndUpdateContext]);
 
   const invokeStreamingAI = async (
     chatId: string, 
@@ -473,27 +447,8 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       selectedWorldInfoId?: string | null;
     }) => {
       if (!user) throw new Error('User not authenticated');
-      const startTime = Date.now();
-
-      try {
-        const aiResult = await invokeStreamingAI(
-          chatId,
-          content,
-          characterId,
-          user.id,
-          trackedContext,
-          addonSettings,
-          selectedPersonaId,
-          selectedWorldInfoId
-        );
-        
-        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
-        const endTime = Date.now();
-        return { chatId, content, updatedContext: aiResult, metrics: { sendTime: endTime - startTime } };
-      } catch (error) {
-        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
-        throw error;
-      }
+      // Invoke streaming handles invalidation at end; avoid mid-flight invalidates
+      return invokeStreamingAI(chatId, content, characterId, user.id, trackedContext, addonSettings, selectedPersonaId, selectedWorldInfoId);
     },
     onMutate: async ({ chatId, content }) => {
       const key = queryKeys.chat.messages(chatId);
@@ -537,11 +492,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         queryClient.setQueryData(ctx.key, ctx.previous);
       }
     },
-    onSettled: (_data, _error, vars) => {
-      if (vars?.chatId && user?.id) {
-        invalidationHelpers.invalidateAfterMessage(queryClient, vars.chatId, user.id);
-      }
-    }
+    onSettled: () => { /* no-op: finalizeStreaming will handle invalidate */ }
   });
 
   // ==========================================================================
