@@ -25,6 +25,7 @@ const state: BootstrapState = {
   characters: [],
   recentChats: [],
   favoriteCharacterIds: [],
+  likedCharacterIds: [] as any,
   tags: [],
   stats: { total_chats: 0, total_characters: 0, total_personas: 0, total_favorites: 0 },
   defaultPersona: null,
@@ -37,7 +38,10 @@ const state: BootstrapState = {
   charactersVersion: 0 as any,
   favoritesVersion: 0 as any,
   chatsVersion: 0 as any,
-};
+  tagsVersion: 0 as any, // track tag updates
+  creditMetrics: null as any, // placeholder for metrics snapshot
+  favoritesFull: [] as any,
+} as any;
 
 // Simple listeners for pub/sub (React integration will subscribe via a bridge)
 const listeners = new Set<() => void>();
@@ -59,7 +63,24 @@ export async function fetchUserSnapshotV2(): Promise<UserSnapshotV2> {
 
 // Attempt sessionStorage hydration (sync) before network
 function tryHydrateFromCache(userId: string | null) {
-  // TEMP: disable cache usage to avoid stale subscription/credits discrepancies
+  if (!userId) return false;
+  try {
+    for (const ver of SUPPORTED_SNAPSHOT_VERSIONS) {
+      const raw = sessionStorage.getItem(persistKey(userId, ver));
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') continue;
+      if (!SUPPORTED_SNAPSHOT_VERSIONS.includes(parsed.version)) continue;
+      // Basic sanity checks
+      if (parsed.user_id !== userId) continue;
+      // Apply cached snapshot immediately (will be refreshed in background)
+      actions.hydrate(parsed as any);
+      console.log('[Bootstrap] cache hydration applied', { version: parsed.version, favorites: parsed.favorite_character_ids?.length, liked: parsed.liked_character_ids?.length });
+      return true;
+    }
+  } catch (e) {
+    console.warn('[Bootstrap] cache hydration failed', e);
+  }
   return false;
 }
 
@@ -88,6 +109,8 @@ const persistSnapshotCurrent = () => {
       characters: state.characters,
       recent_chats: state.recentChats,
       favorite_character_ids: state.favoriteCharacterIds,
+      liked_character_ids: state.likedCharacterIds || [],
+      favorites_full: state.favoritesFull || [],
       tags: state.tags,
       stats: state.stats
     } as any;
@@ -114,8 +137,11 @@ const actions: BootstrapActions = {
     state.characters = snapshot.characters || [];
     state.recentChats = snapshot.recent_chats || [];
     state.favoriteCharacterIds = snapshot.favorite_character_ids || [];
+    if ((snapshot as any).liked_character_ids) (state as any).likedCharacterIds = (snapshot as any).liked_character_ids;
+    if (snapshot.favorites_full) state.favoritesFull = snapshot.favorites_full as any; else state.favoritesFull = [] as any;
     state.tags = snapshot.tags || [];
     state.stats = snapshot.stats;
+    state.creditMetrics = (window as any)?.__creditMetrics || null;
     state.loading = false;
     state.loaded = true;
     state.error = null;
@@ -208,6 +234,27 @@ const actions: BootstrapActions = {
     persistSnapshotCurrent();
     notify();
   },
+  // favoritesFull management
+  addFavoriteFull(entry: any) {
+    if (!state.favoritesFull) state.favoritesFull = [] as any;
+    if (!state.favoritesFull.find((f: any) => f.id === entry.id)) {
+      state.favoritesFull = [entry, ...state.favoritesFull].slice(0,200);
+      persistSnapshotCurrent();
+      notify();
+    }
+  },
+  updateFavoriteFull(id: string, patch: any) {
+    if (!state.favoritesFull) return;
+    let changed = false;
+    state.favoritesFull = state.favoritesFull.map((f: any) => f.id === id ? (changed = true, { ...f, ...patch }) : f);
+    if (changed) { persistSnapshotCurrent(); notify(); }
+  },
+  removeFavoriteFull(id: string) {
+    if (!state.favoritesFull) return;
+    const before = state.favoritesFull.length;
+    state.favoritesFull = state.favoritesFull.filter((f: any) => f.id !== id);
+    if (state.favoritesFull.length !== before) { persistSnapshotCurrent(); notify(); }
+  },
   removeCharacter(id) {
     const before = state.characters.length;
     state.characters = state.characters.filter(c => c.id !== id);
@@ -228,6 +275,16 @@ const actions: BootstrapActions = {
     persistSnapshotCurrent();
     notify();
   },
+  removeRecentChat(id) {
+    const before = state.recentChats.length;
+    state.recentChats = state.recentChats.filter(c => c.id !== id);
+    if (state.recentChats.length < before) {
+      state.chatsVersion++ as any;
+      state.stats.total_chats = Math.max(0, state.stats.total_chats - 1);
+      persistSnapshotCurrent();
+      notify();
+    }
+  },
   setFavorites(ids) {
     state.favoriteCharacterIds = [...ids];
     state.stats.total_favorites = ids.length;
@@ -237,10 +294,62 @@ const actions: BootstrapActions = {
   },
   toggleFavorite(id, favorited) {
     const set = new Set(state.favoriteCharacterIds);
-    if (favorited) set.add(id); else set.delete(id);
+    const already = set.has(id);
+    if (favorited && !already) set.add(id); else if (!favorited && already) set.delete(id);
     state.favoriteCharacterIds = Array.from(set);
     state.stats.total_favorites = state.favoriteCharacterIds.length;
     state.favoritesVersion++ as any;
+    // Update favoritesFull collection optimistically
+    if (favorited) {
+      if (!state.favoritesFull) state.favoritesFull = [] as any;
+      const exists = state.favoritesFull.find((f: any) => f.id === id);
+      if (!exists) {
+        const owned = state.characters.find(c => c.id === id);
+        state.favoritesFull = [
+          {
+            id,
+            name: owned?.name || (exists?.name) || 'Unknown',
+            short_description: owned?.short_description || null,
+            tagline: (owned as any)?.tagline || null,
+            avatar_url: owned?.avatar_url || null,
+            visibility: owned?.visibility || 'public',
+            interaction_count: owned?.interaction_count || 0,
+            chats_count: owned?.chats_count || 0,
+            messages_count: (owned as any)?.messages_count || 0,
+            likes_count: owned?.likes_count || 0,
+            favorites_count: owned?.favorites_count ? (owned.favorites_count + 1) : 1,
+            updated_at: owned?.updated_at || new Date().toISOString(),
+            created_at: owned?.created_at || new Date().toISOString(),
+            creator_username: state.profile?.username || null,
+            character_definitions: (owned as any)?.character_definitions || null,
+            tags: (owned as any)?.tags || [],
+          },
+          ...state.favoritesFull,
+        ].slice(0, 200);
+      }
+    } else {
+      // remove on unfavorite
+      if (state.favoritesFull) {
+        const before = state.favoritesFull.length;
+        state.favoritesFull = state.favoritesFull.filter((f: any) => f.id !== id);
+        if (before !== state.favoritesFull.length) state.favoritesVersion++ as any;
+      }
+    }
+    persistSnapshotCurrent();
+    notify();
+  },
+  toggleLike(id, liked) {
+    const set = new Set(state.likedCharacterIds || []);
+    const already = set.has(id);
+    if (liked && !already) set.add(id); else if (!liked && already) set.delete(id);
+    (state as any).likedCharacterIds = Array.from(set);
+    // Update owned character likes if present
+    state.characters = state.characters.map(c => c.id === id ? { ...c, likes_count: Math.max(0,(c.likes_count || 0) + (liked ? (already?0:1) : (already? -1:0))) } : c);
+    // Update favoritesFull mirror if present
+    if (state.favoritesFull) {
+      state.favoritesFull = state.favoritesFull.map((f: any) => f.id === id ? { ...f, likes_count: Math.max(0,(f.likes_count || 0) + (liked ? (already?0:1) : (already? -1:0))) } : f);
+    }
+    state.charactersVersion++ as any;
     persistSnapshotCurrent();
     notify();
   },
@@ -434,7 +543,7 @@ export function useRecentChats() {
   return useBootstrapSelector(s => ({ recentChats: s.recentChats }));
 }
 export function useFavorites() {
-  return useBootstrapSelector(s => ({ favoriteCharacterIds: s.favoriteCharacterIds }));
+  return useBootstrapSelector(s => ({ favoriteCharacterIds: s.favoriteCharacterIds, favoritesFull: s.favoritesFull }));
 }
 export function useChatSettings() {
   return useBootstrapSelector(s => ({ settings: s.settings }));
@@ -480,6 +589,14 @@ export const startBootstrapRealtime = (userId: string) => {
       const { data } = await supabase.from('character_favorites').select('character_id').eq('user_id', userId).order('created_at', { ascending: false });
       actions.setFavorites((data || []).map(r => r.character_id));
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'character_likes', filter: `user_id=eq.${userId}` }, async () => {
+      try {
+        const { data } = await supabase.from('character_likes').select('character_id').eq('user_id', userId).order('created_at', { ascending: false });
+        (state as any).likedCharacterIds = (data || []).map(r => r.character_id);
+        persistSnapshotCurrent();
+        notify();
+      } catch (e) { console.warn('[Bootstrap] likes realtime refresh failed', e); }
+    })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'characters', filter: `creator_id=eq.${userId}` }, async () => {
       const { data } = await supabase.from('characters').select('id,name,short_description,avatar_url,visibility,interaction_count,chats_count,likes_count,updated_at').eq('creator_id', userId).order('updated_at', { ascending: false }).limit(100);
       if (data) { state.characters = data as any; state.charactersVersion++ as any; persistSnapshotCurrent(); notify(); }
@@ -494,6 +611,25 @@ export const startBootstrapRealtime = (userId: string) => {
         actions.addRecentChat({ id: r.id, title: r.title, last_message_at: r.last_message_at, character_id: r.character_id, character_name: r.character_name || '', character_avatar_url: r.character_avatar_url || '', last_message: r.last_message || null, last_message_is_ai: r.last_message_is_ai || false, message_count: r.message_count || 0 } as any);
         state.stats.total_chats = state.stats.total_chats + 1; persistSnapshotCurrent(); notify();
       }
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chats', filter: `user_id=eq.${userId}` }, (payload: any) => {
+      const id = payload.old?.id;
+      if (id) actions.removeRecentChat?.(id);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'user_tags', filter: `user_id=eq.${userId}` }, async () => {
+      try {
+        const { data } = await supabase.from('tags').select('name, user_tags(user_id)').eq('user_tags.user_id', userId);
+        if (data) { state.tags = data.map(t => (t as any).name); state.tagsVersion++ as any; persistSnapshotCurrent(); notify(); }
+      } catch (e) { console.warn('[Bootstrap] tag refresh failed', e); }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'plans' }, async () => {
+      // Plan changes do not directly alter user subscription but plan features may update UI
+      try {
+        if (state.subscription?.plan?.id) {
+          const { data } = await supabase.from('plans').select('*').eq('id', state.subscription.plan.id).maybeSingle();
+          if (data) { state.subscription = { ...state.subscription, plan: data } as any; state.subscriptionVersion++ as any; persistSnapshotCurrent(); notify(); }
+        }
+      } catch (e) { console.warn('[Bootstrap] plan refresh failed', e); }
     })
     .subscribe();
 };

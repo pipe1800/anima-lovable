@@ -10,14 +10,7 @@ export interface UserSnapshot {
   personas: any[];
 }
 
-export const getUserSnapshot = async (userId: string): Promise<UserSnapshot | null> => {
-  const { data, error } = await (supabase as any).rpc('get_user_snapshot', { p_user_id: userId });
-  if (error) {
-    console.error('getUserSnapshot error', error);
-    return null;
-  }
-  return data as UserSnapshot;
-};
+// get_user_snapshot (v1) removed; use bootstrap-store ensureSnapshotLoaded instead.
 
 export interface WorldInfoSnapshot {
   public: any[];
@@ -38,12 +31,5 @@ export const getWorldInfoSnapshot = async (userId: string | null, limit = 24, of
   return data as WorldInfoSnapshot;
 };
 
-// Helper to seed user snapshot into react-query cache
-export const seedUserSnapshot = (qc: any, userId: string, snap: UserSnapshot) => {
-  qc.setQueryData(queryKeys.user.profile(userId), snap.profile);
-  // subscription & credits now snapshot-store only; no react-query keys
-  qc.setQueryData(queryKeys.user.characters(userId), snap.characters || []);
-  qc.setQueryData(queryKeys.user.favorites(userId), []); // counts only; detailed favorites loaded lazily
-  qc.setQueryData(queryKeys.personas.list(userId), snap.personas || []);
-  qc.setQueryData(queryKeys.user.chatsCount(userId), snap.counts?.chats || 0);
-};
+// Helper to seed user snapshot into react-query cache (legacy callers should migrate to bootstrap store)
+export const seedUserSnapshot = () => { /* deprecated noop */ };

@@ -8,8 +8,10 @@ import { CreditCard, Loader2, Crown, Zap, Calendar, ChevronLeft, ChevronRight } 
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { useUserSubscription, useAvailablePlans } from '@/hooks/useProfile';
+import { useAvailablePlans } from '@/hooks/useProfile';
+import { useSubscriptionInfo, bootstrapActions } from '@/state/bootstrap-store';
 
+// Remove local UserSubscription interface; rely on bootstrap store snapshot type
 interface Plan {
   id: string;
   name: string;
@@ -17,14 +19,6 @@ interface Plan {
   monthly_credits_allowance: number;
   features: any;
   is_active: boolean;
-}
-
-interface UserSubscription {
-  id: string;
-  status: string;
-  current_period_end: string;
-  paypal_subscription_id: string | null;
-  plan: Plan;
 }
 
 interface BillingHistoryItem {
@@ -50,17 +44,15 @@ export const BillingSettings = () => {
   const [availableYears, setAvailableYears] = useState<number[]>([]);
 
   const { 
-    data: userSubscription, 
-    isLoading: subscriptionLoading,
-    refetch: refetchSubscription 
-  } = useUserSubscription();
+    subscription: userSubscription 
+  } = useSubscriptionInfo();
   
   const { 
     data: availablePlans = [], 
     isLoading: plansLoading 
   } = useAvailablePlans();
 
-  const loading = subscriptionLoading || plansLoading;
+  const loading = plansLoading;
 
   // Fetch billing history
   useEffect(() => {
@@ -237,104 +229,42 @@ export const BillingSettings = () => {
     setShowUpgradeConfirmation(true);
   };
 
+  // Helper to refresh subscription from DB after mutations
+  async function refreshSubscription(userId?: string | null) {
+    if (!userId) return;
+    const { data } = await supabase.from('subscriptions').select('id,user_id,plan_id,status,current_period_end, created_at, plan:plans(id,name,price_monthly,monthly_credits_allowance,features)').eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (data) bootstrapActions.setSubscription(data as any); else bootstrapActions.setSubscription(null);
+  }
+
   const handleUpgrade = async () => {
     setIsChangingPlan(true);
     setShowUpgradeConfirmation(false);
     try {
-      // Find The Whale plan ID
       const whalePlan = availablePlans.find(plan => plan.name === 'The Whale');
-      if (!whalePlan) {
-        throw new Error('The Whale plan not found');
-      }
-
-      if (!userSubscription?.paypal_subscription_id) {
-        throw new Error('No PayPal subscription ID found');
-      }
-
-      console.log('🚀 Starting upgrade process:', {
-        whalePlanId: whalePlan.id,
-        whalePlanName: whalePlan.name,
-        currentSubscriptionId: userSubscription.paypal_subscription_id,
-        currentPlanName: userSubscription.plan.name
-      });
-
-      // Create upgrade subscription using the special upgrade plan
+      if (!whalePlan) throw new Error('The Whale plan not found');
+      if (!userSubscription) throw new Error('No active subscription found');
+      console.log('Upgrade process', { whalePlanId: whalePlan.id, currentSubId: userSubscription.id });
       const { data, error } = await supabase.functions.invoke('paypal-management', {
-        body: {
-          operation: 'create-subscription',
-          planId: whalePlan.id, // We'll map this to the upgrade PayPal plan in the backend
-          upgradeFromSubscriptionId: userSubscription.paypal_subscription_id // Pass the current subscription to upgrade from
-        }
+        body: { operation: 'create-subscription', planId: whalePlan.id, upgradeFromSubscriptionId: userSubscription.id }
       });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
+      if (error) throw new Error(error.message);
       if (data?.success) {
         if (data.data?.requires_approval && data.data?.approve_url) {
-          // PayPal requires approval - open approval URL
-          const approvalUrl = data.data.approve_url;
-          const width = 600;
-          const height = 800;
-          const left = (window.screen.width / 2) - (width / 2);
-          const top = (window.screen.height / 2) - (height / 2);
-          
+          const approvalUrl = data.data.approve_url; const w = 600; const h = 800; const left = (window.screen.width/2)-(w/2); const top = (window.screen.height/2)-(h/2);
           setShowPaymentModal(true);
-          
-          const popup = window.open(
-            approvalUrl,
-            'paypal-approval',
-            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-          );
-          
-          // Set up message listener for popup communication
+          const popup = window.open(approvalUrl,'paypal-approval',`width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`);
           const handleMessage = (event: MessageEvent) => {
             if (event.data?.paypal_status === 'success') {
-              // Payment successful, clean up and redirect
-              window.removeEventListener('message', handleMessage);
-              setShowPaymentModal(false);
-              setIsChangingPlan(false);
-              // Refresh subscription data
-              refetchSubscription();
-              toast({
-                title: "Upgrade Successful!",
-                description: "Your plan has been upgraded to The Whale.",
-              });
-            }
+              window.removeEventListener('message', handleMessage); setShowPaymentModal(false); setIsChangingPlan(false); refreshSubscription(user?.id); toast({ title: 'Upgrade Successful!', description: 'Your plan has been upgraded to The Whale.' }); }
           };
-          
           window.addEventListener('message', handleMessage);
-          
-          // Check if popup was closed without completion
-          const checkClosed = setInterval(() => {
-            if (popup.closed) {
-              clearInterval(checkClosed);
-              window.removeEventListener('message', handleMessage);
-              setShowPaymentModal(false);
-              setIsChangingPlan(false);
-            }
-          }, 1000);
+          const checkClosed = setInterval(() => { if (popup?.closed) { clearInterval(checkClosed); window.removeEventListener('message', handleMessage); setShowPaymentModal(false); setIsChangingPlan(false); } }, 1000);
         } else {
-          // Upgrade completed immediately without approval needed
-          setIsChangingPlan(false);
-          await refetchSubscription();
-          toast({
-            title: "Upgrade Successful!",
-            description: "Your plan has been upgraded to The Whale.",
-          });
+          setIsChangingPlan(false); await refreshSubscription(user?.id); toast({ title: 'Upgrade Successful!', description: 'Your plan has been upgraded to The Whale.' });
         }
-      } else {
-        throw new Error('Upgrade failed');
-      }
+      } else { throw new Error('Upgrade failed'); }
     } catch (error) {
-      console.error('Upgrade error:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Could not start the upgrade process. Please try again.",
-        variant: "destructive"
-      });
-      setIsChangingPlan(false);
+      console.error('Upgrade error:', error); toast({ title: 'Error', description: error instanceof Error ? error.message : 'Could not start the upgrade process. Please try again.', variant: 'destructive' }); setIsChangingPlan(false);
     }
   };
 
@@ -342,34 +272,12 @@ export const BillingSettings = () => {
   const handleCancelSubscription = async () => {
     setIsCancelling(true);
     try {
-      const { data, error } = await supabase.functions.invoke('paypal-management', {
-        body: {
-          operation: 'cancel-subscription'
-        }
-      });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      if (data?.success) {
-        toast({
-          title: "Subscription Cancelled",
-          description: "Your subscription has been cancelled and you've been automatically moved to the Guest Pass plan.",
-        });
-        // Refresh the subscription data
-        await refetchSubscription();
-      }
+      const { data, error } = await supabase.functions.invoke('paypal-management', { body: { operation: 'cancel-subscription' } });
+      if (error) throw new Error(error.message);
+      if (data?.success) { toast({ title: 'Subscription Cancelled', description: 'Your subscription has been cancelled and you\'ve been automatically moved to the Guest Pass plan.' }); await refreshSubscription(user?.id); }
     } catch (error) {
-      console.error('Cancellation error:', error);
-      toast({
-        title: "Error", 
-        description: "Failed to cancel subscription. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsCancelling(false);
-    }
+      console.error('Cancellation error:', error); toast({ title: 'Error', description: 'Failed to cancel subscription. Please try again.', variant: 'destructive' });
+    } finally { setIsCancelling(false); }
   };
 
   if (loading) {
@@ -486,8 +394,8 @@ export const BillingSettings = () => {
                 </Button>
               )}
               
-              {/* Cancel Subscription Dialog - Only show for active subscriptions with PayPal ID */}
-              {userSubscription && userSubscription.paypal_subscription_id && (
+              {/* Cancel Subscription Dialog - Only show for active subscriptions */}
+              {userSubscription && (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" className="border-red-600 text-red-400 hover:bg-red-600/10">

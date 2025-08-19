@@ -329,17 +329,7 @@ export const createCharacter = async (userId: string, characterData: {
  * (Removed legacy) getUserCredits => use bootstrapStore.credits (snapshot) or direct 'credits' table.
  */
 
-// DEPRECATED: getUserSubscription replaced by snapshot (BootstrapStore.subscription)
-export const getUserSubscription = async (_userId: string) => {
-  console.warn('[removed] getUserSubscription: use bootstrap snapshot instead');
-  return { data: null, error: null } as any;
-};
-
-// DEPRECATED: getUserCredits replaced by snapshot (BootstrapStore.credits.balance)
-export const getUserCredits = async (_userId: string) => {
-  console.warn('[removed] getUserCredits: use bootstrap snapshot instead');
-  return { data: null, error: null } as any;
-};
+// Removed getUserSubscription / getUserCredits (use bootstrap store)
 
 // =============================================================================
 // ONBOARDING QUERIES
@@ -600,17 +590,37 @@ export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder:
  * Consume credits for a user
  */
 export async function consumeCredits(userId: string, credits: number): Promise<{ data: { success: boolean; balance: number } | null, error: any }> {
+  // Optimistic decrement (will be corrected by authoritative RPC result)
+  try {
+    const { bootstrapActions, getBootstrapState } = await import('@/state/bootstrap-store');
+    const st = getBootstrapState();
+    if (st.userId === userId && typeof credits === 'number' && credits > 0) {
+      bootstrapActions.decrementCredits(credits);
+    }
+  } catch { /* ignore */ }
+  const started = performance.now();
   const { data, error } = await supabase
     .rpc('consume_credits', { 
       user_id_param: userId,
       credits_to_consume: credits 
     });
-
+  const duration = performance.now() - started;
   if (error) return { data: null, error };
-
-  // Normalize response (data should already be JSON object from RPC)
   const success = !!(data as any)?.success;
   const balance = (data as any)?.balance ?? null;
+  // Authoritative store update
+  try {
+    const { bootstrapActions, getBootstrapState } = await import('@/state/bootstrap-store');
+    const st = getBootstrapState();
+    if (st.userId === userId && typeof balance === 'number') {
+      bootstrapActions.setCredits(balance);
+    }
+    // Basic in-memory metrics accumulator
+    ;(window as any).__creditMetrics = (window as any).__creditMetrics || { calls: 0, lastDuration: 0, totalDuration: 0 };
+    (window as any).__creditMetrics.calls += 1;
+    (window as any).__creditMetrics.lastDuration = duration;
+    (window as any).__creditMetrics.totalDuration += duration;
+  } catch { /* ignore */ }
   return { data: { success, balance }, error: null };
 }
 
@@ -767,6 +777,9 @@ export const deleteChat = async (chatId: string, userId: string) => {
       p_chat_id: chatId,
       p_user_id: userId,
     });
+    if (!error) {
+      try { const { bootstrapActions } = await import('@/state/bootstrap-store'); bootstrapActions.removeRecentChat?.(chatId); } catch {}
+    }
     return { data, error };
   } catch (err) {
     console.error('Error in deleteChat:', err);
@@ -789,6 +802,7 @@ export const deleteMultipleChats = async (chatIds: string[], userId: string) => 
         console.log(`Deleting chat ${chatId}...`);
         const result = await deleteChat(chatId, userId);
         results.push({ ...result, chatId });
+        if (!result.error) { try { const { bootstrapActions } = await import('@/state/bootstrap-store'); bootstrapActions.removeRecentChat?.(chatId); } catch {} }
         return result;
       } catch (err) {
         console.error(`Failed to delete chat ${chatId}:`, err);
@@ -808,7 +822,6 @@ export const deleteMultipleChats = async (chatIds: string[], userId: string) => 
 
 export const deleteAllUserChats = async (userId: string) => {
   try {
-    // Fetch all chat ids for user first (batched RPC already optimized)
     const { data: chatsData, error: chatsError } = await supabase
       .from('chats')
       .select('id')
@@ -816,7 +829,6 @@ export const deleteAllUserChats = async (userId: string) => {
     if (chatsError) return { success: false, error: chatsError.message, deletedCount: 0 };
     const ids = (chatsData||[]).map(c=>c.id);
     if (!ids.length) return { success: true, error: null, deletedCount: 0 };
-    // Delete in manageable batches
     const batchSize = 50;
     let deleted = 0;
     for (let i=0; i<ids.length; i+=batchSize) {
@@ -825,6 +837,7 @@ export const deleteAllUserChats = async (userId: string) => {
       if (error) return { success: false, error: error.message, deletedCount: deleted };
       deleted += batch.length;
     }
+    try { const { bootstrapActions } = await import('@/state/bootstrap-store'); ids.forEach(id => bootstrapActions.removeRecentChat?.(id)); } catch {}
     return { success: true, error: null, deletedCount: deleted };
   } catch (e:any) {
     return { success: false, error: e?.message || String(e), deletedCount: 0 };

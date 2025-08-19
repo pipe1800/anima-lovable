@@ -7,23 +7,14 @@ import { Upload, Plus, User, X, Edit } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { toast } from 'sonner';
-import { createPersona, deletePersona, updatePersona, type Persona } from '@/lib/persona-operations';
+import { createPersona, deletePersona, updatePersona, getPersonaById, type Persona } from '@/lib/persona-operations';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { registerPersonaQueryClient, getUserPersonas } from '@/lib/persona-operations';
+import { usePersonas, bootstrapActions } from '@/state/bootstrap-store';
 
 export const PersonasTab = () => {
   const { user } = useAuth();
-  const queryClient = useQueryClient();
-  useEffect(()=>{ registerPersonaQueryClient(queryClient); }, [queryClient]);
-  const personasQuery = useQuery({
-    queryKey: ['personas', user?.id],
-    queryFn: () => user ? getUserPersonas(user.id) : [],
-    enabled: !!user,
-    staleTime: 10 * 60 * 1000,
-  });
-  const personas = personasQuery.data || [];
-  const loadingPersonas = personasQuery.isLoading;
+  const { personas } = usePersonas();
+  const loadingPersonas = !personas; // bootstrap ensures initial load
 
   const [showPersonaModal, setShowPersonaModal] = useState(false);
   const [editingPersona, setEditingPersona] = useState<Persona | null>(null);
@@ -60,15 +51,25 @@ export const PersonasTab = () => {
     setShowPersonaModal(true);
   };
 
-  const handleOpenEditModal = (persona: Persona) => {
-    setEditingPersona(persona);
-    setCurrentPersona({
-      name: persona.name,
-      bio: persona.bio || '',
-      lore: persona.lore || '',
-      avatar_url: persona.avatar_url
-    });
-    setShowPersonaModal(true);
+  // Fetch full persona (with bio/lore) before editing since snapshot personas are trimmed
+  const handleOpenEditModal = async (persona: { id: string; name: string; avatar_url: string | null; updated_at: string }) => {
+    try {
+      setIsLoading(true);
+      const full = await getPersonaById(persona.id);
+      setEditingPersona(full);
+      setCurrentPersona({
+        name: full.name,
+        bio: full.bio || '',
+        lore: full.lore || '',
+        avatar_url: full.avatar_url
+      });
+      setShowPersonaModal(true);
+    } catch (e) {
+      console.error('Failed to load persona details', e);
+      toast.error('Failed to load persona details');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSavePersona = async () => {
@@ -85,22 +86,22 @@ export const PersonasTab = () => {
     setIsLoading(true);
     try {
       if (editingPersona) {
-        // Update existing persona
         const updatedPersona = await updatePersona(editingPersona.id, {
           name: currentPersona.name.trim(),
           bio: currentPersona.bio.trim() || null,
           lore: currentPersona.lore.trim() || null,
           avatar_url: currentPersona.avatar_url
         });
+        bootstrapActions.updatePersona(editingPersona.id, { name: updatedPersona.name, avatar_url: updatedPersona.avatar_url });
         toast.success('Persona updated successfully!');
       } else {
-        // Create new persona
         const newPersona = await createPersona(user.id, {
           name: currentPersona.name.trim(),
           bio: currentPersona.bio.trim() || null,
-          lore: currentPersona.lore.trim() || null,
+            lore: currentPersona.lore.trim() || null,
           avatar_url: currentPersona.avatar_url
-        });
+        } as any);
+        bootstrapActions.addPersona({ id: newPersona.id, name: newPersona.name, avatar_url: newPersona.avatar_url, updated_at: newPersona.updated_at });
         toast.success('Persona created successfully!');
       }
 
@@ -122,6 +123,7 @@ export const PersonasTab = () => {
   const handleRemovePersona = async (id: string) => {
     try {
       await deletePersona(id);
+      bootstrapActions.removePersona(id);
       toast.success('Persona removed');
     } catch (error) {
       console.error('Error removing persona:', error);
@@ -192,22 +194,21 @@ export const PersonasTab = () => {
                       <button
                         onClick={() => handleOpenEditModal(persona)}
                         className="text-gray-400 hover:text-[#FF7A00] transition-colors p-1"
+                        disabled={isLoading}
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleRemovePersona(persona.id)}
                         className="text-gray-400 hover:text-red-400 transition-colors p-1"
+                        disabled={isLoading}
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
-                  {persona.bio && (
-                    <p className="text-gray-400 text-sm mb-2 line-clamp-2">{persona.bio}</p>
-                  )}
                   <div className="text-xs text-gray-500">
-                    Created {new Date(persona.created_at).toLocaleDateString()}
+                    Last updated {new Date(persona.updated_at).toLocaleDateString()}
                   </div>
                 </div>
               </div>

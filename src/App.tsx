@@ -40,25 +40,14 @@ import CreditPurchaseVerification from "./pages/CreditPurchaseVerification";
 import DialogueTestPage from "./pages/DialogueTestPage";
 import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/queries/chatQueries';
-import { getPublicProfile, getUserActiveSubscription, getUserFavorites, getUserCharacters } from '@/lib/supabase-queries';
-import { getUserPersonas } from '@/lib/persona-operations';
-import { getUserSnapshot, seedUserSnapshot } from '@/lib/snapshots';
+import { ensureSnapshotLoaded } from '@/state/bootstrap-store';
 
 const PostAuthPrefetch = () => {
   const { user } = useAuth();
-  const qc = useQueryClient();
   useEffect(() => {
-    const run = async () => {
-      if (!user?.id) return;
-      const id = user.id;
-      const snap = await getUserSnapshot(id);
-      if (snap) seedUserSnapshot(qc, id, snap);
-      // TODO world info snapshot prefetch optional
-    };
-    run();
-  }, [user?.id, qc]);
+    if (!user?.id) return;
+    ensureSnapshotLoaded();
+  }, [user?.id]);
   return null;
 };
 

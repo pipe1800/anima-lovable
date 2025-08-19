@@ -101,12 +101,6 @@ export const useUpdateProfile = () => {
   });
 };
 
-// Remove useUserSubscription (bootstrap handles it)
-export const useUserSubscription = () => {
-  const { subscription } = useSubscriptionInfo();
-  return { subscription } as any;
-};
-
 export const useAvailablePlans = () => {
   return useQuery({
     queryKey: ['available-plans'],

@@ -3,7 +3,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription }
 import { Badge } from "@/components/ui/badge";
 import { Check, Crown } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getUserActiveSubscription } from "@/lib/supabase-queries";
+import { useSubscriptionInfo } from '@/state/bootstrap-store';
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 
@@ -13,33 +13,16 @@ interface PricingTiersProps {
 
 const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
   const { user } = useAuth();
-  const [currentPlan, setCurrentPlan] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchUserSubscription = async () => {
-      if (!user) {
-        setCurrentPlan('Guest Pass'); // Default for non-authenticated users
-        setLoading(false);
-        return;
-      }
+    if (user) {
+      const { subscription } = useSubscriptionInfo();
+      if (subscription?.plan_id) setSelectedPlan(subscription.plan_id);
+    }
 
-      try {
-        const { data: subscription } = await getUserActiveSubscription(user.id);
-        if (subscription?.plan) {
-          setCurrentPlan(subscription.plan.name);
-        } else {
-          setCurrentPlan('Guest Pass'); // Default for users without subscription
-        }
-      } catch (error) {
-        console.error('Error fetching subscription:', error);
-        setCurrentPlan('Guest Pass');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUserSubscription();
+    setLoading(false);
   }, [user]);
 
   const getButtonConfig = (planName: string) => {
@@ -51,7 +34,7 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
       return { text: "Create an Account", variant: "default" as const, disabled: false };
     }
 
-    if (currentPlan === planName) {
+    if (selectedPlan === planName) {
       return { text: "Current Plan", variant: "outline" as const, disabled: true };
     }
 
@@ -63,11 +46,11 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
       'The Whale': 2
     };
 
-    const currentPlanLevel = planHierarchy[currentPlan as keyof typeof planHierarchy] ?? 0;
+    const currentPlanLevel = planHierarchy[selectedPlan as keyof typeof planHierarchy] ?? 0;
     const targetPlanLevel = planHierarchy[planName as keyof typeof planHierarchy] ?? 0;
 
     // Guest Pass users can upgrade to paid plans
-    if (currentPlan === 'Guest Pass' && targetPlanLevel > 0) {
+    if (selectedPlan === 'Guest Pass' && targetPlanLevel > 0) {
       return { text: "Subscribe", variant: "default" as const, disabled: false };
     } else if (targetPlanLevel > currentPlanLevel) {
       return { text: "Upgrade", variant: "default" as const, disabled: false };

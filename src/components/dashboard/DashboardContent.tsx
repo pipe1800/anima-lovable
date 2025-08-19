@@ -59,7 +59,7 @@ import {
   Eye,
   Trash2
 } from 'lucide-react';
-import { useCredits, useSubscriptionInfo, getBootstrapState, useSnapshotLoading, ensureSnapshotLoaded } from '@/state/bootstrap-store';
+import { useCredits, useSubscriptionInfo, getBootstrapState, useSnapshotLoading, ensureSnapshotLoaded, useRecentChats, useStats, useFavorites, useCharacters } from '@/state/bootstrap-store';
 
 export function DashboardContent() {
   const { user, profile, loading: authLoading, subscription: authSubscription } = useAuth();
@@ -117,12 +117,24 @@ export function DashboardContent() {
       });
     }
   }, [balance, subscription, snapshotLoading]);
-  const { data: chatsData, isLoading: chatsLoading, error: chatsError, refetch: refetchChats } = useUserChatsPaginated(currentPage, chatsPerPage);
-  const recentChats = useMemo(() => chatsData?.data || [], [chatsData?.data]);
-  const totalChats = useMemo(() => chatsData?.totalCount || 0, [chatsData?.totalCount]);
-  const totalPages = useMemo(() => chatsData?.totalPages || 1, [chatsData?.totalPages]);
-  const myCharacters = useMemo(() => dashboardData?.characters || [], [dashboardData?.characters]);
-  const favoriteCharacters = useMemo(() => dashboardData?.favorites || [], [dashboardData?.favorites]);
+  const { data: chatsData, isLoading: chatsLoading, error: chatsError, refetch: refetchChats } = useUserChatsPaginated(currentPage, chatsPerPage, currentPage !== 1);
+  const { recentChats: bootstrapRecentChats } = useRecentChats();
+  const { characters } = useCharacters();
+  const { favoritesFull } = useFavorites();
+  const stats = useStats();
+  // Prefer bootstrap snapshot recentChats for first page (reduces duplicate fetch + ensures immediate realtime/optimistic updates)
+  const recentChats = useMemo(() => {
+    if (currentPage === 1 && bootstrapRecentChats && bootstrapRecentChats.length > 0) return bootstrapRecentChats;
+    return chatsData?.data || [];
+  }, [currentPage, bootstrapRecentChats, chatsData?.data]);
+  const totalChats = useMemo(() => {
+    // Stats always reflects authoritative total (kept in sync by snapshot + mutations)
+    if (stats?.total_chats !== undefined) return stats.total_chats;
+    return chatsData?.totalCount || 0;
+  }, [stats?.total_chats, chatsData?.totalCount]);
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(totalChats / chatsPerPage)), [totalChats, chatsPerPage]);
+  const myCharacters = useMemo(() => characters || dashboardData?.characters || [], [characters, dashboardData?.characters]);
+  const favoriteCharacters = useMemo(() => favoritesFull || dashboardData?.favorites || [], [favoritesFull, dashboardData?.favorites]);
   const userCredits = balance;
   const monthlyAllowance = useMemo(() => subscription?.plan?.monthly_credits_allowance ?? 1000, [subscription?.plan?.monthly_credits_allowance]);
   const getCrownIconStyle = useMemo(() => { const planName = subscription?.plan?.name?.toLowerCase(); if (!planName) return 'text-gray-400'; if (planName.includes('whale')) return 'text-yellow-500 fill-yellow-500'; if (planName.includes('true fan')) return 'text-gray-300 fill-gray-300'; return 'text-gray-400'; }, [subscription?.plan?.name]);
@@ -132,22 +144,30 @@ export function DashboardContent() {
 
   // Memoize formatted data for performance
   const formattedRecentChats = useMemo(() => 
-    recentChats.map((chat: any) => ({
-      id: chat.id,
-      character: {
-        id: chat.character?.id,
-        name: chat.character?.name || 'Unknown',
-        avatar: chat.character?.avatar_url,
-        image: chat.character?.avatar_url, // For backwards compatibility
-      },
-      title: chat.title || `Chat with ${chat.character?.name || 'Unknown'}`,
-      message_count: chat.message_count || 0,
-      last_message_at: chat.last_message_at || chat.created_at,
-      created_at: chat.created_at,
-      chat_mode: chat.userSettings?.chat_mode || 'storytelling',
-      time_awareness_enabled: chat.userSettings?.time_awareness_enabled || false,
-      last_message: chat.messages?.[0]?.content || null,
-    })), [recentChats]
+    recentChats.map((chat: any) => {
+      // Support both snapshot shape (flat fields) and paginated shape (nested character/messages)
+      const character = chat.character || {
+        id: chat.character_id,
+        name: chat.character_name,
+        avatar_url: chat.character_avatar_url
+      };
+      return {
+        id: chat.id,
+        character: {
+          id: character?.id,
+          name: character?.name || 'Unknown',
+          avatar: character?.avatar_url,
+          image: character?.avatar_url,
+        },
+        title: chat.title || (character?.name ? `Chat with ${character.name}` : 'Chat'),
+        message_count: chat.message_count || chat.messageCount || 0,
+        last_message_at: chat.last_message_at || chat.created_at,
+        created_at: chat.created_at,
+        chat_mode: chat.userSettings?.chat_mode || chat.chat_mode || 'storytelling',
+        time_awareness_enabled: chat.userSettings?.time_awareness_enabled || chat.time_awareness_enabled || false,
+        last_message: chat.last_message || chat.messages?.[0]?.content || null,
+      };
+    }), [recentChats]
   );
 
   const formattedMyCharacters = useMemo(() => 

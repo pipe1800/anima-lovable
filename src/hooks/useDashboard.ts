@@ -3,43 +3,38 @@ import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   getUserChatsPaginated,
-  getUserCharacters, 
-  getUserSubscription,
-  getUserFavorites
 } from '@/lib/supabase-queries';
 import { queryConfigs, queryKeys } from '@/queries/chatQueries';
 import { useBootstrap } from '@/state/bootstrap-store'
+import { useFavorites } from '@/state/bootstrap-store'
 
 export const useDashboardData = () => {
   const { user } = useAuth();
-  const { credits, subscription, snapshotVersion } = useBootstrap();
+  const { credits, subscription, snapshotVersion, characters, charactersVersion, favoritesVersion } = useBootstrap() as any;
+  const { favoritesFull } = useFavorites();
   const userId = user?.id;
   const queryClient = useQueryClient();
 
   return useQuery({
-    queryKey: ['dashboard', 'overview', userId, snapshotVersion], // include snapshot version so credits/sub refresh after hydrate
+    queryKey: ['dashboard','overview', userId, snapshotVersion, charactersVersion, favoritesVersion],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-      const [charactersResult, favoritesResult] = await Promise.all([
-        getUserCharacters(userId),
-        getUserFavorites(userId)
-      ]);
       return {
-        characters: charactersResult.data || [],
-        favorites: favoritesResult.data || [],
+        characters: characters || [],
+        favorites: favoritesFull || [],
         credits: credits?.balance || 0,
-        subscription: subscription, // from bootstrap snapshot
-        creditsUsed: 0, // monthly_used deprecated; implement real usage separately
-        errors: { characters: charactersResult.error, favorites: favoritesResult.error, credits: null, creditsUsage: null }
+        subscription,
+        creditsUsed: 0,
+        errors: { characters: null, favorites: null, credits: null, creditsUsage: null }
       };
     },
-    enabled: !!userId,
+    enabled: !!userId, // snapshot must exist
     staleTime: 5 * 60 * 1000, // 5 minutes - keep data fresh longer
     gcTime: 5 * 60 * 1000, // 5 minutes
   });
 };
 
-export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
+export const useUserChatsPaginated = (page: number = 1, limit: number = 10, enabled: boolean = true) => {
   const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
@@ -103,7 +98,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
       }
       return result;
     },
-    enabled: !!userId,
+    enabled: !!userId && enabled,
     staleTime: 60 * 1000, // keep for a minute
     gcTime: 10 * 60 * 1000,
     placeholderData: (previousData) => previousData, // Keeps previous data while loading
@@ -132,42 +127,6 @@ export const useUserChats = () => {
   });
 };
 
-export const useUserCharacters = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'characters', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      const result = await getUserCharacters(userId);
-      if (result.error) throw result.error;
-      return result.data || [];
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000,
-  });
-};
-
-export const useUserSubscription = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'subscription', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      const result = await getUserSubscription(userId);
-      if (result.error) throw result.error;
-      return result.data;
-    },
-    enabled: !!userId,
-    staleTime: 15 * 60 * 1000, // 15 minutes - subscriptions change rarely
-    gcTime: 30 * 60 * 1000,
-  });
-};
-
 export const useMonthlyCreditsUsage = () => {
   const { user } = useAuth();
   const userId = user?.id;
@@ -185,24 +144,6 @@ export const useMonthlyCreditsUsage = () => {
   });
 };
 
-export const useUserFavorites = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'favorites', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      const result = await getUserFavorites(userId);
-      if (result.error) throw result.error;
-      return result.data || [];
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000,
-  });
-};
-
 // Hook to invalidate dashboard-related queries
 export const useDashboardMutations = () => {
   const queryClient = useQueryClient();
@@ -212,8 +153,6 @@ export const useDashboardMutations = () => {
   const invalidateDashboard = () => {
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     queryClient.invalidateQueries({ queryKey: ['user', 'chats'] });
-    queryClient.invalidateQueries({ queryKey: ['user', 'characters'] });
-    queryClient.invalidateQueries({ queryKey: ['user', 'favorites'] });
   };
 
   const invalidateCredits = () => {
@@ -236,20 +175,14 @@ export const preloadDashboardData = async (userId: string, queryClient: QueryCli
   if (!userId) return;
   return queryClient.prefetchQuery({
     queryKey: ['dashboard', 'overview', userId, null],
-    queryFn: async () => {
-      const [charactersResult, favoritesResult] = await Promise.all([
-        getUserCharacters(userId),
-        getUserFavorites(userId)
-      ]);
-      return {
-        characters: charactersResult.data || [],
-        favorites: favoritesResult.data || [],
-        credits: 0,
-        subscription: null,
-        creditsUsed: 0,
-        errors: { characters: charactersResult.error, favorites: favoritesResult.error, credits: null, creditsUsage: null }
-      };
-    },
+    queryFn: async () => ({
+      characters: [],
+      favorites: [],
+      credits: 0,
+      subscription: null,
+      creditsUsed: 0,
+      errors: { characters: null, favorites: null, credits: null, creditsUsage: null }
+    }),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 };

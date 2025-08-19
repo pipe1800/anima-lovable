@@ -29,10 +29,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { 
   getPublicProfile, 
   getUserCharacters, 
-  getUserFavorites,
-  getUserActiveSubscription
+  getUserFavorites
 } from '@/lib/supabase-queries';
-import { getUserPersonas } from '@/lib/persona-operations';
+import { useSubscriptionInfo, usePersonas } from '@/state/bootstrap-store';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -69,42 +68,32 @@ const useUserProfileData = (userId: string | null | undefined, isOwnProfile: boo
         getPublicProfile(userId),
         getUserCharacters(userId),
         getUserFavorites(userId),
-        getUserActiveSubscription(userId),
         supabase
           .from('chats')
           .select('id', { count: 'exact', head: true })
           .eq('user_id', userId)
       ];
       const results = await Promise.allSettled(promises);
-
       let personas: any[] = [];
       if (isOwnProfile) {
-        try { personas = await getUserPersonas(userId); } catch { personas = []; }
+        try { const { personas: p } = (await import('@/state/bootstrap-store')).bootstrapStore; personas = p || []; } catch { personas = []; }
       }
-
       const profile = results[0].status === 'fulfilled' && results[0].value.data ? results[0].value.data : null;
       const characters = results[1].status === 'fulfilled' && Array.isArray(results[1].value.data) ? results[1].value.data : [];
       const favorites = results[2].status === 'fulfilled' && Array.isArray(results[2].value.data) ? results[2].value.data : [];
-      const subscription = results[3].status === 'fulfilled' && results[3].value.data ? results[3].value.data : null;
       let chatCount = 0;
-      if (results[4].status === 'fulfilled' && results[4].value && 'count' in results[4].value) {
-        chatCount = (results[4].value as any).count || 0;
+      if (results[3].status === 'fulfilled' && results[3].value && 'count' in results[3].value) {
+        chatCount = (results[3].value as any).count || 0;
       }
-
-      // Seed unified caches so other pages reuse data without refetch
-      if (profile) queryClient.setQueryData(queryKeys.user.profile(userId), profile);
-      queryClient.setQueryData(queryKeys.user.characters(userId), characters);
-      queryClient.setQueryData(queryKeys.user.favorites(userId), favorites);
-      if (subscription) queryClient.setQueryData(queryKeys.user.subscription(userId), subscription);
+      // Subscription comes from bootstrap; no react-query cache seed needed
       queryClient.setQueryData(queryKeys.user.chatsCount(userId), chatCount);
       if (isOwnProfile) queryClient.setQueryData(queryKeys.personas.list(userId), personas);
-
       return {
         profile,
         characters,
         favorites,
         personas,
-        subscription,
+        subscription: null,
         stats: {
           totalChats: chatCount,
           totalCharacters: characters.length,

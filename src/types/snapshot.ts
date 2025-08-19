@@ -2,7 +2,7 @@
 // Generated from docs/snapshot-contract-v2.md
 
 export interface UserSnapshotV2 {
-  version: 2;
+  version: 2; // TODO: update to 3 in a follow-up alignment PR
   generated_at: string;
   user_id: string;
   included_sections: string[];
@@ -82,12 +82,19 @@ export interface UserSnapshotV2 {
     id: string;
     name: string;
     short_description: string | null;
+    tagline?: string | null;
     avatar_url: string | null;
     visibility: 'public' | 'unlisted' | 'private';
     interaction_count: number;
     chats_count: number | null;
+    messages_count?: number | null;
     likes_count: number | null;
+    favorites_count?: number | null;
+    was_public?: boolean | null;
+    created_at?: string; // newly exposed in enriched snapshot
     updated_at: string;
+    character_definitions?: any; // enriched for owned characters
+    tags?: Array<{ id: number; name: string }>;
   }>;
   recent_chats: Array<{
     id: string;
@@ -101,6 +108,25 @@ export interface UserSnapshotV2 {
     message_count: number | null;
   }>;
   favorite_character_ids: string[];
+  favorites_full?: Array<{
+    id: string;
+    name: string;
+    short_description: string | null;
+    tagline?: string | null;
+    avatar_url: string | null;
+    visibility: 'public' | 'unlisted' | 'private';
+    interaction_count: number;
+    chats_count: number | null;
+    messages_count?: number | null;
+    likes_count: number | null;
+    favorites_count?: number | null;
+    updated_at: string;
+    created_at?: string;
+    creator_username: string | null;
+    character_definitions?: any;
+    tags?: Array<{ id: number; name: string }>;
+  }>;
+  liked_character_ids?: string[];
   tags: string[];
   stats: {
     total_chats: number;
@@ -134,10 +160,12 @@ export interface BootstrapState {
   characters: UserSnapshotV2['characters'];
   recentChats: UserSnapshotV2['recent_chats'];
   favoriteCharacterIds: string[];
+  likedCharacterIds?: string[]; // new liked ids from snapshot
   tags: UserSnapshotV2['tags'];
   stats: UserSnapshotV2['stats'];
   defaultPersona: { id: string; name: string; avatar_url: string | null } | null;
   debug?: UserSnapshotV2['debug'];
+  favoritesFull?: NonNullable<UserSnapshotV2['favorites_full']>;
   // segment version counters for granular invalidation
   creditsVersion?: number;
   subscriptionVersion?: number;
@@ -147,6 +175,8 @@ export interface BootstrapState {
   charactersVersion?: number;
   favoritesVersion?: number;
   chatsVersion?: number;
+  tagsVersion?: number;
+  creditMetrics?: { calls: number; lastDuration: number; totalDuration: number } | null;
 }
 
 export interface BootstrapActions {
@@ -157,19 +187,24 @@ export interface BootstrapActions {
   updatePersona(id: string, patch: Partial<{ name: string; avatar_url: string }>): void;
   addPersona(p: { id: string; name: string; avatar_url: string | null; updated_at: string }): void;
   removePersona(id: string): void;
-  updateCharacter(id: string, patch: Partial<{ name: string; short_description: string | null; avatar_url: string | null; visibility: 'public' | 'unlisted' | 'private'; interaction_count: number; chats_count: number | null; likes_count: number | null; updated_at: string }>): void;
+  updateCharacter(id: string, patch: Partial<{ name: string; short_description: string | null; tagline?: string | null; avatar_url: string | null; visibility: 'public' | 'unlisted' | 'private'; interaction_count: number; chats_count: number | null; messages_count?: number | null; likes_count: number | null; favorites_count?: number | null; updated_at: string; was_public?: boolean | null; character_definitions?: any; tags?: Array<{ id: number; name: string }> }>): void;
   addCharacter(c: BootstrapState['characters'][number]): void;
   removeCharacter(id: string): void;
   addRecentChat(chat: BootstrapState['recentChats'][number]): void;
   updateRecentChat(id: string, patch: Partial<BootstrapState['recentChats'][number]>): void;
+  removeRecentChat?(id: string): void;
   setFavorites(ids: string[]): void;
   toggleFavorite(id: string, favorited: boolean): void;
+  toggleLike?(id: string, liked: boolean): void;
   setTags(tags: string[]): void;
   setSettings(patch: Partial<NonNullable<UserSnapshotV2['user_global_chat_settings']>>): void;
   incrementCredits(delta: number): void;
   decrementCredits(delta: number): void;
   setStats(patch: Partial<UserSnapshotV2['stats']>): void;
   reset(): void;
+  addFavoriteFull?(entry: any): void;
+  updateFavoriteFull?(id: string, patch: any): void;
+  removeFavoriteFull?(id: string): void;
 }
 
 export type BootstrapStore = BootstrapState & BootstrapActions;

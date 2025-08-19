@@ -7,8 +7,9 @@ import { Upload, Plus, User, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { createPersona, deletePersona, type Persona } from '@/lib/persona-operations';
 import { useCurrentUser } from '@/hooks/useProfile';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { registerPersonaQueryClient, getUserPersonas } from '@/lib/persona-operations';
+import { useQueryClient } from '@tanstack/react-query';
+import { registerPersonaQueryClient } from '@/lib/persona-operations';
+import { usePersonas, bootstrapActions } from '@/state/bootstrap-store';
 
 interface CurrentPersona {
   name: string;
@@ -26,14 +27,8 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
   const { user } = useCurrentUser();
   const queryClient = useQueryClient();
   useEffect(()=>{ registerPersonaQueryClient(queryClient); }, [queryClient]);
-  const personasQuery = useQuery({
-    queryKey: ['personas', user?.id],
-    queryFn: () => user ? getUserPersonas(user.id) : [],
-    enabled: !!user,
-    staleTime: 10 * 60 * 1000,
-  });
-  const personas = personasQuery.data || [];
-  const loadingPersonas = personasQuery.isLoading;
+  const { personas } = usePersonas();
+  const loadingPersonas = !personas; // snapshot ensures load
 
   const [currentPersona, setCurrentPersona] = useState<CurrentPersona>({
     name: '',
@@ -77,11 +72,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
         avatar_url: currentPersona.avatar_url
       });
 
-      // Optimistically update the query data
-      queryClient.setQueryData(['personas', user.id], (oldData: Persona[] | undefined) => {
-        if (!oldData) return [newPersona];
-        return [newPersona, ...oldData];
-      });
+      bootstrapActions.addPersona({ id: newPersona.id, name: newPersona.name, avatar_url: newPersona.avatar_url, updated_at: newPersona.updated_at });
 
       setCurrentPersona({
         name: '',
@@ -101,11 +92,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
   const handleRemovePersona = async (id: string) => {
     try {
       await deletePersona(id);
-      // Optimistically update the query data
-      queryClient.setQueryData(['personas', user.id], (oldData: Persona[] | undefined) => {
-        if (!oldData) return [];
-        return oldData.filter(p => p.id !== id);
-      });
+      bootstrapActions.removePersona(id);
       toast.success('Persona removed');
     } catch (error) {
       console.error('Error removing persona:', error);
@@ -277,9 +264,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="text-white font-semibold truncate">{persona.name}</h4>
-                        {persona.bio && (
-                          <p className="text-gray-400 text-sm mt-1 line-clamp-2">{persona.bio}</p>
-                        )}
+                        {/* Bootstrap persona shape does not include bio/lore; omit extra text */}
                       </div>
                       <button
                         onClick={() => handleRemovePersona(persona.id)}

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCharacterCreation } from '@/hooks/useCharacterCreation';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
-import { getUserCredits } from '@/lib/supabase-queries';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -17,7 +16,6 @@ import { cn } from '@/lib/utils';
 import type { Tables } from '@/integrations/supabase/types';
 import { supabase, SUPABASE_API_URL } from '@/integrations/supabase/client';
 import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
-import { useUserCredits } from '@/queries/chatQueries';
 import { useOptionalChatBootstrap } from '@/contexts/ChatBootstrapContext';
 
 // Lazy load heavy components for better performance
@@ -72,9 +70,7 @@ const CharacterCreator = () => {
   const [nsfwDetected, setNsfwDetected] = useState(false);
 
   const bootstrap = useOptionalChatBootstrap();
-  const creditsQuery = useUserCredits(user?.id, { enabled: !bootstrap?.hydrated });
   useEffect(() => { if (bootstrap?.creditsBalance !== undefined) setUserCredits(bootstrap.creditsBalance); }, [bootstrap?.creditsBalance]);
-  useEffect(() => { if (!bootstrap?.hydrated && typeof creditsQuery.data === 'number') setUserCredits(creditsQuery.data); }, [creditsQuery.data, bootstrap?.hydrated]);
 
   // Handle unsaved changes warning
   useEffect(() => {

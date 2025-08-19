@@ -7,13 +7,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { X, ChevronDown, ChevronRight } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { getUserActiveSubscription } from '@/lib/supabase-queries';
+import { useSubscriptionInfo } from '@/state/bootstrap-store';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Tables } from '@/integrations/supabase/types';
+import type { Database } from '@/integrations/supabase/types';
 import type { CharacterFormData } from '@/hooks/useCharacterCreation';
 
 // Use shared Tag type from supabase Tables
-type Tag = Tables<'tags'>;
+type Tag = Database['public']['Tables']['tags']['Row'];
 
 interface PersonalityStepProps {
   data: CharacterFormData;
@@ -36,40 +36,17 @@ const PersonalityStep = ({ data, onUpdate, onNext, onPrevious, selectedTags, set
   const { user } = useAuth();
 
   // Fetch user subscription and tags when component mounts
+  const { subscription } = useSubscriptionInfo();
   useEffect(() => {
-    const fetchData = async () => {
-      console.log('PersonalityStep: Starting to fetch data...');
-      setIsLoading(true);
-      
-      try {
-        // Fetch user subscription
-        if (user) {
-          const { data: subscription } = await getUserActiveSubscription(user.id);
-          setUserPlan(subscription?.plan?.name || 'Guest Pass');
-        } else {
-          setUserPlan('Guest Pass');
-        }
-
-        // Fetch tags
-        const { data: tagsData, error } = await supabase.from('tags').select('*').order('name');
-        if (error) {
-          console.error('Error fetching tags:', error);
-          setAllTags([]);
-        } else {
-          console.log('PersonalityStep: Fetched tags:', tagsData);
-          setAllTags((tagsData as Tag[]) || []);
-        }
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        setUserPlan('Guest Pass');
-        setAllTags([]);
-      }
-      
+    setIsLoading(true);
+    setUserPlan(subscription?.plan?.name || 'Guest Pass');
+    (async () => {
+      const { data: tagsData, error } = await supabase.from('tags').select('*').order('name');
+      if (error) { console.error('Error fetching tags:', error); setAllTags([]); }
+      else setAllTags((tagsData as Tag[]) || []);
       setIsLoading(false);
-    };
-    
-    fetchData();
-  }, [user]);
+    })();
+  }, [subscription?.plan?.name]);
 
   // Update form data when character data is loaded
   useEffect(() => {

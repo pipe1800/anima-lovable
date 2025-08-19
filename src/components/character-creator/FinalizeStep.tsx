@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { User, MessageCircle, Heart, Sparkles, Globe, Link, Lock, Loader2 } from 'lucide-react';
-import { getUserActiveSubscription } from '@/lib/supabase-queries';
+import { useSubscriptionInfo } from '@/state/bootstrap-store';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import type { CharacterFormData } from '@/hooks/useCharacterCreation';
@@ -38,6 +38,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   const [showPublishWarning, setShowPublishWarning] = useState(false);
 
   const { user } = useAuth();
+  const { subscription } = useSubscriptionInfo();
 
   // Check if user is premium (True Fan or Whale)
   const isPremiumUser = () => {
@@ -46,36 +47,12 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
   // Load user's subscription and NSFW tag
   useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        // Fetch user subscription
-        if (user) {
-          const { data: subscription } = await getUserActiveSubscription(user.id);
-          if (subscription?.plan) {
-            setUserPlan(subscription.plan.name);
-          } else {
-            setUserPlan('Guest Pass');
-          }
-        } else {
-          setUserPlan('Guest Pass');
-        }
-
-        // Fetch NSFW tag from database
-        const { data: tags } = await supabase
-          .from('tags')
-          .select('*')
-          .ilike('name', 'nsfw')
-          .limit(1);
-        
-        if (tags && tags.length > 0) {
-          setNsfwTag(tags[0]);
-        }
-      } catch (error) {
-        console.error('Error loading user data:', error);
-      }
-    };
-    loadUserData();
-  }, [user]);
+    if (subscription?.plan?.name) setUserPlan(subscription.plan.name); else setUserPlan('Guest Pass');
+    (async () => {
+      const { data: tags } = await supabase.from('tags').select('*').ilike('name', 'nsfw').limit(1);
+      if (tags && tags.length > 0) setNsfwTag(tags[0]);
+    })();
+  }, [subscription?.plan?.name]);
 
   // Update form data when character data is loaded
   useEffect(() => {

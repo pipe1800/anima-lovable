@@ -20,7 +20,6 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUserCredits } from '@/queries/chatQueries';
 import { useOptionalChatBootstrap } from '@/contexts/ChatBootstrapContext';
 
 // Preload the logo image to prevent reloading
@@ -41,8 +40,7 @@ const AppSidebar = () => {
   const navigate = useNavigate();
   const { user, profile, signOut, loading, subscription: authSubscription } = useAuth();
   const bootstrap = useOptionalChatBootstrap();
-  const creditsQuery = useUserCredits(user?.id, { enabled: !(bootstrap && bootstrap.hydrated) });
-  const creditsBalance = (bootstrap && bootstrap.creditsBalance !== undefined) ? bootstrap.creditsBalance : (creditsQuery.data ?? 0);
+  const creditsBalance = (bootstrap && bootstrap.creditsBalance !== undefined) ? bootstrap.creditsBalance : 0;
   const [userCredits, setUserCredits] = useState(0);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const currentPath = location.pathname;

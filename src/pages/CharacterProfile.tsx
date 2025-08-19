@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -37,6 +38,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useUserCharacterEngagementSets } from '@/hooks/useCharacters';
+import { useBootstrap, useFavorites } from '@/state/bootstrap-store';
 
 // Types
 interface CharacterFullData {
@@ -80,19 +82,16 @@ interface CharacterFullData {
 }
 
 // Optimized data fetching hook
-const useCharacterFullProfile = (characterId?: string) => {
+const useCharacterFullProfile = (characterId?: string, skipFetch?: boolean) => {
   return useQuery({
     queryKey: ['character-full-profile', characterId],
     queryFn: async () => {
       if (!characterId) throw new Error('Character ID required');
-
-      // Get character data via view for flattened, denormalized shape
       const { data: viewData, error: viewError } = await supabase
         .from('character_profile_view')
         .select('*')
         .eq('id', characterId)
         .single();
-
       if (viewError || !viewData) throw viewError || new Error('Character not found');
 
       // Get creator id to compute user-specific stats
@@ -160,7 +159,7 @@ const useCharacterFullProfile = (characterId?: string) => {
 
       return result;
     },
-    enabled: !!characterId,
+    enabled: !!characterId && !skipFetch,
     staleTime: 1000 * 60 * 5,
   });
 };
@@ -168,14 +167,14 @@ const useCharacterFullProfile = (characterId?: string) => {
 // User interaction hooks
 const useUserCharacterInteractions = (characterId?: string) => {
   const { user } = useAuth();
-  const engagement = useUserCharacterEngagementSets(user?.id);
+  const bootstrap = useBootstrap();
   return {
     data: {
-      isFavorited: !!(characterId && engagement.favoritesSet?.has(characterId)),
-      isLiked: !!(characterId && engagement.likesSet?.has(characterId))
+      isFavorited: !!(characterId && bootstrap.favoriteCharacterIds.includes(characterId)),
+      isLiked: !!(characterId && (bootstrap as any).likedCharacterIds?.includes(characterId))
     },
-    isLoading: engagement.likesQuery.isLoading || engagement.favoritesQuery.isLoading,
-    refetch: async () => { await Promise.all([engagement.likesQuery.refetch(), engagement.favoritesQuery.refetch()]); }
+    isLoading: false,
+    refetch: async () => {}
   } as const;
 };
 export default function CharacterProfile() {
@@ -185,26 +184,132 @@ export default function CharacterProfile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { startChat, isCreating } = useChatCreation();
- 
-   // Add state for text expansion
-   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
-   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-   const [isDeleting, setIsDeleting] = useState(false);
+  const bootstrap = useBootstrap();
+  const { favoritesFull, favoriteCharacterIds } = useFavorites();
+  // Derive snapshot candidate (owned or favorited) for initial data
+  const snapshotCharacter = useMemo<CharacterFullData | undefined>(() => {
+    if (!characterId) return undefined;
+    const owned = bootstrap.characters.find(c => c.id === characterId);
+    if (owned) {
+      return {
+        id: owned.id,
+        name: owned.name,
+        tagline: owned.tagline ?? undefined,
+        short_description: owned.short_description ?? undefined,
+        avatar_url: owned.avatar_url ?? undefined,
+        visibility: owned.visibility,
+        interaction_count: owned.interaction_count,
+        created_at: owned.created_at || owned.updated_at,
+        updated_at: owned.updated_at,
+        creator_id: user?.id || '',
+        was_public: owned.was_public ?? false,
+        character_definitions: owned.character_definitions || { personality_summary: '', description: undefined, greeting: undefined, scenario: undefined, model_id: undefined },
+        creator: { id: user?.id || '', username: bootstrap.profile?.username || 'You', avatar_url: bootstrap.profile?.avatar_url || undefined },
+        tags: owned.tags || [],
+        world_infos: [],
+        stats: {
+          total_chats: owned.chats_count || 0,
+          total_messages: owned.messages_count || 0,
+          unique_users: 0,
+          average_rating: null,
+          total_favorites: owned.favorites_count || 0,
+          total_likes: owned.likes_count || 0,
+        }
+      };
+    }
+    const favFull = favoritesFull?.find(f => f.id === characterId);
+    if (favFull) {
+      return {
+        id: favFull.id,
+        name: favFull.name,
+        tagline: favFull.tagline ?? undefined,
+        short_description: favFull.short_description ?? undefined,
+        avatar_url: favFull.avatar_url ?? undefined,
+        visibility: favFull.visibility,
+        interaction_count: favFull.interaction_count,
+        created_at: favFull.created_at || favFull.updated_at,
+        updated_at: favFull.updated_at,
+        creator_id: '',
+        was_public: false,
+        character_definitions: favFull.character_definitions || { personality_summary: '', description: undefined, greeting: undefined, scenario: undefined, model_id: undefined },
+        creator: { id: '', username: favFull.creator_username || 'Unknown', avatar_url: undefined },
+        tags: favFull.tags || [],
+        world_infos: [],
+        stats: {
+          total_chats: favFull.chats_count || 0,
+          total_messages: favFull.messages_count || 0,
+          unique_users: 0,
+          average_rating: null,
+          total_favorites: favFull.favorites_count || 0,
+          total_likes: favFull.likes_count || 0,
+        }
+      };
+    }
+    return undefined;
+  }, [characterId, bootstrap.characters, favoritesFull, user?.id, bootstrap.profile?.username, bootstrap.profile?.avatar_url]);
 
-  // Data fetching
+  const isOwned = !!bootstrap.characters.find(c => c.id === characterId);
+  const isFavorited = !!favoriteCharacterIds.find(id => id === characterId) || !!favoritesFull?.find(f => f.id === characterId);
+
+  // Skip network fetch if we have snapshot data (owned or enriched favorite with defs & tags)
+  const hasFullSnapshot = !!(snapshotCharacter && snapshotCharacter.character_definitions && snapshotCharacter.tags);
+  const skipFetch = !!snapshotCharacter && hasFullSnapshot; // owned characters fully enriched now
+
   const { 
-    data: character, 
-    isLoading, 
-    error 
-  } = useCharacterFullProfile(characterId);
-  
+    data: fetchedCharacter, 
+    isLoading: isFetchLoading, 
+    error: fetchError 
+  } = useCharacterFullProfile(characterId, skipFetch);
+
+  // Merge snapshotCharacter (baseline) with fetchedCharacter (authoritative / enriched)
+  const character = useMemo<CharacterFullData | undefined>(() => {
+    if (!snapshotCharacter) return fetchedCharacter;
+    if (!fetchedCharacter) return snapshotCharacter;
+    return { ...snapshotCharacter, ...fetchedCharacter, stats: { ...snapshotCharacter.stats, ...fetchedCharacter.stats } };
+  }, [snapshotCharacter, fetchedCharacter]);
+
+  const isLoading = isFetchLoading && !snapshotCharacter;
+  const error = fetchError && !snapshotCharacter ? fetchError : undefined;
+
+  // Add state for text expansion
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Realtime subscription for non-owned or favorited characters to keep counts fresh
+  useEffect(() => {
+    if (!characterId) return;
+    if (isOwned) return; // owned updated globally
+    const channel = supabase.channel(`char-live-${characterId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'characters', filter: `id=eq.${characterId}` }, (payload: any) => {
+        const row = payload.new;
+        if (!row) return;
+        queryClient.setQueryData(['character-full-profile', characterId], (prev: any) => {
+          if (!prev) return prev;
+          return { ...prev, name: row.name ?? prev.name, avatar_url: row.avatar_url ?? prev.avatar_url, visibility: row.visibility ?? prev.visibility, interaction_count: row.interaction_count ?? prev.interaction_count, updated_at: row.updated_at ?? prev.updated_at, stats: { ...prev.stats, total_chats: row.chats_count ?? prev.stats?.total_chats, total_favorites: row.favorites_count ?? prev.stats?.total_favorites, total_likes: row.likes_count ?? prev.stats?.total_likes } };
+        });
+      });
+    channel.subscribe();
+    return () => { try { channel.unsubscribe(); } catch {} };
+  }, [characterId, isOwned, queryClient]);
+
+  // If user favorites while viewing, we could optionally add a refetch to reconcile full profile counts
+  useEffect(() => {
+    if (!characterId) return;
+    if (isFavorited && !isOwned) {
+      // refetch to ensure we have latest extended fields after favoriting
+      queryClient.invalidateQueries({ queryKey: ['character-full-profile', characterId] });
+    }
+  }, [isFavorited, isOwned, characterId, queryClient]);
+
   const { data: interactions } = useUserCharacterInteractions(characterId);
+  const isLiked = interactions?.isLiked;
+  const isFavoritedNow = interactions?.isFavorited;
 
   // Mutations
   const toggleFavoriteMutation = useMutation({
     mutationFn: async () => {
       if (!user || !characterId) throw new Error('Authentication required');
-
       if (interactions?.isFavorited) {
         const { error } = await supabase
           .from('character_favorites')
@@ -220,60 +325,31 @@ export default function CharacterProfile() {
       }
     },
     onMutate: async () => {
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: ['character-full-profile', characterId] }),
-        queryClient.cancelQueries({ queryKey: ['user-character-interactions', characterId, user?.id] }),
-      ]);
-
+      await queryClient.cancelQueries({ queryKey: ['character-full-profile', characterId] });
       const prevCharacter = queryClient.getQueryData<CharacterFullData>(['character-full-profile', characterId]);
-      const prevInteractions = queryClient.getQueryData<{ isFavorited: boolean; isLiked: boolean }>([
-        'user-character-interactions',
-        characterId,
-        user?.id,
-      ]);
-
-      // Optimistically update favorites count and interaction flag
+      const wasFavorited = interactions?.isFavorited;
+      (bootstrap as any).toggleFavorite(characterId, !wasFavorited);
       if (prevCharacter) {
-        const delta = prevInteractions?.isFavorited ? -1 : 1;
         queryClient.setQueryData<CharacterFullData>(['character-full-profile', characterId], {
           ...prevCharacter,
-          stats: {
-            ...prevCharacter.stats,
-            total_favorites: Math.max(0, (prevCharacter.stats.total_favorites || 0) + delta),
-          },
+          stats: { ...prevCharacter.stats, total_favorites: Math.max(0,(prevCharacter.stats.total_favorites||0) + (wasFavorited ? -1 : 1)) }
         });
       }
-      if (prevInteractions) {
-        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], {
-          ...prevInteractions,
-          isFavorited: !prevInteractions.isFavorited,
-        });
-      }
-
-      return { prevCharacter, prevInteractions } as const;
+      return { prevCharacter, wasFavorited } as const;
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (_e, _v, ctx) => {
       if (!ctx) return;
-      if (ctx.prevCharacter) {
-        queryClient.setQueryData(['character-full-profile', characterId], ctx.prevCharacter);
-      }
-      if (ctx.prevInteractions) {
-        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], ctx.prevInteractions);
-      }
+      (bootstrap as any).toggleFavorite(characterId!, ctx.wasFavorited);
+      if (ctx.prevCharacter) queryClient.setQueryData(['character-full-profile', characterId], ctx.prevCharacter);
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-character-interactions', characterId] });
       queryClient.invalidateQueries({ queryKey: ['character-full-profile', characterId] });
-      toast({
-        title: interactions?.isFavorited ? 'Removed from favorites' : 'Added to favorites',
-      });
-    },
+    }
   });
 
   const toggleLikeMutation = useMutation({
     mutationFn: async () => {
       if (!user || !characterId) throw new Error('Authentication required');
-
       if (interactions?.isLiked) {
         const { error } = await supabase
           .from('character_likes')
@@ -289,55 +365,30 @@ export default function CharacterProfile() {
       }
     },
     onMutate: async () => {
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: ['character-full-profile', characterId] }),
-        queryClient.cancelQueries({ queryKey: ['user-character-interactions', characterId, user?.id] }),
-      ]);
-
+      await queryClient.cancelQueries({ queryKey: ['character-full-profile', characterId] });
       const prevCharacter = queryClient.getQueryData<CharacterFullData>(['character-full-profile', characterId]);
-      const prevInteractions = queryClient.getQueryData<{ isFavorited: boolean; isLiked: boolean }>([
-        'user-character-interactions',
-        characterId,
-        user?.id,
-      ]);
-
-      // Optimistically update likes count and interaction flag
+      const wasLiked = interactions?.isLiked;
+      (bootstrap as any).toggleLike(characterId, !wasLiked);
       if (prevCharacter) {
-        const delta = prevInteractions?.isLiked ? -1 : 1;
         queryClient.setQueryData<CharacterFullData>(['character-full-profile', characterId], {
           ...prevCharacter,
-          stats: {
-            ...prevCharacter.stats,
-            total_likes: Math.max(0, (prevCharacter.stats.total_likes || 0) + delta),
-          },
+          stats: { ...prevCharacter.stats, total_likes: Math.max(0,(prevCharacter.stats.total_likes||0) + (wasLiked ? -1 : 1)) }
         });
       }
-      if (prevInteractions) {
-        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], {
-          ...prevInteractions,
-          isLiked: !prevInteractions.isLiked,
-        });
-      }
-
-      return { prevCharacter, prevInteractions } as const;
+      return { prevCharacter, wasLiked } as const;
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (_e,_v,ctx) => {
       if (!ctx) return;
-      if (ctx.prevCharacter) {
-        queryClient.setQueryData(['character-full-profile', characterId], ctx.prevCharacter);
-      }
-      if (ctx.prevInteractions) {
-        queryClient.setQueryData(['user-character-interactions', characterId, user?.id], ctx.prevInteractions);
-      }
+      (bootstrap as any).toggleLike(characterId!, ctx.wasLiked);
+      if (ctx.prevCharacter) queryClient.setQueryData(['character-full-profile', characterId], ctx.prevCharacter);
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-character-interactions', characterId] });
       queryClient.invalidateQueries({ queryKey: ['character-full-profile', characterId] });
     },
   });
 
-  const isOwner = user && character && character.creator_id === user.id;
-  const canDelete = isOwner && character.visibility === 'private' && character.was_public !== true;
+  const isOwner = !!(user && character && character.creator_id === user.id);
+  const canDelete = !!(isOwner && character && character.visibility === 'private' && character.was_public !== true);
 
   const handleDeleteCharacter = async () => {
     if (!characterId) return;
@@ -521,7 +572,7 @@ export default function CharacterProfile() {
 
                 {/* Avatar and Info side by side */}
                 <div className="flex flex-col md:flex-row gap-6">
-                  {/* Avatar - Character Card Dimensions (4:5 ratio) - Increased sizes */}
+                  {/* Avatar */}
                   <div className="flex-shrink-0 mx-auto md:mx-0">
                     <div className="relative w-84 h-105 md:w-67 md:h-84 rounded-lg overflow-hidden shadow-xl ring-4 ring-background">
                       {character.avatar_url ? (
@@ -540,7 +591,7 @@ export default function CharacterProfile() {
                     </div>
                   </div>
 
-                  {/* Character Info - Height adjusted to match new avatar */}
+                  {/* Character Info */}
                   <div className="flex-1 flex flex-col justify-between h-auto md:h-84">
                     <div className="space-y-4">
                       {character.short_description && (
@@ -562,8 +613,40 @@ export default function CharacterProfile() {
                         </div>
                       )}
 
+                      {/* Greeting Preview */}
+                      {character.character_definitions?.greeting && (
+                        <Card className="bg-primary/5 border-primary/10">
+                          <CardContent className="p-3">
+                            <p className="text-sm italic line-clamp-3">{character.character_definitions.greeting}</p>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Scenario Preview */}
+                      {character.character_definitions?.scenario && (
+                        <Card className="bg-muted/40">
+                          <CardContent className="p-3">
+                            <p className="text-xs text-muted-foreground line-clamp-4 whitespace-pre-wrap">
+                              {typeof character.character_definitions.scenario === 'string'
+                                ? character.character_definitions.scenario
+                                : JSON.stringify(character.character_definitions.scenario)}
+                            </p>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {/* Personality Summary */}
+                      {character.character_definitions?.personality_summary && (
+                        <div>
+                          <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Personality</h4>
+                          <p className="text-sm text-muted-foreground line-clamp-4">
+                            {character.character_definitions.personality_summary}
+                          </p>
+                        </div>
+                      )}
+
                       {/* Tags */}
-                      {character.tags.length > 0 && (
+                      {character.tags && character.tags.length > 0 && (
                         <div className="flex flex-wrap gap-2">
                           {character.tags.slice(0, 5).map((tag) => (
                             <Badge key={tag.id} variant="secondary" className="text-xs">
@@ -578,8 +661,7 @@ export default function CharacterProfile() {
                         </div>
                       )}
                     </div>
-
-                    {/* Creator Info - Positioned at bottom */}
+                    {/* Creator Info */}
                     <div className="flex items-center gap-3 pt-2 mt-auto">
                       <Link 
                         to={`/profile/${character.creator.username}`}
@@ -641,7 +723,7 @@ export default function CharacterProfile() {
                   <div className="flex gap-2">
                     <Button
                       onClick={() => user ? toggleFavoriteMutation.mutate() : navigate('/auth')}
-                      variant={interactions?.isFavorited ? "default" : "outline"}
+                      variant={isFavoritedNow ? "default" : "outline"}
                       size="lg"
                       disabled={toggleFavoriteMutation.isPending}
                     >
@@ -653,7 +735,7 @@ export default function CharacterProfile() {
 
                     <Button
                       onClick={() => user ? toggleLikeMutation.mutate() : navigate('/auth')}
-                      variant={interactions?.isLiked ? "default" : "outline"}
+                      variant={isLiked ? "default" : "outline"}
                       size="lg"
                       disabled={toggleLikeMutation.isPending}
                     >
@@ -752,7 +834,21 @@ export default function CharacterProfile() {
             <CardTitle>Character Overview</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Scenario */}
+            {/* Full Greeting */}
+            {character.character_definitions.greeting && (
+              <div>
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <MessageCircle className="w-5 h-5" />
+                  Full Greeting
+                </h3>
+                <Card className="bg-muted/50 border-primary/20">
+                  <CardContent className="p-4">
+                    <p className="italic whitespace-pre-wrap">{character.character_definitions.greeting}</p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+            {/* Full Scenario */}
             {character.character_definitions.scenario && (
               <div>
                 <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
@@ -770,17 +866,16 @@ export default function CharacterProfile() {
                 </Card>
               </div>
             )}
-
-            {/* Greeting Message */}
-            {character.character_definitions.greeting && (
+            {/* Personality Summary Full */}
+            {character.character_definitions.personality_summary && (
               <div>
                 <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                  <MessageCircle className="w-5 h-5" />
-                  Greeting Message
+                  <Info className="w-5 h-5" />
+                  Personality Summary
                 </h3>
-                <Card className="bg-muted/50 border-primary/20">
+                <Card className="bg-muted/30">
                   <CardContent className="p-4">
-                    <p className="italic">{character.character_definitions.greeting}</p>
+                    <p className="text-sm whitespace-pre-wrap">{character.character_definitions.personality_summary}</p>
                   </CardContent>
                 </Card>
               </div>

@@ -41,6 +41,15 @@ let externalQueryClient: QueryClient | null = null;
 export const registerPersonaQueryClient = (qc: QueryClient) => { externalQueryClient = qc; };
 
 export async function getUserPersonas(userId: string, forceRefresh = false) {
+  // Bootstrap snapshot fallback (preferred) unless forceRefresh explicitly requested
+  try {
+    if (!forceRefresh) {
+      const { bootstrapStore } = await import('@/state/bootstrap-store');
+      if (bootstrapStore.loaded && bootstrapStore.userId === userId && bootstrapStore.personas?.length) {
+        return bootstrapStore.personas as any[];
+      }
+    }
+  } catch { /* ignore dynamic import errors */ }
   const now = Date.now();
   if (!userId) return [];
   if (!forceRefresh && userPersonasCache && userPersonasCache.expires > now) return userPersonasCache.value;
@@ -58,6 +67,13 @@ export async function getUserPersonas(userId: string, forceRefresh = false) {
     list.forEach(p => personaByIdCache.set(p.id, { value: p, expires: now + PERSONA_CACHE_TTL_MS }));
     const rqKey = ['personas', userId];
     if (externalQueryClient) externalQueryClient.setQueryData(rqKey, list);
+    // Also sync bootstrap store if loaded but personas empty (rare race)
+    try {
+      const { bootstrapStore, bootstrapActions } = await import('@/state/bootstrap-store');
+      if (bootstrapStore.loaded && bootstrapStore.userId === userId && (!bootstrapStore.personas || !bootstrapStore.personas.length)) {
+        bootstrapActions.hydrate({ ...(bootstrapStore as any), personas: list });
+      }
+    } catch {/* ignore */}
     return list;
   })();
   pendingListRef.promise = p; try { return await p; } finally { pendingListRef.promise = null; }
