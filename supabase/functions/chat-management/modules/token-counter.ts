@@ -173,19 +173,6 @@ export async function checkSummaryTrigger(
     messagesToSummarize
   };
 }
-  estimatedTokens = Math.max(estimatedTokens, wordBasedTokens);
-  
-  // Adjust for content type
-  if (text.includes('{') || text.includes('[')) {
-    estimatedTokens = Math.ceil(estimatedTokens * 1.2); // JSON/structured content
-  }
-  
-  if (text.includes('```') || text.includes('<')) {
-    estimatedTokens = Math.ceil(estimatedTokens * 1.15); // Code or markup
-  }
-  
-  return estimatedTokens;
-}
 
 /**
  * Calculate total tokens for an array of conversation messages
@@ -312,7 +299,10 @@ export function buildConversationMessagesWithTokenBudget(
   
   // Trigger summarization based on ORIGINAL total tokens (all history + new message)
   // This ensures we trigger when the full conversation reaches 12k, regardless of truncation
-  const needsSummarization = originalTotalTokens >= 12000;
+  const SUMMARY_THRESHOLD_TOKENS = 12000;
+  const needsSummarization = originalTotalTokens >= SUMMARY_THRESHOLD_TOKENS;
+  const currentAiMessageCount = messageHistory.filter(m => m.is_ai_message && !m.content.includes('[PLACEHOLDER]')).length;
+  const nextSummaryAt = SUMMARY_THRESHOLD_TOKENS; // token-based threshold for next summary (simplified)
 
   console.log('🎯 Auto-Summary Decision:', {
     originalTotalTokens,
@@ -333,6 +323,8 @@ export function buildConversationMessagesWithTokenBudget(
     totalTokens,
     droppedMessages,
     needsSummarization,
+    currentAiMessageCount,
+    nextSummaryAt,
     tokenBreakdown: {
       system: systemPromptTokens,
       history: historyTokens,

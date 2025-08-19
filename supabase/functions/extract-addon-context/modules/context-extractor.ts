@@ -8,6 +8,15 @@ declare const Deno: any;
 
 import { dbToUi, type DbContext } from '../../_shared/context-mapper.ts';
 
+// Runtime helper to safely pluck OpenRouter choices
+function extractChoiceContent(payload: any): string {
+  if (!payload || typeof payload !== 'object') return '{}';
+  const choices = (payload as any).choices;
+  if (!Array.isArray(choices) || !choices[0]) return '{}';
+  const content = choices[0]?.message?.content;
+  return typeof content === 'string' ? content : '{}';
+}
+
 export async function extractInitialContext(character, addonSettings, openRouterKey, replaceTemplatesFn) {
   if (!addonSettings || !Object.values(addonSettings).some(Boolean)) {
     console.log('No addons enabled - skipping initial context extraction');
@@ -55,8 +64,8 @@ Return only the JSON object with no additional text. If a field is not mentioned
       body: JSON.stringify(body)
     });
     if (contextResponse.ok) {
-      const contextData = await contextResponse.json();
-      const contextStr = contextData.choices?.[0]?.message?.content || '{}';
+  const contextData: any = await contextResponse.json();
+  const contextStr = extractChoiceContent(contextData);
       console.log('📝 Initial context extraction response:', contextStr);
       const cleanedContextStr = contextStr.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
       let parsed: any = null;
@@ -205,8 +214,8 @@ Return ONLY the JSON object with no additional text.`;
 
     const firstReq = await fetch(url, { method: 'POST', headers, body: JSON.stringify(buildBody([{ role: 'user', content: contextPrompt }])) });
     if (!firstReq.ok) throw new Error(`OpenRouter error: ${firstReq.status}`);
-    const firstJson = await firstReq.json();
-    const firstText = firstJson.choices?.[0]?.message?.content || '{}';
+  const firstJson: any = await firstReq.json();
+  const firstText = extractChoiceContent(firstJson);
     console.log('📝 Raw context extraction response:', firstText);
 
     let parsed = tryParse(firstText);
@@ -218,8 +227,8 @@ Return ONLY the JSON object with no additional text.`;
         { role: 'user', content: contextPrompt }
       ])) });
       if (retryReq.ok) {
-        const retryJson = await retryReq.json();
-        const retryText = retryJson.choices?.[0]?.message?.content || '{}';
+  const retryJson: any = await retryReq.json();
+  const retryText = extractChoiceContent(retryJson);
         parsed = tryParse(retryText);
       }
     }

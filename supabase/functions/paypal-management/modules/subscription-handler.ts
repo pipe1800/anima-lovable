@@ -41,7 +41,7 @@ export async function handleCreateSubscription(
     // ============================================================================
     // INPUT VALIDATION
     // ============================================================================
-    const { planId, upgradeFromSubscriptionId } = request;
+  const { planId, upgradeFromSubscriptionId } = request;
     
     if (!planId) {
       throw new Error("Plan ID is required");
@@ -127,8 +127,10 @@ export async function handleCreateSubscription(
     const accessToken = await getPayPalAccessToken();
 
     // Build subscription request data (preserving exact format from working function)
-    const subscriptionData = {
+  const subscriptionData = {
       plan_id: paypalPlanId, // Use the determined plan ID (upgrade or regular)
+      // Bind provisional subscription to user id (checked during verification & via webhook)
+      custom_id: user.id,
       subscriber: {
         email_address: user.email
       },
@@ -141,8 +143,8 @@ export async function handleCreateSubscription(
           payer_selected: "PAYPAL",
           payee_preferred: "IMMEDIATE_PAYMENT_REQUIRED"
         },
-        // Preserve exact URL patterns from working function
-        return_url: `${req.headers.get("origin")}/paypal-verification`,
+    // We add state (nonce) to return URL for CSRF/link hijack mitigation
+    return_url: `${req.headers.get("origin")}/paypal-verification`,
         cancel_url: `${req.headers.get("origin")}/subscription?cancelled=true`
       }
     };
@@ -179,7 +181,27 @@ export async function handleCreateSubscription(
       throw new Error(`Failed to create PayPal subscription: ${errorData}`);
     }
 
-    const subscription = await subscriptionResponse.json();
+  const subscription: any = await subscriptionResponse.json();
+
+    // --------------------------------------------------------------------------
+    // Generate & persist state nonce (ties user + provisional subscription id)
+    // --------------------------------------------------------------------------
+    const stateNonce = crypto.randomUUID();
+    try {
+      const { error: nonceError } = await supabase
+        .from('subscription_nonces')
+        .insert({
+          id: stateNonce,
+          user_id: user.id,
+          provisional_subscription_id: subscription.id,
+          created_at: new Date().toISOString()
+        });
+      if (nonceError) {
+        console.warn('[CREATE-SUBSCRIPTION] Failed to persist state nonce (still proceeding):', nonceError.message);
+      }
+    } catch (nonceInsertErr) {
+      console.warn('[CREATE-SUBSCRIPTION] Exception inserting state nonce (proceeding):', (nonceInsertErr as any)?.message || nonceInsertErr);
+    }
     
     console.log('[CREATE-SUBSCRIPTION] PayPal subscription created', {
       subscriptionId: subscription.id,
@@ -196,7 +218,8 @@ export async function handleCreateSubscription(
     }
 
     // Preserve exact URL modification pattern from working function
-    const modifiedApprovalLink = `${approvalLink}&subscription_id=${subscription.id}`;
+  // Append subscription_id & state to approval link
+  const modifiedApprovalLink = `${approvalLink}&subscription_id=${subscription.id}&state=${stateNonce}`;
 
     console.log('[CREATE-SUBSCRIPTION] Approval link generated', {
       originalLink: approvalLink,
@@ -209,7 +232,8 @@ export async function handleCreateSubscription(
     const response: CreateSubscriptionResponse = {
       subscriptionId: subscription.id,
       approvalUrl: modifiedApprovalLink,
-      status: subscription.status || 'APPROVAL_PENDING'
+      status: subscription.status || 'APPROVAL_PENDING',
+      state: stateNonce
     };
 
     console.log('[CREATE-SUBSCRIPTION] Subscription creation completed successfully');
@@ -254,14 +278,52 @@ export async function handleVerifySubscription(
     // ============================================================================
     // INPUT VALIDATION
     // ============================================================================
-    const { subscriptionId, token } = request;
+  const { subscriptionId, token, state } = request;
     
     console.log('[VERIFY-SUBSCRIPTION] Received parameters', { 
       hasSubscriptionId: !!subscriptionId, 
       hasToken: !!token,
+      hasState: !!state,
       userId: user.id,
       email: user.email
     });
+
+    // ------------------------------------------------------------------------
+    // STATE NONCE REQUIREMENT & VALIDATION
+    // Prevents attacker from reusing their own subscription_id in victim's session.
+    // If a nonce was generated during creation (row exists for provisional_subscription_id + user),
+    // we REQUIRE the matching state parameter here (one-time use).
+    // ------------------------------------------------------------------------
+    if (subscriptionId) {
+      const { data: nonceBySub, error: nonceBySubErr } = await supabase
+        .from('subscription_nonces')
+        .select('id')
+        .eq('provisional_subscription_id', subscriptionId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (nonceBySubErr) {
+        console.warn('[VERIFY-SUBSCRIPTION] Nonce (by sub) lookup error:', nonceBySubErr.message);
+      }
+      if (nonceBySub) {
+        if (!state) {
+          return { success: false, error: 'Missing verification state' };
+        }
+        const { data: nonceRow, error: nonceError } = await supabase
+          .from('subscription_nonces')
+          .select('id, provisional_subscription_id, user_id')
+          .eq('id', state)
+          .maybeSingle();
+        if (nonceError) {
+          console.warn('[VERIFY-SUBSCRIPTION] Nonce lookup error (state path):', nonceError.message);
+          return { success: false, error: 'Verification state lookup failed' };
+        }
+        if (!nonceRow || nonceRow.user_id !== user.id || nonceRow.provisional_subscription_id !== subscriptionId) {
+          return { success: false, error: 'Invalid verification state' };
+        }
+        // Consume nonce (single-use)
+        await supabase.from('subscription_nonces').delete().eq('id', state);
+      }
+    }
 
     if (!subscriptionId && !token) {
       throw new Error("Either subscription ID or PayPal token is required");
@@ -288,7 +350,7 @@ export async function handleVerifySubscription(
     const paypalBaseUrl = "https://api-m.sandbox.paypal.com";
     let subscription: any;
 
-    if (subscriptionId) {
+  if (subscriptionId) {
       // Direct subscription lookup by ID
       console.log('[VERIFY-SUBSCRIPTION] Fetching subscription by ID:', subscriptionId);
       
@@ -308,6 +370,23 @@ export async function handleVerifySubscription(
       }
 
       subscription = await subscriptionResponse.json();
+
+      // Ownership binding checks
+      try {
+        const subEmail = subscription?.subscriber?.email_address?.toLowerCase?.();
+        if (!subEmail) {
+          throw new Error('Missing subscriber email in PayPal subscription');
+        }
+        if (subEmail !== user.email.toLowerCase()) {
+          throw new Error('Subscription email mismatch');
+        }
+        if (subscription?.custom_id && subscription.custom_id !== user.id) {
+          throw new Error('Subscription ownership mismatch (custom_id)');
+        }
+      } catch (ownershipErr) {
+        console.error('[VERIFY-SUBSCRIPTION] Ownership validation failed:', ownershipErr);
+        return { success: false, error: ownershipErr.message || 'Ownership validation failed' };
+      }
       
     } else if (token) {
       // Email-based fallback search (preserve original logic)
@@ -322,8 +401,8 @@ export async function handleVerifySubscription(
       });
 
       if (searchResponse.ok) {
-        const searchData = await searchResponse.json();
-        subscription = searchData.subscriptions?.find((sub: any) => 
+  const searchData: any = await searchResponse.json();
+  subscription = searchData.subscriptions?.find((sub: any) => 
           sub.subscriber?.email_address?.toLowerCase() === user.email?.toLowerCase() && 
           sub.status === 'ACTIVE'
         );
@@ -336,10 +415,11 @@ export async function handleVerifySubscription(
       }
     }
 
-    console.log('[VERIFY-SUBSCRIPTION] PayPal subscription found', {
+    console.log('[VERIFY-SUBSCRIPTION] PayPal subscription found & ownership confirmed', {
       subscriptionId: subscription.id,
       status: subscription.status,
-      planId: subscription.plan_id
+      planId: subscription.plan_id,
+      custom_id: subscription.custom_id
     });
 
     // ============================================================================
@@ -958,7 +1038,7 @@ export async function handleReviseSubscription(
     // ============================================================================
     // CHECK FOR APPROVAL REQUIREMENT
     // ============================================================================
-    const approvalLink = paypalRevisionResponse.links?.find((link: any) => link.rel === 'approve');
+  const approvalLink = (paypalRevisionResponse as any).links?.find((link: any) => link.rel === 'approve');
     if (approvalLink) {
       console.log('[REVISE-SUBSCRIPTION] Approval needed:', approvalLink.href);
       return {
@@ -1106,13 +1186,13 @@ export async function handleSaveSubscription(
 
     const subscriptionData = await subscriptionResponse.json();
     console.log('[SAVE-SUBSCRIPTION] PayPal subscription verified:', {
-      status: subscriptionData.status,
-      id: subscriptionData.id
+  status: (subscriptionData as any).status,
+  id: (subscriptionData as any).id
     });
 
     // Check if subscription is active
-    if (subscriptionData.status !== "ACTIVE") {
-      throw new Error(`Subscription is not active. Status: ${subscriptionData.status}`);
+    if ((subscriptionData as any).status !== "ACTIVE") {
+      throw new Error(`Subscription is not active. Status: ${(subscriptionData as any).status}`);
     }
 
     // ============================================================================

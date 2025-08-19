@@ -9,6 +9,7 @@ import {
 import { getLatestSummaryInfo } from './message-counter.ts';
 import { generateMessageBasedSummary } from './auto-summary-new.ts';
 import { normalizeKeywords, normalizeContentForHash, computeContentHash } from './memory-utils.ts';
+import { safeLog, safeError } from '../../_shared/logging.ts';
 
 import type { CreateMemoryRequest, ChatResponse } from '../types/index.ts';
 
@@ -73,6 +74,23 @@ async function generateChatSummary(
   character: any,
   openRouterKey: string
 ): Promise<{ summary: string; keywords: string[] } | null> {
+  // Basic validation & sanitization
+  if (!Array.isArray(messages)) {
+    throw new Error('Invalid messages payload');
+  }
+  // Enforce max messages and per-message length to prevent prompt injection / token blow-up
+  const MAX_MESSAGES = 120; // safeguard
+  const MAX_MSG_CHARS = 1200;
+  const SAFE_CONTENT_REGEX = /[\u0000-\u001F]/g; // control chars to strip
+  const sanitized = messages.slice(0, MAX_MESSAGES).map(m => ({
+    ...m,
+    content: String(m?.content || '')
+      .replace(SAFE_CONTENT_REGEX, ' ')
+      .replace(/\s+/g, ' ')
+      .slice(0, MAX_MSG_CHARS)
+  }));
+  messages = sanitized;
+
   const conversationText = messages
     .map(msg => `${msg.is_ai_message ? character.name || 'Character' : 'User'}: ${msg.content}`)
     .join('\n');
@@ -133,8 +151,8 @@ Respond in this exact JSON format:
       return null;
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
+  const data: any = await response.json();
+  const content = data?.choices?.[0]?.message?.content || '';
     
     console.log('📝 Raw summary response:', content);
 
@@ -172,6 +190,11 @@ Respond in this exact JSON format:
             return !(isGeneric || isCharName || isUserName);
           })
           .slice(0, 5); // Ensure exactly 5 keywords max
+
+        // Fallback: ensure non-empty keywords array with at least one hash if filtering removed all
+        if (filteredKeywords.length === 0) {
+          filteredKeywords.push(hashString(conversationText).slice(0,6));
+        }
         
         console.log('✅ Successfully parsed summary and keywords');
         console.log('🔍 Filtered keywords:', filteredKeywords);
@@ -279,14 +302,13 @@ export async function handleCreateMemory(
     const { chatId, characterId } = request;
 
     if (!chatId || !characterId) {
-      console.error('❌ Missing required fields:', { chatId: !!chatId, characterId: !!characterId });
+      safeError('memory_missing_fields', new Error('missing'), { chatIdPresent: !!chatId, characterIdPresent: !!characterId });
       return {
         success: false,
         error: 'Missing required fields'
       };
     }
-
-    console.log('🧠 Creating memory for chat:', { chatId, characterId, userId: user.id });
+    safeLog('memory_create_start', { chatId, characterId, userId: user.id });
 
     // Get OpenRouter API key
     const openRouterKey = globalThis.Deno?.env?.get('OPENROUTER_API_KEY');
@@ -318,7 +340,7 @@ export async function handleCreateMemory(
       };
     }
 
-    console.log(`📊 Found ${messageHistory.length} total messages in chat`);
+  safeLog('memory_messages_total', { chatId, count: messageHistory.length });
 
     // Get latest summary info to determine what messages to summarize
     const { lastSummaryEndMessage } = await getLatestSummaryInfo(chatId, supabase);
@@ -335,7 +357,7 @@ export async function handleCreateMemory(
       };
     }
 
-    console.log(`🔍 Manual summary scope:`, {
+  safeLog('manual_memory_scope', {
       totalMessages: messageHistory.length,
       lastSummaryEndMessage,
       unsummarizedMessages: unsummarizedMessages.length,
@@ -348,7 +370,7 @@ export async function handleCreateMemory(
     // New credit calculation: 5 credits per 300 tokens, minimum 5 credits
     const creditCost = Math.max(5, Math.ceil(estimatedTokens / 300) * 5);
 
-    console.log('💰 Memory creation cost calculation:', {
+  safeLog('memory_creation_cost', {
       estimatedTokens,
       creditCost,
       formula: 'max(5, ceil(tokens/300) * 5)'
@@ -375,7 +397,9 @@ export async function handleCreateMemory(
     const summaryData = await generateMessageBasedSummary(
       unsummarizedMessages, 
       character, 
-      openRouterKey
+  openRouterKey,
+  undefined,
+  user.id
     );
     
     if (!summaryData) {
@@ -396,14 +420,14 @@ export async function handleCreateMemory(
     // Normalize content and keywords
     const normalizedContent = normalizeContentForHash(summaryData.content);
     const cleanedKeywords = normalizeKeywords([...summaryData.keywords, ...createDateKeywords()], character?.name);
-    const contentHash = await computeContentHash(normalizedContent);
+  const contentHash = await computeContentHash(normalizedContent, chatId);
 
     const memoryData: MemoryData = {
       summary_content: normalizedContent,
       trigger_keywords: cleanedKeywords,
       message_count: aiSequenceEnd, // Standardized: AI sequence end
       input_token_cost: creditCost,
-      content_hash: (await computeContentHash(normalizedContent)) || hashString(normalizedContent)
+  content_hash: (await computeContentHash(normalizedContent, chatId)) || hashString(normalizedContent)
     };
 
     // Save to database (always insert or update same chat row per legacy logic)
@@ -423,7 +447,7 @@ export async function handleCreateMemory(
     }
 
     const endTime = Date.now();
-    console.log(`✅ Manual memory creation completed in ${endTime - startTime}ms`);
+  safeLog('manual_memory_created', { durationMs: endTime - startTime, chatId, characterId });
 
     return {
       success: true,
@@ -439,7 +463,10 @@ export async function handleCreateMemory(
     };
 
   } catch (error) {
-    console.error('💥 Memory creation error:', error);
+    // Extract identifiers safely for logging
+    const cId = (request as any)?.chatId;
+    const chId = (request as any)?.characterId;
+    safeError('memory_creation_error', error, { chatId: cId, characterId: chId });
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error'

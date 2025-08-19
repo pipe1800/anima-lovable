@@ -1,4 +1,6 @@
 import type { PayPalAccessToken } from '../types/index.ts';
+// Declare Deno for type-checking in non-Deno environments
+declare const Deno: any;
 
 const PAYPAL_BASE_URL = 'https://api-m.sandbox.paypal.com'; // TODO: Switch to production URL
 
@@ -7,8 +9,8 @@ const PAYPAL_BASE_URL = 'https://api-m.sandbox.paypal.com'; // TODO: Switch to p
  * This function is used across multiple PayPal operations
  */
 export async function getPayPalAccessToken(): Promise<string> {
-  const clientId = Deno.env.get('PAYPAL_CLIENT_ID');
-  const clientSecret = Deno.env.get('PAYPAL_CLIENT_SECRET');
+  const clientId = (globalThis as any).Deno?.env?.get('PAYPAL_CLIENT_ID') || (typeof process !== 'undefined' ? process.env.PAYPAL_CLIENT_ID : undefined);
+  const clientSecret = (globalThis as any).Deno?.env?.get('PAYPAL_CLIENT_SECRET') || (typeof process !== 'undefined' ? process.env.PAYPAL_CLIENT_SECRET : undefined);
   
   console.log('[PAYPAL-CLIENT] Checking credentials:', { 
     clientIdExists: !!clientId, 
@@ -44,7 +46,18 @@ export async function getPayPalAccessToken(): Promise<string> {
     throw new Error(`Failed to get PayPal access token: ${response.status} - ${errorText}`);
   }
 
-  const tokenData: PayPalAccessToken = await response.json();
+  const raw: any = await response.json();
+  // Minimal runtime validation before casting
+  if (!raw || typeof raw.access_token !== 'string') {
+    throw new Error('Malformed PayPal token response');
+  }
+  const tokenData: PayPalAccessToken = {
+    access_token: raw.access_token,
+    token_type: raw.token_type || 'Bearer',
+    app_id: raw.app_id || '',
+    expires_in: typeof raw.expires_in === 'number' ? raw.expires_in : 0,
+    scope: raw.scope || ''
+  };
   console.log('[PAYPAL-CLIENT] Token obtained successfully:', { 
     tokenType: tokenData.token_type,
     expiresIn: tokenData.expires_in,

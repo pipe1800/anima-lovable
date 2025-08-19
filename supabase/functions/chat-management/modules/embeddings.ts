@@ -44,8 +44,8 @@ export async function getTextEmbedding(text: string): Promise<number[] | null> {
       return null;
     }
 
-    const json = await resp.json();
-    const vec: number[] | undefined = json?.data?.[0]?.embedding;
+  const json: any = await resp.json();
+  const vec: number[] | undefined = Array.isArray(json?.data) ? json.data[0]?.embedding : undefined;
     if (!Array.isArray(vec)) {
       console.warn('Embeddings response missing vector');
       return null;

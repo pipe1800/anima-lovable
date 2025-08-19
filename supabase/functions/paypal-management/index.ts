@@ -3,6 +3,7 @@ declare const Deno: any;
 
 import { authenticateUser, createCorsResponse, createErrorResponse, corsHeaders } from './modules/auth.ts';
 import { verifyPayPalWebhook } from './modules/paypal-client.ts';
+import { withRateLimit, enforceJsonBodySize } from '../_shared/rate-limit.ts';
 import { 
   handleCreateSubscription, 
   handleVerifySubscription, 
@@ -18,6 +19,7 @@ import {
   handleWebhook
 } from './modules/webhook-handler.ts';
 import type { PayPalManagementRequest, PayPalResponse } from './types/index.ts';
+import { paypalRequestUnion, safeParse, sanitizePayload } from '../_shared/validation.ts';
 
 /**
  * Unified PayPal Management Edge Function
@@ -42,6 +44,11 @@ import type { PayPalManagementRequest, PayPalResponse } from './types/index.ts';
  * ✅ Reduced code duplication (70%+ duplicate code eliminated)
  * ✅ Easier maintenance and deployment
  */
+
+function redactUserId(id?: string) {
+  if (!id) return 'anon';
+  return id.length > 8 ? `${id.slice(0,4)}…${id.slice(-2)}` : id;
+}
 
 Deno.serve(async (req: Request) => {
   // Handle CORS preflight requests
@@ -79,20 +86,23 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // ============================================================================
-    // REQUEST PARSING & OPERATION DETECTION
-    // ============================================================================
-    let requestBody: PayPalManagementRequest;
-    
+    const sizeResp = await enforceJsonBodySize(req);
+    if (sizeResp) return sizeResp;
+  // ============================================================================
+  // REQUEST PARSING & OPERATION DETECTION
+  // ============================================================================
+    let rawBody: any;
     try {
-      requestBody = await req.json();
-    } catch (parseError) {
-      throw new Error('Invalid JSON in request body');
+      rawBody = await req.json();
+    } catch {
+      return createErrorResponse('Invalid JSON body', 400);
     }
-
-    if (!requestBody.operation) {
-      throw new Error('Missing operation parameter. Must be one of: create-subscription, verify-subscription, cancel-subscription, revise-subscription, save-subscription, create-order, capture-order, webhook');
+    sanitizePayload(rawBody, 6000);
+    const parsed = safeParse(paypalRequestUnion, rawBody);
+    if (parsed.success === false) {
+      return createErrorResponse(`Invalid request: ${parsed.error}`, 400);
     }
+    const requestBody = parsed.data as PayPalManagementRequest;
 
     console.log('🎯 PayPal operation requested:', requestBody.operation);
 
@@ -132,9 +142,11 @@ Deno.serve(async (req: Request) => {
     // ============================================================================
     // AUTHENTICATION (Required for all operations except webhook)
     // ============================================================================
-    console.log('🔐 Starting user authentication...');
-    const { user, supabase, supabaseAdmin } = await authenticateUser(req);
-    console.log('👤 User authenticated successfully:', user.id);
+  console.log('🔐 Starting user authentication...');
+  const { user, supabase, supabaseAdmin } = await authenticateUser(req);
+  console.log('👤 User authenticated successfully:', redactUserId(user?.id));
+
+    return await withRateLimit(req, user?.id, async () => {
 
     // ============================================================================
     // OPERATION ROUTING
@@ -187,15 +199,14 @@ Deno.serve(async (req: Request) => {
     const executionTime = Date.now() - startTime;
     console.log(`✅ PayPal operation ${requestBody.operation} completed in ${executionTime}ms`);
 
-    if (!result.success) {
-      // Business logic errors should return 400, not 500
-      return createErrorResponse(result.error || 'PayPal operation failed', 400);
-    }
-
-    return createCorsResponse({
-      ...result,
-      executionTime,
-      requestId
+      if (!result.success) {
+        return createErrorResponse(result.error || 'PayPal operation failed', 400);
+      }
+      return createCorsResponse({
+        ...result,
+        executionTime,
+        requestId
+      });
     });
 
   } catch (error) {

@@ -17,12 +17,14 @@ export interface CreateSubscriptionRequest extends BasePayPalRequest {
   operation: 'create-subscription';
   planId: string;
   upgradeFromSubscriptionId?: string; // Optional - used for upgrades from existing subscription
+  stateNonceId?: string; // Optional incoming override (should not be trusted)
 }
 
 export interface VerifySubscriptionRequest extends BasePayPalRequest {
   operation: 'verify-subscription';
   subscriptionId?: string;
   token?: string;
+  state?: string; // Returned state/nonce from approval redirect
 }
 
 export interface CancelSubscriptionRequest extends BasePayPalRequest {
@@ -88,6 +90,7 @@ export interface CreateSubscriptionResponse {
   subscriptionId: string;
   approvalUrl: string;
   status: string;
+  state: string; // Nonce to be validated on verification
 }
 
 export interface VerifySubscriptionResponse {

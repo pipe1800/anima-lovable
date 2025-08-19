@@ -407,7 +407,7 @@ export default function Subscription() {
         operation: 'create-subscription',
         planId: plan.id,
         upgradeFromSubscriptionId: userSubscription?.paypal_subscription_id
-      };
+      } as const;
       
       console.log('📤 Sending request to paypal-management:', requestBody);
 
@@ -430,6 +430,10 @@ export default function Subscription() {
       // Fix: Check for correct response structure with detailed logging
       if (data?.success && data?.data?.approvalUrl) {
         console.log('✅ Opening PayPal window with URL:', data.data.approvalUrl);
+        // Persist state nonce (if provided) for later verification step to mitigate CSRF/replay
+        if (data?.data?.state) {
+          try { localStorage.setItem('paypal_upgrade_state', data.data.state); } catch {}
+        }
         openPayPalWindow(data.data.approvalUrl);
       } else {
         console.error('❌ Invalid response structure:', {
@@ -455,13 +459,10 @@ export default function Subscription() {
       let errorMessage = "Failed to process subscription. Please try again.";
       
       if (error instanceof Error) {
-        if (error.message.includes('network')) {
-          errorMessage = "Network error. Please check your connection and try again.";
-        } else if (error.message.includes('timeout')) {
-          errorMessage = "Request timed out. Please try again.";
-        } else {
-          errorMessage = error.message;
-        }
+        const msg = error.message.toLowerCase();
+        if (msg.includes('network')) errorMessage = 'Network issue. Please retry.';
+        else if (msg.includes('timeout')) errorMessage = 'Request timed out. Try again.';
+        // Otherwise keep generic sanitized message
       }
       
       toast({
@@ -538,13 +539,9 @@ export default function Subscription() {
       let errorMessage = "Failed to process credit purchase. Please try again.";
       
       if (error instanceof Error) {
-        if (error.message.includes('network')) {
-          errorMessage = "Network error. Please check your connection and try again.";
-        } else if (error.message.includes('timeout')) {
-          errorMessage = "Request timed out. Please try again.";
-        } else {
-          errorMessage = error.message;
-        }
+        const msg = error.message.toLowerCase();
+        if (msg.includes('network')) errorMessage = 'Network issue. Please retry.';
+        else if (msg.includes('timeout')) errorMessage = 'Request timed out. Try again.';
       }
       
       toast({

@@ -238,19 +238,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    // Token refresh monitor
+    // Token refresh / expiry monitor
     const refreshInterval = setInterval(async () => {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
-      if (currentSession) {
-        const expiresAt = currentSession.expires_at;
-        const currentTime = Math.floor(Date.now() / 1000);
-        const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
-        if (timeUntilExpiry > 0 && timeUntilExpiry < 600) {
-          console.debug('Proactively refreshing token...');
-          await supabase.auth.refreshSession();
-        }
+      if (!currentSession) return;
+      const expiresAt = currentSession.expires_at;
+      const currentTime = Math.floor(Date.now() / 1000);
+      if (expiresAt && currentTime >= expiresAt) {
+        console.warn('Session expired – clearing auth state');
+        await signOut();
+        return;
       }
-    }, 5 * 60 * 1000);
+      const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
+      if (timeUntilExpiry > 0 && timeUntilExpiry < 600) {
+        console.debug('Proactively refreshing token...');
+        await supabase.auth.refreshSession();
+      }
+    }, 2 * 60 * 1000); // check more frequently for timely expiry handling
 
     return () => {
       authSub.unsubscribe();

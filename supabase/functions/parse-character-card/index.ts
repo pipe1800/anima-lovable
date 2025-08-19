@@ -3,6 +3,8 @@
 // normalizes it to the creator form shape, optionally uploads avatar to Storage, and can persist.
 
 import { authenticateUser, createCorsResponse, createErrorResponse } from "../_shared/auth.ts";
+import { withRateLimit, enforceJsonBodySize } from "../_shared/rate-limit.ts";
+import { parseCharacterCardJsonSchema, safeParse, sanitizePayload } from "../_shared/validation.ts";
 import { CORS_HEADERS } from "../types/interfaces.ts";
 
 // Utility: read uint32 and chunk type
@@ -323,7 +325,14 @@ globalThis.Deno.serve(async (req) => {
   try {
     const { user, supabaseAdmin } = await authenticateUser(req);
 
+    // Wrap the entire processing logic in rate limiting / concurrency guard
+    return await withRateLimit(req, user?.id, async () => {
+
     const contentType = req.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const sizeResp = await enforceJsonBodySize(req);
+      if (sizeResp) return sizeResp;
+    }
     let fileBytes: Uint8Array | null = null;
     let originalFilename = 'card.png';
     let uploadAvatar = false;
@@ -341,24 +350,29 @@ globalThis.Deno.serve(async (req) => {
       const ab = await file.arrayBuffer();
       fileBytes = new Uint8Array(ab);
     } else {
-      const body = await req.json().catch(() => ({}));
+      let rawBody: any;
+      try { rawBody = await req.json(); } catch { return createErrorResponse('Invalid JSON body', 400); }
+      sanitizePayload(rawBody, 1_000_000); // allow large base64 but still bounded
+      const parsed = safeParse(parseCharacterCardJsonSchema, rawBody);
+      if (parsed.success === false) return createErrorResponse(`Invalid request: ${parsed.error}`, 400);
+      const body = parsed.data;
       uploadAvatar = !!body.store_avatar;
       persist = !!body.persist;
       bypassCache = !!body.bypass_cache;
       if (body.storage_bucket && body.storage_path) {
-        const { data, error } = await supabaseAdmin.storage.from(String(body.storage_bucket)).download(String(body.storage_path));
+        const { data, error } = await supabaseAdmin.storage.from(body.storage_bucket).download(body.storage_path);
         if (error || !data) return createErrorResponse('Failed to download from Storage', 400);
         const ab = await data.arrayBuffer();
         fileBytes = new Uint8Array(ab);
         originalFilename = body.storage_path.split('/').pop() || originalFilename;
       } else if (body.url) {
-        const res = await fetch(String(body.url));
+        const res = await fetch(body.url);
         if (!res.ok) return createErrorResponse('Failed to fetch URL', 400);
         const ab = await res.arrayBuffer();
         fileBytes = new Uint8Array(ab);
-        originalFilename = (new URL(String(body.url))).pathname.split('/').pop() || originalFilename;
+        originalFilename = (new URL(body.url)).pathname.split('/').pop() || originalFilename;
       } else if (body.base64) {
-        const bin = atob(String(body.base64));
+        const bin = atob(body.base64);
         const arr = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
         fileBytes = arr;
@@ -384,7 +398,8 @@ globalThis.Deno.serve(async (req) => {
         .eq('hash', hash)
         .maybeSingle();
       if (!cacheErr && cached && cached.normalized) {
-        const formData = cached.normalized;
+        // cached.normalized column is JSON (unknown to TS) – cast to expected shape
+        const formData = cached.normalized as { avatar?: string; [k: string]: any };
         const moderation = buildModeration(formData);
         // Append Guest Pass NSFW warning if applicable
         if (moderation.flags.nsfwDetected) {
@@ -404,7 +419,7 @@ globalThis.Deno.serve(async (req) => {
             formData.avatar = pub.publicUrl;
           }
         } else if (cached.avatar_public_url) {
-          formData.avatar = cached.avatar_public_url;
+          formData.avatar = cached.avatar_public_url as string;
         }
         return createCorsResponse({
           formData,
@@ -552,7 +567,7 @@ globalThis.Deno.serve(async (req) => {
       persisted = character;
     }
 
-    return createCorsResponse({
+  return createCorsResponse({
       formData: normalized.formData,
       meta: {
         vendor: normalized.vendor,
@@ -567,7 +582,8 @@ globalThis.Deno.serve(async (req) => {
       },
       persisted,
       chunksScanned: decodedChunks.length,
-    }, 200);
+  }, 200);
+  });
   } catch (e) {
     console.error('parse-character-card error:', e);
     return createErrorResponse(typeof e === 'string' ? e : (e?.message || 'Server error'));

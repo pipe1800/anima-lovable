@@ -15,8 +15,24 @@ export interface AuthResult {
   response?: Response;
 }
 
+// Dynamically derive allowed origins (comma-separated) – fallback to * for local/dev
+const rawAllowed = (globalThis.Deno?.env?.get('ALLOWED_ORIGINS') || '').trim();
+let allowOrigin = '*';
+if (rawAllowed) {
+  try {
+    const origins = rawAllowed.split(',').map(o => o.trim()).filter(Boolean);
+    if (origins.length === 1) {
+      allowOrigin = origins[0];
+    } else if (origins.length > 1) {
+      // For multiple, we'll validate per-request elsewhere; here default to first
+      allowOrigin = origins[0];
+    }
+  } catch { /* noop */ }
+}
+
 export const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': allowOrigin,
+  'Vary': 'Origin',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Content-Type': 'application/json',

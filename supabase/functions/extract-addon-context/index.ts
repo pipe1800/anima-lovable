@@ -3,6 +3,7 @@
 // This is an AI-powered function that uses OpenRouter to understand conversation context
 
 import { authenticateUser, createCorsResponse, createErrorResponse } from '../_shared/auth.ts';
+import { withRateLimit, enforceJsonBodySize } from '../_shared/rate-limit.ts';
 import { extractInitialContext, extractContextFromResponse, saveContextUpdates } from './modules/context-extractor.ts';
 import { fetchCharacterData, fetchUserData, getCharacterForContext, createTemplateReplacer } from './modules/character-fetcher.ts';
 import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreeting, updateChatMetadata } from './modules/greeting-enhancer.ts';
@@ -53,17 +54,27 @@ import { anyAddonEnabled, sanitizeAddonSettings } from '../_shared/settings-mapp
     // AUTHENTICATION
     // ============================================================================
     console.log('🔐 Starting user authentication...');
-    const { user, supabase, supabaseAdmin } = await authenticateUser(req);
-    console.log('👤 User authenticated successfully:', user.id);
+  const { user, supabase, supabaseAdmin } = await authenticateUser(req);
+  console.log('👤 User authenticated successfully:', user.id);
+  return await withRateLimit(req, user?.id, async () => {
     // ============================================================================
     // REQUEST PARSING & VALIDATION
     // ============================================================================
-    console.log('📥 Parsing request body...');
-    const requestBody = await req.json();
-    const { chat_id, character_id, addon_settings, mode = 'initial' } = requestBody;
+  console.log('📥 Parsing request body...');
+  let rawBody: any;
+  const sizeResp = await enforceJsonBodySize(req);
+  if (sizeResp) return sizeResp;
+  try { rawBody = await req.json(); } catch { return createErrorResponse('Invalid JSON body', 400); }
+  // Minimal inline schema (avoid adding full divergent schema set):
+  const chatId = typeof rawBody?.chat_id === 'string' ? rawBody.chat_id : undefined;
+  const characterId = typeof rawBody?.character_id === 'string' ? rawBody.character_id : undefined;
+  const mode = (rawBody?.mode === 'conversation' ? 'conversation' : 'initial');
+  const addon_settings = rawBody?.addon_settings && typeof rawBody.addon_settings === 'object' ? rawBody.addon_settings : {};
+  const chat_id = chatId; // keep existing variable names after validation
+  const character_id = characterId;
     const normalizedAddonSettings = sanitizeAddonSettings(addon_settings);
     
-    if (!chat_id || !character_id) {
+  if (!chat_id || !character_id) {
       console.error('❌ Missing required fields:', {
         chat_id: !!chat_id,
         character_id: !!character_id
@@ -255,7 +266,8 @@ import { anyAddonEnabled, sanitizeAddonSettings } from '../_shared/settings-mapp
         persistMs: tPersistEnd - tPersistStart
       }
     };
-    return createCorsResponse(response);
+  return createCorsResponse(response);
+  });
   } catch (error) {
     console.error('❌ Extract chat context error:', error);
     const errorResponse = {

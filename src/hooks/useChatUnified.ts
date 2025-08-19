@@ -104,6 +104,15 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     ...queryConfigs.userCredits(user?.id || ''),
     enabled: !!user,
   });
+  // Preserve last known non-zero credits to avoid transient 0 due to race / RLS lag
+  const lastNonZeroCreditsRef = useRef<number>(0);
+  if (creditsBalance > 0 && creditsBalance !== lastNonZeroCreditsRef.current) {
+    lastNonZeroCreditsRef.current = creditsBalance;
+  }
+  // TEMP DEBUG: log credits balance fetch results
+  useEffect(() => {
+    logger.debug('[Credits] useChatUnified creditsBalance changed:', creditsBalance, 'user:', user?.id);
+  }, [creditsBalance, user?.id]);
 
   // Get character details
   const { data: characterDetails } = useQuery({
@@ -565,7 +574,11 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
   ) => {
     const effectiveChatId = overrideChatId || chatId;
     if (!user || !effectiveChatId || !content.trim()) return;
-    if (creditsBalance < 1) throw new Error('Insufficient credits');
+    const effectiveCredits = creditsBalance > 0 ? creditsBalance : lastNonZeroCreditsRef.current;
+    if (effectiveCredits < 1) {
+      logger.warn('[Credits] Blocked send. Reported balance:', creditsBalance, 'Last known non-zero:', lastNonZeroCreditsRef.current);
+      throw new Error('Insufficient credits');
+    }
 
     dispatch({ type: 'SET_TYPING', payload: true });
     try {
@@ -581,6 +594,10 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       return result;
     } catch (error) {
       logger.error('Send message error:', error);
+      // If backend responded 402 while we had fallback credits, force refetch credits
+      if ((error as any)?.message?.includes('Insufficient') && user?.id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
+      }
       handleChatError(error, 'Failed to send message');
       throw error;
     } finally {

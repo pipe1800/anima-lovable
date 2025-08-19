@@ -206,7 +206,7 @@ export async function handleCreateOrder(
       throw new Error(`Failed to create PayPal order: ${response.status} - ${errorText}`);
     }
 
-    const paypalOrder = await response.json();
+  const paypalOrder: any = await response.json();
     
     console.log('[CREATE-ORDER] PayPal order created successfully:', paypalOrder.id);
 
@@ -350,7 +350,7 @@ export async function handleCaptureOrder(
       throw new Error(`Failed to capture PayPal order: ${response.status} - ${errorText}`);
     }
 
-    const captureResult = await response.json();
+  const captureResult: any = await response.json();
     
     // ============================================================================
     // VERIFY CAPTURE SUCCESS

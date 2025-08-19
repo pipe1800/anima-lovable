@@ -16,6 +16,7 @@ export const PayPalVerification = () => {
   const { toast } = useToast();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('Verifying your subscription...');
+  const [securityChecked, setSecurityChecked] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const queryClient = useQueryClient();
   const log = logger.scoped('PayPalVerification');
@@ -51,6 +52,25 @@ export const PayPalVerification = () => {
       const subscriptionId = searchParams.get('subscription_id') || searchParams.get('subscriptionID');
       const token = searchParams.get('token');
       const payerId = searchParams.get('PayerID');
+      const state = searchParams.get('state');
+
+      // Validate state nonce if one was stored locally
+      try {
+        const expected = localStorage.getItem('paypal_upgrade_state');
+        if (expected) {
+          if (!state || state !== expected) {
+            log.warn('State mismatch', { expected, got: state });
+            setStatus('error');
+            setMessage('Security validation failed. Please restart the subscription process.');
+            return;
+          }
+          // one-time use
+          localStorage.removeItem('paypal_upgrade_state');
+        }
+        setSecurityChecked(true);
+      } catch (e) {
+        log.error('State validation error:', e);
+      }
       
       log.info('PayPal verification attempt:', {
         subscription_id: subscriptionId,
@@ -69,16 +89,17 @@ export const PayPalVerification = () => {
         const { data, error } = await supabase.functions.invoke('paypal-management', {
           body: { 
             operation: 'verify-subscription',
-            subscriptionId: subscriptionId || token
+            subscriptionId: subscriptionId || token,
+            state
           }
         });
 
         log.debug('Verification response:', { data, error });
 
         if (error) {
-          log.error('Verification error:', error);
+          log.error('Verification error (sanitized):', error);
           setStatus('error');
-          setMessage('Verification failed. Please contact support.');
+          setMessage('Verification failed. Please try again.');
           return;
         }
 
@@ -112,9 +133,9 @@ export const PayPalVerification = () => {
           setMessage('Subscription verification failed. Please contact support.');
         }
       } catch (error) {
-        log.error('Verification error:', error);
-        setStatus('error');
-        setMessage('An error occurred during verification. Please contact support.');
+  log.error('Verification exception (sanitized):', error);
+  setStatus('error');
+  setMessage('Unexpected error. Please retry.');
       } finally {
         setIsVerifying(false);
       }

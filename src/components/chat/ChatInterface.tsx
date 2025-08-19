@@ -498,6 +498,7 @@ const ChatInterface = ({
 
     // Check if user has enough credits
     if (creditsBalance < 1) {
+  log.warn('[Credits] Block send: creditsBalance < 1', { creditsBalance, userId: user?.id });
       setShowInsufficientCreditsModal(true);
       return;
     }
@@ -514,6 +515,19 @@ const ChatInterface = ({
         selectedWorldInfoId,
         effectiveTrackedContext
       );
+
+      // Proactively force scroll in case layout shift (quick manual assist; primary logic lives in ChatMessages)
+      try {
+        requestAnimationFrame(() => {
+          const scroller = document.querySelector('.chat-messages-container');
+          if (scroller) {
+            (scroller as HTMLElement).scrollTop = (scroller as HTMLElement).scrollHeight;
+            requestAnimationFrame(() => { (scroller as HTMLElement).scrollTop = (scroller as HTMLElement).scrollHeight; });
+          } else {
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+          }
+        });
+      } catch {}
 
   // Only refocus if user had keyboard open
   focusBackIfNeeded();
@@ -573,6 +587,7 @@ const ChatInterface = ({
       throw new Error('No active chat');
     }
     if (creditsBalance < 1) throw new Error('Insufficient credits');
+  log.warn('[Credits] Regeneration blocked due to low credits', { creditsBalance, userId: user?.id });
 
     // Fetch last user message content to resend
     const { data: lastUserMsg, error: lastMsgErr } = await supabase
@@ -785,6 +800,41 @@ const ChatInterface = ({
       }
     }
   }, [user, currentChatId, creditsBalance, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, character.id, streamingMode, queryClient, toast]);
+
+  // --- Responsive typing/streaming indicator control ---
+  // Track stream progress to detect stagnation (backend slow to flip isStreaming false)
+  const streamProgressRef = useRef<{len:number; ts:number}>({ len: 0, ts: 0 });
+  const [, forceRerenderTick] = useState(0); // to trigger re-render when stagnation threshold reached
+  useEffect(() => {
+    if (isStreaming && streamingMessage) {
+      const l = streamingMessage.length;
+      if (l !== streamProgressRef.current.len) {
+        streamProgressRef.current = { len: l, ts: Date.now() };
+      }
+    }
+  }, [isStreaming, streamingMessage]);
+  // Periodic check (cheap) every 1s while streaming to hide if stagnated
+  useEffect(() => {
+    if (!isStreaming) return;
+    const id = setInterval(() => {
+      forceRerenderTick(t => t + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isStreaming]);
+  // Determine last AI message content
+  const lastAiMessageContent = React.useMemo(() => {
+    if (!messages || !messages.length) return '';
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m: any = messages[i];
+      if (m && (m.is_ai_message === true || m.isUser === false || m.role === 'assistant')) {
+        return typeof m.content === 'string' ? m.content : '';
+      }
+    }
+    return '';
+  }, [messages]);
+  const streamingCompleteMatch = !!(isStreaming && streamingMessage && lastAiMessageContent && lastAiMessageContent === streamingMessage);
+  const stagnated = isStreaming && !streamingCompleteMatch && (Date.now() - streamProgressRef.current.ts > 2000) && streamProgressRef.current.len > 0;
+  const showRespondingIndicator = isTyping || (isStreaming && !streamingCompleteMatch && !stagnated);
 
   // Reconcile regeneration overrides: clear when message matches or vanished or timeout
   useEffect(() => {
@@ -1172,7 +1222,7 @@ const ChatInterface = ({
               aria-live="polite"
               role="status"
               className={`flex items-center gap-2 text-gray-400 px-1 transition-all duration-200 ease-out origin-bottom ${
-                (isTyping || isStreaming)
+                showRespondingIndicator
                   ? 'opacity-100 h-5 translate-y-0'
                   : 'opacity-0 h-0 -translate-y-1 pointer-events-none'
               }`}

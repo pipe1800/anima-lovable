@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import type { Message, TrackedContext } from '@/types/chat';
@@ -56,6 +56,13 @@ const ChatMessages = ({
 }: ChatMessagesProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Track when we're prepending earlier messages so we can skip bottom autoscroll for that cycle
+  const loadingEarlierRef = useRef(false);
+  // Track last chat id to detect chat switches
+  const lastChatIdRef = useRef<string | null>(null);
+  // Track whether we've performed the initial jump-to-bottom for the current chat
+  const initialScrollDoneRef = useRef(false);
+  const initialScrollPendingRef = useRef(false);
   
   // Load addon and style settings from global settings
   const { data: globalSettings } = useUserGlobalChatSettings();
@@ -177,15 +184,16 @@ const ChatMessages = ({
   const handleLoadEarlier = useCallback(() => {
     if (hasMore && !isFetchingNextPage && fetchNextPage) {
       const currentScrollHeight = messagesContainerRef.current?.scrollHeight || 0;
-      
+      loadingEarlierRef.current = true;
       fetchNextPage();
-      
       setTimeout(() => {
         if (messagesContainerRef.current) {
           const newScrollHeight = messagesContainerRef.current.scrollHeight;
-          const scrollDiff = newScrollHeight - currentScrollHeight;
-          messagesContainerRef.current.scrollTop = scrollDiff;
+            const scrollDiff = newScrollHeight - currentScrollHeight;
+            messagesContainerRef.current.scrollTop = scrollDiff;
         }
+        // Allow next message append to auto-scroll again
+        requestAnimationFrame(() => { loadingEarlierRef.current = false; });
       }, 100);
     }
   }, [hasMore, isFetchingNextPage, fetchNextPage]);
@@ -241,22 +249,77 @@ const ChatMessages = ({
   }, [isStreaming, displayedStream, lastAiMessage?.content]);
 
 
-  // ✅ PHASE 3: Optimized auto-scroll with better performance
-  useEffect(() => {
-    const shouldAutoScroll = () => {
-      if (isLoadingMessages && messages.length === 0) return false;
-      return messages.length > 0 || showStreamingBubble;
-    };
-
-    if (shouldAutoScroll()) {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ 
-          behavior: isLoadingMessages ? 'auto' : 'smooth', 
-          block: 'end' 
-        });
+  // Robust force scroll utility (desktop + mobile) with double rAF to catch late layout (images, fonts, streamed chars)
+  const forceScrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    // Immediate jump (behavior ignored when setting scrollTop directly)
+    el.scrollTop = el.scrollHeight;
+    // Double frame to account for just-rendered streaming characters / images
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    });
+    // Fallback for mobile browsers if outer document scrolls instead
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
       });
     }
-  }, [messages.length, showStreamingBubble, isLoadingMessages]);
+  }, []);
+
+  // On chat switch, mark that we need an initial instantaneous scroll when messages arrive
+  useEffect(() => {
+    if (!chatId) return;
+    if (lastChatIdRef.current !== chatId) {
+      lastChatIdRef.current = chatId;
+      initialScrollDoneRef.current = false;
+      initialScrollPendingRef.current = true;
+    }
+  }, [chatId]);
+
+  // Layout effect so initial jump happens before paint to avoid visible scroll animation
+  useLayoutEffect(() => {
+    if (messages.length === 0) return;
+    if (initialScrollPendingRef.current && !initialScrollDoneRef.current) {
+      // Instant jump (no smooth)
+      forceScrollToBottom('auto');
+      initialScrollDoneRef.current = true;
+      initialScrollPendingRef.current = false;
+      return;
+    }
+  }, [messages.length, forceScrollToBottom]);
+
+  // Non-initial auto-scroll for new messages appended at bottom
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (loadingEarlierRef.current) return; // user loaded earlier messages; don't yank scroll
+    if (!initialScrollDoneRef.current) return; // handled by layout effect
+    forceScrollToBottom(messages.length < 5 ? 'auto' : 'smooth');
+  }, [messages.length, forceScrollToBottom]);
+
+  // Continuous scroll during streaming (each incremental character rerender)
+  const lastStreamLenRef = useRef(0);
+  useEffect(() => {
+    if (!showStreamingBubble) { lastStreamLenRef.current = 0; return; }
+    const currentLen = displayedStream.length;
+    if (currentLen !== lastStreamLenRef.current) {
+      lastStreamLenRef.current = currentLen;
+      forceScrollToBottom('auto');
+    }
+  }, [displayedStream, showStreamingBubble, forceScrollToBottom]);
+
+  // Fallback: when loading finishes and we have messages but container isn't at bottom (e.g., images loaded after render)
+  useEffect(() => {
+    if (isLoadingMessages) return;
+    if (!messagesContainerRef.current) return;
+    const el = messagesContainerRef.current;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+    if (!nearBottom) {
+      // Force alignment once after load
+      forceScrollToBottom('auto');
+    }
+  }, [isLoadingMessages, forceScrollToBottom]);
 
   // Show empty state when no chat is selected
   if (!chatId) {
@@ -298,7 +361,7 @@ const ChatMessages = ({
       {/* Scrollable messages layer */}
       <div 
         ref={messagesContainerRef}
-        className="absolute inset-0 overflow-y-auto p-6 space-y-6 font-['Open_Sans',_sans-serif]"
+        className="chat-messages-container absolute inset-0 overflow-y-auto p-6 space-y-6 font-['Open_Sans',_sans-serif]"
       >
         {/* Load Earlier Messages Button */}
         {hasMore && (

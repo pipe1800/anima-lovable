@@ -59,7 +59,8 @@ export async function backfillMissingEmbeddings(
 
     pages++;
     scanned += list.length;
-    lastCreatedAt = list[list.length - 1]?.created_at;
+  const tail = list[list.length - 1] as any;
+  lastCreatedAt = typeof tail?.created_at === 'string' ? tail.created_at as string : undefined;
 
     console.log(`📦 Backfill page #${pages} - ${list.length} rows`);
 
@@ -67,23 +68,23 @@ export async function backfillMissingEmbeddings(
     for (let i = 0; i < list.length; i += concurrency) {
       const slice = list.slice(i, i + concurrency);
       const results = await Promise.allSettled(
-        slice.map(async (row) => {
+  slice.map(async (row: any) => {
           try {
             if (dryRun) return 'dryRun';
 
-            const text = normalizeContentForHash(row.summary_content || '');
+            const text = normalizeContentForHash(typeof row.summary_content === 'string' ? row.summary_content : '');
             const vec = await getTextEmbedding(text);
             if (!vec) throw new Error('No embedding returned');
 
             const upd = await supabase
               .from('character_memories')
               .update({ embedding: vec as any })
-              .eq('id', row.id);
+              .eq('id', String(row.id));
 
             if (upd.error) throw upd.error;
             return 'ok';
           } catch (e) {
-            console.warn('⚠️ Backfill row failed:', row.id, e);
+            console.warn('⚠️ Backfill row failed:', String(row?.id), e);
             throw e;
           }
         })

@@ -1,4 +1,10 @@
 import { authenticateUser, createCorsResponse, createErrorResponse } from '../_shared/auth.ts';
+import { getMemoriesSchema, safeParse, sanitizePayload } from '../_shared/validation.ts';
+
+function redactUserId(id?: string) {
+  if (!id) return 'anon';
+  return id.length > 8 ? `${id.slice(0,4)}…${id.slice(-2)}` : id;
+}
 
 interface GetMemoriesRequest {
   characterId: string;
@@ -25,19 +31,19 @@ globalThis.Deno.serve(async (req) => {
       return createErrorResponse('Unauthorized', 401);
     }
 
-    const body: GetMemoriesRequest = await req.json();
-    const { characterId, userId } = body;
-
-    if (!characterId || !userId) {
-      return createErrorResponse('Missing required fields', 400);
-    }
+  let rawBody: any;
+  try { rawBody = await req.json(); } catch { return createErrorResponse('Invalid JSON body', 400); }
+  sanitizePayload(rawBody, 4000);
+  const parsed = safeParse(getMemoriesSchema, rawBody);
+  if (parsed.success === false) return createErrorResponse(`Invalid request: ${parsed.error}`, 400);
+  const { characterId, userId } = parsed.data;
 
     // Only allow users to fetch their own memories
     if (userId !== user.id) {
       return createErrorResponse('Forbidden', 403);
     }
 
-    console.log('🧠 Fetching memories for character:', { characterId, userId });
+  console.log('🧠 Fetching memories for character:', { characterId, user: redactUserId(userId) });
 
     // Fetch memories from the database
     const { data: memories, error } = await supabaseAdmin

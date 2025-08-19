@@ -236,7 +236,11 @@ export const searchPublicCharacters = async (params: SearchParams): Promise<Sear
 
   // Apply text search if provided
   if (searchQuery && searchQuery.trim()) {
-    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
+    // Sanitize search term to mitigate injection / malformed filter risk since .or() expects a raw filter string
+    const sanitized = sanitizeSearchInput(searchQuery);
+    if (sanitized) {
+      query = query.or(`name.ilike.%${sanitized}%,short_description.ilike.%${sanitized}%`);
+    }
   }
 
   // Don't apply NSFW filter in the query - we'll handle it after fetching
@@ -378,6 +382,27 @@ export const searchPublicCharacters = async (params: SearchParams): Promise<Sear
     total,
     hasMore
   };
+}
+
+// -----------------------------------------------------------------------------
+// SECURITY: Shared helper(s)
+// -----------------------------------------------------------------------------
+/**
+ * Sanitize free-form user search input used inside a dynamic Supabase .or() filter string.
+ * - Removes characters that can break filter syntax (commas, parentheses, quotes, semicolons)
+ * - Collapses whitespace and trims
+ * - Limits length to prevent abuse
+ * NOTE: Supabase query builder lacks parameterization for composite OR ilike filters.
+ * This approach narrows input to a safe subset while preserving useful search capability.
+ */
+function sanitizeSearchInput(raw: string, maxLen = 100): string {
+  if (!raw) return '';
+  return raw
+    .replace(/[%,"'();]/g, ' ')           // strip delimiters that affect filter grammar
+    .replace(/[^\w\s-]/g, ' ')          // allow alphanumerics, underscore, space, hyphen
+    .replace(/\s+/g, ' ')                 // collapse whitespace
+    .trim()
+    .slice(0, maxLen);
 }
 
 /**
@@ -1179,7 +1204,10 @@ export const searchPublicWorldInfos = async (params: SearchParams): Promise<Sear
 
   // Apply text search if provided
   if (searchQuery && searchQuery.trim()) {
-    query = query.or(`name.ilike.%${searchQuery}%,short_description.ilike.%${searchQuery}%`);
+    const sanitized = sanitizeSearchInput(searchQuery);
+    if (sanitized) {
+      query = query.or(`name.ilike.%${sanitized}%,short_description.ilike.%${sanitized}%`);
+    }
   }
 
   // Apply creator filter if specified

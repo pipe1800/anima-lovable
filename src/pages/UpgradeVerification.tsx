@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
@@ -20,7 +20,10 @@ const UpgradeVerification = () => {
   const query = useQuery();
   const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'auth-required'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
-  const [hasProcessed, setHasProcessed] = useState(false); // Use a simple flag instead of isProcessing
+  const [stateValidated, setStateValidated] = useState<boolean | null>(null);
+  // Ref-based guard to prevent race conditions / double invocation from React StrictMode or fast navigation
+  const processedRef = useRef(false);
+  const [hasProcessed, setHasProcessed] = useState(false); // state for UI only
   const queryClient = useQueryClient();
   const log = logger.scoped('UpgradeVerification');
 
@@ -37,18 +40,38 @@ const UpgradeVerification = () => {
       return;
     }
 
-    // Prevent multiple executions with a simple flag
-    if (hasProcessed) {
-      log.debug('[UPGRADE-VERIFICATION] Already processed, skipping...');
-      return;
+    // Prevent multiple executions (StrictMode mounts, user nav spam, etc.)
+    if (processedRef.current) {
+      log.debug('[UPGRADE-VERIFICATION] Already processed (ref guard), skipping...');
+      return; 
     }
 
     const processUpgrade = async () => {
-      setHasProcessed(true); // Set flag immediately to prevent re-runs
+      processedRef.current = true; // hard guard before awaiting
+      setHasProcessed(true); // UI reflection
       
       try {
         // The subscription_id is now in the URL from PayPal's redirect
         const paypalSubscriptionId = query.get('subscription_id');
+        const state = query.get('state');
+
+        // CSRF/Replay protection: Compare returned state against locally stored nonce
+        try {
+          const expectedState = window.localStorage.getItem('paypal_upgrade_state');
+          if (!state || !expectedState || state !== expectedState) {
+            log.warn('[UPGRADE-VERIFICATION] State mismatch or missing. expected=%s got=%s', expectedState, state);
+            setStateValidated(false);
+            setStatus('error');
+            setErrorMessage('Security validation failed (state mismatch). Please restart upgrade.');
+            return;
+          }
+          setStateValidated(true);
+          // One-time use: remove to prevent replay
+          window.localStorage.removeItem('paypal_upgrade_state');
+        } catch (e) {
+          log.error('[UPGRADE-VERIFICATION] Failed to validate state:', e);
+          setStateValidated(false);
+        }
 
         if (!paypalSubscriptionId) {
           setErrorMessage("No subscription ID found in URL. Cannot verify upgrade.");
@@ -59,23 +82,25 @@ const UpgradeVerification = () => {
         log.info('[UPGRADE-VERIFICATION] Starting upgrade verification with subscription ID:', paypalSubscriptionId);
 
         // Use paypal-management to verify the subscription
+        // Idempotent verification call – backend must ensure safe replays
         const { data, error } = await supabase.functions.invoke('paypal-management', {
           body: { 
             operation: 'verify-subscription',
-            subscriptionId: paypalSubscriptionId
+            subscriptionId: paypalSubscriptionId,
+            state // forward nonce for ownership assertion
           }
         });
 
         log.debug('[UPGRADE-VERIFICATION] Verification response:', { data, error });
 
         if (error) {
-          log.error('[UPGRADE-VERIFICATION] Verification error:', error);
+          log.error('[UPGRADE-VERIFICATION] Verification error (sanitized for user):', error);
           setStatus('error');
-          setErrorMessage(`Upgrade verification failed: ${error.message || 'Unknown error'}`);
+          setErrorMessage('Verification failed. Please retry.');
           return;
         }
 
-        if (data?.success && data?.data?.verified) {
+  if (data?.success && data?.data?.verified) {
           setStatus('success');
           log.info('[UPGRADE-VERIFICATION] Upgrade verification successful');
 
@@ -100,14 +125,14 @@ const UpgradeVerification = () => {
           setErrorMessage('Upgrade verification failed. Please contact support.');
         }
       } catch (error) {
-        log.error('[UPGRADE-VERIFICATION] Verification error:', error);
+        log.error('[UPGRADE-VERIFICATION] Verification exception (sanitized):', error);
         setStatus('error');
-        setErrorMessage('An error occurred during upgrade verification. Please contact support.');
+        setErrorMessage('An unexpected error occurred. Please retry or contact support.');
       }
     };
 
     processUpgrade();
-  }, [user]); // Only depend on user, not navigate or query which can change
+  }, [user]); // Only depend on user
 
   const renderContent = () => {
     switch (status) {

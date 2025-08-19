@@ -107,23 +107,101 @@ export async function consumeCredits(
 ): Promise<boolean> {
   console.log(`💰 Credit calculation: Base(${creditInfo.baseCost}) + ${creditInfo.addonPercentage}% addon increase = Total(${creditInfo.totalCost})`);
 
-  // Check and consume credits
+  // 1. Fetch current balance explicitly (to log & detect missing row)
+  const { data: existingCredits, error: creditsSelectError } = await supabaseAdmin
+    .from('credits')
+    .select('balance')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (creditsSelectError) {
+    console.warn('⚠️ Credits select error (will still attempt RPC):', creditsSelectError);
+  }
+
+  let startingBalance: number | undefined = typeof existingCredits?.balance === 'number' ? existingCredits.balance : undefined;
+
+  // 2. Auto-provision credits row if missing (legacy users predating trigger or accidental deletion)
+  if (startingBalance === undefined) {
+    console.log('🛠️ No credits row found; attempting to provision default row for user:', userId);
+    // Attempt to derive default from active plan; fallback 1000
+    let defaultAllowance = 1000;
+    try {
+      const { data: activeSub } = await supabaseAdmin
+        .from('subscriptions')
+        .select('plan_id, status, current_period_end')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .gt('current_period_end', new Date().toISOString())
+        .maybeSingle();
+      if (activeSub?.plan_id) {
+        const { data: planRow } = await supabaseAdmin
+          .from('plans')
+          .select('monthly_credits_allowance, name')
+          .eq('id', activeSub.plan_id)
+          .maybeSingle();
+        if (typeof planRow?.monthly_credits_allowance === 'number') {
+          defaultAllowance = planRow.monthly_credits_allowance;
+          console.log('📦 Using plan allowance for new credits row:', defaultAllowance, 'plan name:', planRow.name);
+        }
+      }
+    } catch (planLookupErr) {
+      console.warn('⚠️ Plan lookup failed while provisioning credits row, using fallback 1000:', planLookupErr);
+    }
+    try {
+      const { error: insertErr } = await supabaseAdmin
+        .from('credits')
+        .insert({ user_id: userId, balance: defaultAllowance });
+      if (insertErr) {
+        console.error('❌ Failed to auto-provision credits row:', insertErr);
+      } else {
+        startingBalance = defaultAllowance;
+        console.log('✅ Provisioned credits row with balance:', defaultAllowance);
+      }
+    } catch (provisionErr) {
+      console.error('❌ Exception provisioning credits row:', provisionErr);
+    }
+  }
+
+  console.log('🔍 Pre-consumption balance check:', { userId, startingBalance, required: creditInfo.totalCost });
+
+  // 3. If after provisioning we still have undefined or < required, short-circuit with explicit log
+  if (startingBalance === undefined) {
+    console.log(`❌ Insufficient credits for user: ${userId} balance: undefined (row missing & provisioning failed)`);
+    return false;
+  }
+  if (startingBalance < creditInfo.totalCost) {
+    console.log(`❌ Insufficient credits for user: ${userId} balance: ${startingBalance} required: ${creditInfo.totalCost}`);
+    return false;
+  }
+
+  // 4. Attempt atomic consumption via RPC
   const { data: creditCheckResult, error: creditError } = await supabaseAdmin.rpc('consume_credits', {
     user_id_param: userId,
     credits_to_consume: creditInfo.totalCost
   });
 
   if (creditError) {
-    console.error('Credit consumption error:', creditError);
+    console.error('Credit consumption error (RPC failed):', creditError);
     throw new Error('Failed to process credits');
   }
 
   if (!creditCheckResult) {
-    console.log('❌ Insufficient credits for user:', userId);
+    // Fetch again for clarity
+    const { data: afterRow } = await supabaseAdmin
+      .from('credits')
+      .select('balance')
+      .eq('user_id', userId)
+      .maybeSingle();
+    console.log('❌ RPC reported insufficient credits despite pre-check', {
+      userId,
+      startingBalance,
+      postCheckBalance: afterRow?.balance,
+      required: creditInfo.totalCost
+    });
     return false;
   }
 
-  console.log(`✅ Credits consumed successfully: ${creditInfo.totalCost} credits deducted`);
+  console.log(`✅ Credits consumed successfully: ${creditInfo.totalCost} credits deducted (user: ${userId})`);
   return true;
 }
 

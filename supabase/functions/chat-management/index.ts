@@ -1,5 +1,7 @@
 import { authenticateUser, createCorsResponse, createErrorResponse } from '../_shared/auth.ts';
 import { mapGlobalSettingsToAddonSettings } from '../_shared/settings-mapper.ts';
+import { withRateLimit, enforceJsonBodySize } from '../_shared/rate-limit.ts';
+import { chatRequestUnion, safeParse, sanitizePayload } from '../_shared/validation.ts';
 
 // Import handlers for different operations
 import { handleCreateBasicChat } from './modules/basic-chat-handler.ts';
@@ -48,6 +50,13 @@ import type {
  * ✅ World Info Integration
  */
 
+// Lightweight PII redaction helper
+function redactUserId(id?: string) {
+  if (!id) return 'anon';
+  // Hash-ish: keep first 4 + last 2 to aid correlation without full UUID exposure
+  return id.length > 8 ? `${id.slice(0,4)}…${id.slice(-2)}` : id;
+}
+
 globalThis.Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -73,17 +82,33 @@ globalThis.Deno.serve(async (req) => {
   console.log('📝 Request ID:', requestId);
 
   try {
+    // Hard Cost Fail: reject large JSON early
+    const sizeResp = await enforceJsonBodySize(req);
+    if (sizeResp) return sizeResp;
     // ============================================================================
     // AUTHENTICATION
     // ============================================================================
-    // Reduce duplicate logs: shared auth module logs details
-    const { user, supabase, supabaseAdmin } = await authenticateUser(req);
+  // Reduce duplicate logs: shared auth module logs details
+  const { user, supabase, supabaseAdmin } = await authenticateUser(req);
+
+  return await withRateLimit(req, user?.id, async () => {
 
     // ============================================================================
     // REQUEST PARSING & VALIDATION
     // ============================================================================
-    console.log('📥 Parsing request body...');
-    const requestBody: ChatManagementRequest = await req.json();
+  console.log('📥 Parsing request body (body size guarded)...');
+    let rawBody: any;
+    try {
+      rawBody = await req.json();
+    } catch {
+      return createErrorResponse('Invalid JSON body', 400);
+    }
+    sanitizePayload(rawBody);
+    const parsed = safeParse(chatRequestUnion, rawBody);
+    if (parsed.success === false) {
+      return createErrorResponse(`Invalid request: ${parsed.error}`, 400);
+    }
+    const requestBody = parsed.data as ChatManagementRequest;
     const { operation } = requestBody;
 
     if (!operation) {
@@ -91,7 +116,7 @@ globalThis.Deno.serve(async (req) => {
       return createErrorResponse('Missing operation field', 400);
     }
 
-    console.log('📋 Operation requested:', operation);
+  console.log('📋 Operation requested:', operation);
 
     // ============================================================================
     // ROUTE TO APPROPRIATE HANDLER
@@ -100,7 +125,7 @@ globalThis.Deno.serve(async (req) => {
 
     switch (operation) {
       case 'create-basic':
-        console.log('🎯 Routing to basic chat creation...');
+  console.log('🎯 Routing to basic chat creation...');
         response = await handleCreateBasicChat(
           requestBody as CreateBasicChatRequest,
           user,
@@ -109,7 +134,7 @@ globalThis.Deno.serve(async (req) => {
         break;
 
       case 'create-with-greeting':
-        console.log('🎯 Routing to greeting chat creation...');
+  console.log('🎯 Routing to greeting chat creation...');
         response = await handleCreateWithGreeting(
           requestBody as CreateWithGreetingRequest,
           user,
@@ -119,7 +144,7 @@ globalThis.Deno.serve(async (req) => {
         break;
 
       case 'send-message':
-        console.log('🎯 Routing to message streaming...');
+  console.log('🎯 Routing to message streaming...');
         response = await handleSendMessage(
           requestBody as any, // Will be typed properly in the handler
           user,
@@ -130,7 +155,7 @@ globalThis.Deno.serve(async (req) => {
         break;
 
       case 'regenerate-message':
-        console.log('🎯 Routing to regenerate message...');
+  console.log('🎯 Routing to regenerate message...');
         {
           const { handleRegenerateMessage } = await import('./modules/regenerate-message-handler.ts');
           response = await handleRegenerateMessage(
@@ -144,7 +169,7 @@ globalThis.Deno.serve(async (req) => {
         break;
 
       case 'extract-context':
-        console.log('🎯 Routing to context extraction...');
+  console.log('🎯 Routing to context extraction...');
         response = await handleExtractContext(
           requestBody as ExtractContextRequest,
           user,
@@ -154,7 +179,7 @@ globalThis.Deno.serve(async (req) => {
         break;
 
       case 'create-memory':
-        console.log('🎯 Routing to memory creation...');
+  console.log('🎯 Routing to memory creation...');
         response = await handleCreateMemory(
           requestBody as CreateMemoryRequest,
           user,
@@ -174,15 +199,16 @@ globalThis.Deno.serve(async (req) => {
     const endTime = Date.now();
     const duration = endTime - startTime;
     
-    console.log(`✅ Operation '${operation}' completed in ${duration}ms`);
+  console.log(`✅ Operation '${operation}' completed in ${duration}ms`);
     
     // For streaming responses, return them directly
     if (operation === 'send-message' && response instanceof Response) {
       return response; // This should be a streaming Response object
     }
 
-    // For regular JSON responses
-    return createCorsResponse(response);
+      // For regular JSON responses
+      return createCorsResponse(response);
+    });
 
   } catch (error) {
     console.error('💥 Unhandled error in chat management:', error);

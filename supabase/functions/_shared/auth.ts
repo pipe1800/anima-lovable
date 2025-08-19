@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.3';
+// Declare Deno for type-checking if executing under Node locally
+declare const Deno: any;
 import type { AuthResult } from '../types/interfaces.ts';
 import { CORS_HEADERS } from '../types/interfaces.ts';
 
@@ -15,9 +17,15 @@ export async function authenticateUser(req: Request): Promise<AuthResult> {
     throw new Error('No authorization header');
   }
 
+  const supabaseUrl = (globalThis as any).Deno?.env?.get('SUPABASE_URL') || (typeof process !== 'undefined' ? process.env.SUPABASE_URL : undefined);
+  const supabaseAnon = (globalThis as any).Deno?.env?.get('SUPABASE_ANON_KEY') || (typeof process !== 'undefined' ? process.env.SUPABASE_ANON_KEY : undefined);
+  if (!supabaseUrl || !supabaseAnon) {
+    console.error('❌ Supabase environment variables missing');
+    throw new Error('Server misconfiguration');
+  }
   const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
+    supabaseUrl,
+    supabaseAnon,
     {
       global: {
         headers: {
@@ -33,17 +41,22 @@ export async function authenticateUser(req: Request): Promise<AuthResult> {
     throw new Error('Invalid token');
   }
   
+  const serviceKey = (globalThis as any).Deno?.env?.get('SUPABASE_SERVICE_ROLE_KEY') || (typeof process !== 'undefined' ? process.env.SUPABASE_SERVICE_ROLE_KEY : undefined);
+  if (!serviceKey) {
+    console.error('❌ Service role key missing');
+    throw new Error('Server misconfiguration');
+  }
   const supabaseAdmin = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    supabaseUrl,
+    serviceKey
   );
   
   console.log('✅ User authenticated successfully:', user.id);
   
   return {
-    user,
-    supabase,
-    supabaseAdmin
+    user: { id: user.id, email: user.email } as any,
+    supabase: supabase as any,
+    supabaseAdmin: supabaseAdmin as any
   };
 }
 

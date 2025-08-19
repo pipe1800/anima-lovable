@@ -49,7 +49,8 @@ export function normalizeKeywords(keywords: string[] = [], characterName?: strin
 /**
  * Convenience: normalize then compute hash.
  */
-export async function computeContentHash(content: string): Promise<string | null> {
+export async function computeContentHash(content: string, salt?: string): Promise<string | null> {
   const normalized = normalizeContentForHash(content || '');
-  return computeSha256Hex(normalized);
+  const payload = salt ? `${salt}::${normalized}` : normalized;
+  return computeSha256Hex(payload);
 }
