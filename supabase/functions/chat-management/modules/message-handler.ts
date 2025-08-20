@@ -416,11 +416,19 @@ Balance dialogue with descriptive elements to create an engaging story.`;
         const staleHint = (timeAwarenessData && timeAwarenessData.delaySeconds && timeAwarenessData.delaySeconds > 1800)
           ? `\n(Notice: This context may be stale; over 30 minutes since your last message.)`
           : '';
-        systemPrompt += `\n\n[CURRENT CONTEXT]\n` +
-          `Use this section as the latest known state. Treat it as tentative and observational.${staleHint}\n` +
-          `- Live conversation (the user's latest message and what happens now) ALWAYS takes precedence over this block.\n` +
-          `- If the user's message or your next actions imply a new value for any field (mood, clothing, location, relationship, position, time/weather), adopt the new value immediately.\n` +
-          `- Do not force or repeat these details unless they are relevant to answering the current message naturally.\n` +
+        const godMode = !!addonSettings.godMode;
+        // Policy text differs depending on god mode
+        const policyHeader = godMode
+          ? `USER SUPREMACY MODE ACTIVE (godMode=true). The user's explicit statements immediately become canonical unless they contradict immutable character card identity (e.g., species/race if core).`
+          : `SAFE MODE (godMode=false). Stored context + character card are authoritative; user claims that contradict established clothing/location/etc. should be politely corrected unless a plausible transition is initiated.`;
+        const sharedRules = `General Rules:\n- When the user merely ASKS about a field (e.g. "What are you wearing?"), report the stored value verbatim.\n- Never change a field just to add variety.\n- Preserve unchanged fields exactly.\n- Multi-field changes: ${godMode ? 'allowed when user explicitly bundles them.' : 'only apply fields the user clearly drives; reject or defer others.'}\n- Environment or situational hints (temperature, setting) justify change ONLY if the current value is implausible. Setting alone (e.g. beach in winter) does NOT force a change without plausibility.`;
+        const changeRulesSafe = `Valid change triggers (safe mode):\n1. Explicit user request to CHANGE ("put on X", "move to Y") that fits character card OR is plausible with a transition.\n2. Environment shift making old state untenable (remove heavy coat in hot sauna).\n3. Continuation of a previously started change sequence.\n4. Explicit user retcon WITH justification (user begins to narrate change).\nReject & correct: pure assertions that contradict current state without justification ("you're wearing a blue shirt" when context says red dress). Ask the user to justify or initiate an in-story transition.`;
+        const changeRulesGod = `Valid change triggers (god mode):\n1. Any explicit user statement or request about a field.\n2. Environment-based necessity.\n3. Continuation of earlier change.\nIf a user assertion conflicts, ACCEPT and optionally micro-narrate transition (unless in pure dialogue mode).`;
+        const narrationRules = chatMode === 'companion'
+          ? `COMPANION MODE: Do NOT narrate transitions; respond only with dialogue reflecting new state when a change is accepted.`
+          : `STORYTELLING MODE: When a field changes, include a concise micro-transition sentence ONCE (e.g., "She slips off the sweater and pulls on a light swimsuit."). Do not repeat the transition in subsequent turns.`;
+        const moodRules = `Mood: keep consistent with character card; only shift when user action, strong emotional content, or explicit user assignment justifies it. Emotionless / stoic archetypes stay within minimal shifts (neutral, calm, focused).`;
+        systemPrompt += `\n\n[CURRENT CONTEXT]\n${policyHeader}${staleHint}\n${sharedRules}\n${godMode ? changeRulesGod : changeRulesSafe}\n${narrationRules}\n${moodRules}\nCurrent Stored State:\n` +
           contextParts.join('\n') + `\n[/CURRENT CONTEXT]`;
       }
     });

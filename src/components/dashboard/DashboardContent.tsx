@@ -22,7 +22,7 @@ import { TopBar } from '@/components/ui/TopBar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useUserChatsPaginated } from '@/hooks/useDashboard';
-import { useDashboardStats, useDashboardCharacters } from '@/hooks/useDashboardProgressive';
+import { useDashboardData } from '@/hooks/useDashboardProgressive';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { 
   StatsCardSkeleton, 
@@ -90,20 +90,13 @@ export function DashboardContent() {
   // Enable real-time updates
   useRealtimeUpdates(user?.id);
   
-  // Use progressive loading hooks for better UX
-  const { 
-    data: statsData, 
-    isLoading: statsLoading, 
-    error: statsError,
-    refetch: refetchStats
-  } = useDashboardStats();
-
-  const { 
-    data: charactersData, 
-    isLoading: charactersLoading, 
-    error: charactersError,
-    refetch: refetchCharacters
-  } = useDashboardCharacters();
+  // Single combined dashboard query
+  const {
+    data: dashboardData,
+    isLoading: dashboardLoading,
+    error: dashboardError,
+    refetch: refetchDashboard
+  } = useDashboardData();
 
   // Use separate hook for paginated chats
   const {
@@ -117,14 +110,15 @@ export function DashboardContent() {
   const recentChats = useMemo(() => chatsData?.data || [], [chatsData?.data]);
   const totalChats = useMemo(() => chatsData?.totalCount || 0, [chatsData?.totalCount]);
   const totalPages = useMemo(() => chatsData?.totalPages || 1, [chatsData?.totalPages]);
-  const myCharacters = useMemo(() => charactersData?.characters || [], [charactersData?.characters]);
-  const favoriteCharacters = useMemo(() => charactersData?.favorites || [], [charactersData?.favorites]);
-  const userCredits = useMemo(() => statsData?.credits || 0, [statsData?.credits]);
+  const myCharacters = useMemo(() => dashboardData?.characters || [], [dashboardData?.characters]);
+  const favoriteCharacters = useMemo(() => dashboardData?.favorites || [], [dashboardData?.favorites]);
+  const userCredits = useMemo(() => dashboardData?.credits || 0, [dashboardData?.credits]);
+  const likedSet = useMemo(() => new Set(dashboardData?.likedCharacterIds || []), [dashboardData?.likedCharacterIds]);
   
   // Use subscription from AuthContext first, fallback to stats data
-  const subscription = useMemo(() => authSubscription || statsData?.subscription, [authSubscription, statsData?.subscription]);
+  const subscription = useMemo(() => authSubscription || dashboardData?.subscription, [authSubscription, dashboardData?.subscription]);
   
-  const creditsUsed = useMemo(() => statsData?.creditsUsed || 0, [statsData?.creditsUsed]);
+  const creditsUsed = useMemo(() => dashboardData?.creditsUsed || 0, [dashboardData?.creditsUsed]);
   const monthlyAllowance = useMemo(() => subscription?.plan?.monthly_credits_allowance || 1000, [subscription?.plan?.monthly_credits_allowance]);
 
   // Get crown icon styling based on plan - MOVED BEFORE CONDITIONAL RETURNS
@@ -187,7 +181,8 @@ export function DashboardContent() {
       tagline: character.tagline || character.short_description || '',
       totalChats: character.chats_count || 0, // Use chats_count
       likesCount: character.likes_count || 0,       // Use likes_count
-      originalCharacter: character
+  originalCharacter: character,
+  isLiked: likedSet.has(character.id)
     })), [myCharacters]
   );
 
@@ -201,18 +196,18 @@ export function DashboardContent() {
       totalChats: character.chats_count || character.interaction_count || 0,
       likesCount: character.likes_count || 0,
       creatorUsername: character.creator?.username || 'Unknown',
-      originalCharacter: character
+  originalCharacter: character,
+  isLiked: likedSet.has(character.id)
     })), [favoriteCharacters]
   );
 
   // Refresh data on mount and when user changes
   useEffect(() => {
     if (user) {
-      refetchStats();
-      refetchCharacters();
+      refetchDashboard();
       refetchChats();
     }
-  }, [user, refetchStats, refetchCharacters, refetchChats]);
+  }, [user, refetchDashboard, refetchChats]);
 
   // Clear selections when page changes
   useEffect(() => {
@@ -479,7 +474,7 @@ export function DashboardContent() {
     }
   }, [currentPage, totalPages]);
 
-  if (authLoading || statsLoading) {
+  if (authLoading || dashboardLoading) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-white">Loading your dashboard...</div>
@@ -496,8 +491,8 @@ export function DashboardContent() {
   }
 
   // Soft-handle data errors without crashing the page
-  if (statsError || charactersError || chatsError) {
-    console.error('Dashboard data load issues:', { statsError, charactersError, chatsError });
+  if (dashboardError || chatsError) {
+    console.error('Dashboard data load issues:', { dashboardError, chatsError });
     // Proceed to render with safe fallbacks already applied above
   }
 
@@ -540,7 +535,7 @@ export function DashboardContent() {
       <div className="p-3 sm:p-6 md:p-6 space-y-4 sm:space-y-6">
         {/* Stats cards above Daily Message Limit */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
-          {statsLoading ? (
+          {dashboardLoading ? (
             // Show skeleton loading for stats
             <>
               {Array.from({ length: 4 }).map((_, index) => (
@@ -712,7 +707,7 @@ export function DashboardContent() {
 
                 <TabsContent value="my-characters" className="mt-3 sm:mt-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {charactersLoading ? (
+                    {dashboardLoading ? (
                       // Show skeleton loading for characters
                       <>
                         {Array.from({ length: 6 }).map((_, index) => (
@@ -810,7 +805,7 @@ export function DashboardContent() {
 
                 <TabsContent value="favorites" className="mt-3 sm:mt-6">
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-                    {charactersLoading ? (
+                    {dashboardLoading ? (
                       // Show skeleton loading for favorite characters
                       <>
                         {Array.from({ length: 6 }).map((_, index) => (

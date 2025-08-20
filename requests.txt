@@ -1,0 +1,274 @@
+[
+  {
+    "event_message": "✅ Latest AI message updated with context - UI should update immediately\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "672329a0-c007-4129-8e28-9715e155dfe4",
+    "level": "log",
+    "timestamp": 1755653274286000
+  },
+  {
+    "event_message": "✅ Context extraction completed in 11984ms for chat: 0cfb517e-1902-491a-9c2a-188e46a3825a\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "0d295133-fd97-46d6-8ef5-51431a795149",
+    "level": "log",
+    "timestamp": 1755653274286000
+  },
+  {
+    "event_message": "✅ Context saved to chat_context table successfully\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "3037ba41-53d8-4170-85ae-7204ce14f541",
+    "level": "log",
+    "timestamp": 1755653274126000
+  },
+  {
+    "event_message": "🔄 Updating latest AI message with extracted context...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "2ddcdd8a-191f-458b-bf45-530bfb94b3d0",
+    "level": "log",
+    "timestamp": 1755653274126000
+  },
+  {
+    "event_message": "💾 Setting character_position context: Standing, opening door\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "7ba5193e-4e14-47d8-aa51-61fce401f927",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "💾 Setting location context: Rockwood Mansion\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "ad49a9b9-158c-4d88-8cf8-125edc5315b3",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "💾 Setting clothing context: Black leather maid uniform\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "7ce361f6-8009-4887-9f66-d81f396cd8f8",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "⏭️ Skipping time_weather context update - no changes detected\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "38ce0774-2c3d-4800-91b4-6ae749796ed3",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "⏭️ Skipping relationship context update - no changes detected\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "304a621e-06b6-404f-a320-67ec82f186cb",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "⏭️ Skipping mood context update - no changes detected\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "114e06ff-c19f-4fe1-bf07-8e150976f44a",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "💾 Updating chat_context table with: {\n  mood: null,\n  clothing: \"Black leather maid uniform\",\n  location: \"Rockwood Mansion\",\n  relationship: null,\n  time_weather: null,\n  character_position: \"Standing, opening door\",\n  conversation_tone: null,\n  urgency_level: null\n}\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "447d0795-6634-4cba-8f6c-9ebbcd7d86d0",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "💾 Saving extracted context to database...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "5a4efff7-a20f-4cc4-99f1-d0f86595e0dc",
+    "level": "log",
+    "timestamp": 1755653274066000
+  },
+  {
+    "event_message": "🔍 Parsed context (flattened): {\n  mood: \"No context\",\n  clothing: \"Black leather maid uniform\",\n  location: \"Rockwood Mansion\",\n  time_weather: \"No context\",\n  relationship: \"No context\",\n  character_position: \"Standing, opening door\"\n}\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "f4861dfc-032d-4d65-b90d-e2d85ffdac8b",
+    "level": "log",
+    "timestamp": 1755653274065000
+  },
+  {
+    "event_message": "⚠️ Context JSON invalid; retrying with corrective system message\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "df56f9e6-c47d-4a25-8415-facabf6842ac",
+    "level": "error",
+    "timestamp": 1755653264617000
+  },
+  {
+    "event_message": "📝 Raw context extraction response: ```json\n{\n  \"mood\": {\n    \"value\": \"professional\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"clothing\": {\n    \"value\": \"short black leather maid uniform\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"location\": {\n    \"value\": \"Rockwood Mansion\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"time_weather\": {\n    \"value\": \"morning\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"relationship\": {\n    \"value\": \"head maid\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"character_position\": {\n    \"value\": \"standing, opening door\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  }\n}\n```\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "4a37e92f-b558-4a68-ae11-1a46ab92a341",
+    "level": "log",
+    "timestamp": 1755653264616000
+  },
+  {
+    "event_message": "🔍 CONTEXT EXTRACTION DEBUG: Function called {\n  timestamp: \"2025-08-20T01:27:42.651Z\",\n  chatId: \"0cfb517e-1902-491a-9c2a-188e46a3825a\",\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  callStack: [\n    \"Error\",\n    \"    at extractContextFromResponse (file:///tmp/user_fn_rclpyipeytqbamiwcuih_f6f19ab9-deca-4f6f-9940-000d1f115a00_50/source/supabase/functions/extract-addon-context/modules/context-extractor.ts:103:16)\",\n    \"    at file:///tmp/user_fn_rclpyipeytqbamiwcuih_f6f19ab9-deca-4f6f-9940-000d1f115a00_50/source/supabase/functions/extract-addon-context/index.ts:151:38\",\n    \"    at eventLoopTick (ext:core/01_core.js:175:7)\",\n    \"    at async withRateLimit (file:///tmp/user_fn_rclpyipeytqbamiwcuih_f6f19ab9-deca-4f6f-9940-000d1f115a00_50/source/supabase/functions/_shared/rate-limit.ts:127:12)\"\n  ]\n}\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "9dac2eab-e971-4ed1-8484-f29c077bfc5a",
+    "level": "log",
+    "timestamp": 1755653262653000
+  },
+  {
+    "event_message": "🔧 Extracting context for enabled addons: [\n  \"mood\",\n  \"clothing\",\n  \"location\",\n  \"time_weather\",\n  \"relationship\",\n  \"character_position\"\n]\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "b6672f73-90f8-42c4-a312-b787f0ddfb38",
+    "level": "log",
+    "timestamp": 1755653262653000
+  },
+  {
+    "event_message": "💬 Extracting context from recent conversation...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "3da0161b-eaa4-497a-a851-cf5df5ac0730",
+    "level": "log",
+    "timestamp": 1755653262650000
+  },
+  {
+    "event_message": "🔄 Starting context extraction...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "35ca974f-1f63-4a65-945d-c4e46e6c6925",
+    "level": "log",
+    "timestamp": 1755653262573000
+  },
+  {
+    "event_message": "✅ Data fetched successfully: {\n  hasCharacter: true,\n  hasDefinitions: true,\n  hasPersona: true,\n  hasProfile: true,\n  fetchMs: 154\n}\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "6c354da9-dc9d-4fb6-9879-76924bb3d508",
+    "level": "log",
+    "timestamp": 1755653262573000
+  },
+  {
+    "event_message": "✅ User data fetched: { hasPersona: true, hasProfile: true, username: \"admin\" }\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "ad204012-b984-4b3f-a23a-4ed761c17638",
+    "level": "log",
+    "timestamp": 1755653262573000
+  },
+  {
+    "event_message": "✅ Fallback: Found character in character_definitions only\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "e3122ce8-13ba-40c4-a3ab-3369210d14af",
+    "level": "log",
+    "timestamp": 1755653262539000
+  },
+  {
+    "event_message": "Character not found in characters table, trying character_definitions...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "6adae114-5e84-4bdb-9a8a-c4852ed6313e",
+    "level": "log",
+    "timestamp": 1755653262465000
+  },
+  {
+    "event_message": "📊 Fetching required data in parallel...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "1473e67f-418b-40b1-bde3-5e75295c82df",
+    "level": "log",
+    "timestamp": 1755653262419000
+  },
+  {
+    "event_message": "📊 Addon settings (normalized): {\n  \"dynamicWorldInfo\": true,\n  \"enhancedMemory\": true,\n  \"moodTracking\": true,\n  \"clothingInventory\": true,\n  \"locationTracking\": true,\n  \"timeAndWeather\": true,\n  \"relationshipStatus\": true,\n  \"characterPosition\": true,\n  \"godMode\": false\n}\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "48adb6be-b4a0-4d9e-ab0f-de1c5d70483b",
+    "level": "log",
+    "timestamp": 1755653262419000
+  },
+  {
+    "event_message": "✅ Required fields validated: {\n  chat_id: \"0cfb517e-1902-491a-9c2a-188e46a3825a\",\n  character_id: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  mode: \"conversation\"\n}\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "eb2d72f8-20ae-4188-90b5-fc0b4a038955",
+    "level": "log",
+    "timestamp": 1755653262418000
+  },
+  {
+    "event_message": "👤 User authenticated successfully: bb0acf17-c3aa-429a-abdd-aef545216a90\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "b45260c1-c705-4c4d-851e-7f32831fa630",
+    "level": "log",
+    "timestamp": 1755653262416000
+  },
+  {
+    "event_message": "✅ User authenticated successfully: bb0acf17-c3aa-429a-abdd-aef545216a90\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "6edd0fbb-7c4d-4487-b6aa-1015bfb72616",
+    "level": "log",
+    "timestamp": 1755653262416000
+  },
+  {
+    "event_message": "📥 Parsing request body...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "2653aa47-fdf5-456f-a390-af089f15683b",
+    "level": "log",
+    "timestamp": 1755653262416000
+  },
+  {
+    "event_message": "🔐 Starting user authentication...\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "a67ec095-0a8e-4a7f-b34c-a7da0433d8b6",
+    "level": "log",
+    "timestamp": 1755653262302000
+  },
+  {
+    "event_message": "📝 Request ID: d9c8bb80-41fe-48d9-990a-0a1cce0ae4ab\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "869dcc11-7e17-4555-9c96-9194578f896e",
+    "level": "log",
+    "timestamp": 1755653262302000
+  },
+  {
+    "event_message": "🔍 Extract chat context function called - Refactored Version v2\n",
+    "event_type": "Log",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "ea555727-d4e9-4cba-a6c3-a306fcc44aa3",
+    "level": "log",
+    "timestamp": 1755653262302000
+  },
+  {
+    "event_message": "booted (time: 28ms)",
+    "event_type": "Boot",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "a4089fe8-0834-4e0b-b927-861edacaa450",
+    "level": "log",
+    "timestamp": 1755653262288000
+  },
+  {
+    "event_message": "shutdown",
+    "event_type": "Shutdown",
+    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
+    "id": "5d333be9-90fc-4b19-8ca9-38b9187dd759",
+    "level": "log",
+    "timestamp": 1755653206826000
+  }
+]

@@ -35,6 +35,8 @@ interface ChatMessagesProps {
   userAvatarUrlOverride?: string;
   // New: show regenerating stream for a deleted AI message in place
   regeneratingContentByMessageId?: Record<string, string>;
+  // Optimization: allow parent to provide global settings to avoid duplicate queries
+  globalSettingsOverride?: any;
 }
 
 const ChatMessages = ({ 
@@ -53,6 +55,7 @@ const ChatMessages = ({
   renderBackground = true,
   userAvatarUrlOverride,
   regeneratingContentByMessageId = {},
+  globalSettingsOverride,
 }: ChatMessagesProps) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -65,31 +68,34 @@ const ChatMessages = ({
   const initialScrollPendingRef = useRef(false);
   
   // Load addon and style settings from global settings
-  const { data: globalSettings } = useUserGlobalChatSettings();
+  // Use override if provided (prevents extra React Query fetch)
+  // Avoid duplicate fetch if parent already provided settings
+  const { data: globalSettings } = useUserGlobalChatSettings({ enabled: !globalSettingsOverride });
+  const effectiveGlobalSettings = globalSettingsOverride || globalSettings;
 
   // Map global style settings
-  const backgroundImage = globalSettings?.background_image_url || null;
+  const backgroundImage = effectiveGlobalSettings?.background_image_url || null;
   const styleOptions = useMemo(() => ({
-    aiTextColor: globalSettings?.ai_text_color ?? '#E5E7EB',
-    userTextColor: globalSettings?.user_text_color ?? '#FFFFFF',
-    showCharacterAvatar: globalSettings?.show_character_avatar ?? true,
-    showUserAvatar: globalSettings?.show_user_avatar ?? false,
+    aiTextColor: effectiveGlobalSettings?.ai_text_color ?? '#E5E7EB',
+    userTextColor: effectiveGlobalSettings?.user_text_color ?? '#FFFFFF',
+    showCharacterAvatar: effectiveGlobalSettings?.show_character_avatar ?? true,
+    showUserAvatar: effectiveGlobalSettings?.show_user_avatar ?? false,
     // Bubble styles
-    aiBubbleColor: globalSettings?.ai_bubble_color ?? '#1f2937',
-    aiBubbleOpacity: globalSettings?.ai_bubble_opacity ?? 0.9,
-    userBubbleColor: globalSettings?.user_bubble_color ?? '#FF7A00',
-    userBubbleOpacity: globalSettings?.user_bubble_opacity ?? 1,
+    aiBubbleColor: effectiveGlobalSettings?.ai_bubble_color ?? '#1f2937',
+    aiBubbleOpacity: effectiveGlobalSettings?.ai_bubble_opacity ?? 0.9,
+    userBubbleColor: effectiveGlobalSettings?.user_bubble_color ?? '#FF7A00',
+    userBubbleOpacity: effectiveGlobalSettings?.user_bubble_opacity ?? 1,
     // Advanced avatar styles
-    avatarStyle: (globalSettings?.avatar_style ?? 'classic') as 'classic' | 'bubble-bg' | 'portrait' | 'side-banner',
-    portraitFrameStyle: (globalSettings?.portrait_frame_style ?? 'clean') as 'clean' | 'polaroid' | 'foil',
-    portraitFrameColor: globalSettings?.portrait_frame_color ?? '#4B5563',
-    bannerWidth: (globalSettings?.banner_width ?? 'md') as 'sm' | 'md' | 'lg',
-    bannerTintFromAvatar: globalSettings?.banner_tint_from_avatar ?? false,
-  }), [globalSettings]);
+    avatarStyle: (effectiveGlobalSettings?.avatar_style ?? 'classic') as 'classic' | 'bubble-bg' | 'portrait' | 'side-banner',
+    portraitFrameStyle: (effectiveGlobalSettings?.portrait_frame_style ?? 'clean') as 'clean' | 'polaroid' | 'foil',
+    portraitFrameColor: effectiveGlobalSettings?.portrait_frame_color ?? '#4B5563',
+    bannerWidth: (effectiveGlobalSettings?.banner_width ?? 'md') as 'sm' | 'md' | 'lg',
+    bannerTintFromAvatar: effectiveGlobalSettings?.banner_tint_from_avatar ?? false,
+  }), [effectiveGlobalSettings]);
   
   // Compute font size class from global settings
   const fontSizeClass = useMemo(() => {
-    const size = globalSettings?.font_size;
+    const size = effectiveGlobalSettings?.font_size;
     switch (size) {
       case 'small':
         return 'text-sm';
@@ -98,18 +104,18 @@ const ChatMessages = ({
       default:
         return 'text-base';
     }
-  }, [globalSettings?.font_size]);
+  }, [effectiveGlobalSettings?.font_size]);
 
   // New: compute addon settings once to reuse across groups and streaming bubble
   const computedAddonSettings = useMemo(() => {
-    if (globalSettings) {
+    if (effectiveGlobalSettings) {
       return {
-        moodTracking: globalSettings.mood_tracking,
-        clothingInventory: globalSettings.clothing_inventory,
-        locationTracking: globalSettings.location_tracking,
-        timeAndWeather: globalSettings.time_and_weather,
-        relationshipStatus: globalSettings.relationship_status,
-        characterPosition: globalSettings.character_position,
+        moodTracking: effectiveGlobalSettings.mood_tracking,
+        clothingInventory: effectiveGlobalSettings.clothing_inventory,
+        locationTracking: effectiveGlobalSettings.location_tracking,
+        timeAndWeather: effectiveGlobalSettings.time_and_weather,
+        relationshipStatus: effectiveGlobalSettings.relationship_status,
+        characterPosition: effectiveGlobalSettings.character_position,
       };
     }
     // Default to all enabled while loading to ensure context displays
@@ -121,7 +127,7 @@ const ChatMessages = ({
       relationshipStatus: true,
       characterPosition: true,
     };
-  }, [globalSettings]);
+  }, [effectiveGlobalSettings]);
 
   // Use tracked context as the primary source (real-time from database), fall back to message context
   const contextToUse = React.useMemo(() => {
@@ -397,6 +403,7 @@ const ChatMessages = ({
               userAvatarUrlOverride={userAvatarUrlOverride}
               regeneratingContentByMessageId={regeneratingContentByMessageId}
               canModify={!group.isUser && group.id === lastAiGroupId}
+              globalSettingsOverride={effectiveGlobalSettings}
               {...({ styleOptions } as any)}
             />
           ))
@@ -434,6 +441,7 @@ const ChatMessages = ({
             fontSizeClass={fontSizeClass}
             userAvatarUrlOverride={userAvatarUrlOverride}
             canModify={false}
+            globalSettingsOverride={effectiveGlobalSettings}
             {...({ styleOptions } as any)}
           />
         )}

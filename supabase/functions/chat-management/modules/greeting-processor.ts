@@ -6,6 +6,7 @@
  */
 
 import { fetchCharacterData } from './character-fetcher.ts';
+import { mapGlobalSettingsToAddonSettings, sanitizeAddonSettings, anyAddonEnabled } from '../../_shared/settings-mapper.ts';
 import type { AddonSettings } from '../types/streaming-interfaces.ts';
 import type { CreateWithGreetingRequest, ChatResponse } from '../types/index.ts';
 import type { TemplateContext } from '../types/streaming-interfaces.ts';
@@ -204,7 +205,8 @@ export async function handleCreateWithGreeting(
   request: CreateWithGreetingRequest,
   user: any,
   supabase: any,
-  supabaseAdmin: any
+  supabaseAdmin: any,
+  req?: Request
 ): Promise<ChatResponse> {
   try {
     const { charactersData, worldInfos, greeting, selectedPersonaId, chatMode } = request;
@@ -264,6 +266,8 @@ export async function handleCreateWithGreeting(
     if (messageError) {
       throw new Error('Failed to create greeting message');
     }
+  // Initial addon context extraction is now deferred until first user → AI exchange; removed fire-and-forget call.
+
     return {
       success: true,
       chat_id: chat.id,

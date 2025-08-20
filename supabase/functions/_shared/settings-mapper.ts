@@ -11,6 +11,7 @@ export interface GlobalChatSettings {
   time_and_weather: boolean;
   relationship_status: boolean;
   character_position: boolean;
+  god_mode: boolean; // NEW: when true, user statements override context immediately
   chain_of_thought: boolean;
   few_shot_examples: boolean;
   streaming_mode: 'instant' | 'smooth';
@@ -29,6 +30,7 @@ export interface AddonSettings {
   chainOfThought?: boolean;
   fewShotExamples?: boolean;
   timeAwareness?: boolean;
+  godMode?: boolean; // NEW: runtime toggle giving user absolute authority
 }
 
 /**
@@ -44,6 +46,7 @@ export function mapGlobalSettingsToAddonSettings(globalSettings: Partial<GlobalC
     timeAndWeather: globalSettings.time_and_weather,
     relationshipStatus: globalSettings.relationship_status,
     characterPosition: globalSettings.character_position,
+  godMode: globalSettings.god_mode,
     chainOfThought: false, // Temporarily disabled - coming soon
     fewShotExamples: false, // Temporarily disabled - coming soon
   };
@@ -62,6 +65,7 @@ export function mapAddonSettingsToGlobalSettings(addonSettings: AddonSettings): 
     time_and_weather: addonSettings.timeAndWeather,
     relationship_status: addonSettings.relationshipStatus,
     character_position: addonSettings.characterPosition,
+  god_mode: addonSettings.godMode,
     chain_of_thought: false, // Temporarily disabled - coming soon
     few_shot_examples: false, // Temporarily disabled - coming soon
   };
@@ -88,6 +92,7 @@ export const ADDON_RUNTIME_KEYS = [
   'relationshipStatus',
   'characterPosition',
   'timeAwareness',
+  'godMode',
 ] as const;
 
 export type AddonDbKey = typeof ADDON_DB_KEYS[number];

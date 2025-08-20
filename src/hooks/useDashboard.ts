@@ -57,7 +57,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
         queryKey: ['user', 'chats', 'paginated', userId, page + 1, limit],
         queryFn: async () => {
           const nextPage = page + 1;
-          const result = await getUserChatsPaginated(userId, nextPage, limit);
+          const result = await getUserChatsPaginated(userId, nextPage, limit, true);
           if (result.error) {
             console.warn('Prefetch chats failed (next):', result.error);
             return { data: [], totalCount: 0, currentPage: nextPage, totalPages: 0, error: null } as any;
@@ -70,7 +70,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
         queryKey: ['user', 'chats', 'paginated', userId, page + 2, limit],
         queryFn: async () => {
           const nextNextPage = page + 2;
-          const result = await getUserChatsPaginated(userId, nextNextPage, limit);
+          const result = await getUserChatsPaginated(userId, nextNextPage, limit, true);
           if (result.error) {
             console.warn('Prefetch chats failed (+2):', result.error);
             return { data: [], totalCount: 0, currentPage: nextNextPage, totalPages: 0, error: null } as any;
@@ -84,7 +84,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
           queryKey: ['user', 'chats', 'paginated', userId, page - 1, limit],
           queryFn: async () => {
             const prevPage = page - 1;
-            const result = await getUserChatsPaginated(userId, prevPage, limit);
+            const result = await getUserChatsPaginated(userId, prevPage, limit, true);
             if (result.error) {
               console.warn('Prefetch chats failed (prev):', result.error);
               return { data: [], totalCount: 0, currentPage: prevPage, totalPages: 0, error: null } as any;
@@ -160,17 +160,22 @@ export const useUserCredits = () => {
   const { user } = useAuth();
   const userId = user?.id;
 
+  const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: ['user', 'credits', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
+      const dashboard: any = queryClient.getQueryData(['dashboard', 'overview', userId]);
+      if (dashboard?.credits !== undefined) return dashboard.credits;
       const result = await getUserCredits(userId);
       if (result.error) throw result.error;
       return result.data?.balance || 0;
     },
     enabled: !!userId,
-    staleTime: 2 * 60 * 1000, // 2 minutes - credits change more frequently
-    gcTime: 10 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 };
 

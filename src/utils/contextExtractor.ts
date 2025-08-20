@@ -123,40 +123,8 @@ export async function extractInitialContext(
   addonSettings: AddonSettings
 ): Promise<TrackedContext | null> {
   try {
-    logger.info('🔄 Extracting initial context for character greeting...');
-    
-    const { data, error } = await supabase.functions.invoke('extract-addon-context', {
-      body: {
-        chat_id: chatId,
-        character_id: characterId,
-        addon_settings: addonSettings
-      }
-    });
-
-    if (error) {
-      logger.error('❌ Initial context extraction error:', error);
-      return null;
-    }
-
-    const response = data as ContextExtractionResponse;
-    
-    if (!response.success || !response.context_summary) {
-      logger.debug('⏭️ No initial context extracted');
-      return null;
-    }
-
-    // Convert to TrackedContext format
-    const trackedContext: TrackedContext = {
-      moodTracking: response.context_summary.mood || 'No context',
-      clothingInventory: response.context_summary.clothing || 'No context',
-      locationTracking: response.context_summary.location || 'No context',
-      timeAndWeather: response.context_summary.time_weather || 'No context',
-      relationshipStatus: response.context_summary.relationship || 'No context',
-      characterPosition: response.context_summary.character_position || 'No context'
-    };
-
-    logger.info('✅ Initial context extracted:', trackedContext);
-    return trackedContext;
+  logger.info('⏭️ Initial addon context extraction disabled (deferred until first user → AI exchange).');
+  return null; // Always defer now
   } catch (error) {
     logger.error('❌ Initial context extraction error:', error);
     return null;

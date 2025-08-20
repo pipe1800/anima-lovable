@@ -93,7 +93,7 @@ Return only the JSON object with no additional text. If a field is not mentioned
   }
   return null;
 }
-export async function extractContextFromResponse(character, conversationContext, message, aiResponse, addonSettings, openRouterKey, replaceTemplatesFn, supabase, userId, chatId, characterId) {
+export async function extractContextFromResponse(character, conversationContext, message, aiResponse, addonSettings, openRouterKey, replaceTemplatesFn, supabase, userId, chatId, characterId, previousContext) {
   console.log('🔍 CONTEXT EXTRACTION DEBUG: Function called', {
     timestamp: new Date().toISOString(),
     chatId,
@@ -147,32 +147,46 @@ export async function extractContextFromResponse(character, conversationContext,
   }
   console.log('🔧 Extracting context for enabled addons:', Object.keys(contextFields));
   // IMPROVED PROMPT - Focus on the conversation exchange, avoid context contamination
-  const contextPrompt = `You are analyzing a conversation between a user and a character to extract context information.
+  const godMode = !!addonSettings.godMode;
+  const prior = previousContext || {};
+  const reasonKeys = Object.keys(contextFields);
+  const noPriorContext = !prior || Object.values(prior).every(v => !v || v === 'No context');
+  const cardSnippet = noPriorContext ? `\nCHARACTER CARD SEED (do not hallucinate beyond this; only use to disambiguate): ${[
+    character?.personality_summary || '',
+    character?.description || '',
+    typeof character?.scenario === 'string' ? character?.scenario : (character?.scenario ? JSON.stringify(character.scenario) : ''),
+    character?.greeting || ''
+  ].join(' ').replace(/\s+/g,' ').trim().slice(0,800)}\n` : '';
+  const contextPrompt = `You are extracting UPDATED context fields from a single user → AI exchange.${cardSnippet}
 
-CONVERSATION EXCHANGE:
-User said: "${message}"
-Character responded: "${aiResponse}"
+PRIOR CONTEXT (may be partial): ${JSON.stringify(prior).slice(0,400)}
 
-Your task: Determine the CURRENT STATE of each context field based on what's happening in this conversation exchange.
+USER: "${message}"
+CHARACTER: "${aiResponse}"
 
-CRITICAL RULES:
-- COMPLETELY REPLACE field values, do not append or combine with previous values
-- If something changes in the conversation, use the NEW value only
-- If nothing is mentioned about a field in this exchange, return "No context"
-- Be precise and specific (max 8 words per field)
-- Focus on what the USER and CHARACTER are doing/saying RIGHT NOW
+For each enabled field output an object: { "value": string, "changed": boolean, "reason": one_of[explicit_user,user_request,environment_shift,narrative_followup,ai_spontaneous,no_change] }.
 
-Extract the CURRENT context in JSON format:
-{
-  ${enabledFields.join(',\n  ')}
-}
+REASONS:
+- explicit_user: user directly states new state ("you're wearing", "you are now at")
+- user_request: user asks to change ("put on", "move to") AND change executed in reply
+- environment_shift: new setting/conditions make prior state implausible and reply reflects adaptation
+- narrative_followup: continuation of a previously started multi-step change (reference prior value)
+- ai_spontaneous: model changed without any valid trigger above
+- no_change: field not referenced / no justification to alter
 
-Examples of GOOD responses:
-- "red evening dress" (not "maid uniform, red evening dress")
-- "happy and excited" (not "sad, happy and excited") 
-- "bedroom" (not "kitchen, bedroom")
+RULES:
+- If no evidence of change: keep previous value (or "No context" if none) with changed=false reason=no_change.
+- Keep value ≤ 8 words. No concatenations.
+- LOCATION detection cues (ANY of these -> candidate): prepositions ("at/in/inside/within/near/by/on the"), movement verbs ("go to", "walks to", "heads to", "arrives at", "enters", "steps into", "leaves", "exits"), explicit setting phrases ("in the classroom", "at the beach"). Prefer the MOST SPECIFIC latest phrase. Ignore metaphorical phrases.
+- If multiple locations appear, choose the final one associated with arrival / presence.
+- CHARACTER POSITION cues: posture or stance verbs/adjectives ("sitting", "standing", "lying", "reclining", "crouching", "kneeling", "running", "walking", "pacing", "folds her arms", "cross-legged"). Summarize posture + simple action if present (e.g. "sitting, leaning forward").
+- Clothing/location require explicit verbs or arrival/transition indicators to change.
+- Mood changes only with emotional stimulus or explicit descriptor consistent with character card.
+- Safe mode (godMode=false): reject unsupported user assertions lacking change verbs if they contradict prior; if model still changed mark ai_spontaneous and revert.
+- God mode: any explicit user assertion overrides (explicit_user).
+- If model invented change w/out trigger: mark ai_spontaneous and revert to prior.
 
-Return ONLY the JSON object with no additional text.`;
+Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to its object.`;
   try {
     const tryParse = (raw: string) => {
       const cleaned = raw.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
@@ -235,20 +249,82 @@ Return ONLY the JSON object with no additional text.`;
 
     if (!parsed) return null;
 
-    // Ensure we have values for all enabled fields
+    const flattened: Record<string,string> = {};
     for (const key of allowedKeys) {
-      const v = parsed[key];
-      if (v == null || v === '') parsed[key] = 'No context';
-      else if (typeof v === 'string') parsed[key] = v.trim().slice(0, 120);
+      const raw = parsed[key];
+      let value: string | null = null;
+      let reason = 'no_change';
+      if (raw && typeof raw === 'object') {
+        if (typeof raw.value === 'string') value = raw.value.trim();
+        if (typeof raw.reason === 'string') reason = raw.reason;
+      } else if (typeof raw === 'string') {
+        value = raw.trim(); // backward compat
+      }
+      const priorVal = (prior as any)[key];
+      if (!value || value === '') value = priorVal || 'No context';
+      if (value === 'No context' && priorVal) value = priorVal; // prefer prior
+      if (!godMode && reason === 'ai_spontaneous' && priorVal) {
+        value = priorVal;
+      }
+      flattened[key] = value.slice(0,120);
     }
-    console.log('🔍 Parsed context:', parsed);
-    return parsed;
+    console.log('🔍 Parsed context (flattened):', flattened);
+    // Heuristic fallback enhancement for LOCATION & CHARACTER POSITION if model missed a clear cue
+    try {
+      const lowerAI = (aiResponse || '').toLowerCase();
+      const lowerUser = (message || '').toLowerCase();
+      const textWindow = lowerUser + ' \n ' + lowerAI;
+
+      // Simple location phrase extraction
+      const locationPatterns = [
+        /\b(?:at|in|inside|within|on|near|by|beside|outside) (?:the )?([a-z0-9\- ]{2,40}\b)/g,
+        /\b(arrives|heads|goes|walks|steps|moves) (?:to|into|inside|toward|onto) (?:the )?([a-z0-9\- ]{2,40}\b)/g,
+        /\b(beach|forest|cabin|room|bedroom|kitchen|hallway|garden|park|library|classroom|office|street|shore|mountain|camp|campfire|market|plaza|docks|harbor)\b/g
+      ];
+      const priorLocation = (prior as any).location || (prior as any).location_tracking || (prior as any).locationTracking;
+      let detectedLoc: string | null = null;
+      for (const pattern of locationPatterns) {
+        let m: RegExpExecArray | null;
+        while ((m = pattern.exec(textWindow))) {
+          const group = m[m.length - 1];
+            if (group) {
+              detectedLoc = group.trim();
+            }
+        }
+      }
+      if (detectedLoc && detectedLoc.length <= 40) {
+        const existing = flattened['location'];
+        if ((!existing || existing === priorLocation || existing === 'No context') && detectedLoc !== existing) {
+          flattened['location'] = detectedLoc;
+          console.log('📍 Heuristic location update applied:', detectedLoc);
+        }
+      }
+
+      // Character position heuristics
+      if (flattened['character_position']) {
+        const existingPos = flattened['character_position'];
+        // If model returned prior unchanged but we see a new posture word, update
+        const postureKeywords = ['sitting','sits','squat','squatting','standing','stands','leaning','leans','lying','laying','reclining','crouching','kneeling','running','walking','pacing','folds her arms','folding her arms','cross-legged','perched'];
+        const found = postureKeywords.filter(k => lowerAI.includes(k));
+        if (found.length > 0) {
+          const concise = found.slice(0,2).join(', ').replace(/s$/,'');
+          if (concise && concise.length < 50 && !existingPos.toLowerCase().includes(concise.split(',')[0])) {
+            flattened['character_position'] = concise;
+            console.log('🧍 Heuristic character_position update applied:', concise);
+          }
+        }
+      }
+    } catch (heurErr) {
+      console.warn('⚠️ Heuristic enhancement failed (non-fatal):', heurErr);
+    }
+
+    return flattened;
   } catch (error) {
     console.error('Context extraction error:', error);
   }
   return null;
 }
-export async function saveContextUpdates(extractedContext, addonSettings, userId, chatId, characterId, supabase) {
+export async function saveContextUpdates(extractedContext, addonSettings, userId, chatId, characterId, supabase, options: { forcePersist?: boolean } = {}) {
   if (!extractedContext || !addonSettings) return;
   const contextMappings = [
     { setting: 'moodTracking', field: 'mood', type: 'mood' },
@@ -289,9 +365,17 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
     }
   }
 
-  if (hasUpdates) {
+  if (hasUpdates || options.forcePersist) {
     try {
-      console.log('💾 Updating chat_context table with:', contextData);
+      if (options.forcePersist && !hasUpdates) {
+        // Populate contextData with "No context" values to initialize row
+        for (const k of Object.keys(contextData)) {
+          (contextData as any)[k] = null; // keep as null so UI can still show placeholders
+        }
+        console.log('💾 Forcing baseline chat_context row creation (no meaningful updates yet)');
+      } else {
+        console.log('💾 Updating chat_context table with:', contextData);
+      }
       
       const { error } = await supabase
         .from('chat_context')
@@ -311,10 +395,16 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
         console.log('✅ Context saved to chat_context table successfully');
         
         // ALSO update the latest AI message with the new context for immediate UI update
-        console.log('🔄 Updating latest AI message with extracted context...');
+  console.log('🔄 Updating latest AI message with extracted context...');
         try {
           // Build message context format using shared mapper
           const messageContext = dbToUi(contextData);
+          if (options.forcePersist && !hasUpdates) {
+            // Ensure all expected keys present with 'No context' so UI recognizes initialized state
+            for (const key of Object.keys(messageContext)) {
+              if (messageContext[key] == null) messageContext[key] = 'No context';
+            }
+          }
           
           // Find the latest AI message in this chat
           const { data: latestMessage, error: messageError } = await supabase

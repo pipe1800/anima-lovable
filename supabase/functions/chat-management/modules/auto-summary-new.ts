@@ -53,12 +53,13 @@ async function guardedOpenRouterFetch(init: {
     throw new Error('OpenRouter summary total deadline exceeded');
   }
   const userId = init.userId || 'anonymous';
-  // Per-user window tracking
-  const win = globalThis.openRouterUserWindows![userId] || { started: Date.now(), count: 0 };
-  if (Date.now() - win.started > OPENROUTER_USER_WINDOW_MS) {
-    globalThis.openRouterUserWindows![userId] = { started: Date.now(), count: 0 };
+  // Per-user window tracking (FIX: ensure window object is stored when first created)
+  let windowEntry = globalThis.openRouterUserWindows![userId];
+  if (!windowEntry || (Date.now() - windowEntry.started) > OPENROUTER_USER_WINDOW_MS) {
+    windowEntry = { started: Date.now(), count: 0 };
+    globalThis.openRouterUserWindows![userId] = windowEntry; // persist new/rotated window
   }
-  const currentWindow = globalThis.openRouterUserWindows![userId];
+  const currentWindow = windowEntry; // guaranteed defined now
   if (currentWindow.count >= OPENROUTER_USER_MAX_REQUESTS) {
     throw new Error('Per-user OpenRouter rate limit exceeded');
   }

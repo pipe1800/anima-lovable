@@ -5,18 +5,21 @@ import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 export interface FormattedMessageProps {
   content: string;
   className?: string;
+  // Optional optimization: reuse provided settings
+  settingsOverride?: any;
 }
 
-export function FormattedMessage({ content, className = '' }: FormattedMessageProps) {
+export function FormattedMessage({ content, className = '', settingsOverride }: FormattedMessageProps) {
   const segments = parseMessageContent(content);
   const { data: settings } = useUserGlobalChatSettings();
+  const effectiveSettings = settingsOverride || settings;
 
-  const mode = settings?.semantic_overrides_mode || 'default';
+  const mode = effectiveSettings?.semantic_overrides_mode || 'default';
   const colors = {
-    speech: settings?.speech_color || '#93C5FD', // blue-300 fallback
-    action: settings?.action_color || '#D8B4FE', // purple-300 fallback
-    emphasis: settings?.emphasis_color || '#FDE68A', // yellow-300 fallback
-    parenthetical: settings?.parenthetical_color || '#9CA3AF', // gray-400 fallback
+    speech: effectiveSettings?.speech_color || '#93C5FD', // blue-300 fallback
+    action: effectiveSettings?.action_color || '#D8B4FE', // purple-300 fallback
+    emphasis: effectiveSettings?.emphasis_color || '#FDE68A', // yellow-300 fallback
+    parenthetical: effectiveSettings?.parenthetical_color || '#9CA3AF', // gray-400 fallback
   };
 
   const segmentStyle = (type: string): React.CSSProperties | undefined => {

@@ -9,28 +9,18 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useChatUnified } from '@/hooks/useChatUnified';
 import { useChatPerformance } from '@/hooks/useChatPerformance';
 import type { TrackedContext } from '@/types/chat';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { createChat } from '@/lib/chat-operations';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import logger from '@/utils/logger';
-import { getPersonaById, type Persona } from '@/lib/persona-operations';
+import { type Persona } from '@/lib/persona-operations';
+import { usePersonaById } from '@/queries/personaQueries';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/queries/chatQueries';
 import { useNavigate } from 'react-router-dom';
 import { buildGreetingVariants } from '@/lib/greeting-utils'; // still used for initial variants (could swap to getGreetingVariants)
 import { supabase } from '@/integrations/supabase/client';
 
-// Debug components - Only load when needed
-const AddonDebugPanel = lazy(() => import('@/components/debug/AddonDebugPanel').then(module => ({
-  default: module.AddonDebugPanel
-})));
-
-// Loading fallback for debug components
-const LoadingSpinner = () => (
-  <div className="flex items-center justify-center p-4">
-    <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
-  </div>
-);
+// Removed AddonDebugPanel (no longer needed)
 
 interface Character {
   id: string;
@@ -51,6 +41,8 @@ interface ChatInterfaceProps {
   onChatCreated?: (chatId: string) => void; // New callback for when chat is created
   onMessageSent?: () => Promise<void>; // New callback for when message is sent
   characterDetails?: any; // New: full character details including definition (for greeting variants)
+  creditsBalanceOverride?: number; // Provided by parent to avoid duplicate fetches
+  globalSettingsOverride?: any; // Provided by parent to avoid duplicate fetches
 }
 
 const ChatInterface = ({
@@ -63,13 +55,15 @@ const ChatInterface = ({
   selectedWorldInfoId,
   onChatCreated,
   onMessageSent,
-  characterDetails
+  characterDetails,
+  creditsBalanceOverride,
+  globalSettingsOverride
 }: ChatInterfaceProps) => {
   const [inputValue, setInputValue] = useState('');
   const [isFirstMessage, setIsFirstMessage] = useState(true);
   const [currentChatId, setCurrentChatId] = useState<string | null>(existingChatId || null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(propSelectedPersonaId || null);
-  const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
+  const { data: selectedPersonaData } = usePersonaById(selectedPersonaId);
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [isPreChatPhase, setIsPreChatPhase] = useState(!existingChatId); // true until chat created
@@ -181,7 +175,19 @@ const ChatInterface = ({
     debugInfo,
     isStreaming,
     streamingMessage
-  } = useChatUnified(currentChatId, character.id);
+  } = useChatUnified(currentChatId, character.id, {
+    skipCreditsFetch: typeof creditsBalanceOverride === 'number',
+    externalCreditsBalance: creditsBalanceOverride,
+    externalGlobalSettings: globalSettingsOverride
+  });
+  // Broadcast message count to parent layout (replaces separate HEAD count query)
+  useEffect(() => {
+    if (!currentChatId) return;
+    try {
+      const ev = new CustomEvent('chat-messages-updated', { detail: { chatId: currentChatId, count: messages.length } });
+      window.dispatchEvent(ev);
+    } catch {}
+  }, [messages.length, currentChatId]);
   // Reintroduce effectiveTrackedContext (was removed during duplicate cleanup)
   const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
   // Derived: whether any user message exists in this chat (used to lock greeting picker)
@@ -226,7 +232,8 @@ const ChatInterface = ({
   const { updateMetrics } = useChatPerformance(currentChatId);
 
   // Addon settings
-  const { data: globalSettings } = useUserGlobalChatSettings();
+  // Use provided global settings override (avoids duplicate network fetches)
+  const globalSettings = globalSettingsOverride;
   const backgroundImage = globalSettings?.background_image_url || null;
   const currentAddonSettings = globalSettings ? {
     dynamicWorldInfo: globalSettings.dynamic_world_info,
@@ -281,34 +288,7 @@ const ChatInterface = ({
   }, [currentChatId, isPreChatPhase, log]);
 
   // Helper: create chat with chosen greeting THEN send first user message (reordered after dependencies)
-  const waitForGreetingPersistence = useCallback(async (newChatId: string, timeoutMs = 2000) => {
-    const start = Date.now();
-    let attempt = 0;
-    while (Date.now() - start < timeoutMs) {
-      attempt++;
-      try {
-        const { data } = await supabase
-          .from('messages')
-          .select('content,is_ai_message,message_order')
-            .eq('chat_id', newChatId)
-            .eq('is_ai_message', true)
-            .order('message_order', { ascending: true })
-            .limit(1);
-        if (data && data.length > 0) {
-          const msg = data[0];
-          // Accept if first AI message present; optionally verify it matches a known greeting variant
-          if (!greetingPersisted) setGreetingPersisted(true);
-          if (greetingVariants.length === 0 || greetingVariants.includes(msg.content) || msg.message_order === 1) {
-            return { found: true, content: msg.content };
-          }
-        }
-      } catch {}
-      // Exponential-ish backoff within bounds
-      const delay = Math.min(100 + attempt * 75, 300);
-      await new Promise(r => setTimeout(r, delay));
-    }
-    return { found: false };
-  }, [greetingVariants, greetingPersisted]);
+  // Removed waitForGreetingPersistence polling; rely on realtime + unified message cache
 
   const createChatAndSendFirstMessage = useCallback(async (userMessage: string) => {
     if (!user || currentChatId || sendingFirstMessage) return;
@@ -328,33 +308,8 @@ const ChatInterface = ({
       window.history.replaceState(null, '', `/chat/${character.id}/${newChatId}`);
       onChatCreated?.(newChatId);
 
-      // Wait for greeting persistence (extended)
-      const result = await waitForGreetingPersistence(newChatId);
-      if (!result.found) {
-        log.warn('⚠️ Greeting not detected within wait window; proceeding anyway');
-      } else {
-        log.info('✅ Greeting persistence confirmed');
-      }
-
-      // Force refetch of messages now that greeting should exist
-      try {
-        await queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(newChatId) });
-      } catch {}
-
-      // Poll cache until greeting message visible or timeout (avoid flicker)
-      const visibilityStart = Date.now();
-      const visibilityTimeout = 1500; // ms
-      let greetingVisible = false;
-      while (Date.now() - visibilityStart < visibilityTimeout) {
-        const cache: any = queryClient.getQueryData(queryKeys.chat.messages(newChatId));
-        const msgs = cache?.pages?.flatMap((p: any) => p.messages) || [];
-        if (msgs.some((m: any) => m.isUser === false && (!greetingVariants.length || greetingVariants.includes(m.content)))) {
-          greetingVisible = true;
-          break;
-        }
-        await new Promise(r => setTimeout(r, 100));
-      }
-      if (!greetingVisible) log.warn('⚠️ Greeting not visible in cache before first user message send');
+  // Skip greeting polling; first AI message arrives via realtime and unified hook
+  try { await queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(newChatId) }); } catch {}
 
       // Now hide greeting bubble deterministically only after attempt to show persisted greeting
       if (chatPhase === 'greeting') {
@@ -387,7 +342,7 @@ const ChatInterface = ({
       setIsCreatingChat(false);
       setSendingFirstMessage(false);
     }
-  }, [user, currentChatId, sendingFirstMessage, greetingVariants, selectedGreetingIndex, log, character.id, character.name, propSelectedPersonaId, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, onChatCreated, sendMessage, onFirstMessage, toast, chatPhase, waitForGreetingPersistence, queryClient]);
+  }, [user, currentChatId, sendingFirstMessage, greetingVariants, selectedGreetingIndex, log, character.id, character.name, propSelectedPersonaId, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, onChatCreated, sendMessage, onFirstMessage, toast, chatPhase, queryClient]);
 
   // Sync tracked context with parent
   useEffect(() => {
@@ -448,27 +403,7 @@ const ChatInterface = ({
     }
   }, [propSelectedPersonaId, log]);
 
-  // Fetch selected persona data (persona > profile > default precedence in chat)
-  useEffect(() => {
-    let active = true;
-    const loadPersona = async () => {
-      try {
-        // Avoid refetch if already loaded same persona id
-        if (selectedPersonaId) {
-          if (selectedPersonaData?.id === selectedPersonaId) return;
-          const persona = await getPersonaById(selectedPersonaId);
-          if (active) setSelectedPersonaData(persona as Persona);
-        } else {
-          if (active && selectedPersonaData !== null) setSelectedPersonaData(null);
-        }
-      } catch (e) {
-        if (active) setSelectedPersonaData(null);
-        log.warn('Failed to load selected persona for avatar override:', e);
-      }
-    };
-    loadPersona();
-    return () => { active = false; };
-  }, [selectedPersonaId, selectedPersonaData, log]);
+  // Persona data now delivered by react-query cache (removed manual effect)
 
   // Send message
   const handleSendMessage = useCallback(async (e: React.FormEvent) => {
@@ -588,19 +523,11 @@ const ChatInterface = ({
     }
     if (creditsBalance < 1) throw new Error('Insufficient credits');
   log.warn('[Credits] Regeneration blocked due to low credits', { creditsBalance, userId: user?.id });
-
-    // Fetch last user message content to resend
-    const { data: lastUserMsg, error: lastMsgErr } = await supabase
-      .from('messages')
-      .select('content')
-      .eq('chat_id', currentChatId)
-      .eq('is_ai_message', false)
-      .order('message_order', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (lastMsgErr || !lastUserMsg?.content) {
-      console.warn('No last user message found to regenerate', { lastMsgErr });
+    // Derive last user message from cached messages (avoid extra select)
+    const all = messages || [];
+    const lastUser = [...all].reverse().find(m => (m as any).is_ai_message === false || (m as any).isUser === true || (m as any).role === 'user');
+    if (!lastUser || typeof (lastUser as any).content !== 'string' || !(lastUser as any).content.trim()) {
+      console.warn('No last user message found in cache to regenerate');
       throw new Error('No previous user message to regenerate');
     }
 
@@ -612,7 +539,7 @@ const ChatInterface = ({
       characterId: character.id,
       character_id: character.id,
       // Use the previous user message to trigger a new AI response
-      message: lastUserMsg.content as string,
+  message: (lastUser as any).content as string,
       // settings (both cases to be safe)
       addonSettings: currentAddonSettings,
       addon_settings: currentAddonSettings,
@@ -657,7 +584,7 @@ const ChatInterface = ({
     } catch (err) {
       throw err;
     }
-  }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId]);
+  }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, messages]);
 
   // Regeneration UI map: messageId -> streaming content
   const [regeneratingContentById, setRegeneratingContentById] = useState<Record<string, string>>({});
@@ -781,6 +708,10 @@ const ChatInterface = ({
       if (currentChatId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
         if (user?.id) queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
+        // Schedule a second invalidate shortly after to pick up async addon context extraction (regeneration)
+        setTimeout(() => {
+          try { queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) }); } catch {}
+        }, 1200);
       }
     } catch (err: any) {
       console.error('Regenerate failed:', err);
@@ -1186,9 +1117,7 @@ const ChatInterface = ({
       {/* Foreground content */}
       <div className="relative z-10 flex flex-col h-full">
         {/* Debug Panel - Lazy loaded for performance */}
-        <Suspense fallback={<LoadingSpinner />}>
-          <AddonDebugPanel characterId={character.id} userId={user?.id} chatId={currentChatId} />
-        </Suspense>
+  {/* Debug panel previously rendered here; removed for optimization */}
         
         {/* Messages Area - Mobile Responsive */}
         <div className="flex-1 overflow-hidden">
@@ -1211,6 +1140,7 @@ const ChatInterface = ({
               renderBackground={false}
               userAvatarUrlOverride={selectedPersonaData?.avatar_url || undefined}
               regeneratingContentByMessageId={regeneratingContentById}
+              globalSettingsOverride={globalSettings}
             />
           )}
         </div>

@@ -43,6 +43,7 @@ export interface AddonSettings {
   chainOfThought?: boolean;
   fewShotExamples?: boolean;
   enhancedMemory?: boolean;
+  godMode?: boolean; // user statements override context when true
 }
 
 export interface TemplateContext {

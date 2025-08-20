@@ -1,10 +1,17 @@
 import type { CreateBasicChatRequest, ChatResponse } from '../types/index.ts';
 import { getBestPersonaForNewChat } from './database.ts';
+import { mapGlobalSettingsToAddonSettings, sanitizeAddonSettings, anyAddonEnabled } from '../../_shared/settings-mapper.ts';
+
+interface BasicChatHandlerOptions {
+  req?: Request; // to forward auth header for initial context extraction
+  supabaseAdmin?: any; // needed to fetch global settings
+}
 
 export async function handleCreateBasicChat(
   request: CreateBasicChatRequest,
   user: any,
-  supabase: any
+  supabase: any,
+  options?: BasicChatHandlerOptions
 ): Promise<ChatResponse> {
   try {
     const { charactersData, selectedPersonaId } = request;
@@ -124,12 +131,14 @@ export async function handleCreateBasicChat(
 
     console.log('✅ Basic chat created successfully:', chat.id);
 
+  // Initial addon context extraction removed (deferred until first user → AI exchange)
+
     return {
       success: true,
       chat_id: chat.id,
       data: {
         message: 'Basic chat created successfully',
-        needs_context_extraction: true
+        needs_context_extraction: false
       }
     };
 

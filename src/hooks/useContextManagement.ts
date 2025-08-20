@@ -6,7 +6,8 @@ import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter
 export const useContextManagement = (
   chatId: string | null,
   characterId: string,
-  userId: string | null
+  userId: string | null,
+  options?: { enabled?: boolean }
 ) => {
   const [context, setContext] = useState<TrackedContext>({
     moodTracking: 'No context',
@@ -19,7 +20,10 @@ export const useContextManagement = (
   const [isLoading, setIsLoading] = useState(false);
   const lastLoadedRef = useRef<string>('');
 
+  const enabled = options?.enabled !== false;
+
   const loadContext = useCallback(async () => {
+    if (!enabled) return;
     if (!chatId || !userId || !characterId) {
       return;
     }
@@ -71,7 +75,7 @@ export const useContextManagement = (
 
   // Set up real-time subscription for context updates with debouncing
   useEffect(() => {
-    if (!chatId) return;
+    if (!enabled || !chatId) return;
     
     let debounceTimer: NodeJS.Timeout;
     
@@ -122,12 +126,12 @@ export const useContextManagement = (
       clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
-  }, [chatId]); // Remove loadContext from dependencies to prevent infinite loop
+  }, [chatId, enabled]); // Remove loadContext from dependencies to prevent infinite loop
 
   // Initial load when parameters change
   useEffect(() => {
-    loadContext();
-  }, [chatId, characterId, userId]); // Only reload when these core params change
+    if (enabled) loadContext();
+  }, [chatId, characterId, userId, enabled]); // Only reload when these core params change
 
   return {
     context: context,

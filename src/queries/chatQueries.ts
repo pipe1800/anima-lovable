@@ -25,9 +25,8 @@ export const queryKeys = {
   // Chat queries
   chat: {
     all: ['chat'] as const,
-    messages: (chatId: string) => ['chat', 'messages', chatId] as const,
-    context: (chatId: string, characterId: string) => ['chat', 'context', chatId, characterId] as const,
-    messageCount: (chatId: string) => ['chat', 'message-count', chatId] as const,
+  messages: (chatId: string) => ['chat', 'messages', chatId] as const,
+  context: (chatId: string, characterId: string) => ['chat', 'context', chatId, characterId] as const,
   },
   
   // User queries  
@@ -59,21 +58,7 @@ export const queryConfigs = {
   }),
   
   // Lightweight message count per chat (for memory dialog)
-  chatMessageCount: (chatId: string) => ({
-    queryKey: queryKeys.chat.messageCount(chatId),
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('chat_id', chatId)
-        .not('content', 'ilike', '%[PLACEHOLDER]%');
-      if (error) throw error;
-      return count || 0;
-    },
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
-    refetchOnWindowFocus: false,
-  }),
+  // Removed chatMessageCount: now derived from messages list in unified hook (no HEAD query)
   
   // User credits - balanced updates with background refresh
   userCredits: (userId: string) => ({
@@ -155,7 +140,7 @@ export const invalidationHelpers = {
   invalidateChatData: (queryClient: any, chatId: string) => {
     queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(chatId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.chat.context(chatId, '') });
-    queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatId) });
+  // removed messageCount invalidation
   },
   
   // Invalidate user-related queries  
@@ -174,10 +159,7 @@ export const invalidationHelpers = {
       queryKey: queryKeys.user.credits(userId),
       exact: true 
     });
-    queryClient.invalidateQueries({
-      queryKey: queryKeys.chat.messageCount(chatId),
-      exact: true
-    });
+  // removed messageCount invalidation
   }
 } as const;
 
@@ -186,12 +168,12 @@ export const invalidationHelpers = {
 // ============================================================================
 export type QueryKey = 
   | ReturnType<typeof queryKeys.chat.messages>
-  | ReturnType<typeof queryKeys.chat.messageCount>
+  // messageCount key removed
   | ReturnType<typeof queryKeys.user.credits>
   | ReturnType<typeof queryKeys.character.details>;
 
 export type QueryConfig = 
   | ReturnType<typeof queryConfigs.chatMessages>
-  | ReturnType<typeof queryConfigs.chatMessageCount>
+  // chatMessageCount config removed
   | ReturnType<typeof queryConfigs.userCredits>
   | ReturnType<typeof queryConfigs.characterDetails>;

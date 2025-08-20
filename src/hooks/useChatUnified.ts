@@ -81,15 +81,43 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
   }
 }
 
-export const useChatUnified = (chatId: string | null, characterId: string) => {
+interface UseChatUnifiedOptions {
+  skipCreditsFetch?: boolean;
+  externalCreditsBalance?: number;
+  externalGlobalSettings?: any; // UserGlobalChatSettings (kept loose to avoid import chain here)
+}
+
+export const useChatUnified = (chatId: string | null, characterId: string, options: UseChatUnifiedOptions = {}) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const isStreamingRef = useRef(false);
   const channelRef = useRef<any>(null);
+  // Throttle map to prevent redundant invalidations hammering backend
+  const lastInvalidationRef = useRef<Record<string, number>>({});
+  const THROTTLE_MS = 1500; // widened to reduce rapid duplicate refetches
+
+  const throttledInvalidate = useCallback((key: any) => {
+    try {
+      const now = Date.now();
+      const flatKey = JSON.stringify(key);
+      const last = lastInvalidationRef.current[flatKey] || 0;
+      if (now - last < THROTTLE_MS) {
+        return; // skip rapid duplicate
+      }
+      lastInvalidationRef.current[flatKey] = now;
+      queryClient.invalidateQueries({ queryKey: key, exact: true });
+    } catch {}
+  }, [queryClient]);
+
+  const throttledInvalidateChatData = useCallback((chatIdLocal: string) => {
+    throttledInvalidate(queryKeys.chat.messages(chatIdLocal));
+  }, [throttledInvalidate]);
   
-  // Get global chat settings for streaming preferences
-  const { data: globalSettings } = useUserGlobalChatSettings();
+  // Get global chat settings for streaming preferences (allow external override to prevent duplicate fetch)
+  // Skip fetching global settings if an external override was supplied
+  const { data: internalGlobalSettings } = useUserGlobalChatSettings({ enabled: !options.externalGlobalSettings });
+  const globalSettings = options.externalGlobalSettings || internalGlobalSettings;
 
   // ============================================================================
   // MESSAGE FETCHING (replaces useChatMessages)
@@ -99,26 +127,25 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
     enabled: !!chatId
   });
 
-  // Get credits balance
-  const { data: creditsBalance = 0 } = useQuery({
+  // Get credits balance unless provided externally to avoid duplicate network calls
+  const { data: internalCreditsBalance = 0 } = useQuery({
     ...queryConfigs.userCredits(user?.id || ''),
-    enabled: !!user,
+    enabled: !!user && !options.skipCreditsFetch,
   });
+  const creditsBalance = options.externalCreditsBalance ?? internalCreditsBalance;
   // Preserve last known non-zero credits to avoid transient 0 due to race / RLS lag
   const lastNonZeroCreditsRef = useRef<number>(0);
   if (creditsBalance > 0 && creditsBalance !== lastNonZeroCreditsRef.current) {
     lastNonZeroCreditsRef.current = creditsBalance;
   }
   // TEMP DEBUG: log credits balance fetch results
+  const lastInsertTsRef = useRef<number>(0);
+
   useEffect(() => {
     logger.debug('[Credits] useChatUnified creditsBalance changed:', creditsBalance, 'user:', user?.id);
   }, [creditsBalance, user?.id]);
 
-  // Get character details
-  const { data: characterDetails } = useQuery({
-    ...queryConfigs.characterDetails(characterId),
-    enabled: !!characterId
-  });
+  // Removed duplicate character details query (already fetched upstream & unused here)
 
   // ============================================================================
   // REAL-TIME SUBSCRIPTIONS (replaces useChatRealtime)
@@ -162,8 +189,10 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
             return;
           }
           addDebugInfo(`New message: ${payload.new.is_ai_message ? 'AI' : 'User'}`);
+          lastInsertTsRef.current = Date.now();
           setTimeout(() => {
-            invalidationHelpers.invalidateChatData(queryClient, chatId);
+            // Real-time invalidation throttled
+            throttledInvalidateChatData(chatId);
             addDebugInfo('Real-time chat data invalidated');
           }, 100);
         }
@@ -187,7 +216,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           
           // Invalidate to pick up context updates
           setTimeout(() => {
-            invalidationHelpers.invalidateChatData(queryClient, chatId);
+            throttledInvalidateChatData(chatId);
             addDebugInfo('Real-time context invalidated');
           }, 100);
         }
@@ -249,15 +278,19 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
 
   // Helper to finalize streaming and refresh messages/context
   const finalizeStreaming = useCallback((chatIdParam: string) => {
-    // Clear streaming state
     dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
-    // Refresh messages to show final result
-    invalidationHelpers.invalidateChatData(queryClient, chatIdParam);
+    // Avoid double invalidation if real-time INSERT just arrived very recently
+    const sinceInsert = Date.now() - (lastInsertTsRef.current || 0);
+    if (sinceInsert > 800) {
+      throttledInvalidateChatData(chatIdParam);
+    } else {
+      logger.debug('🛑 Skipping redundant post-stream invalidation (recent real-time insert)');
+    }
     // Also refresh credits and message count explicitly
     if (user?.id) {
-      queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
+      throttledInvalidate(queryKeys.user.credits(user.id));
     }
-    queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(chatIdParam), exact: true });
+  // Removed message count query invalidation (derived via event)
     // Fetch context shortly after backend finishes
     setTimeout(() => fetchAndUpdateContext(chatIdParam), 1000);
     // Notify UI that AI response is done
@@ -265,7 +298,7 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
       const ev = new CustomEvent('chat-ai-response-finished');
       window.dispatchEvent(ev);
     } catch {}
-  }, [queryClient, fetchAndUpdateContext, user?.id]);
+  }, [queryClient, fetchAndUpdateContext, user?.id, throttledInvalidate, throttledInvalidateChatData]);
 
   const invokeStreamingAI = async (
     chatId: string, 
@@ -469,12 +502,9 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
           selectedPersonaId,
           selectedWorldInfoId
         );
-        
-        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
         const endTime = Date.now();
         return { chatId, content, updatedContext: aiResult, metrics: { sendTime: endTime - startTime } };
       } catch (error) {
-        invalidationHelpers.invalidateAfterMessage(queryClient, chatId, user.id);
         throw error;
       }
     },
@@ -512,18 +542,30 @@ export const useChatUnified = (chatId: string | null, characterId: string) => {
         return { ...old, pages: [updatedFirst, ...old.pages.slice(1)] };
       });
 
+      // Optimistically decrement credits (they will be refetched & reconciled after streaming)
+      if (user?.id) {
+        const creditKey = queryKeys.user.credits(user.id);
+        const current = queryClient.getQueryData<number>(creditKey);
+        if (typeof current === 'number' && current > 0) {
+          queryClient.setQueryData(creditKey, current - 1);
+        }
+      }
+
       return { previous, key };
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (_err, vars, ctx) => {
       if (ctx?.key) {
         queryClient.setQueryData(ctx.key, ctx.previous);
       }
-    },
-    onSettled: (_data, _error, vars) => {
-      if (vars?.chatId && user?.id) {
-        invalidationHelpers.invalidateAfterMessage(queryClient, vars.chatId, user.id);
+      // Rollback optimistic credit decrement if present
+      if (user?.id) {
+        throttledInvalidate(queryKeys.user.credits(user.id));
       }
-    }
+      if (vars?.chatId) {
+        throttledInvalidate(queryKeys.chat.messages(vars.chatId));
+      }
+    },
+    // We intentionally do NOT invalidate onSettled; finalizeStreaming & real-time handle it
   });
 
   // ==========================================================================

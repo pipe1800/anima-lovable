@@ -113,6 +113,21 @@ create policy character_tags_write on public.character_tags for all using (
   exists (select 1 from public.characters c where c.id = character_id and c.creator_id=auth.uid())
 );
 
+-- Ensure base tag definitions are selectable (used to populate tag pickers)
+do $$ begin
+  if exists (select 1 from information_schema.tables where table_schema='public' and table_name='tags') then
+    -- Only create if a SELECT policy does not already exist
+    if not exists (
+      select 1 from pg_policies p
+      join pg_class c on p.tablename = c.relname
+      join pg_namespace n on c.relnamespace = n.oid
+      where n.nspname='public' and c.relname='tags' and p.cmd ~* 'select'
+    ) then
+      execute 'create policy tags_select on public.tags for select using ( true )';
+    end if;
+  end if;
+end $$;
+
 -- Profiles (read all, self-edit only)
 create policy profiles_select on public.profiles for select using ( true );
 create policy profiles_update on public.profiles for update using ( id = auth.uid() ) with check ( id = auth.uid() );

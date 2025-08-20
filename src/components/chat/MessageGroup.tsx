@@ -59,6 +59,8 @@ interface MessageGroupProps {
   regeneratingContentByMessageId?: Record<string, string>;
   // New: only allow edit/regenerate on the very latest AI group
   canModify?: boolean;
+  // Optimization: pass global settings to nested FormattedMessage to avoid repeated queries
+  globalSettingsOverride?: any;
 }
 
 // Helper: hex + opacity -> rgba string
@@ -75,7 +77,7 @@ const toRgba = (hex?: string, opacity?: number, fallbackHex: string = '#1f2937',
 const DEFAULT_AVATAR = '/default_avatar.jpg';
 
 // ✅ PHASE 3: Memoized component to prevent unnecessary re-renders
-export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions, userAvatarUrlOverride, regeneratingContentByMessageId = {}, canModify = false }: MessageGroupProps) {
+export const MessageGroup = memo(function MessageGroup({ group, character, trackedContext, addonSettings, fontSizeClass, styleOptions, userAvatarUrlOverride, regeneratingContentByMessageId = {}, canModify = false, globalSettingsOverride }: MessageGroupProps) {
   const { messages, isUser, showTimestamp } = group;
 
   // Truncated character display name (first 15 chars)
@@ -305,7 +307,8 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
           </Avatar>
         </div>
       )}
-      <div className={`flex gap-3 ${avatarStyle === 'classic' ? 'sm:flex-row flex-col' : ''}`}>
+  {/* Layout container: force side-by-side (row) for AI groups even on mobile so streaming starts beside avatar */}
+  <div className={`flex gap-3 ${avatarStyle === 'classic' ? (!isUser ? 'flex-row' : 'sm:flex-row flex-col') : ''}`}>
         {/* Left avatar for AI messages (classic style only, hidden on mobile) */}
         {(!isUser && showLeftAvatar && avatarStyle === 'classic') && (
           <Avatar className={`hidden sm:flex ${mobileAvatarSizeClass} flex-shrink-0 ${avatarShapeClass}`}>
@@ -345,6 +348,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                           <FormattedMessage
                             content={displayContentFor(message)}
                             className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                            settingsOverride={globalSettingsOverride}
                           />
                         </span>
                       </div>
@@ -361,11 +365,12 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                 }
                 // AI SIDE (unchanged float-left behavior)
                 const avatarMask = 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)';
+                // FLEX ROW VERSION: keeps text beside avatar on all breakpoints (no float/clear)
                 return (
                   <div
                     ref={(el) => { messageRefs.current[index] = el; }}
                     key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-                    className={`relative ${sizeClass} ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
+                    className={`relative ${sizeClass} flex items-start ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
                       index === 0 && index === messages.length - 1
                         ? 'rounded-lg'
                         : index === 0
@@ -381,14 +386,14 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                     }}
                   >
                     <div
-                      className="float-left w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7"
+                      className="w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7 flex-shrink-0"
                       style={{
                         backgroundImage: `url(${imageUrl})`,
                         maskImage: avatarMask as any,
                         WebkitMaskImage: avatarMask as any,
                       }}
                     />
-                    <div className="pt-2 pb-3 pr-4 pl-2 md:pl-4 min-h-[7rem]">
+                    <div className="pt-2 pb-3 pr-4 pl-2 md:pl-4 min-h-[7rem] flex-1">
                       <div className="font-bold text-white/85 leading-tight mb-2" style={{ fontSize: `${nameFontSizePx}px` }} title={rawCharacterName}>
                         {truncatedCharacterName}
                       </div>
@@ -405,11 +410,11 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                           <FormattedMessage
                             content={displayContentFor(message)}
                             className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                            settingsOverride={globalSettingsOverride}
                           />
                         </span>
                       )}
                     </div>
-                    <div className="clear-both" />
                   </div>
                 );
               }
@@ -459,6 +464,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                     <FormattedMessage
                       content={displayContentFor(message)}
                       className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                      settingsOverride={globalSettingsOverride}
                     />
                   </span>
                 )}

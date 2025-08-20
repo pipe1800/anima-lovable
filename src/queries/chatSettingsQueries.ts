@@ -22,6 +22,7 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
   character_position: false,
   chain_of_thought: false,
   few_shot_examples: false,
+  god_mode: false,
   
   // Streaming settings
   streaming_mode: 'smooth',
@@ -58,24 +59,25 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
 };
 
 // Get user's global chat settings (includes ALL settings)
-export const useUserGlobalChatSettings = () => {
+export const useUserGlobalChatSettings = (opts?: { enabled?: boolean }) => {
   const { user } = useAuth();
-  
+  const finalEnabled = (opts?.enabled ?? true) && !!user?.id;
+
   return useQuery({
     queryKey: globalChatSettingsKeys.user(user?.id || ''),
     queryFn: async (): Promise<UserGlobalChatSettings> => {
       if (!user?.id) throw new Error('User not authenticated');
-      
+
       const { data, error } = await supabase
         .from('user_global_chat_settings')
         .select('*')
         .eq('user_id', user.id)
         .single();
-      
+
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
         throw error;
       }
-      
+
       // If no settings exist, create default settings
       if (!data) {
         const { data: newSettings, error: insertError } = await supabase
@@ -86,16 +88,16 @@ export const useUserGlobalChatSettings = () => {
           })
           .select()
           .single();
-        
+
         if (insertError) throw insertError;
         // Ensure all fields present
         return { ...defaultGlobalChatSettings, ...newSettings } as UserGlobalChatSettings;
       }
-      
+
       // Merge defaults to ensure new fields exist for older rows
       return { ...defaultGlobalChatSettings, ...data } as UserGlobalChatSettings;
     },
-    enabled: !!user?.id,
+    enabled: finalEnabled,
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000, // 10 minutes
   });
@@ -156,6 +158,7 @@ export const useAddonSettings = (characterId?: string) => {
       characterPosition: globalSettings.character_position,
       chainOfThought: false, // Temporarily disabled - coming soon
       fewShotExamples: false, // Temporarily disabled - coming soon
+  godMode: globalSettings.god_mode,
     } : null,
     isLoading: !globalSettings,
     error: null,

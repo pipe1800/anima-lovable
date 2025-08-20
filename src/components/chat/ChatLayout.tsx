@@ -42,11 +42,12 @@ interface ChatLayoutProps {
   onContextUpdate?: (context: TrackedContext) => void;
   onPersonaChange?: (personaId: string | null) => void;
   onWorldInfoChange?: (worldInfoId: string | null) => void;
-  // Optional preloaded details to prevent duplicate fetching
-  characterDetails?: any;
+  characterDetails?: any; // pre-fetched character details to avoid refetch
+  creditsBalanceOverride?: number; // provided by page to avoid duplicate /credits queries
+  globalSettingsOverride?: any; // provided by page to avoid duplicate global settings fetch
 }
 
-export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange, characterDetails: characterDetailsOverride }: ChatLayoutProps) => {
+export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange, characterDetails: characterDetailsOverride, creditsBalanceOverride, globalSettingsOverride }: ChatLayoutProps) => {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   // Removed chatHistory and filteredChatHistory local state in favor of query + memo
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,28 +64,15 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // Auth
   const { user: currentUser } = useAuth();
 
-  // Fetch user credits as single source of truth
-  const { data: creditsBalance = 0 } = useQuery({
+  // Credits (skip if provided by parent)
+  const { data: internalCreditsBalance = 0 } = useQuery({
     ...queryConfigs.userCredits(currentUser?.id || ''),
-    enabled: !!currentUser?.id,
+    enabled: !!currentUser?.id && typeof creditsBalanceOverride !== 'number'
   });
+  const creditsBalance = typeof creditsBalanceOverride === 'number' ? creditsBalanceOverride : internalCreditsBalance;
 
   // Persona manager hook
-  const {
-    personas,
-    selectedPersona,
-    setSelectedPersona,
-    showCreateModal,
-    setShowCreateModal,
-    showEditModal,
-    setShowEditModal,
-    personaToEdit,
-    setPersonaToEdit,
-    currentPersonaDraft,
-    setCurrentPersonaDraft,
-    createPersona: createPersonaAsync,
-    deletePersona: deletePersonaAsync,
-  } = usePersonaManager(currentUser?.id, currentChatId);
+  const { personas, selectedPersona, setSelectedPersona, showCreateModal, setShowCreateModal, showEditModal, setShowEditModal, personaToEdit, setPersonaToEdit, currentPersonaDraft, setCurrentPersonaDraft, createPersona: createPersonaAsync, deletePersona: deletePersonaAsync } = usePersonaManager(currentUser?.id, currentChatId);
   const [isCreatingPersona, setIsCreatingPersona] = useState(false);
 
   // Tutorial state
@@ -93,18 +81,23 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // World Info hook
   const { selectedWorldInfoId, selectWorldInfo } = useWorldInfoSelection(currentUser?.id, character.id, onWorldInfoChange);
   
-  // Enhanced Memory state
-  const { data: globalSettings } = useUserGlobalChatSettings();
-  const [isCreatingMemory, setIsCreatingMemory] = useState(false);
+  // Global settings (skip duplicate fetch)
+  const { data: internalGlobalSettings } = useUserGlobalChatSettings({ enabled: !globalSettingsOverride });
+  const globalSettings = globalSettingsOverride || internalGlobalSettings;
+
+  // Message count (replaces HEAD count query): derived from unified chat hook via event
   const [currentChatMessageCount, setCurrentChatMessageCount] = useState(0);
-  const { data: countedMessages = 0 as number, isLoading: messageCountLoading } = useQuery<number>({
-    ...(currentChatId ? (queryConfigs as any).chatMessageCount(currentChatId) : { queryKey: ['chat', 'message-count', 'none'], queryFn: async () => 0 }),
-    enabled: !!currentChatId
-  });
+  const messageCountLoading = false; // no network loading now
   useEffect(() => {
-    if (currentChatId) setCurrentChatMessageCount(Number(countedMessages) || 0);
-    else setCurrentChatMessageCount(0);
-  }, [currentChatId, countedMessages]);
+    const handler = (e: any) => {
+      if (!e?.detail) return;
+      if (e.detail.chatId === currentChatId) {
+        setCurrentChatMessageCount(e.detail.count || 0);
+      }
+    };
+    window.addEventListener('chat-messages-updated', handler);
+    return () => window.removeEventListener('chat-messages-updated', handler);
+  }, [currentChatId]);
   
   // Memories Dialog state
   const [showMemoriesDialog, setShowMemoriesDialog] = useState(false);
@@ -124,6 +117,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // Time awareness state
   const [timeAwarenessEnabled, setTimeAwarenessEnabled] = useState(false);
   const [timeAwarenessLoading, setTimeAwarenessLoading] = useState(false);
+  // Reuse existing globalSettings above (removed duplicate declaration)
+  const [isCreatingMemory, setIsCreatingMemory] = useState(false);
   const [userTimezone, setUserTimezone] = useState<string>('UTC');
 
   // Timezone (no longer in loadData)
@@ -514,7 +509,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         toast.success('Memory created successfully! 🧠', {
           description: `Conversation summarized with ${data.data?.messageCount || 0} messages processed. ${creditCost} credits deducted.`,
         });
-        queryClient.invalidateQueries({ queryKey: queryKeys.chat.messageCount(currentChatId), exact: true });
+  // Removed: message count query invalidation (now event-driven & derived)
         if (currentUser?.id) {
           queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(currentUser.id), exact: true });
         }

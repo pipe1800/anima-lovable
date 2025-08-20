@@ -1,60 +1,25 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  getUserCredits, 
-  getUserCharacters,
-  getUserFavorites
-} from '@/lib/supabase-queries';
 import { supabase } from '@/integrations/supabase/client';
+import { getUserCredits } from '@/lib/supabase-queries';
 
-/**
- * Hook for loading dashboard stats independently
- * This loads first to show the user basic information immediately
- */
-export const useDashboardStats = () => {
+// Combined single query hook to reduce duplicate network calls.
+export const useDashboardData = () => {
   const { user, subscription: authSubscription } = useAuth();
   const userId = user?.id;
 
   return useQuery({
-    queryKey: ['dashboard', 'stats', userId],
+    queryKey: ['dashboard', 'combined', userId],
+    enabled: !!userId,
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
 
-      const [creditsResult] = await Promise.all([
-        getUserCredits(userId)
-      ]);
-
-      return {
-        credits: creditsResult.data?.balance || 0,
-        subscription: authSubscription,
-        creditsUsed: 0,
-        errors: {
-          credits: creditsResult.error,
-          creditsUsage: null
-        }
-      };
-    },
-    enabled: !!userId,
-    staleTime: 60 * 1000, // 1 minute
-    gcTime: 5 * 60 * 1000, // 5 minutes
-  });
-};
-
-/**
- * Hook for loading dashboard characters independently
- * This loads after stats to show user's characters and favorites
- */
-export const useDashboardCharacters = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['dashboard', 'characters', userId],
-    queryFn: async () => {
-      if (!userId) return { characters: [], favorites: [] };
-      try {
-        // Get user's own characters with proper counts
-        const { data: characters, error: charError } = await supabase
+      // Parallel queries: credits, own characters, favorites
+  const [creditsResult, charactersQuery, favoritesQuery] = await Promise.all([
+        getUserCredits(userId),
+        supabase
           .from('characters')
           .select(`
             id,
@@ -68,28 +33,11 @@ export const useDashboardCharacters = () => {
             creator_id,
             chats_count,
             likes_count,
-            character_definitions!inner(
-              personality_summary,
-              scenario
-            )
+            character_definitions!inner(personality_summary, scenario)
           `)
           .eq('creator_id', userId)
-          .order('updated_at', { ascending: false });
-
-        if (charError) {
-          console.error('Dashboard characters query failed:', charError);
-        }
-
-        const charactersWithCounts = (characters || []).map((character: any) => ({
-          ...character,
-          chats_count: character?.chats_count ?? 0,
-          likes_count: character?.likes_count ?? 0,
-          tagline: character?.short_description || '',
-          creator: { username: 'You' }
-        }));
-
-        // Get favorites
-        const { data: favoritesData, error: favError } = await supabase
+          .order('updated_at', { ascending: false }),
+        supabase
           .from('character_favorites')
           .select(`
             character:characters(
@@ -103,41 +51,69 @@ export const useDashboardCharacters = () => {
               creator_id,
               chats_count,
               likes_count,
-              character_definitions!inner(
-                personality_summary,
-                scenario
-              )
+              character_definitions!inner(personality_summary, scenario)
             )
           `)
           .eq('user_id', userId)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+      ]);
 
-        if (favError) {
-          console.error('Dashboard favorites query failed:', favError);
-        }
+      const { data: characters, error: charError } = charactersQuery;
+      const { data: favoritesData, error: favError } = favoritesQuery;
 
-        const favoritesWithCounts = (favoritesData || []).map((fav: any) => {
-          if (!fav.character) return null;
+      if (charError) console.warn('Dashboard characters query failed:', charError);
+      if (favError) console.warn('Dashboard favorites query failed:', favError);
+
+      const charactersWithCounts = (characters || []).map((c: any) => ({
+        ...c,
+        chats_count: c?.chats_count ?? 0,
+        likes_count: c?.likes_count ?? 0,
+        tagline: c?.short_description || '',
+        creator: { username: 'You' }
+      }));
+
+      const favoritesWithCounts = (favoritesData || [])
+        .map((fav: any) => {
           const c = fav.character as any;
-          return {
-            ...c,
-            chats_count: c?.chats_count ?? 0,
-            likes_count: c?.likes_count ?? 0,
-            tagline: c?.short_description || '',
-          };
-        });
+          if (!c) return null;
+            return {
+              ...c,
+              chats_count: c?.chats_count ?? 0,
+              likes_count: c?.likes_count ?? 0,
+              tagline: c?.short_description || ''
+            };
+        })
+        .filter(Boolean);
 
-        return { 
-          characters: charactersWithCounts,
-          favorites: favoritesWithCounts.filter(Boolean)
-        };
-      } catch (e) {
-        console.error('Dashboard characters/favorites load failed:', e);
-        return { characters: [], favorites: [] };
+      // Batch liked status for all dashboard characters (avoid N like-status queries)
+      const allIds = [
+        ...charactersWithCounts.map(c => c.id),
+        ...favoritesWithCounts.map((c: any) => c.id)
+      ];
+      const uniqueIds = Array.from(new Set(allIds));
+      let likedCharacterIds: string[] = [];
+      if (uniqueIds.length) {
+        const { data: likesRows } = await supabase
+          .from('character_likes')
+          .select('character_id')
+          .eq('user_id', userId)
+          .in('character_id', uniqueIds);
+        likedCharacterIds = (likesRows || []).map(r => (r as any).character_id);
       }
-    },
-    enabled: !!userId,
-    staleTime: 1000 * 60, // 1 minute
-    gcTime: 10 * 60 * 1000, // 10 minutes
+
+      return {
+        credits: creditsResult.data?.balance || 0,
+        subscription: authSubscription,
+        creditsUsed: 0, // Placeholder for future usage metrics
+        characters: charactersWithCounts,
+        favorites: favoritesWithCounts,
+        likedCharacterIds,
+        errors: {
+          credits: creditsResult.error,
+          characters: charError,
+          favorites: favError
+        }
+      };
+    }
   });
 };

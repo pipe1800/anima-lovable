@@ -486,7 +486,7 @@ export async function handleSendMessage(
                       // Get the Authorization header from the original request
                       const authHeader = req.headers.get('authorization');
                       
-                      const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
+            const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
                         method: 'POST',
                         headers: {
                           'Authorization': authHeader || '',
@@ -496,7 +496,10 @@ export async function handleSendMessage(
                           chat_id: chatId,
                           character_id: characterId,
                           addon_settings: effectiveAddonSettings,
-                          mode: 'conversation'
+              mode: 'conversation',
+              message_id: placeholder.id, // explicit AI message id
+              user_message: message,      // explicit user text
+              ai_response: finalMessage   // explicit AI reply
                         })
                       });
                       

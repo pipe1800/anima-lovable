@@ -177,6 +177,34 @@ export async function handleRegenerateMessage(
                   } as any;
                   await saveCharacterMessage(supabase, supabaseAdmin, user.id, chatId, final, basicContext, aiMessageId, aiMsg.message_order);
                   await updateChatLastActivity(supabase, chatId, characterId);
+
+                  // Trigger addon context extraction (same behavior as new message)
+                  try {
+                    const addonsActive = anyAddonEnabled(effectiveAddonSettings);
+                    if (!addonsActive) {
+                      console.log('⏭️ Regeneration: addons disabled; skipping extract-addon-context');
+                    } else {
+                      const supabaseUrl = (() => { try { return globalThis.Deno?.env?.get('SUPABASE_URL'); } catch { return process?.env?.SUPABASE_URL; } })();
+                      const authHeader = req.headers.get('authorization');
+                      const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
+                        method: 'POST',
+                        headers: { 'Authorization': authHeader || '', 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          chat_id: chatId,
+                          character_id: characterId,
+                          addon_settings: effectiveAddonSettings,
+                          mode: 'conversation'
+                        })
+                      });
+                      if (extractResponse.ok) {
+                        console.log('✅ Regeneration context extraction triggered');
+                      } else {
+                        console.error('❌ Regeneration context extraction failed:', extractResponse.status);
+                      }
+                    }
+                  } catch (regenExtractErr) {
+                    console.error('💥 Regeneration extract-addon-context error:', regenExtractErr);
+                  }
                 }
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
                 controller.close();

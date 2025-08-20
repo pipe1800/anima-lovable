@@ -1,36 +1,104 @@
-// Extract Addon Context Edge Function
-// Analyzes recent chat messages to extract contextual information like location, time, mood, etc.
-// This is an AI-powered function that uses OpenRouter to understand conversation context
+// Optimized Extract Addon Context Edge Function (v3)
+// Single-pass, explicit user/AI exchange, minimal fetch, phase timings.
 
 import { authenticateUser, createCorsResponse, createErrorResponse } from '../_shared/auth.ts';
 import { withRateLimit, enforceJsonBodySize } from '../_shared/rate-limit.ts';
-import { extractInitialContext, extractContextFromResponse, saveContextUpdates } from './modules/context-extractor.ts';
-import { fetchCharacterData, fetchUserData, getCharacterForContext, createTemplateReplacer } from './modules/character-fetcher.ts';
-import { generateEnhancedGreeting, buildMessageContext, updateMessageWithGreeting, updateChatMetadata } from './modules/greeting-enhancer.ts';
+import { saveContextUpdates } from './modules/context-extractor.ts';
+import { fetchCharacterData, getCharacterForContext, fetchUserData, createTemplateReplacer } from './modules/character-fetcher.ts';
+import { generateEnhancedGreeting, updateMessageWithGreeting } from './modules/greeting-enhancer.ts';
 import { anyAddonEnabled, sanitizeAddonSettings } from '../_shared/settings-mapper.ts';
-/**
- * Extract Chat Context Edge Function - Refactored and Optimized
- * 
- * Key Features Preserved:
- * ✅ Authentication & Authorization
- * ✅ Character Data Fetching (with fallback logic)
- * ✅ User Persona & Profile Fetching
- * ✅ Context Extraction (separate model: mistralai/mistral-small-3.2-24b-instruct)
- * ✅ Template Replacement
- * ✅ Greeting Enhancement
- * ✅ Message Context Building
- * ✅ Database Updates (messages & chat metadata)
- * ✅ Error Handling & CORS
- * ✅ Background Processing Support
- * 
- * Improvements:
- * - Modular architecture (491 lines → ~120 lines main + focused modules)
- * - Eliminated 156 lines of duplicate code (32% reduction)
- * - 30-40% faster execution (parallel operations)
- * - 50% less memory usage (modular structure)
- * - Better error isolation and handling
- * - Shared modules with chat-stream (consistency)
- */ declare const Deno: any; Deno.serve(async (req)=>{
+
+declare const Deno: any;
+
+interface PhaseTimings { [k: string]: number }
+
+function ms(start: number) { return Math.round(performance.now() - start); }
+function logPhase(id: string, phase: string, start: number, extra: Record<string, unknown> = {}) {
+  console.log(`⏱️ [${id}] ${phase} ${ms(start)}ms${Object.keys(extra).length ? ' ' + JSON.stringify(extra) : ''}`);
+}
+
+function buildPrompt(opts: {
+  character: any;
+  prior: Record<string,string>|null;
+  enabled: string[];
+  userMessage: string;
+  aiResponse: string;
+  greetingUsed?: string|null;
+}) {
+  const { character, prior, enabled, userMessage, aiResponse, greetingUsed } = opts;
+  const firstExtraction = !prior || Object.keys(prior).length === 0;
+  const seedParts = [
+    character?.name,
+    character?.personality_summary,
+    character?.description,
+    character?.scenario,
+    character?.greeting
+  ].filter(Boolean);
+  const seedRaw = seedParts.join(' ').replace(/\s+/g,' ');
+  const seed = firstExtraction ? seedRaw.slice(0, 800) : seedRaw.slice(0, 400);
+  const priorFiltered = prior ? Object.fromEntries(Object.entries(prior).filter(([k]) => enabled.includes(k))) : {};
+  const lines: string[] = [];
+  lines.push('You output ONLY minified JSON. No markdown fences.');
+  lines.push(`Fields:${enabled.join(',')}`);
+  if (firstExtraction) {
+    lines.push('MODE: FIRST_EXTRACTION');
+    if (character?.description) lines.push(`Description:${String(character.description).slice(0,600)}`);
+    if (character?.scenario) lines.push(`Scenario:${(typeof character.scenario==='string'?character.scenario:JSON.stringify(character.scenario)).slice(0,600)}`);
+    if (greetingUsed) lines.push(`GreetingUsed:${greetingUsed.slice(0,600)}`);
+  }
+  if (seed) lines.push(`Seed:${seed}`);
+  lines.push(`Prior:${JSON.stringify(priorFiltered)}`);
+  lines.push(`User:${userMessage.slice(0,800)}`);
+  lines.push(`AI:${aiResponse.slice(0,800)}`);
+  lines.push('Each field => {"value":string,"changed":boolean,"reason":one_of[explicit_user,user_request,environment_shift,narrative_followup,ai_spontaneous,no_change]}');
+  lines.push('If unknown -> value "No context", changed false, reason "no_change"');
+  lines.push('Return object with only the field keys.');
+  return lines.join('\n');
+}
+
+function parseModelJSON(raw: string|null, allowed: string[]) {
+  if (!raw) return null;
+  raw = raw.replace(/```json|```/gi,'').trim();
+  let obj: any; try { obj = JSON.parse(raw); } catch { return null; }
+  if (!obj || typeof obj !== 'object') return null;
+  const out: Record<string,string> = {};
+  for (const k of allowed) {
+    const v = obj[k];
+    if (v && typeof v === 'object' && typeof v.value === 'string') out[k] = v.value.trim() || 'No context';
+    else if (typeof v === 'string') out[k] = v.trim() || 'No context';
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+async function callModel(prompt: string, signal: AbortSignal): Promise<string|null> {
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
+  const key = Deno.env.get('OPENROUTER_API_KEY');
+  if (!key) return null;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': Deno.env.get('SITE_URL') || 'https://yourapp.com',
+      'X-Title': 'AnimaChat-Context-v3'
+    },
+    body: JSON.stringify({
+      model: 'mistralai/mistral-small-3.2-24b-instruct',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0,
+      top_p: 0.1,
+      max_tokens: 250
+    }),
+    signal
+  });
+  if (!res.ok) return null;
+  const json: any = await res.json();
+  const choices = json?.choices; if (!Array.isArray(choices) || !choices[0]) return null;
+  const content = choices[0]?.message?.content;
+  return typeof content === 'string' ? content : null;
+}
+
+Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     console.log('📋 CORS preflight request received');
@@ -38,244 +106,133 @@ import { anyAddonEnabled, sanitizeAddonSettings } from '../_shared/settings-mapp
   }
   // Test endpoint for debugging
   if (req.url.includes('test')) {
-    console.log('🧪 Test endpoint reached');
-    return createCorsResponse({
-      message: 'Refactored extract-chat-context function is working',
-      timestamp: new Date().toISOString(),
-      version: 'v2-modular'
-    });
+    return createCorsResponse({ message: 'extract-addon-context v3 ok', ts: new Date().toISOString() });
   }
-  const startTime = Date.now();
+  const tStart = performance.now();
   const requestId = crypto.randomUUID();
-  console.log('🔍 Extract chat context function called - Refactored Version v2');
-  console.log('📝 Request ID:', requestId);
+  console.log(`🔍 [${requestId}] extract-addon-context v3 start`);
   try {
-    // ============================================================================
-    // AUTHENTICATION
-    // ============================================================================
-    console.log('🔐 Starting user authentication...');
-  const { user, supabase, supabaseAdmin } = await authenticateUser(req);
-  console.log('👤 User authenticated successfully:', user.id);
-  return await withRateLimit(req, user?.id, async () => {
-    // ============================================================================
-    // REQUEST PARSING & VALIDATION
-    // ============================================================================
-  console.log('📥 Parsing request body...');
-  let rawBody: any;
-  const sizeResp = await enforceJsonBodySize(req);
-  if (sizeResp) return sizeResp;
-  try { rawBody = await req.json(); } catch { return createErrorResponse('Invalid JSON body', 400); }
-  // Minimal inline schema (avoid adding full divergent schema set):
-  const chatId = typeof rawBody?.chat_id === 'string' ? rawBody.chat_id : undefined;
-  const characterId = typeof rawBody?.character_id === 'string' ? rawBody.character_id : undefined;
-  const mode = (rawBody?.mode === 'conversation' ? 'conversation' : 'initial');
-  const addon_settings = rawBody?.addon_settings && typeof rawBody.addon_settings === 'object' ? rawBody.addon_settings : {};
-  const chat_id = chatId; // keep existing variable names after validation
-  const character_id = characterId;
-    const normalizedAddonSettings = sanitizeAddonSettings(addon_settings);
-    
-  if (!chat_id || !character_id) {
-      console.error('❌ Missing required fields:', {
-        chat_id: !!chat_id,
-        character_id: !!character_id
-      });
-      return createErrorResponse('Missing chat_id or character_id', 400);
+    // AUTH
+    const authStart = performance.now();
+    const { user, supabase, supabaseAdmin } = await authenticateUser(req);
+    logPhase(requestId, 'auth', authStart, { user: user.id });
+    const rateLimited = await withRateLimit(req, user.id, async () => true);
+    if (!rateLimited) return createErrorResponse('Rate limit', 429);
+
+    // BODY
+    const parseStart = performance.now();
+    const sizeResp = await enforceJsonBodySize(req); if (sizeResp) return sizeResp;
+    let body: any; try { body = await req.json(); } catch { return createErrorResponse('Invalid JSON body', 400); }
+    const chat_id = typeof body.chat_id === 'string' ? body.chat_id : '';
+    const character_id = typeof body.character_id === 'string' ? body.character_id : '';
+    const mode = body.mode === 'conversation' ? 'conversation' : 'initial';
+    const userMsg = typeof body.user_message === 'string' ? body.user_message : '';
+    const aiMsg = typeof body.ai_response === 'string' ? body.ai_response : '';
+    const normalizedAddonSettings = sanitizeAddonSettings(body.addon_settings || {});
+    logPhase(requestId, 'parse', parseStart, { mode });
+    if (!chat_id || !character_id) return createErrorResponse('Missing chat_id or character_id', 400);
+    if (mode === 'conversation' && (!userMsg || !aiMsg)) return createErrorResponse('Must include user_message and ai_response for conversation mode', 400);
+
+    // EARLY EXIT
+    if (!anyAddonEnabled(normalizedAddonSettings) || !Deno.env.get('OPENROUTER_API_KEY')) {
+      return createCorsResponse({ success: true, chat_id, message: 'No addons enabled or missing key', context_summary: null, timings: { totalMs: ms(tStart) } });
     }
-    
-    const requestContext = {
-      requestId,
-      userId: user.id,
-      chatId: chat_id,
-      characterId: character_id,
-      mode,
-      startTime
-    };
-    
-    console.log('✅ Required fields validated:', {
-      chat_id,
-      character_id,
-      mode
-    });
-    console.log('📊 Addon settings (normalized):', JSON.stringify(normalizedAddonSettings, null, 2));
-    // ============================================================================
-    // EARLY EXIT CHECK
-    // ============================================================================
-    const openRouterKey = Deno.env.get('OPENROUTER_API_KEY');
-    if (!anyAddonEnabled(normalizedAddonSettings) || !openRouterKey) {
-      console.log('⏭️ Skipping context extraction - no addons enabled or missing API key');
-      const endEarly = Date.now();
-      const response = {
-        success: true,
-        chat_id: chat_id,
-        message: 'Context extraction skipped - no addons enabled',
-        context_summary: null,
-        timings: {
-          totalMs: endEarly - startTime
-        }
-      };
-      return createCorsResponse(response);
-    }
-    // ============================================================================
-    // PARALLEL DATA FETCHING
-    // ============================================================================
-    const tFetchStart = Date.now();
-    console.log('📊 Fetching required data in parallel...');
-    const [character, userData] = await Promise.all([
+
+    // FETCH character + prior context
+    const fetchStart = performance.now();
+    const [character, priorCtxRow] = await Promise.all([
       fetchCharacterData(character_id, supabase),
-      fetchUserData(user.id, supabase)
+      supabase.from('chat_context').select('current_context').eq('chat_id', chat_id).maybeSingle()
     ]);
-    const tFetchEnd = Date.now();
-    const { persona: userPersona, profile: userProfile } = userData;
-    console.log('✅ Data fetched successfully:', {
-      hasCharacter: !!character,
-      hasDefinitions: !!character.character_definitions,
-      hasPersona: !!userPersona,
-      hasProfile: !!userProfile,
-      fetchMs: tFetchEnd - tFetchStart
-    });
-    // ============================================================================
-    // TEMPLATE PROCESSING SETUP
-    // ============================================================================
-    const templateReplacer = createTemplateReplacer(userPersona, userProfile, character);
-    const characterForContext = getCharacterForContext(character);
-    // ============================================================================
-    // CONTEXT EXTRACTION
-    // ============================================================================
-    console.log('🔄 Starting context extraction...');
-    const tExtractStart = Date.now();
-    let extractedContext: Record<string, string> | null = null;
-    
-    if (mode === 'conversation') {
-      // Extract context from recent conversation messages
-      console.log('💬 Extracting context from recent conversation...');
-      
-      // Fetch recent messages from the chat (get a wider window and pair reliably)
-      const { data: messages, error: messagesError } = await supabase
-        .from('messages')
-        .select('id, content, is_ai_message, created_at')
-        .eq('chat_id', chat_id)
-        .order('created_at', { ascending: true })
-        .limit(12);
-      
-      if (messagesError || !messages || messages.length < 2) {
-        console.log('⏭️ Not enough messages for conversation context extraction');
-      } else {
-        // Find the latest clean user → AI pair
-        let userMessage: any = null;
-        let aiMessage: any = null;
-        for (let i = messages.length - 1; i >= 0; i--) {
-          const msg = messages[i];
-          if (msg.is_ai_message) {
-            // look backward for the preceding user message
-            for (let j = i - 1; j >= 0; j--) {
-              if (!messages[j].is_ai_message) {
-                userMessage = messages[j];
-                aiMessage = msg;
-                break;
-              }
-            }
-            if (userMessage && aiMessage) break;
-          }
-        }
-        
-        if (aiMessage && userMessage) {
-          try {
-            extractedContext = await extractContextFromResponse(
-              characterForContext,
-              [], // No conversation history needed for this mode
-              userMessage.content,
-              aiMessage.content,
-              normalizedAddonSettings,
-              openRouterKey,
-              templateReplacer,
-              supabase,
-              user.id,
-              chat_id,
-              character_id
-            );
-            
-            // NOTE: Do not update the AI message here to avoid double-writes.
-            // saveContextUpdates() will update chat_context and the latest AI message consistently.
-          } catch (contextError) {
-            console.error('❌ Conversation context extraction failed:', contextError);
-          }
-        } else {
-          console.log('⏭️ No suitable user→AI message pair found for context extraction');
-        }
-      }
-    } else {
-      // Extract initial context from character card (existing functionality)
-      console.log('🔄 Extracting initial context from character card...');
+    const priorContext = priorCtxRow?.data?.current_context || null;
+    let greetingUsed: string | null = null;
+    let templateReplacer: ((s:string)=>string) | null = null;
+    if (!priorContext) {
+      // First extraction: need persona/profile for template replacement
+      const userData = await fetchUserData(user.id, supabase);
+      templateReplacer = createTemplateReplacer(userData.persona, userData.profile, character || {});
       try {
-        extractedContext = await extractInitialContext(characterForContext, normalizedAddonSettings, openRouterKey, templateReplacer);
-      } catch (contextError) {
-        console.error('❌ Initial context extraction failed:', contextError);
-      }
+        const { data: greetMsg } = await supabase
+          .from('messages')
+          .select('content')
+          .eq('chat_id', chat_id)
+          .eq('is_ai_message', true)
+          .eq('message_order', 1)
+          .maybeSingle();
+        greetingUsed = (greetMsg?.content && typeof greetMsg.content === 'string') ? greetMsg.content : null;
+      } catch {}
     }
-    const tExtractEnd = Date.now();
-    // ============================================================================
-    // CONTEXT PERSISTENCE
-    // ============================================================================
-    const tPersistStart = Date.now();
-    if (extractedContext) {
-      console.log('💾 Saving extracted context to database...');
-      try {
-        await saveContextUpdates(extractedContext, normalizedAddonSettings, user.id, chat_id, character_id, supabaseAdmin);
-      } catch (saveError) {
-        console.error('❌ Failed to save context updates:', saveError);
-      // Continue - don't fail for context save errors
-      }
-    }
-    const tPersistEnd = Date.now();
-    // ============================================================================
-    // GREETING ENHANCEMENT (only for initial mode)
-    // ============================================================================
+    logPhase(requestId, 'fetch', fetchStart, { hasCharacter: !!character, prior: !!priorContext, greetIncluded: !!greetingUsed });
+
+    // INITIAL MODE: only update greeting (no extraction)
     if (mode === 'initial') {
-      const enhancedGreeting = generateEnhancedGreeting(character, userPersona, userProfile, extractedContext, templateReplacer);
-      const messageContext = buildMessageContext(extractedContext, normalizedAddonSettings);
-      console.log('💾 Updating greeting message with context:', messageContext);
-      // ============================================================================
-      // DATABASE UPDATES
-      // ============================================================================
-      console.log('📝 Updating message and chat metadata...');
-      try {
-        // Update message with enhanced greeting and context
-        await updateMessageWithGreeting(supabase, chat_id, enhancedGreeting, messageContext);
-        // Update chat metadata
-        await updateChatMetadata(supabase, chat_id);
-      } catch (updateError) {
-        console.error('❌ Database update failed:', updateError);
-        // For background processing, we can be more lenient with update failures
-        console.log('⚠️ Continuing despite update failures (background processing)');
-      }
+      const greetStart = performance.now();
+      const enhancedGreeting = generateEnhancedGreeting(character, null, null, {}, (s: string)=>s);
+      await updateMessageWithGreeting(supabase, chat_id, enhancedGreeting, {});
+      logPhase(requestId, 'greeting', greetStart);
+      return createCorsResponse({ success: true, chat_id, message: 'Greeting updated (extraction deferred)', context_summary: null, timings: { totalMs: ms(tStart) } });
     }
-    // ============================================================================
-    // SUCCESS RESPONSE
-    // ============================================================================
-    const endTime = Date.now();
-    console.log(`✅ Context extraction completed in ${endTime - startTime}ms for chat: ${chat_id}`);
-    const response = {
-      success: true,
-      chat_id: chat_id,
-      message: mode === 'initial' ? 'Context extracted and greeting enhanced successfully' : 'Context extracted from conversation successfully',
-      context_summary: extractedContext,
-      timings: {
-        totalMs: endTime - startTime,
-        fetchMs: tFetchEnd - tFetchStart,
-        extractMs: tExtractEnd - tExtractStart,
-        persistMs: tPersistEnd - tPersistStart
-      }
+
+    // DETERMINE enabled fields
+    const fieldMap: Record<string,string> = {
+      moodTracking: 'mood',
+      clothingInventory: 'clothing',
+      locationTracking: 'location',
+      timeAndWeather: 'time_weather',
+      relationshipStatus: 'relationship',
+      characterPosition: 'character_position',
+      timeAwareness: 'conversation_tone' // urgency_level also under timeAwareness
     };
-  return createCorsResponse(response);
-  });
+    const enabledFields: string[] = [];
+    if (normalizedAddonSettings.moodTracking) enabledFields.push('mood');
+    if (normalizedAddonSettings.clothingInventory) enabledFields.push('clothing');
+    if (normalizedAddonSettings.locationTracking) enabledFields.push('location');
+    if (normalizedAddonSettings.timeAndWeather) enabledFields.push('time_weather');
+    if (normalizedAddonSettings.relationshipStatus) enabledFields.push('relationship');
+    if (normalizedAddonSettings.characterPosition) enabledFields.push('character_position');
+    if (normalizedAddonSettings.timeAwareness) { enabledFields.push('conversation_tone', 'urgency_level'); }
+    logPhase(requestId, 'fields', performance.now(), { enabled: enabledFields });
+    if (!enabledFields.length) return createCorsResponse({ success: true, chat_id, message: 'No enabled fields', context_summary: null, timings: { totalMs: ms(tStart) } });
+
+    // PROMPT
+    const promptStart = performance.now();
+    const prompt = buildPrompt({
+      character: getCharacterForContext(character),
+      prior: priorContext as Record<string,string> | null,
+      enabled: enabledFields,
+      userMessage: templateReplacer ? templateReplacer(userMsg) : userMsg,
+      aiResponse: templateReplacer ? templateReplacer(aiMsg) : aiMsg,
+      greetingUsed: templateReplacer && greetingUsed ? templateReplacer(greetingUsed) : greetingUsed
+    });
+    logPhase(requestId, 'prompt', promptStart, { est_tokens: Math.ceil(prompt.length/4) });
+
+    // MODEL CALL (timeout 6000ms)
+    const modelStart = performance.now();
+    const controller = new AbortController();
+    const to = setTimeout(()=>controller.abort(), 6000);
+    let raw = null;
+    try { raw = await callModel(prompt, controller.signal); } catch (e) { console.warn(`[${requestId}] model error`, e); }
+    clearTimeout(to);
+    logPhase(requestId, 'model', modelStart, { got: !!raw });
+
+    // PARSE
+    const parse2Start = performance.now();
+    const parsed = parseModelJSON(raw, enabledFields);
+    logPhase(requestId, 'parse-json', parse2Start, { parsed: !!parsed });
+
+    // PERSIST
+    const persistStart = performance.now();
+    if (parsed) {
+      const allNo = Object.values(parsed).every(v => v === 'No context');
+      await saveContextUpdates(parsed, normalizedAddonSettings, user.id, chat_id, character_id, supabaseAdmin, { forcePersist: allNo || !priorContext });
+    }
+    logPhase(requestId, 'persist', persistStart, { persisted: !!parsed });
+
+    const totalMs = ms(tStart);
+    console.log(`✅ [${requestId}] complete ${totalMs}ms`);
+    return createCorsResponse({ success: true, chat_id, message: 'Context processed', context_summary: parsed || null, timings: { totalMs } });
   } catch (error) {
-    console.error('❌ Extract chat context error:', error);
-    const errorResponse = {
-      success: false,
-      chat_id: '',
-      message: 'Context extraction failed',
-      error: (error as any)?.message || String(error)
-    };
-    return createCorsResponse(errorResponse, 500);
+    console.error(`❌ [${requestId}] failure:`, error);
+    return createCorsResponse({ success: false, chat_id: '', message: 'Context extraction failed', error: (error as any)?.message || String(error) }, 500);
   }
 });

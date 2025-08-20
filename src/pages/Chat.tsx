@@ -5,12 +5,14 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import ChatInterface from '@/components/chat/ChatInterface';
 import { ChatLayout } from '@/components/chat/ChatLayout';
 import { TutorialManager } from '@/components/tutorial/TutorialManager';
-import { useContextManagement } from '@/hooks/useContextManagement';
+// import { useContextManagement } from '@/hooks/useContextManagement'; // Disabled to reduce duplicate chat_context queries
 import type { TrackedContext } from '@/types/chat';
 import logger from '@/utils/logger';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { queryConfigs } from '@/queries/chatQueries';
+import { queryKeys } from '@/queries/chatQueries';
+import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 
 const Chat = () => {
   const { user: currentUser } = useAuth();
@@ -63,64 +65,47 @@ const Chat = () => {
   }, [currentUser, fromOnboarding, navigate, log]);
 
   // Load context from database and sync with local state
-  const { context: loadedContext, reloadContext, isLoading: contextLoading } = useContextManagement(
-    currentChatId, 
-    characterId || '', 
-    currentUser?.id || null
-  );
+  // Context now sourced from unified chat hook via ChatInterface; disabling dedicated context polling to avoid duplicate GET /chat_context
+  const reloadContext = () => {}; // no-op placeholder
 
+  // Single authoritative global settings fetch; children receive as override and skip their own queries
+  const { data: globalSettings } = useUserGlobalChatSettings();
+  // Fetch user credits once here to avoid duplicate fetch in ChatLayout & ChatInterface
+  const { data: creditsBalance = 0 } = useQuery({
+    ...(currentUser?.id ? queryConfigs.userCredits(currentUser.id) : { queryKey: queryKeys.user.credits('none'), queryFn: async () => 0 }),
+    enabled: !!currentUser?.id,
+  });
+
+  // NOTE: Backend now auto-triggers initial extraction during chat creation.
+  // Frontend trigger retained behind feature flag (disabled) to avoid duplicate extraction & UI flicker.
+  const frontendInitialExtractionEnabled = false;
   const triggerInitialExtraction = useCallback(async (forcedChatId?: string) => {
+    if (!frontendInitialExtractionEnabled) {
+      log.debug('⏭️ Frontend initial extraction disabled (handled server-side)');
+      initialExtractionAttemptedRef.current = true;
+      return;
+    }
     const activeChatId = forcedChatId || currentChatId || chatId;
     if (!activeChatId || initialExtractionAttemptedRef.current) return;
-    // Basic guard: wait until at least one AI message exists (message_count > 0 where is_ai_message true)
-    try {
-      const { data: aiMsgs, error: aiErr } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('chat_id', activeChatId)
-        .eq('is_ai_message', true)
-        .limit(1);
-      if (aiErr) {
-        log.warn('AI message presence check failed', aiErr);
-        return; // try later
-      }
-      if (!aiMsgs || aiMsgs.length === 0) {
-        log.debug('⏳ Deferring extract-addon-context (no AI message yet)');
-        return; // will retry through effect below
-      }
-    } catch (e) {
-      log.warn('AI presence probe exception', e);
+    if (!globalSettings) return; // wait until settings are loaded (React Query cached)
+
+    const addonSettings = {
+      moodTracking: globalSettings.mood_tracking,
+      clothingInventory: globalSettings.clothing_inventory,
+      locationTracking: globalSettings.location_tracking,
+      timeAndWeather: globalSettings.time_and_weather,
+      relationshipStatus: globalSettings.relationship_status,
+      characterPosition: globalSettings.character_position
+    };
+
+    if (!Object.values(addonSettings).some(Boolean)) {
+      log.debug('⏭️ All addons disabled; skipping extract-addon-context call');
+      initialExtractionAttemptedRef.current = true;
       return;
     }
 
-    log.info('🔄 Triggering initial context extraction for chat', activeChatId);
+    log.info('🔄 Triggering initial context extraction (event-driven) for chat', activeChatId);
     try {
-      const { data: globalSettings, error: settingsError } = await supabase
-        .from('user_global_chat_settings')
-        .select('*')
-        .eq('user_id', currentUser?.id as string)
-        .single();
-      if (settingsError) {
-        log.warn('Global settings fetch error', settingsError);
-        return;
-      }
-      if (!globalSettings) {
-        log.debug('⚠️ No global settings found - skipping context extraction');
-        return;
-      }
-      const addonSettings = {
-        moodTracking: globalSettings.mood_tracking,
-        clothingInventory: globalSettings.clothing_inventory,
-        locationTracking: globalSettings.location_tracking,
-        timeAndWeather: globalSettings.time_and_weather,
-        relationshipStatus: globalSettings.relationship_status,
-        characterPosition: globalSettings.character_position
-      };
-      if (!Object.values(addonSettings).some(Boolean)) {
-        log.debug('⏭️ All addons disabled; skipping extract-addon-context call');
-        initialExtractionAttemptedRef.current = true;
-        return;
-      }
       const { data, error } = await supabase.functions.invoke('extract-addon-context', {
         body: {
           chat_id: activeChatId,
@@ -138,19 +123,15 @@ const Chat = () => {
     } catch (error) {
       log.error('❌ Error in initial context extraction:', error);
     }
-  }, [characterId, chatId, currentUser?.id, log, currentChatId]);
+  }, [characterId, chatId, currentChatId, globalSettings, log]);
 
-  // Retry extraction after AI response event
+  // Single event-driven extraction: when AI finishes first streamed response
   useEffect(() => {
+    if (!frontendInitialExtractionEnabled) return; // server handles initial extraction
     const handler = () => triggerInitialExtraction();
-    window.addEventListener('chat-ai-response-finished', handler);
-    return () => window.removeEventListener('chat-ai-response-finished', handler);
-  }, [triggerInitialExtraction]);
-
-  // Also attempt extraction when chatId changes (guarded)
-  useEffect(() => {
-    if (currentChatId) triggerInitialExtraction();
-  }, [currentChatId, triggerInitialExtraction]);
+    window.addEventListener('chat-ai-response-finished', handler, { once: true } as any);
+    return () => window.removeEventListener('chat-ai-response-finished', handler as any);
+  }, [triggerInitialExtraction, frontendInitialExtractionEnabled]);
 
   // Dedupe: Prefer react-query for character details, avoid manual fetch
   const characterDetailsQuery = useQuery({
@@ -269,6 +250,8 @@ const Chat = () => {
             onPersonaChange={handlePersonaChange}
             onWorldInfoChange={handleWorldInfoChange}
             characterDetails={preloadedDetails}
+            creditsBalanceOverride={creditsBalance}
+            globalSettingsOverride={globalSettings}
           >
             <ChatInterface
               character={character}
@@ -281,6 +264,8 @@ const Chat = () => {
               onChatCreated={handleChatCreated}
               onMessageSent={handleMessageSent}
               characterDetails={preloadedDetails}
+              creditsBalanceOverride={creditsBalance}
+              globalSettingsOverride={globalSettings}
             />
           </ChatLayout>
         </div>

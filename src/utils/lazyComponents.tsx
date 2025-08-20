@@ -55,12 +55,8 @@ export const createLazyWrapper = (
 // ============================================================================
 
 export const loadChatFeatures = {
-  // Debug panel for developers - only load when needed
-  addonDebugPanel: () => import('../components/debug/AddonDebugPanel'),
-  
   // Context display for AI conversations
   contextDisplay: () => import('../components/chat/ContextDisplay'),
-  
   // Performance monitoring for optimization
   performanceMonitor: () => import('../components/chat/PerformanceMonitor'),
 } as const;
@@ -70,19 +66,9 @@ export const loadChatFeatures = {
 // ============================================================================
 
 export const preloadChatFeatures = {
-  // Preload debug panel for development
-  addonDebugPanel: () => {
-    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-      setTimeout(() => {
-        import('../components/debug/AddonDebugPanel');
-      }, 1000);
-    }
-  },
-  
   // Preload context display when user is engaged
   contextDisplay: () => {
     if (typeof window !== 'undefined') {
-      // Preload after user interaction
       const timer = setTimeout(() => {
         import('../components/chat/ContextDisplay');
       }, 3000);
@@ -96,11 +82,7 @@ export const preloadChatFeatures = {
 // ============================================================================
 
 export const componentSizes = {
-  // Estimated component sizes for bundle analysis
   contextDisplay: '~2KB',
-  addonDebugPanel: '~5KB', 
   performanceMonitor: '~3KB',
-  
-  // Total savings from lazy loading
-  totalSavings: '~10KB',
+  totalSavings: '~5KB',
 } as const;

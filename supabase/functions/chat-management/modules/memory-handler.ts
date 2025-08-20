@@ -235,7 +235,7 @@ async function saveCharacterMemory(
       .eq('user_id', userId)
       .eq('character_id', characterId)
       .eq('chat_id', chatId)
-      .single();
+      .maybeSingle();
 
     if (existingMemory) {
       // Update existing memory

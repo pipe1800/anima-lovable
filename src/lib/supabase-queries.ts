@@ -322,52 +322,40 @@ export const searchPublicCharacters = async (params: SearchParams): Promise<Sear
     filteredData = filteredData.filter(c => charactersWithTags.has(c.id));
   }
 
-  // Fetch additional data for filtered characters
-  const charactersWithDetails = await Promise.all(
-    filteredData.map(async (character) => {
-      // Get creator profile
-      const { data: creatorData } = await supabase
-        .from('profiles')
-        .select('id, username, avatar_url')
-        .eq('id', character.creator_id)
-        .maybeSingle();
+  // Avoid N+1 detail queries: batch fetch creators and tags for all filtered characters.
+  const creatorIdsBatch = Array.from(new Set(filteredData.map(c => c.creator_id)));
+  const charIdsBatch = filteredData.map(c => c.id);
 
-      // Get actual chat count
-      const { count: chatCount } = await supabase
-        .from('chats')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id);
+  const [creatorsBatchRes, tagsBatchRes, likesBatchRes, favsBatchRes, chatsBatchRes] = await Promise.all([
+    creatorIdsBatch.length ? supabase.from('profiles').select('id, username, avatar_url').in('id', creatorIdsBatch) : Promise.resolve({ data: [] }),
+    charIdsBatch.length ? supabase.from('character_tags').select('character_id, tag:tags(id, name)').in('character_id', charIdsBatch) : Promise.resolve({ data: [] }),
+    charIdsBatch.length ? supabase.from('character_likes').select('character_id, id').in('character_id', charIdsBatch) : Promise.resolve({ data: [] }),
+    charIdsBatch.length ? supabase.from('character_favorites').select('character_id, id').in('character_id', charIdsBatch) : Promise.resolve({ data: [] }),
+    charIdsBatch.length ? supabase.from('chats').select('character_id, id').in('character_id', charIdsBatch) : Promise.resolve({ data: [] })
+  ] as any);
 
-      // Get likes count
-      const { count: likesCount } = await supabase
-        .from('character_likes')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id);
+  const creatorsMapBatch = new Map((creatorsBatchRes.data || []).map((c: any) => [c.id, c]));
+  const tagsMapBatch = new Map<string, Array<{ id: number; name: string }>>();
+  (tagsBatchRes.data || []).forEach((row: any) => {
+    const existing = tagsMapBatch.get(row.character_id) || [];
+    if (row.tag) existing.push(row.tag);
+    tagsMapBatch.set(row.character_id, existing);
+  });
+  const likeCountsBatch = new Map<string, number>();
+  (likesBatchRes.data || []).forEach((r: any) => likeCountsBatch.set(r.character_id, (likeCountsBatch.get(r.character_id) || 0) + 1));
+  const favCountsBatch = new Map<string, number>();
+  (favsBatchRes.data || []).forEach((r: any) => favCountsBatch.set(r.character_id, (favCountsBatch.get(r.character_id) || 0) + 1));
+  const chatCountsBatch = new Map<string, number>();
+  (chatsBatchRes.data || []).forEach((r: any) => chatCountsBatch.set(r.character_id, (chatCountsBatch.get(r.character_id) || 0) + 1));
 
-      // Get favorites count
-      const { count: favoritesCount } = await supabase
-        .from('character_favorites')
-        .select('id', { count: 'exact' })
-        .eq('character_id', character.id);
-
-      // Get character tags
-      const { data: tagsData } = await supabase
-        .from('character_tags')
-        .select(`
-          tag:tags(id, name)
-        `)
-        .eq('character_id', character.id);
-
-      return {
-        ...character,
-        creator: creatorData,
-        chats_count: chatCount || 0,
-        likes_count: likesCount || 0,
-        favorites_count: favoritesCount || 0,
-        tags: tagsData?.map(t => t.tag) || []
-      };
-    })
-  );
+  const charactersWithDetails = filteredData.map(character => ({
+    ...character,
+    creator: creatorsMapBatch.get(character.creator_id) || null,
+    chats_count: chatCountsBatch.get(character.id) || 0,
+    likes_count: likeCountsBatch.get(character.id) || 0,
+    favorites_count: favCountsBatch.get(character.id) || 0,
+    tags: tagsMapBatch.get(character.id) || []
+  }));
 
   // Apply conversations sorting if specified (now that we have chat counts)
   if (sortBy === 'conversations') {
@@ -471,7 +459,7 @@ export const getUserCharacters = async (userId: string) => {
  * Get character with full details (respects visibility rules)
  */
 export const getCharacterDetails = async (characterId: string) => {
-
+  // Single nested query to reduce network calls
   const { data, error } = await supabase
     .from('characters')
     .select(`
@@ -483,55 +471,57 @@ export const getCharacterDetails = async (characterId: string) => {
       visibility,
       interaction_count,
       created_at,
-      creator_id
+      creator_id,
+      character_definitions ( greeting, description, personality_summary, scenario ),
+      character_tags ( tag:tags ( id, name ) )
     `)
     .eq('id', characterId)
-    .maybeSingle()
+    .maybeSingle();
 
   if (error || !data) {
-    console.error('❌ Failed to fetch character:', error)
-    return { data: null, error }
+    console.error('❌ Failed to fetch character (merged):', error);
+    return { data: null, error };
   }
 
-  // Fetch creator profile separately
-  const { data: creatorData, error: creatorError } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url')
-    .eq('id', data.creator_id)
-    .maybeSingle()
+  // Fetch creator profile separately (FK is to auth.users, so nested profiles join is not auto-resolvable)
+  let creatorProfile: any = null;
+  try {
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('id, username, avatar_url')
+      .eq('id', data.creator_id)
+      .maybeSingle();
+    creatorProfile = profileData || null;
+  } catch (e) {
+    console.warn('⚠️ Failed to fetch creator profile (non-fatal):', (e as any)?.message || e);
+  }
 
-  console.log('👤 Creator query result:', { creatorData, creatorError })
+  // Normalize shape to match previous multi-call version
+  const definitionNode = Array.isArray(data.character_definitions)
+    ? data.character_definitions[0]
+    : data.character_definitions;
 
-  // Fetch character definition separately
-  const { data: definitionData, error: definitionError } = await supabase
-    .from('character_definitions')
-    .select('greeting, description, personality_summary, scenario')
-    .eq('character_id', characterId)
-    .maybeSingle()
+  const tags = (data.character_tags || [])
+    .map((ct: any) => ct?.tag)
+    .filter(Boolean);
 
-  console.log('📄 Definition query result:', { definitionData, definitionError })
-
-  // Fetch character tags separately
-  const { data: tagsData, error: tagsError } = await supabase
-    .from('character_tags')
-    .select(`
-      tag:tags(id, name)
-    `)
-    .eq('character_id', characterId)
-
-  console.log('🏷️ Tags query result:', { tagsData, tagsError })
-
-  // Combine the data
   const characterWithDetails = {
-    ...data,
-    creator: creatorData,
-    character_definitions: definitionData,
-    definition: definitionData ? [definitionData] : [],
-    tags: tagsData?.map(t => t.tag).filter(Boolean) || []
-  }
+    id: data.id,
+    name: data.name,
+    short_description: data.short_description,
+    tagline: data.tagline,
+  creator: creatorProfile,
+    avatar_url: data.avatar_url,
+    visibility: data.visibility,
+    interaction_count: data.interaction_count,
+    created_at: data.created_at,
+    creator_id: data.creator_id,
+    character_definitions: definitionNode || null,
+    definition: definitionNode ? [definitionNode] : [],
+    tags,
+  } as any;
 
-
-  return { data: characterWithDetails, error: null }
+  return { data: characterWithDetails, error: null };
 }
 
 // Helper: fetch sticky publish flag without strict typing constraints
@@ -694,21 +684,29 @@ export const completeOnboardingTask = async (userId: string, taskId: number) => 
 // CHAT QUERIES
 // =============================================================================
 
+// Lightweight in-memory cache for chat message counts to avoid refetching counts repeatedly
+const chatMessageCountCache: Map<string, number> = new Map();
+
 /**
  * Get user's chat sessions with pagination
  */
 export const getUserChatsPaginated = async (
-  userId: string, 
-  page: number = 1, 
-  pageSize: number = 10
+  userId: string,
+  page: number = 1,
+  pageSize: number = 10,
+  /** Skip total count HEAD query (used for background prefetch pages) */
+  skipCount: boolean = false
 ) => {
   const offset = (page - 1) * pageSize;
-  
-  // First get total count for pagination
-  const { count: totalCount } = await supabase
-    .from('chats')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId);
+
+  let totalCount: number | null = null;
+  if (!skipCount) {
+    const { count } = await supabase
+      .from('chats')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    totalCount = count ?? 0;
+  }
 
   // Then get paginated data (lighter payload - drop heavy character_definitions join)
   const { data: chats, error } = await supabase
@@ -732,7 +730,7 @@ export const getUserChatsPaginated = async (
     .range(offset, offset + pageSize - 1);
 
   if (error || !chats) {
-    return { data: [], totalCount: 0, error };
+    return { data: [], totalCount: totalCount ?? 0, error };
   }
 
   const chatIds = chats.map((c) => c.id);
@@ -757,29 +755,9 @@ export const getUserChatsPaginated = async (
     }
   });
 
-  // Batch fetch message counts per chat (exclude placeholders)
+  // Removed N+1 per-chat message count head requests for performance.
+  // If a message count is needed later, fetch it lazily in the specific chat view.
   const messageCounts = new Map<string, number>();
-  if (chatIds.length > 0) {
-    try {
-      const results = await Promise.all(
-        chatIds.map(async (id) => {
-          const { count, error } = await supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('chat_id', id)
-            .eq('is_placeholder', false);
-          if (error) {
-            console.warn('Per-chat count failed for', id, error);
-            return { id, count: 0 };
-          }
-          return { id, count: count || 0 };
-        })
-      );
-      results.forEach(({ id, count }) => messageCounts.set(id, count));
-    } catch (e) {
-      console.error('Per-chat count failed (paginated):', e);
-    }
-  }
 
   // Batch fetch user character settings
   const settingsMap = new Map<string, { chat_mode: string; time_awareness_enabled: boolean }>();
@@ -799,6 +777,26 @@ export const getUserChatsPaginated = async (
   }
 
   // Compose result (provide messages array with last message for UI)
+  // Restore message_count for UI accuracy: fetch counts only for chats not yet cached (limits to page size)
+  const uncachedChatIds = chatIds.filter(id => !chatMessageCountCache.has(id));
+  if (uncachedChatIds.length > 0) {
+    // Perform individual lightweight HEAD count requests in parallel (max page size, e.g. 10)
+    await Promise.all(
+      uncachedChatIds.map(async (id) => {
+        try {
+          const { count } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('chat_id', id)
+            .eq('is_placeholder', false);
+          if (typeof count === 'number') chatMessageCountCache.set(id, count);
+        } catch (e) {
+          // Swallow errors; leave count undefined
+        }
+      })
+    );
+  }
+
   const chatsWithExtras = chats.map((chat) => {
     const last = lastMessageMap.get(chat.id);
     const userSettings = settingsMap.get(chat.character_id) || { chat_mode: 'storytelling', time_awareness_enabled: false };
@@ -810,16 +808,16 @@ export const getUserChatsPaginated = async (
       },
       messages: last ? [last] : [],
       userSettings,
-      message_count: messageCounts.get(chat.id) || 0,
+      message_count: chatMessageCountCache.get(chat.id) ?? undefined,
     };
   });
 
-  return { 
-    data: chatsWithExtras, 
-    totalCount: totalCount || 0,
+  return {
+    data: chatsWithExtras,
+    totalCount: (totalCount ?? 0),
     currentPage: page,
-    totalPages: Math.ceil((totalCount || 0) / pageSize),
-    error: null 
+    totalPages: Math.ceil((totalCount ?? 0) / pageSize),
+    error: null
   };
 };
 
@@ -1475,69 +1473,54 @@ export const getRecommendedCharacters = async (tags: string[], limit = 4) => {
 
     if (error) throw error
 
-    // If we don't have enough characters from tags, fallback to most popular
+    // Collect initial characters (may be empty or partial)
+    let finalCharacters = [...(characters || [])];
     if (!characters || characters.length < limit) {
-      const { data: popularCharacters, error: popularError } = await supabase
-        .from('characters')
-        .select(`
-          id,
-          name,
-          short_description,
-          avatar_url,
-          interaction_count,
-          created_at,
-          character_definitions!inner(greeting)
-        `)
-        .eq('visibility', 'public')
-        .order('interaction_count', { ascending: false })
-        .limit(limit)
-
-      if (popularError) throw popularError
-      
-      // Combine and deduplicate
-      const allCharacters = characters || []
-      const existingIds = new Set(allCharacters.map(c => c.id))
-      
-      popularCharacters?.forEach(char => {
-        if (!existingIds.has(char.id) && allCharacters.length < limit) {
-          allCharacters.push(char)
+      const remaining = limit - finalCharacters.length;
+      if (remaining > 0) {
+        const { data: popularCharacters, error: popularError } = await supabase
+          .from('characters')
+          .select(`
+            id,
+            name,
+            short_description,
+            avatar_url,
+            interaction_count,
+            created_at,
+            character_definitions!inner(greeting)
+          `)
+          .eq('visibility', 'public')
+          .order('interaction_count', { ascending: false })
+          .limit(limit);
+        if (popularError) throw popularError;
+        const existingIds = new Set(finalCharacters.map(c => c.id));
+        for (const pc of popularCharacters || []) {
+          if (finalCharacters.length >= limit) break;
+          if (!existingIds.has(pc.id)) finalCharacters.push(pc);
         }
-      })
-
-      // Get likes count for all characters
-      const charactersWithCounts = await Promise.all(
-        allCharacters.map(async (character) => {
-          const { count: likesCount } = await supabase
-            .from('character_likes')
-            .select('id', { count: 'exact' })
-            .eq('character_id', character.id)
-
-          return {
-            ...character,
-            likes_count: likesCount || 0
-          }
-        })
-      )
-
-      return { data: charactersWithCounts.slice(0, limit), error: null }
+      }
     }
 
-    // Get likes count for tag-filtered characters
-    const charactersWithCounts = await Promise.all(
-      characters.map(async (character) => {
-        const { count: likesCount } = await supabase
-          .from('character_likes')
-          .select('id', { count: 'exact' })
-          .eq('character_id', character.id)
+    // Batch likes in a single query instead of N+1
+    const ids = finalCharacters.map(c => c.id);
+    let likesMap: Record<string, number> = {};
+    if (ids.length) {
+      const { data: likeRows } = await supabase
+        .from('character_likes')
+        .select('character_id')
+        .in('character_id', ids);
+      (likeRows || []).forEach((row: any) => {
+        if (!row.character_id) return;
+        likesMap[row.character_id] = (likesMap[row.character_id] || 0) + 1;
+      });
+    }
 
-        return {
-          ...character,
-          likes_count: likesCount || 0
-        }
-      })
-    )
+    const enriched = finalCharacters.map(c => ({
+      ...c,
+      likes_count: likesMap[c.id] || 0
+    }));
 
-    return { data: charactersWithCounts, error: null }
+    return { data: enriched.slice(0, limit), error: null }
   } catch (error) {
     console.error('Error getting recommended characters:', error)
     return { data: [], error }

@@ -138,6 +138,13 @@ export const ChatConfigurationTab = ({
         available: true,
         dynamicCost: null
       },
+      god_mode: {
+        name: 'God Mode',
+        cost: 0,
+        description: 'User assertions override character context instantly',
+        available: true,
+        dynamicCost: null
+      },
     },
     'Character Tracking': {
       mood_tracking: { 
@@ -207,7 +214,7 @@ export const ChatConfigurationTab = ({
   const handleToggleAddon = (addonKey: keyof Pick<UserGlobalChatSettings, 
     'dynamic_world_info' | 'enhanced_memory' | 'mood_tracking' | 'clothing_inventory' | 
     'location_tracking' | 'time_and_weather' | 'relationship_status' | 'character_position' | 
-    'chain_of_thought' | 'few_shot_examples'>) => {
+    'chain_of_thought' | 'few_shot_examples' | 'god_mode'>) => {
     
     if (!globalSettings) return;
 

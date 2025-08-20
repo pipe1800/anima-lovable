@@ -139,7 +139,8 @@ globalThis.Deno.serve(async (req) => {
         response = await handleCreateBasicChat(
           requestBody as CreateBasicChatRequest,
           user,
-          supabase
+          supabase,
+          { req, supabaseAdmin }
         );
         break;
 
@@ -149,7 +150,8 @@ globalThis.Deno.serve(async (req) => {
           requestBody as CreateWithGreetingRequest,
           user,
           supabase,
-          supabaseAdmin
+          supabaseAdmin,
+          req
         );
         break;
 
