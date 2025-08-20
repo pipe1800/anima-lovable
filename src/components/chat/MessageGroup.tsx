@@ -1,7 +1,6 @@
 import React, { memo } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatMessageTime } from "@/utils/messageGrouping";
-import { ContextDisplay } from "./ContextDisplay";
 import { FormattedMessage } from "@/components/ui/FormattedMessage";
 import OptimizedMessageFormatter from "./OptimizedMessageFormatter";
 import type { TrackedContext, Message, Character } from '@/types/chat';
@@ -363,14 +362,13 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                     </div>
                   );
                 }
-                // AI SIDE (unchanged float-left behavior)
+                // AI SIDE (updated: float avatar so long content wraps beneath; streaming starts beside avatar)
                 const avatarMask = 'linear-gradient(to right, rgba(0,0,0,1) 0%, rgba(0,0,0,1) 62%, rgba(0,0,0,0) 100%)';
-                // FLEX ROW VERSION: keeps text beside avatar on all breakpoints (no float/clear)
                 return (
                   <div
                     ref={(el) => { messageRefs.current[index] = el; }}
                     key={message.id === 'streaming-temp' ? `${message.id}-${message.content.length}` : message.id}
-                    className={`relative ${sizeClass} flex items-start ${index === activeIndex && !isUser ? 'ring-1 ring-white/20' : ''} ${
+                    className={`relative ${sizeClass} ${
                       index === 0 && index === messages.length - 1
                         ? 'rounded-lg'
                         : index === 0
@@ -385,15 +383,17 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                       width: (!isUser && editingIndex === index && editingWidth) ? `${editingWidth}px` : undefined,
                     }}
                   >
+                    {/* Floated avatar panel */}
                     <div
-                      className="w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7 flex-shrink-0"
+                      className="float-left w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7 mb-2 md:mb-3"
                       style={{
                         backgroundImage: `url(${imageUrl})`,
                         maskImage: avatarMask as any,
                         WebkitMaskImage: avatarMask as any,
                       }}
                     />
-                    <div className="pt-2 pb-3 pr-4 pl-2 md:pl-4 min-h-[7rem] flex-1">
+                    {/* Text/content block flows to the right of avatar until it exceeds avatar height, then wraps beneath */}
+                    <div className="pt-2 pb-3 pr-4 pl-2 md:pl-4 min-h-[7rem]">
                       <div className="font-bold text-white/85 leading-tight mb-2" style={{ fontSize: `${nameFontSizePx}px` }} title={rawCharacterName}>
                         {truncatedCharacterName}
                       </div>
@@ -415,6 +415,8 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                         </span>
                       )}
                     </div>
+                    {/* Clear float so following layout (e.g., action bars) starts below full bubble */}
+                    <div className="clear-both" />
                   </div>
                 );
               }
@@ -485,20 +487,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
         <div className="mt-3 ml-11">
           {(() => {
             const latestMessage = messages[messages.length - 1];
-            
-            const hasContextUpdates = latestMessage.contextUpdates && Object.keys(latestMessage.contextUpdates).length > 0;
-            const hasCurrentContext = latestMessage.current_context && Object.keys(latestMessage.current_context).length > 0;
-            const hasEnabledAddons = addonSettings && (
-              addonSettings.moodTracking || 
-              addonSettings.clothingInventory || 
-              addonSettings.locationTracking || 
-              addonSettings.timeAndWeather || 
-              addonSettings.relationshipStatus ||
-              addonSettings.characterPosition
-            );
-            
             const rightActions = (() => {
-              // Only show action bar for latest AI group (canModify)
               if (!canModify && editingIndex === null) return null;
               return (
                 <div className="flex items-center gap-1">
@@ -524,20 +513,6 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                 </div>
               );
             })();
-            
-            if (hasContextUpdates || hasCurrentContext || hasEnabledAddons) {
-              return (
-                <ContextDisplay 
-                  context={trackedContext}
-                  contextUpdates={latestMessage.contextUpdates} 
-                  currentContext={trackedContext || latestMessage.current_context}
-                  addonSettings={addonSettings}
-                  className="mt-2"
-                  rightActions={rightActions || undefined}
-                />
-              );
-            }
-            // No context widget requested: still show the action bar aligned subtly (only if allowed)
             return (
               <div className="flex justify-end">
                 {rightActions}

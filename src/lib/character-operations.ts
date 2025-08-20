@@ -41,6 +41,15 @@ export interface CharacterCreationData {
     character_notes?: string;
     creator_notes?: string;
   };
+  manual_addon_context_enabled?: boolean;
+  manual_addon_context?: {
+    mood?: string;
+    clothing?: string;
+    location?: string;
+    time_weather?: string;
+    relationship?: string;
+    character_position?: string;
+  } | null;
 }
 
 export const createCharacter = async (characterData: CharacterCreationData) => {
@@ -56,7 +65,7 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
       avatar_url: characterData.avatar,
       tagline: characterData.title,
       visibility: characterData.visibility
-    };
+    } as any;
 
     const { data: character, error: characterError } = await supabase
       .from('characters')
@@ -105,6 +114,31 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
       definition.addons = characterData.addons;
     }
 
+    // Persist manual initial addon context if enabled
+    if (characterData.manual_addon_context_enabled && characterData.manual_addon_context) {
+      definition.initial_addon_context_enabled = true;
+      definition.initial_addon_context = characterData.manual_addon_context;
+    }
+
+    // Sanitize manual addon context (creation)
+    const cleanedManualContextCreate = characterData.manual_addon_context ? Object.fromEntries(
+      Object.entries(characterData.manual_addon_context).filter(([_,v]) => typeof v === 'string' && v.trim())
+    ) : {};
+    const enableInitialAddonCreate = !!characterData.manual_addon_context_enabled;
+    console.log('🧪 [create] Manual addon context incoming:', {
+      raw_enabled: characterData.manual_addon_context_enabled,
+      raw_context: characterData.manual_addon_context,
+      cleaned: cleanedManualContextCreate,
+      enableInitialAddonCreate
+    });
+
+    if (enableInitialAddonCreate) {
+      definition.initial_addon_context_enabled = true;
+      if (Object.keys(cleanedManualContextCreate).length) {
+        definition.initial_addon_context = cleanedManualContextCreate;
+      }
+    }
+
     const { error: definitionError } = await supabase
       .from('character_definitions')
       .insert({
@@ -112,8 +146,18 @@ export const createCharacter = async (characterData: CharacterCreationData) => {
         personality_summary: JSON.stringify(definition),
         greeting: characterData.dialogue.greeting,
         description: characterData.personality.core_personality,
-        scenario: characterData.personality.scenario_definition || null
+        scenario: characterData.personality.scenario_definition || null,
+        initial_addon_context_enabled: !!(characterData.manual_addon_context_enabled && characterData.manual_addon_context && Object.keys(characterData.manual_addon_context).length > 0),
+        initial_addon_context: (characterData.manual_addon_context_enabled && characterData.manual_addon_context && Object.keys(characterData.manual_addon_context).length > 0)
+          ? characterData.manual_addon_context
+          : null
       });
+    if (!definitionError) {
+      console.log('✅ Created definition with initial addon context columns:', {
+        enabled: !!(characterData.manual_addon_context_enabled && characterData.manual_addon_context && Object.keys(characterData.manual_addon_context).length > 0),
+        context: characterData.manual_addon_context
+      });
+    }
 
     if (definitionError) {
       console.error('Error creating character definition:', definitionError);
@@ -202,11 +246,11 @@ export const updateCharacter = async (characterId: string, characterData: Charac
     // Update character record
     const characterUpdate: TablesUpdate<'characters'> = {
       name: characterData.name,
-      short_description: characterData.description, // ✅ Map description to short_description
+      short_description: characterData.description,
       avatar_url: characterData.avatar,
-      tagline: characterData.title || '', // ✅ Ensure title is mapped to tagline (with fallback)
+      tagline: characterData.title || '',
       visibility: characterData.visibility
-    };
+    } as any;
 
     console.log('📝 Sending character update to database:', {
       ...characterUpdate,
@@ -285,8 +329,28 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       }).flat() // Flatten in case parseExampleDialogue returns an array
     };
 
+    // Before building definition for update, decode existing summary to avoid losing unrelated keys
+    let existingSummary: any = {};
+    try {
+      const existingDefResp: any = await supabase
+        .from('character_definitions')
+        .select('personality_summary, initial_addon_context_enabled, initial_addon_context')
+        .eq('character_id', characterId)
+        .maybeSingle();
+      const existingDef = existingDefResp?.data || existingDefResp; // adapt to different client return shapes
+      if (existingDef && typeof existingDef === 'object' && 'personality_summary' in existingDef && existingDef.personality_summary) {
+        try { existingSummary = JSON.parse(existingDef.personality_summary); } catch {}
+      }
+    } catch (e) {
+      console.warn('⚠️ Unable to load existing personality_summary for merge', e);
+    }
+    // Remove potential stale inline keys to prevent confusion
+    delete existingSummary.initial_addon_context_enabled;
+    delete existingSummary.initial_addon_context;
+
     // Update character definition
     const definition: any = {
+      ...existingSummary,
       personality: characterData.personality,
       dialogue: processedDialogue,
       title: characterData.title
@@ -309,24 +373,73 @@ export const updateCharacter = async (characterId: string, characterData: Charac
       definition.addons = characterData.addons;
     }
 
-    console.log('📝 Updating character definition with:', {
-      characterId,
-      definition: JSON.stringify(definition, null, 2)
+    // Persist manual initial addon context if enabled
+    if (characterData.manual_addon_context_enabled && characterData.manual_addon_context) {
+      definition.initial_addon_context_enabled = true;
+      definition.initial_addon_context = characterData.manual_addon_context;
+    } else if (characterData.manual_addon_context_enabled === false) {
+      definition.initial_addon_context_enabled = false;
+      definition.initial_addon_context = null;
+    }
+
+    // Sanitize manual addon context (update)
+    const cleanedManualContextUpdate = characterData.manual_addon_context ? Object.fromEntries(
+      Object.entries(characterData.manual_addon_context).filter(([_,v]) => typeof v === 'string' && v.trim())
+    ) : {};
+    const enableInitialAddon = !!characterData.manual_addon_context_enabled;
+    console.log('🧪 [update] Manual addon context incoming:', {
+      raw_enabled: characterData.manual_addon_context_enabled,
+      raw_context: characterData.manual_addon_context,
+      cleaned: cleanedManualContextUpdate,
+      enableInitialAddon
     });
 
-    const { error: definitionError } = await supabase
+    console.log('🧪 Initial addon context payload about to persist:', {
+      manual_enabled_flag: characterData.manual_addon_context_enabled,
+      manual_context_object: characterData.manual_addon_context,
+      keys: characterData.manual_addon_context ? Object.keys(characterData.manual_addon_context) : [],
+      will_enable: !!(characterData.manual_addon_context_enabled && characterData.manual_addon_context && Object.keys(characterData.manual_addon_context).length > 0)
+    });
+
+    let defUpdate = {
+      personality_summary: JSON.stringify(definition),
+      greeting: characterData.dialogue.greeting,
+      description: characterData.personality.core_personality,
+      scenario: characterData.personality.scenario_definition || null,
+      initial_addon_context_enabled: !!(enableInitialAddon && Object.keys(cleanedManualContextUpdate).length > 0),
+      initial_addon_context: (enableInitialAddon && Object.keys(cleanedManualContextUpdate).length > 0) ? cleanedManualContextUpdate : null
+    } as any;
+    console.log('🧪 [update] defUpdate payload:', defUpdate);
+
+    const { data: defAfterUpdate, error: definitionError } = await supabase
       .from('character_definitions')
-      .update({
-        personality_summary: JSON.stringify(definition),
-        greeting: characterData.dialogue.greeting,
-        description: characterData.personality.core_personality,
-        scenario: characterData.personality.scenario_definition || null
-      })
-      .eq('character_id', characterId);
+      .update(defUpdate)
+      .eq('character_id', characterId)
+      .select('character_id, initial_addon_context_enabled, initial_addon_context');
+    const defCount = defAfterUpdate ? defAfterUpdate.length : 0;
 
     if (definitionError) {
-      console.error('❌ Error updating character definition:', definitionError);
-      throw new Error(`Failed to update character definition: ${definitionError.message}`);
+      console.error('❌ Error updating character definition (will attempt insert fallback):', definitionError);
+    }
+
+    if ((!defAfterUpdate || defAfterUpdate.length === 0) && !definitionError) {
+      console.warn('⚠️ No definition row updated (count=0) — attempting insert fallback');
+      const { error: insertFallbackErr, data: insertedDef } = await supabase
+        .from('character_definitions')
+        .insert({
+          character_id: characterId,
+          ...defUpdate
+        })
+        .select('character_id, initial_addon_context_enabled, initial_addon_context')
+        .single();
+      if (insertFallbackErr) {
+        console.error('💥 Fallback insert failed:', insertFallbackErr);
+        throw new Error(`Failed to persist character definition: ${insertFallbackErr.message}`);
+      } else {
+        console.log('✅ Fallback insert succeeded:', insertedDef);
+      }
+    } else if (defAfterUpdate && defAfterUpdate.length > 0) {
+      console.log('✅ Definition update result:', defAfterUpdate[0]);
     }
 
     console.log('✅ Character definition updated successfully');

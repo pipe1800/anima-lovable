@@ -20,6 +20,8 @@ export const defaultGlobalChatSettings: Omit<UserGlobalChatSettings, 'id' | 'use
   time_and_weather: false,
   relationship_status: false,
   character_position: false,
+  enchantment_status: false, // NEW
+  item_inventory: false, // NEW
   chain_of_thought: false,
   few_shot_examples: false,
   god_mode: false,
@@ -201,6 +203,9 @@ export const useUpdateAddonSettings = () => {
       character_position?: boolean;
       chain_of_thought?: boolean;
       few_shot_examples?: boolean;
+      god_mode?: boolean;
+      enchantment_status?: boolean; // NEW
+      item_inventory?: boolean; // NEW
     }) => {
       return updateSettings.mutateAsync(addonSettings);
     },

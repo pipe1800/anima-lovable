@@ -47,6 +47,7 @@ import { buildConversationMessagesWithMessageBudget } from './message-counter.ts
 import { triggerMessageBasedSummary, getMostRecentAutoSummary } from './auto-summary-new.ts';
 import { assembleConversation } from './conversation-assembler.ts';
 import type { ConversationKnobs } from './message-counter.ts';
+import { logger } from '../../_shared/logger.ts';
 
 /**
  * Send Message Handler - Streaming AI Responses
@@ -72,15 +73,8 @@ export async function handleSendMessage(
       return createErrorResponse('Missing required fields', 400);
     }
 
-    console.log('✅ Required fields validated:', { 
-      chatId, 
-      characterId, 
-      messageLength: message.length,
-      hasSelectedWorldInfo: !!selectedWorldInfoId,
-      selectedWorldInfoId: selectedWorldInfoId || 'none',
-      selectedWorldInfoIdType: typeof selectedWorldInfoId,
-      addonSettings: addonSettings || 'none provided'
-    });
+    logger.debug('send.required.validated', { chatId, characterId, len: message.length, worldInfo: !!selectedWorldInfoId });
+    const trivialInput = message.trim().length < 4;
 
     // ============================================================================
     // DATABASE OPERATIONS - PARALLEL FETCHING (same as chat-stream)
@@ -126,14 +120,17 @@ export async function handleSendMessage(
     // Early guard: if all addons disabled, skip extraction later
     const addonsActive = anyAddonEnabled(effectiveAddonSettings);
 
-    console.log('🌍 World Info Status:', {
+    if (trivialInput) {
+      // Disable heavy addons for trivial input to reduce latency & cost
+      if (effectiveAddonSettings.dynamicWorldInfo) effectiveAddonSettings.dynamicWorldInfo = false;
+      if (effectiveAddonSettings.enhancedMemory) effectiveAddonSettings.enhancedMemory = false;
+      logger.debug('addons.skip.trivialInput', { len: message.trim().length });
+    }
+
+    logger.debug('worldInfo.status', {
       requested: !!selectedWorldInfoId,
-      fetched: !!worldInfoEntries,
-      entriesCount: worldInfoEntries?.length || 0,
-      dynamicWorldInfoEnabled: effectiveAddonSettings?.dynamicWorldInfo || false,
-      globalSettings: globalSettings ? 'loaded' : 'not loaded',
-      effectiveAddonSettings: effectiveAddonSettings,
-      worldInfoEntries: worldInfoEntries
+      count: worldInfoEntries?.length || 0,
+      dyn: effectiveAddonSettings?.dynamicWorldInfo || false
     });
 
     // ============================================================================
@@ -145,6 +142,8 @@ export async function handleSendMessage(
     if (!hasCredits) {
       return createErrorResponse(createInsufficientCreditsError(creditInfo), 402);
     }
+
+    logger.debug('billing.charge', { plan: planAndModel.plan, model: planAndModel.model });
 
     // ============================================================================
     // SAVE USER MESSAGE & CREATE AI PLACEHOLDER (same as chat-stream)
@@ -387,6 +386,16 @@ export async function handleSendMessage(
       });
     }
 
+    if (logger.isDebug()) {
+      try {
+        logger.debug('openrouter.payload.meta', {
+          model: planAndModel.model,
+          messages: conversationMessages.length,
+          systemChars: conversationMessages[0]?.content?.length || 0
+        });
+      } catch {}
+    }
+
     const aiResponse = await generateAIResponse(conversationMessages, planAndModel.model, openRouterKey);
 
     // Enhanced error handling for AI API
@@ -441,7 +450,7 @@ export async function handleSendMessage(
                 // Save final message immediately for instant UI feedback
                 const finalMessage = fullResponse.trim();
                 if (finalMessage && placeholder?.id) {
-                  console.log('💾 Saving final message...');
+                  logger.debug('stream.final.save', { placeholderId: placeholder.id, bytes: finalMessage.length });
 
                   // Update placeholder content first
                   await updateMessageContent(supabaseAdmin, placeholder.id, finalMessage);
@@ -504,16 +513,16 @@ export async function handleSendMessage(
                       });
                       
                       if (extractResponse.ok) {
-                        console.log('✅ Addon context extraction triggered successfully');
+                        logger.debug('extract.triggered');
                       } else {
-                        console.error('❌ Failed to trigger addon context extraction:', extractResponse.status);
+                        logger.warn('extract.failed', { status: extractResponse.status });
                       }
                     }
                   } catch (extractError) {
                     console.error('💥 Error triggering addon context extraction:', extractError);
                   }
 
-                  console.log(`✅ Message streaming completed in ${Date.now() - startTime}ms`);
+                  logger.info('stream.complete', { ms: Date.now() - startTime });
                 }
                 break;
               }
@@ -564,7 +573,7 @@ export async function handleSendMessage(
            controller.close();
 
          } catch (streamError) {
-           console.error('💥 Streaming error:', streamError);
+           logger.error('stream.error', { message: (streamError as Error)?.message });
            controller.error(streamError);
          }
        }
@@ -582,7 +591,7 @@ export async function handleSendMessage(
     });
 
   } catch (error) {
-    console.error('💥 Error in handleSendMessage:', error);
+    logger.error('sendMessage.error', { message: (error as Error)?.message });
     return createStreamingErrorResponse(
       error instanceof Error ? error.message : 'Internal server error',
       'unknown',

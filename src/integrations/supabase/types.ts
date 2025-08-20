@@ -1002,6 +1002,8 @@ export type Database = {
           time_and_weather: boolean | null
           updated_at: string | null
           user_id: string
+          enchantment_status: boolean | null
+          item_inventory: boolean | null
         }
         Insert: {
           chain_of_thought?: boolean | null
@@ -1021,6 +1023,8 @@ export type Database = {
           time_and_weather?: boolean | null
           updated_at?: string | null
           user_id: string
+          enchantment_status?: boolean | null
+          item_inventory?: boolean | null
         }
         Update: {
           chain_of_thought?: boolean | null
@@ -1040,6 +1044,8 @@ export type Database = {
           time_and_weather?: boolean | null
           updated_at?: string | null
           user_id?: string
+          enchantment_status?: boolean | null
+          item_inventory?: boolean | null
         }
         Relationships: []
       }

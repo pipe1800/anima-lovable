@@ -13,6 +13,7 @@ import {
 import { getMostRecentAutoSummary } from './auto-summary-new.ts';
 import { getTextEmbedding, cosineSimilarity } from './embeddings.ts';
 import { PromptBuilder } from './prompt-builder.ts';
+import { logger } from '../../_shared/logger.ts';
 
 export type PromptMeta = {
   currentContext?: Partial<{
@@ -85,44 +86,18 @@ function getRelevantWorldInfo(
   conversationHistory: any[]
 ): Array<{ keywords: string[]; entry_text: string }> {
   if (!worldInfoEntries || worldInfoEntries.length === 0) return [];
-
-  // Combine user message and recent conversation for context
-  const recentMessages = conversationHistory.slice(-5); // Last 5 messages
-  const conversationText = [
-    userMessage,
-    ...recentMessages.map(msg => msg.content || '')
-  ].join(' ').toLowerCase();
-
-  console.log('🔍 World Info Keyword Filtering:', {
-    conversationText: conversationText.substring(0, 200) + '...',
-    totalEntries: worldInfoEntries.length,
-    entryKeywords: worldInfoEntries.map(entry => entry.keywords)
-  });
-
-  // Filter entries where at least one keyword appears in the conversation
+  const recentMessages = conversationHistory.slice(-5);
+  const conversationText = [userMessage, ...recentMessages.map(msg => msg.content || '')].join(' ').toLowerCase();
+  if (logger.isTrace()) {
+    logger.trace('worldInfo.filter.trace', { sample: conversationText.substring(0,120) });
+  }
   const relevantEntries = worldInfoEntries.filter(entry => {
     if (!entry.keywords || entry.keywords.length === 0) return false;
-    
-    const matchedKeywords = entry.keywords.filter(keyword => {
-      const normalizedKeyword = keyword.toLowerCase().trim();
-      const isMatch = conversationText.includes(normalizedKeyword);
-      
-      if (isMatch) {
-        console.log(`✅ Keyword match found: "${keyword}" in conversation`);
-      }
-      
-      return isMatch;
-    });
-    
-    const hasMatch = matchedKeywords.length > 0;
-    console.log(`📝 Entry with keywords [${entry.keywords.join(', ')}]: ${hasMatch ? 'INCLUDED' : 'EXCLUDED'}`);
-    
-    return hasMatch;
+    return entry.keywords.some(keyword => conversationText.includes(keyword.toLowerCase().trim()));
   });
-
-  console.log(`🎯 Filtered ${relevantEntries.length} relevant entries from ${worldInfoEntries.length} total`);
-
-  // Limit to prevent token bloat (max 3 entries)
+  if (logger.isDebug()) {
+    logger.debug('worldInfo.filter.result', { original: worldInfoEntries.length, kept: relevantEntries.length, keywords: relevantEntries.map(e=>e.keywords) });
+  }
   return relevantEntries.slice(0, 3);
 }
 
@@ -264,37 +239,99 @@ export async function buildSystemPrompt(
   conversationHistory?: any[],
   characterMemories?: Array<{ id?: string; summary_content: string; trigger_keywords: string[]; created_at: string; updated_at?: string; last_injected_at?: string | null; injection_count?: number | null }> | null,
   chatMode?: 'storytelling' | 'companion',
-  timeAwarenessData?: {
-    enabled: boolean;
-    delaySeconds: number;
-    userTimezone: string;
-    userLocalTime: string;
-    conversationTone?: string;
-    urgencyLevel?: string;
-  },
+  timeAwarenessData?: { enabled: boolean; delaySeconds: number; userTimezone: string; userLocalTime: string; conversationTone?: string; urgencyLevel?: string; },
   chatId?: string,
   userId?: string,
   metaCollector?: (meta: PromptMeta) => void
 ): Promise<string> {
-  console.log('🎯 buildSystemPrompt called with:', {
-    character: character ? 'loaded' : 'null',
-    addonSettings,
-    worldInfoEntries: worldInfoEntries ? `${worldInfoEntries.length} entries` : 'null',
-    characterMemories: characterMemories ? `${characterMemories.length} memories` : 'null',
-    userMessage: userMessage ? userMessage.substring(0, 100) + '...' : 'null',
-    conversationHistoryLength: conversationHistory?.length || 0,
-    dynamicWorldInfoSetting: addonSettings?.dynamicWorldInfo,
-    enhancedMemorySetting: addonSettings?.enhancedMemory
-  });
+  // Canonical block builder (persistent every turn)
+  const buildPersistentCanonicalOverrides = (ctx: CurrentContext | undefined): { block: string; json: Record<string,string> } => {
+    if (!ctx) return { block: '', json: {} };
+    const alias = (primary: keyof any, ...alts: string[]) => {
+      for (const k of [primary as string, ...alts]) { const v = (ctx as any)[k]; if (typeof v === 'string' && v.trim() && v !== 'No context') return v.trim(); }
+      return null;
+    };
+    const collected: Record<string,string> = {};
+    const add = (k: string, v: string | null) => { if (v) collected[k] = v; };
+    add('clothing', alias('clothingInventory','clothing'));
+    add('location', alias('locationTracking','location'));
+    add('mood', alias('moodTracking','mood'));
+    add('time_weather', alias('timeAndWeather','time_weather'));
+    add('relationship', alias('relationshipStatus','relationship'));
+    add('character_position', alias('characterPosition','character_position'));
+    add('enchantment_status', alias('enchantmentStatus','enchantment_status'));
+    add('item_inventory', alias('itemInventory','item_inventory'));
+    if (!Object.keys(collected).length) return { block: '', json: {} };
+    let canonicalJson = '{}';
+    try { canonicalJson = JSON.stringify(collected); } catch {}
+    const block = [
+      '[[ PERSISTENT CANONICAL STATE OVERRIDES ]]',
+      'ALWAYS OUTRANKS: description, scenario, personality_summary, greeting, examples, style, world info, memories.',
+      'PRECEDENCE: Canonical State JSON > accepted user-driven changes (post-ack) > persisted addon updates (next turn canonical) > character core > greeting > examples.',
+      '[CANONICAL_STATE_JSON]',
+      canonicalJson,
+      '[/CANONICAL_STATE_JSON]',
+      'RULES:',
+      '- Any conflicting mention elsewhere is obsolete; never resurrect it.',
+      '- Direct queries: answer with canonical value verbatim.',
+      '- Change only with explicit user request / justified narrative / environment necessity.',
+      '- If user asserts different state without request: reaffirm canonical & optionally offer change.',
+      '- Ignore greeting / core text conflicts for these fields.',
+      '[[ END PERSISTENT CANONICAL STATE OVERRIDES ]]',
+      ''
+    ].join('\n');
+    return { block, json: collected };
+  };
 
-  // Build the initial core sections via PromptBuilder
-  const builder = new PromptBuilder({ character, replaceTemplates: replaceTemplatesFn });
-  let systemPrompt = builder
-    .addPreamble()
-    .addCharacterCore()
-    .addStyleProfile()
-    .addUserPersona(selectedPersona)
-    .build();
+  // Build canonical block + keep JSON for sanitation
+  const { block: canonicalOverrideBlock, json: canonicalJson } = buildPersistentCanonicalOverrides(currentContext);
+
+  // Sanitize character card fields that contradict canonical state (remove conflicting sentences)
+  const sanitizeText = (text: string | null | undefined): string | null => {
+    if (!text || !Object.keys(canonicalJson).length) return text || null;
+    const lowerCanon: Record<string,string> = Object.fromEntries(Object.entries(canonicalJson).map(([k,v])=>[k, v.toLowerCase()]));
+    const fieldsPatterns: Array<{key:string; pat: RegExp}> = [
+      { key: 'clothing', pat: /(wearing|dressed|clad|outfit|uniform|garb|attire|coat|dress|shirt|skirt|jeans|armor|armour)/i },
+      { key: 'location', pat: /(\bat\b|\bin\b|\binside\b|\bwithin\b|\broom\b|\bbeach\b|\bforest\b|\bgarden\b|\blibrary\b|\bpark\b|\boffice\b|\bclassroom\b|\bcastle\b|\binn\b|\btavern\b)/i },
+      { key: 'mood', pat: /(mood|feels|feeling|emotion|temperament|demeanor|demeanour)/i },
+      { key: 'relationship', pat: /(relationship|lover|friend|rival|enemy|spouse|partner)/i },
+      { key: 'character_position', pat: /(sitting|standing|lying|reclining|crouching|kneeling|running|walking|pacing|leaning)/i }
+    ];
+    const sentences = text.split(/(?<=[.!?])\s+/);
+    const kept: string[] = []; let removed = 0;
+    for (const s of sentences) {
+      const sl = s.toLowerCase();
+      let conflict = false;
+      for (const f of fieldsPatterns) {
+        if (!canonicalJson[f.key]) continue;
+        if (f.pat.test(sl) && !sl.includes(lowerCanon[f.key])) { conflict = true; break; }
+      }
+      if (!conflict) kept.push(s); else removed++;
+    }
+    const result = kept.join(' ').trim();
+    if (removed > 0) console.log('✂️ Card sanitation removed conflicting sentences', { removed, originalLen: text.length, newLen: result.length });
+    return result || text; // fallback to original if empty
+  };
+
+  // Create sanitized clone of character
+  const sanitizedCharacter: Character = { ...character } as any;
+  try {
+    if ((sanitizedCharacter as any).personality_summary) (sanitizedCharacter as any).personality_summary = sanitizeText((sanitizedCharacter as any).personality_summary);
+    if ((sanitizedCharacter as any).description) (sanitizedCharacter as any).description = sanitizeText((sanitizedCharacter as any).description);
+    if ((sanitizedCharacter as any).scenario) (sanitizedCharacter as any).scenario = sanitizeText(typeof (sanitizedCharacter as any).scenario === 'string' ? (sanitizedCharacter as any).scenario : JSON.stringify((sanitizedCharacter as any).scenario));
+  } catch (e) { console.warn('⚠️ Character sanitation failed (non-fatal)', e); }
+
+  // Build core sections with sanitized character
+  const builder = new PromptBuilder({ character: sanitizedCharacter, replaceTemplates: replaceTemplatesFn });
+  let systemPrompt = builder.addPreamble().addCharacterCore().addStyleProfile().addUserPersona(selectedPersona).build();
+
+  // Prepend canonical block
+  if (canonicalOverrideBlock) {
+    logger.debug('canonical.inject', canonicalJson);
+    systemPrompt = canonicalOverrideBlock + systemPrompt;
+  } else {
+    logger.trace('canonical.none');
+  }
 
   const meta: PromptMeta = { currentContext: {}, worldInfoUsed: [], memoryIds: [], summary: null, tokens: {} };
   try {
@@ -421,9 +458,23 @@ Balance dialogue with descriptive elements to create an engaging story.`;
         const policyHeader = godMode
           ? `USER SUPREMACY MODE ACTIVE (godMode=true). The user's explicit statements immediately become canonical unless they contradict immutable character card identity (e.g., species/race if core).`
           : `SAFE MODE (godMode=false). Stored context + character card are authoritative; user claims that contradict established clothing/location/etc. should be politely corrected unless a plausible transition is initiated.`;
-        const sharedRules = `General Rules:\n- When the user merely ASKS about a field (e.g. "What are you wearing?"), report the stored value verbatim.\n- Never change a field just to add variety.\n- Preserve unchanged fields exactly.\n- Multi-field changes: ${godMode ? 'allowed when user explicitly bundles them.' : 'only apply fields the user clearly drives; reject or defer others.'}\n- Environment or situational hints (temperature, setting) justify change ONLY if the current value is implausible. Setting alone (e.g. beach in winter) does NOT force a change without plausibility.`;
-        const changeRulesSafe = `Valid change triggers (safe mode):\n1. Explicit user request to CHANGE ("put on X", "move to Y") that fits character card OR is plausible with a transition.\n2. Environment shift making old state untenable (remove heavy coat in hot sauna).\n3. Continuation of a previously started change sequence.\n4. Explicit user retcon WITH justification (user begins to narrate change).\nReject & correct: pure assertions that contradict current state without justification ("you're wearing a blue shirt" when context says red dress). Ask the user to justify or initiate an in-story transition.`;
-        const changeRulesGod = `Valid change triggers (god mode):\n1. Any explicit user statement or request about a field.\n2. Environment-based necessity.\n3. Continuation of earlier change.\nIf a user assertion conflicts, ACCEPT and optionally micro-narrate transition (unless in pure dialogue mode).`;
+        const sharedRules = `General Rules:
+- When the user merely ASKS about a field (e.g. "What are you wearing?"), report the stored value verbatim.
+- Never change a field just to add variety.
+- Preserve unchanged fields exactly.
+- Multi-field changes: ${godMode ? 'allowed when user explicitly bundles them.' : 'only apply fields the user clearly drives; reject or defer others.'}
+- Environment or situational hints (temperature, setting) justify change ONLY if the current value is implausible. Setting alone (e.g. beach in winter) does NOT force a change without plausibility.`;
+        const changeRulesSafe = `Valid change triggers (safe mode):
+1. Explicit user request to CHANGE ("put on X", "move to Y") that fits character card OR is plausible with a transition.
+2. Environment shift making old state untenable (remove heavy coat in hot sauna).
+3. Continuation of a previously started change sequence.
+4. Explicit user retcon WITH justification (user begins to narrate change).
+Reject & correct: pure assertions that contradict current state without justification ("you're wearing a blue shirt" when context says red dress). Ask the user to justify or initiate an in-story transition.`;
+        const changeRulesGod = `Valid change triggers (god mode):
+1. Any explicit user statement or request about a field.
+2. Environment-based necessity.
+3. Continuation of earlier change.
+If a user assertion conflicts, ACCEPT and optionally micro-narrate transition (unless in pure dialogue mode).`;
         const narrationRules = chatMode === 'companion'
           ? `COMPANION MODE: Do NOT narrate transitions; respond only with dialogue reflecting new state when a change is accepted.`
           : `STORYTELLING MODE: When a field changes, include a concise micro-transition sentence ONCE (e.g., "She slips off the sweater and pulls on a light swimsuit."). Do not repeat the transition in subsequent turns.`;
@@ -487,22 +538,9 @@ Delay category: ${delayCategory}`;
       willProcessWorldInfo: addonSettings.dynamicWorldInfo && worldInfoEntries && worldInfoEntries.length > 0 && userMessage
     });
     if (addonSettings.dynamicWorldInfo && worldInfoEntries && worldInfoEntries.length > 0 && userMessage) {
-      console.log('🌍 Processing world info for system prompt...');
-      
-      // Filter to only relevant world info entries
       const relevantEntries = getRelevantWorldInfo(worldInfoEntries, userMessage, conversationHistory || []);
-      
-      console.log('🎯 Relevant world info entries:', {
-        originalCount: worldInfoEntries.length,
-        filteredCount: relevantEntries.length,
-        relevantEntries: relevantEntries.map(entry => ({
-          keywords: entry.keywords,
-          textPreview: entry.entry_text.substring(0, 100) + '...'
-        }))
-      });
-      
       if (relevantEntries.length > 0) {
-        try { meta.worldInfoUsed = relevantEntries.map(e => ({ keywords: e.keywords, preview: e.entry_text.substring(0, 120) })); } catch {}
+        if (logger.isDebug()) logger.debug('worldInfo.applied', { count: relevantEntries.length });
         withTokenDelta('world', () => {
           systemPrompt += '\n\n[WORLD INFORMATION]';
           systemPrompt += '\nUse this world information to enhance your responses when relevant:';
@@ -518,14 +556,10 @@ Delay category: ${delayCategory}`;
         
         console.log('✅ World information added to system prompt');
       } else {
-        console.log('❌ No relevant world info entries found after filtering');
+        logger.debug('worldInfo.noneRelevant');
       }
     } else {
-      console.log('❌ World info processing skipped:', {
-        dynamicWorldInfoEnabled: addonSettings.dynamicWorldInfo,
-        hasWorldInfoEntries: !!worldInfoEntries && worldInfoEntries.length > 0,
-        hasUserMessage: !!userMessage
-      });
+      logger.trace('worldInfo.skipped', { dyn: addonSettings.dynamicWorldInfo, entries: worldInfoEntries?.length || 0, hasUserMessage: !!userMessage });
     }
 
     // MEMORY BANK section
@@ -536,38 +570,17 @@ Delay category: ${delayCategory}`;
       willProcessMemories: addonSettings.enhancedMemory && characterMemories && characterMemories.length > 0 && userMessage
     });
     if (addonSettings.enhancedMemory && characterMemories && characterMemories.length > 0 && userMessage) {
-      console.log('🧠 Processing character memories for system prompt...');
-      
-      // Filter to only relevant memories (weighted with recency and recent-injection penalty)
-      let relevantMemories = getRelevantMemoriesWeighted(characterMemories, userMessage, conversationHistory || [], chatId, character.name)
-        .slice(0, 5); // take a slightly larger candidate pool before semantic rerank
-
-      // Optional: semantic reranking using embeddings if available
-      let semanticUsed = false;
-      let topSimScore: number | null = null;
+      let relevantMemories = getRelevantMemoriesWeighted(characterMemories, userMessage, conversationHistory || [], chatId, character.name).slice(0, 5);
+      let semanticUsed = false; let topSimScore: number | null = null;
       try {
         const queryVec = await getTextEmbedding(`${userMessage}\n${(conversationHistory||[]).slice(-4).map(m=>m.content).join(' ')}`);
         const { ranked, hit, topScore } = rerankWithSemantic(relevantMemories as any, queryVec, 0.17);
-        semanticUsed = !!hit;
-        topSimScore = topScore;
-        relevantMemories = (ranked as any).slice(0, 3);
+        semanticUsed = !!hit; topSimScore = topScore; relevantMemories = (ranked as any).slice(0,3);
       } catch (e) {
-        console.warn('⚠️ Semantic rerank skipped due to error:', e);
-        relevantMemories = relevantMemories.slice(0, 3);
+        if (logger.isDebug()) logger.debug('memory.semantic.skip', { reason: String(e).slice(0,80) });
+        relevantMemories = relevantMemories.slice(0,3);
       }
-      
-      console.log('🎯 Relevant character memories:', {
-        originalCount: characterMemories.length,
-        filteredCount: relevantMemories.length,
-        semanticUsed,
-        topSimScore,
-        relevantMemories: relevantMemories.map(memory => ({
-          id: (memory as any).id,
-          keywords: memory.trigger_keywords,
-          contentPreview: memory.summary_content.substring(0, 100) + '...',
-          date: memory.created_at
-        }))
-      });
+      if (logger.isDebug()) logger.debug('memory.filter.result', { original: characterMemories.length, kept: relevantMemories.length, semanticUsed, topSimScore });
       
       if (relevantMemories.length > 0) {
         try { meta.memoryIds = relevantMemories.map(m => (m.id || '')).filter(Boolean) as string[]; } catch {}
@@ -615,14 +628,10 @@ Delay category: ${delayCategory}`;
         
         console.log('✅ Character memories added to system prompt');
       } else {
-        console.log('❌ No relevant character memories found after filtering');
+        logger.debug('memory.noneRelevant');
       }
     } else {
-      console.log('❌ Memory processing skipped:', {
-        enhancedMemoryEnabled: addonSettings.enhancedMemory,
-        hasCharacterMemories: !!characterMemories && characterMemories.length > 0,
-        hasUserMessage: !!userMessage
-      });
+      logger.trace('memory.skipped', { enabled: addonSettings.enhancedMemory, total: characterMemories?.length || 0 });
     }
   }
 
@@ -638,15 +647,12 @@ Delay category: ${delayCategory}`;
     
     // Validate character.id before calling
     if (!character?.id || character.id === 'undefined') {
-      console.warn('⚠️ Skipping auto-summary fetch - invalid character.id:', character?.id);
+      logger.warn('summary.skip.invalidCharacter');
     } else if (!chatId) {
-      console.warn('⚠️ Skipping auto-summary fetch - missing chatId');
+      logger.warn('summary.skip.noChatId');
     } else {
-      console.log('🤖 Retrieving most recent auto-summary for character and chat (with cross-chat fallback):', { characterId: character.id, chatId, hasUserId: !!userId });
-      const latestSummary = userId
-        ? await getMostRecentAutoSummary(chatId, character.id, userId, supabase)
-        : await getMostRecentAutoSummary(chatId, character.id, supabase as any);
-    
+      logger.debug('summary.fetch.latest', { characterId: character.id, chatId });
+      const latestSummary = userId ? await getMostRecentAutoSummary(chatId, character.id, userId, supabase) : await getMostRecentAutoSummary(chatId, character.id, supabase as any);
       if (latestSummary) {
         withTokenDelta('summary', () => {
           systemPrompt += '\n\n[CONVERSATION SUMMARY]';
@@ -656,16 +662,9 @@ Delay category: ${delayCategory}`;
           systemPrompt += '\nUse this summary to maintain continuity with previous conversations.';
         });
         
-        console.log('✅ Most recent auto-summary added to system prompt:', {
-          summaryName: latestSummary.name,
-          summaryLength: latestSummary.summary_content.length,
-          messageCount: latestSummary.message_count,
-          createdAt: latestSummary.created_at
-        });
+        logger.debug('summary.added', { id: latestSummary.id, len: latestSummary.summary_content.length });
       } else {
-        console.log(userId
-          ? '❌ No auto-summary found for character (checked chat and cross-chat for this user)'
-          : '❌ No auto-summary found for character in this chat', { characterId: character.id, chatId });
+        logger.debug('summary.none');
       }
     }
   } catch (error) {
@@ -673,16 +672,18 @@ Delay category: ${delayCategory}`;
     // Continue without auto-summary - this is non-critical
   }
 
-  console.log('📝 Final system prompt length:', systemPrompt.length);
-  console.log('📋 System prompt preview:', systemPrompt.substring(0, 500) + '...');
-  console.log('🔢 System prompt estimated tokens:', estimateTokens(systemPrompt));
+  if (logger.isTrace()) {
+    logger.trace('prompt.full', { length: systemPrompt.length });
+  } else if (logger.isDebug()) {
+    logger.debug('prompt.truncated', { length: systemPrompt.length, head: systemPrompt.substring(0,300) });
+  }
+  logger.debug('prompt.tokens.est', { est: estimateTokens(systemPrompt) });
   if (metaCollector) {
-    try {
-      metaCollector(meta);
-      console.log('🧩 Prompt meta collected:', JSON.stringify(meta));
-    } catch (e) {
-      console.warn('⚠️ Failed to collect prompt meta:', e);
-    }
+    try { metaCollector(meta); logger.debug('prompt.meta', meta); } catch (e) { logger.warn('prompt.meta.fail', String(e)); }
+  }
+
+  if (canonicalOverrideBlock) {
+    systemPrompt += '\n[CANONICAL STATE REINFORCEMENT]\nFor ALL references to clothing, location, mood, relationship, position, time/weather, enchantment, inventory: obey CANONICAL_STATE_JSON over any card/greeting/example residue.\n[/CANONICAL STATE REINFORCEMENT]';
   }
 
   return systemPrompt;
@@ -772,3 +773,19 @@ export async function generateAIResponse(
    const ranked = hit ? scored.map(s => s.c) : candidates;
    return { ranked, hit, topScore };
 }
+
+// Updated policy wording to reinforce canonical precedence
+const CURRENT_CONTEXT_POLICY = `Authority & Precedence:
+1. The CANONICAL_STATE_JSON block (persistent) is the single source of truth for dynamic situational fields (clothing, location, mood, relationship_to_user, character_position, time_weather, enchantment_status, item_inventory).
+2. Character card text (personality, description, scenario) MUST NOT override or reintroduce conflicting facts once canonical values are set.
+3. Do not invent changes to any canonical field unless the USER explicitly requests or clearly causes a change. Model self-initiated shifts are disallowed.
+4. If user attempts to ascribe a different current clothing/location/etc. than canonical, politely reaffirm the canonical state unless they are asking to change it ("Okay, you change into ..."). Only then update (via extraction pipeline) after acknowledging the transition.
+5. Avoid repeating removed contradictory sentences from original card; treat them as deprecated data.
+Change Gating:
+- Treat spontaneous environment or outfit changes without user action verbs as hallucinations; reject them.
+- Valid change intent verbs (examples): change, put on, take off, remove, switch, swap, go to, move to, head to, walk to, enter, leave, travel to, pick up, drop, equip, unequip.
+- If ambiguity exists, ask a clarifying question instead of assuming change.
+Output Discipline:
+- Refer to canonical fields naturally but do not restate all every reply.
+- Never contradict canonical values. If a contradiction slips into prior AI text, self-correct in the next turn without rewriting history.
+- Keep responses concise and aligned with current mode (companion/storytelling).`;

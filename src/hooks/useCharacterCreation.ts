@@ -47,6 +47,17 @@ export interface CharacterFormData {
   
   // User-specific settings
   timeAwarenessEnabled?: boolean;
+
+  // Custom initial addon context
+  manual_addon_context_enabled?: boolean;
+  manual_addon_context?: {
+    mood?: string;
+    clothing?: string;
+    location?: string;
+    time_weather?: string;
+    relationship?: string;
+    character_position?: string;
+  } | null;
 }
 
 const INITIAL_CHARACTER_DATA: CharacterFormData = {
@@ -71,7 +82,9 @@ const INITIAL_CHARACTER_DATA: CharacterFormData = {
   visibility: 'private',
   nsfw_enabled: false,
   default_persona_id: null,
-  timeAwarenessEnabled: false
+  timeAwarenessEnabled: false,
+  manual_addon_context_enabled: false,
+  manual_addon_context: null
 };
 
 export function useCharacterCreation() {
@@ -142,6 +155,7 @@ export function useCharacterCreation() {
       }
 
       // Map character data to form structure
+      const definitionNode = (character as any)?.character_definitions || (character as any)?.definition?.[0];
       const formData: CharacterFormData = {
         name: character.name,
         avatar: character.avatar_url || '',
@@ -168,7 +182,9 @@ export function useCharacterCreation() {
         nsfw_enabled: character.nsfw_enabled || false,
         default_persona_id: character.default_persona_id,
         // ✅ Include user-specific settings
-        timeAwarenessEnabled: userSettings?.time_awareness_enabled || false
+        timeAwarenessEnabled: userSettings?.time_awareness_enabled || false,
+        manual_addon_context_enabled: definitionNode?.initial_addon_context_enabled || false,
+        manual_addon_context: definitionNode?.initial_addon_context || null
       };
 
       console.log('📝 Mapped character data to form:', {

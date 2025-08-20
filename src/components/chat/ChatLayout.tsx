@@ -7,6 +7,8 @@ import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
 import { getUserCharacterSettings, upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
 import { getBrowserTimezone } from '@/utils/timezone';
 import AppSidebar from '@/components/dashboard/AppSidebar';
+import { ContextSidebar } from './ContextSidebar';
+import { UnifiedSidebarToggle } from './UnifiedSidebarToggle';
 import { MobileHeader } from '@/components/layout/MobileHeader';
 import { toast } from 'sonner';
 import { useTutorial } from '@/contexts/TutorialContext';
@@ -49,6 +51,27 @@ interface ChatLayoutProps {
 
 export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange, characterDetails: characterDetailsOverride, creditsBalanceOverride, globalSettingsOverride }: ChatLayoutProps) => {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+    // Sidebar state
+  const [sidebarView, setSidebarView] = useState<'navigation' | 'context'>('navigation');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Listen for sidebar collapse events from AppSidebar
+  useEffect(() => {
+    const handleSidebarToggled = () => {
+      const savedState = localStorage.getItem('sidebarCollapsed');
+      if (savedState) {
+        setSidebarCollapsed(JSON.parse(savedState));
+      }
+    };
+    
+    // Set initial state
+    handleSidebarToggled();
+    
+    // Listen for changes
+    window.addEventListener('sidebarToggled', handleSidebarToggled);
+    return () => window.removeEventListener('sidebarToggled', handleSidebarToggled);
+  }, []);
+  
   // Removed chatHistory and filteredChatHistory local state in favor of query + memo
   const [searchQuery, setSearchQuery] = useState('');
   const [isLiked, setIsLiked] = useState(false);
@@ -329,6 +352,38 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
+  // Sidebar toggle handlers
+  const handleSidebarToggle = useCallback((view: 'navigation' | 'context') => {
+    setSidebarView(view);
+    // Don't reset collapsed state - let AppSidebar manage it
+  }, []);
+
+  const handleSidebarModeToggle = useCallback(() => {
+    setSidebarView(prev => prev === 'navigation' ? 'context' : 'navigation');
+    // Don't reset collapsed state - let AppSidebar manage it
+  }, []);
+
+  // Count active context items for the badge
+  const contextCount = useMemo(() => {
+    if (!trackedContext) return 0;
+    return Object.values(trackedContext).filter(value => 
+      value && value !== 'No context' && value.trim() !== ''
+    ).length;
+  }, [trackedContext]);
+
+  // Auto-switch to context view when context becomes available
+  useEffect(() => {
+    if (trackedContext && sidebarView === 'navigation') {
+      const hasContext = Object.values(trackedContext).some(value => 
+        value && value !== 'No context' && value.trim() !== ''
+      );
+      if (hasContext) {
+        // Don't auto-switch, let user manually toggle to see the context
+        // setSidebarView('context');
+      }
+    }
+  }, [trackedContext, sidebarView]);
+
   const handleRightPanelToggle = useCallback(() => {
     logger.debug('🔧 Right panel toggle clicked:', { isActive, currentStep, rightPanelOpen });
     setRightPanelOpen(prev => !prev);
@@ -524,6 +579,81 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
   };
 
+  useEffect(() => {
+    const fetchInitialContext = async () => {
+      try {
+        if (!currentChatId || !currentUser?.id || !character?.id) return;
+        const { data, error } = await supabase
+          .from('chat_context')
+          .select('current_context')
+          .eq('chat_id', currentChatId)
+          .eq('user_id', currentUser.id)
+          .eq('character_id', character.id)
+          .maybeSingle();
+        if (error) {
+          logger.warn('Context fetch skipped/failed:', error.message);
+          return;
+        }
+        if (data?.current_context) {
+          const raw = data.current_context as any;
+          const converted = {
+            moodTracking: raw?.mood || 'No context',
+            clothingInventory: raw?.clothing || 'No context',
+            locationTracking: raw?.location || 'No context',
+            timeAndWeather: raw?.time_weather || 'No context',
+            relationshipStatus: raw?.relationship || 'No context',
+            characterPosition: raw?.character_position || 'No context',
+            enchantmentStatus: raw?.enchantment_status || 'No context', // NEW
+            itemInventory: raw?.item_inventory || 'No context' // NEW
+          };
+          if (onContextUpdate) onContextUpdate(converted);
+        }
+      } catch (e:any) {
+        logger.error('Failed to fetch initial context:', e);
+      }
+    };
+    fetchInitialContext();
+  }, [currentChatId, currentUser?.id, character?.id, onContextUpdate]);
+
+  const preChatInitialContextSeededRef = useRef(false);
+  useEffect(() => {
+    if (currentChatId) return; // only pre-chat
+    if (preChatInitialContextSeededRef.current) return;
+    if (!onContextUpdate) return;
+    const def = (characterDetailsOverride || (window as any).characterDetails || {} as any).character_definitions || (character as any).character_definitions || {};
+    let initialCtx: any = null;
+    try {
+      if (def.initial_addon_context_enabled && def.initial_addon_context && typeof def.initial_addon_context === 'object') {
+        initialCtx = def.initial_addon_context;
+      } else if (def.personality_summary) {
+        const parsed = typeof def.personality_summary === 'string' ? JSON.parse(def.personality_summary) : def.personality_summary;
+        if (parsed?.initial_addon_context_enabled && parsed?.initial_addon_context && typeof parsed.initial_addon_context === 'object') {
+          initialCtx = parsed.initial_addon_context;
+        }
+      }
+    } catch { /* swallow */ }
+    if (!initialCtx) return;
+    const pick = (k: string) => {
+      const v = initialCtx[k];
+      return (typeof v === 'string' && v.trim()) ? v.trim() : 'No context';
+    };
+    const mapped: TrackedContext = {
+      moodTracking: pick('mood'),
+      clothingInventory: pick('clothing'),
+      locationTracking: pick('location'),
+      timeAndWeather: pick('time_weather'),
+      relationshipStatus: pick('relationship'),
+      characterPosition: pick('character_position'),
+      enchantmentStatus: pick('enchantment_status'),
+      itemInventory: pick('item_inventory')
+    };
+    // If all are 'No context', skip
+    const anyValue = Object.values(mapped).some(v => v && v !== 'No context');
+    if (!anyValue) return;
+    preChatInitialContextSeededRef.current = true;
+    try { onContextUpdate(mapped); } catch {}
+  }, [currentChatId, onContextUpdate, characterDetailsOverride, character]);
+
   return (
     <div className="flex flex-col md:flex-row min-h-screen-stable md:h-full bg-[#121212] relative overflow-hidden">
       {/* Mobile Header */}
@@ -535,13 +665,35 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         />
       </div>
 
-      {/* Desktop Sidebar */}
-      <div className="hidden md:block">
-        <AppSidebar />
+      {/* Desktop Sidebar - Fixed Position */}
+      <div className={`hidden md:block fixed left-0 top-0 h-full z-40 transition-all duration-300 ${
+        sidebarCollapsed ? 'w-16' : 'w-64'
+      }`}>
+        {sidebarView === 'navigation' ? (
+          <AppSidebar 
+            sidebarMode={sidebarView}
+            onToggleMode={handleSidebarModeToggle}
+            contextCount={contextCount}
+            userCreditsOverride={creditsBalance}
+          />
+        ) : (
+          <ContextSidebar
+            context={trackedContext}
+            currentContext={trackedContext}
+            addonSettings={globalSettings}
+            character={character}
+            onBackToNav={() => setSidebarView('navigation')}
+            onOpenSettings={() => {
+              setRightPanelOpen(true);
+            }}
+          />
+        )}
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col h-full relative">
+      <div className={`flex-1 flex flex-col h-full relative transition-all duration-300 ${
+        sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'
+      }`}>
         <ChatHeader
           character={character}
           characterDetails={characterDetails}

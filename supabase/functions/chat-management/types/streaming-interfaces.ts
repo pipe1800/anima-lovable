@@ -58,6 +58,8 @@ export interface CurrentContext {
   timeAndWeather?: string;
   relationshipStatus?: string;
   characterPosition?: string;
+  enchantmentStatus?: string;
+  itemInventory?: string;
 }
 
 export interface ContextData {

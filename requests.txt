@@ -1,274 +1,706 @@
 [
   {
-    "event_message": "✅ Latest AI message updated with context - UI should update immediately\n",
+    "event_message": "📋 CORS preflight request received\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "672329a0-c007-4129-8e28-9715e155dfe4",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "dc045fe3-4016-43e3-9d10-f48f2059f852",
     "level": "log",
-    "timestamp": 1755653274286000
+    "timestamp": 1755701082593000
   },
   {
-    "event_message": "✅ Context extraction completed in 11984ms for chat: 0cfb517e-1902-491a-9c2a-188e46a3825a\n",
-    "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "0d295133-fd97-46d6-8ef5-51431a795149",
+    "event_message": "booted (time: 36480ms)",
+    "event_type": "Boot",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f5aa56ee-aaf7-413f-8d8c-aea1f3b74b0a",
     "level": "log",
-    "timestamp": 1755653274286000
+    "timestamp": 1755701082463000
   },
   {
-    "event_message": "✅ Context saved to chat_context table successfully\n",
+    "event_message": "✅ Message streaming completed in 6764ms\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "3037ba41-53d8-4170-85ae-7204ce14f541",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "26a824fc-f225-406a-b819-b73a9c1ce48a",
     "level": "log",
-    "timestamp": 1755653274126000
+    "timestamp": 1755701028366000
   },
   {
-    "event_message": "🔄 Updating latest AI message with extracted context...\n",
+    "event_message": "✅ Addon context extraction triggered successfully\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "2ddcdd8a-191f-458b-bf45-530bfb94b3d0",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "d1237cc3-5180-4cc2-9cbf-9a855a096d47",
     "level": "log",
-    "timestamp": 1755653274126000
+    "timestamp": 1755701028366000
   },
   {
-    "event_message": "💾 Setting character_position context: Standing, opening door\n",
+    "event_message": "🔍 Triggering addon context extraction...\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "7ba5193e-4e14-47d8-aa51-61fce401f927",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "0238d42a-ef8a-42b4-900b-0da93008405a",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701026781000
   },
   {
-    "event_message": "💾 Setting location context: Rockwood Mansion\n",
+    "event_message": "💾 Saving final message...\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "ad49a9b9-158c-4d88-8cf8-125edc5315b3",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "b8990ce1-5480-44b9-9993-832b68ff984a",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701026607000
   },
   {
-    "event_message": "💾 Setting clothing context: Black leather maid uniform\n",
+    "event_message": "✅ Operation 'send-message' completed in 1124ms\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "7ce361f6-8009-4887-9f66-d81f396cd8f8",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "7cbbfdad-738e-4c10-b2b1-a4a38444766c",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701022614000
   },
   {
-    "event_message": "⏭️ Skipping time_weather context update - no changes detected\n",
+    "event_message": "📤 OpenRouter request payload: {\n  \"model\": \"nousresearch/hermes-3-llama-3.1-70b\",\n  \"messagesCount\": 3,\n  \"stream\": true,\n  \"temperature\": 0.7,\n  \"max_tokens\": 1000,\n  \"totalEstimatedTokens\": 2052,\n  \"messages\": [\n    {\n      \"index\": 0,\n      \"role\": \"system\",\n      \"contentLength\": 6727,\n      \"estimatedTokens\": 2019,\n      \"contentPreview\": \"[[ PERSISTENT CANONICAL STATE OVERRIDES ]]\\nALWAYS OUTRANKS: description, scenario, personality_summary, greeting, examples, style, world info, memories.\\nPRECEDENCE: Canonical State JSON > accepted use...\"\n    },\n    {\n      \"index\": 1,\n      \"role\": \"assistant\",\n      \"contentLength\": 108,\n      \"estimatedTokens\": 30,\n      \"contentPreview\": \"*As the sun rises a new day begins at Rockwood Mansion. You hear a knock on the door and heels on the floor*\"\n    },\n    {\n      \"index\": 2,\n      \"role\": \"user\",\n      \"contentLength\": 7,\n      \"estimatedTokens\": 3,\n      \"contentPreview\": \"come in\"\n    }\n  ]\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "38ce0774-2c3d-4800-91b4-6ae749796ed3",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "96508df7-d4f2-4258-8369-46d2770f3025",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701022362000
   },
   {
-    "event_message": "⏭️ Skipping relationship context update - no changes detected\n",
+    "event_message": "✅ Message-based conversation built: {\n  totalMessages: 1,\n  recentMessagesUsed: 1,\n  totalTokens: 2052,\n  truncated: false,\n  droppedMessages: 0,\n  summaryTrigger: \"❌ NO\",\n  currentAiCount: 1,\n  nextSummaryAt: 15,\n  tokenSavingsAgainstGreedyHistory: 0,\n  baselineTotal: 2052\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "304a621e-06b6-404f-a320-67ec82f186cb",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "6211d16c-da5c-4296-b5c8-f954c8610c22",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701022361000
   },
   {
-    "event_message": "⏭️ Skipping mood context update - no changes detected\n",
+    "event_message": "🎯 Generating AI response with model: nousresearch/hermes-3-llama-3.1-70b\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "114e06ff-c19f-4fe1-bf07-8e150976f44a",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "47353527-4d6a-432f-a4c5-ea54094f146a",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701022361000
   },
   {
-    "event_message": "💾 Updating chat_context table with: {\n  mood: null,\n  clothing: \"Black leather maid uniform\",\n  location: \"Rockwood Mansion\",\n  relationship: null,\n  time_weather: null,\n  character_position: \"Standing, opening door\",\n  conversation_tone: null,\n  urgency_level: null\n}\n",
+    "event_message": "📝 Recent Message Context (param): {\n  totalMessages: 1,\n  recentMessagesIncluded: 1,\n  pairsIncluded: 1,\n  estimatedTokens: 30,\n  tokenLimit: 24000,\n  maxPairsAllowed: 10\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "447d0795-6634-4cba-8f6c-9ebbcd7d86d0",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "4a4eaa82-106a-4e7d-ad06-9aaa5ada49fd",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701022361000
   },
   {
-    "event_message": "💾 Saving extracted context to database...\n",
+    "event_message": "📝 Recent Message Context (param): {\n  totalMessages: 1,\n  recentMessagesIncluded: 1,\n  pairsIncluded: 1,\n  estimatedTokens: 30,\n  tokenLimit: 16000,\n  maxPairsAllowed: 5\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "5a4efff7-a20f-4cc4-99f1-d0f86595e0dc",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "dd46e492-bc4c-4e8c-aeea-231b350b99f4",
     "level": "log",
-    "timestamp": 1755653274066000
+    "timestamp": 1755701022361000
   },
   {
-    "event_message": "🔍 Parsed context (flattened): {\n  mood: \"No context\",\n  clothing: \"Black leather maid uniform\",\n  location: \"Rockwood Mansion\",\n  time_weather: \"No context\",\n  relationship: \"No context\",\n  character_position: \"Standing, opening door\"\n}\n",
+    "event_message": "📝 No auto-summary needed: {\n  currentAiMessageCount: 1,\n  nextSummaryAt: 15,\n  needsSummarization: false\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "f4861dfc-032d-4d65-b90d-e2d85ffdac8b",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "6d1878f4-27f3-467f-bb73-c667d2d08897",
     "level": "log",
-    "timestamp": 1755653274065000
+    "timestamp": 1755701022361000
   },
   {
-    "event_message": "⚠️ Context JSON invalid; retrying with corrective system message\n",
+    "event_message": "🧾 Prompt meta (backend-ready for UX drawer): {\"currentContext\":{\"clothingInventory\":\"Red dress\",\"relationshipStatus\":\"Girlfriend\"},\"worldInfoUsed\":[],\"memoryIds\":[],\"summary\":null,\"tokens\":{\"preamble\":41,\"core\":711,\"style\":0,\"persona\":74,\"guidelines\":311,\"context\":551}}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "df56f9e6-c47d-4a25-8415-facabf6842ac",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "c2f97b2a-d420-4895-8353-a0dcaabd474a",
+    "level": "log",
+    "timestamp": 1755701022361000
+  },
+  {
+    "event_message": "🔨 Building conversation with message-based system\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "e352d453-74a9-4894-afe7-147d04556f60",
+    "level": "log",
+    "timestamp": 1755701022322000
+  },
+  {
+    "event_message": "🧩 Prompt meta collected: {\"currentContext\":{\"clothingInventory\":\"Red dress\",\"relationshipStatus\":\"Girlfriend\"},\"worldInfoUsed\":[],\"memoryIds\":[],\"summary\":null,\"tokens\":{\"preamble\":41,\"core\":711,\"style\":0,\"persona\":74,\"guidelines\":311,\"context\":551}}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "66698311-321f-4753-9bec-7be28c53a91c",
+    "level": "log",
+    "timestamp": 1755701022322000
+  },
+  {
+    "event_message": "📋 System prompt preview: [[ PERSISTENT CANONICAL STATE OVERRIDES ]]\nALWAYS OUTRANKS: description, scenario, personality_summary, greeting, examples, style, world info, memories.\nPRECEDENCE: Canonical State JSON > accepted user-driven changes (post-ack) > persisted addon updates (next turn canonical) > character core > greeting > examples.\n[CANONICAL_STATE_JSON]\n{\"clothing\":\"Red dress\",\"relationship\":\"Girlfriend\"}\n[/CANONICAL_STATE_JSON]\nRULES:\n- Any conflicting mention elsewhere is obsolete; never resurrect it.\n- Direct...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "cb4cae78-76b2-43ac-a559-085eca74a072",
+    "level": "log",
+    "timestamp": 1755701022321000
+  },
+  {
+    "event_message": "❌ No auto-summary found for character (checked chat and cross-chat for this user) {\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  chatId: \"fa7192c5-08ee-4491-b32a-fb2af99beff5\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "089bbfef-de48-428a-b630-678e10865f7d",
+    "level": "log",
+    "timestamp": 1755701022321000
+  },
+  {
+    "event_message": "🔢 System prompt estimated tokens: 1947\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "87d361f8-1046-4455-af4f-028393ef5059",
+    "level": "log",
+    "timestamp": 1755701022321000
+  },
+  {
+    "event_message": "📝 Final system prompt length: 6486\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "c1d4dd0b-1a2a-47b9-962b-eb38696c0789",
+    "level": "log",
+    "timestamp": 1755701022321000
+  },
+  {
+    "event_message": "🤖 Retrieving most recent auto-summary for character and chat (with cross-chat fallback): {\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  chatId: \"fa7192c5-08ee-4491-b32a-fb2af99beff5\",\n  hasUserId: true\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "6a3c32b1-3736-40cb-a9ca-b225963218d9",
+    "level": "log",
+    "timestamp": 1755701022239000
+  },
+  {
+    "event_message": "🤖 About to retrieve most recent auto-summary - character details: {\n  characterExists: true,\n  characterName: \"Nina Lovewood\",\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  characterIdType: \"string\",\n  characterIdValue: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f67b0cb3-55e6-4ae3-bbe7-72970ef62db6",
+    "level": "log",
+    "timestamp": 1755701022239000
+  },
+  {
+    "event_message": "Embeddings HTTP warning: {\n  status: 200,\n  contentType: \"text/html; charset=utf-8\",\n  preview: '<!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, minimum-scale=1\"/><link rel=\"stylesheet\" href=\"/_next/static/css/5b57690'\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "4f3f7efe-f6e0-4f2f-8357-a9dd9d2d7b8e",
     "level": "error",
-    "timestamp": 1755653264617000
+    "timestamp": 1755701022238000
   },
   {
-    "event_message": "📝 Raw context extraction response: ```json\n{\n  \"mood\": {\n    \"value\": \"professional\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"clothing\": {\n    \"value\": \"short black leather maid uniform\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"location\": {\n    \"value\": \"Rockwood Mansion\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"time_weather\": {\n    \"value\": \"morning\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"relationship\": {\n    \"value\": \"head maid\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  },\n  \"character_position\": {\n    \"value\": \"standing, opening door\",\n    \"changed\": false,\n    \"reason\": \"no_change\"\n  }\n}\n```\n",
+    "event_message": "❌ No relevant character memories found after filtering\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "4a37e92f-b558-4a68-ae11-1a46ab92a341",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "7ec51cf7-7f64-4fe1-947a-62ae5a63d8ba",
     "level": "log",
-    "timestamp": 1755653264616000
+    "timestamp": 1755701022238000
   },
   {
-    "event_message": "🔍 CONTEXT EXTRACTION DEBUG: Function called {\n  timestamp: \"2025-08-20T01:27:42.651Z\",\n  chatId: \"0cfb517e-1902-491a-9c2a-188e46a3825a\",\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  callStack: [\n    \"Error\",\n    \"    at extractContextFromResponse (file:///tmp/user_fn_rclpyipeytqbamiwcuih_f6f19ab9-deca-4f6f-9940-000d1f115a00_50/source/supabase/functions/extract-addon-context/modules/context-extractor.ts:103:16)\",\n    \"    at file:///tmp/user_fn_rclpyipeytqbamiwcuih_f6f19ab9-deca-4f6f-9940-000d1f115a00_50/source/supabase/functions/extract-addon-context/index.ts:151:38\",\n    \"    at eventLoopTick (ext:core/01_core.js:175:7)\",\n    \"    at async withRateLimit (file:///tmp/user_fn_rclpyipeytqbamiwcuih_f6f19ab9-deca-4f6f-9940-000d1f115a00_50/source/supabase/functions/_shared/rate-limit.ts:127:12)\"\n  ]\n}\n",
+    "event_message": "🎯 Relevant character memories: {\n  originalCount: 1,\n  filteredCount: 0,\n  semanticUsed: false,\n  topSimScore: null,\n  relevantMemories: []\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "9dac2eab-e971-4ed1-8484-f29c077bfc5a",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "9442fed1-fe02-4b09-8629-d22e5b23f2be",
     "level": "log",
-    "timestamp": 1755653262653000
+    "timestamp": 1755701022238000
   },
   {
-    "event_message": "🔧 Extracting context for enabled addons: [\n  \"mood\",\n  \"clothing\",\n  \"location\",\n  \"time_weather\",\n  \"relationship\",\n  \"character_position\"\n]\n",
+    "event_message": "📝 Entry with keywords [Pain au Chocolat, pastry, dessert]: EXCLUDED\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "b6672f73-90f8-42c4-a312-b787f0ddfb38",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "84754096-cee2-49e6-bff6-07dcd7058885",
     "level": "log",
-    "timestamp": 1755653262653000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "💬 Extracting context from recent conversation...\n",
+    "event_message": "❌ No relevant world info entries found after filtering\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "3da0161b-eaa4-497a-a851-cf5df5ac0730",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "fa4fa6e1-d774-4146-b483-cf129e10c570",
     "level": "log",
-    "timestamp": 1755653262650000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "🔄 Starting context extraction...\n",
+    "event_message": "🔍 Memory Processing Check: {\n  enhancedMemoryEnabled: true,\n  hasCharacterMemories: true,\n  hasUserMessage: true,\n  willProcessMemories: \"come in\"\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "35ca974f-1f63-4a65-945d-c4e46e6c6925",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "cc292248-ef5e-4a79-9087-f2cee42f0244",
     "level": "log",
-    "timestamp": 1755653262573000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "✅ Data fetched successfully: {\n  hasCharacter: true,\n  hasDefinitions: true,\n  hasPersona: true,\n  hasProfile: true,\n  fetchMs: 154\n}\n",
+    "event_message": "📝 Entry with keywords [chef, cook, meal, hungry, food]: EXCLUDED\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "6c354da9-dc9d-4fb6-9879-76924bb3d508",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "7692ce79-a6e7-4832-b1a7-83cf3bbb39ee",
     "level": "log",
-    "timestamp": 1755653262573000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "✅ User data fetched: { hasPersona: true, hasProfile: true, username: \"admin\" }\n",
+    "event_message": "🎯 Filtered 0 relevant entries from 6 total\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "ad204012-b984-4b3f-a23a-4ed761c17638",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "d6276aa6-2563-4640-aa19-4302bd8173d2",
     "level": "log",
-    "timestamp": 1755653262573000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "✅ Fallback: Found character in character_definitions only\n",
+    "event_message": "🧠 Processing character memories for system prompt...\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "e3122ce8-13ba-40c4-a3ab-3369210d14af",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "91d8aa49-7f37-47c2-a35d-598ffd02c986",
     "level": "log",
-    "timestamp": 1755653262539000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "Character not found in characters table, trying character_definitions...\n",
+    "event_message": "📝 Entry with keywords [Ava]: EXCLUDED\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "6adae114-5e84-4bdb-9a8a-c4852ed6313e",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "7d2c45b1-e040-4e78-9257-5edee579df79",
     "level": "log",
-    "timestamp": 1755653262465000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "📊 Fetching required data in parallel...\n",
+    "event_message": "🔍 World Info Keyword Filtering: {\n  conversationText: \"come in *as the sun rises a new day begins at rockwood mansion. you hear a knock on the door and heels on the floor*...\",\n  totalEntries: 6,\n  entryKeywords: [\n    [ \"french\", \"France\", \"lesson\", \"lessons\", \"teach\" ],\n    [ \"Pain au Chocolat\", \"pastry\", \"dessert\" ],\n    [ \"staff\" ],\n    [ \"wine\" ],\n    [ \"chef\", \"cook\", \"meal\", \"hungry\", \"food\" ],\n    [ \"Ava\" ]\n  ]\n}\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "1473e67f-418b-40b1-bde3-5e75295c82df",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "6285e0db-5f8d-493a-84d7-6806dd1d033f",
     "level": "log",
-    "timestamp": 1755653262419000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "📊 Addon settings (normalized): {\n  \"dynamicWorldInfo\": true,\n  \"enhancedMemory\": true,\n  \"moodTracking\": true,\n  \"clothingInventory\": true,\n  \"locationTracking\": true,\n  \"timeAndWeather\": true,\n  \"relationshipStatus\": true,\n  \"characterPosition\": true,\n  \"godMode\": false\n}\n",
+    "event_message": "📝 Entry with keywords [wine]: EXCLUDED\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "48adb6be-b4a0-4d9e-ab0f-de1c5d70483b",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "9c22756d-942d-4845-bb8e-4896f75e7a0c",
     "level": "log",
-    "timestamp": 1755653262419000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "✅ Required fields validated: {\n  chat_id: \"0cfb517e-1902-491a-9c2a-188e46a3825a\",\n  character_id: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  mode: \"conversation\"\n}\n",
+    "event_message": "📝 Entry with keywords [french, France, lesson, lessons, teach]: EXCLUDED\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "eb2d72f8-20ae-4188-90b5-fc0b4a038955",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f49e6094-580f-428a-9ef5-f6a585dd9e1d",
     "level": "log",
-    "timestamp": 1755653262418000
+    "timestamp": 1755701022091000
   },
   {
-    "event_message": "👤 User authenticated successfully: bb0acf17-c3aa-429a-abdd-aef545216a90\n",
+    "event_message": "📝 Entry with keywords [staff]: EXCLUDED\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "b45260c1-c705-4c4d-851e-7f32831fa630",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "20700c52-b4cf-4a0d-b35a-d6a1470aee8f",
     "level": "log",
-    "timestamp": 1755653262416000
+    "timestamp": 1755701022091000
+  },
+  {
+    "event_message": "🎯 Relevant world info entries: { originalCount: 6, filteredCount: 0, relevantEntries: [] }\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f63a149e-22c2-4b5a-b24e-95654c7cfcc7",
+    "level": "log",
+    "timestamp": 1755701022091000
+  },
+  {
+    "event_message": "🔍 World Info Processing Check: {\n  dynamicWorldInfoEnabled: true,\n  hasWorldInfoEntries: true,\n  hasUserMessage: true,\n  willProcessWorldInfo: \"come in\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "0b2b9417-0616-4414-b6d5-1e4735eb7630",
+    "level": "log",
+    "timestamp": 1755701022090000
+  },
+  {
+    "event_message": "🌍 Processing world info for system prompt...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "9a36d61a-a020-4c9e-92d8-df7abbcac88e",
+    "level": "log",
+    "timestamp": 1755701022090000
+  },
+  {
+    "event_message": "🛡️ Injecting persistent canonical block { clothing: \"Red dress\", relationship: \"Girlfriend\" }\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "2e800bc0-a355-483d-b239-d6f578f55500",
+    "level": "log",
+    "timestamp": 1755701022090000
+  },
+  {
+    "event_message": "🧱 PromptBuilder built prompt { length: 2775, tokens: 833 }\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "ac8f7926-c523-49b3-b4af-a63665ff3058",
+    "level": "log",
+    "timestamp": 1755701022090000
+  },
+  {
+    "event_message": "✂️ Card sanitation removed conflicting sentences { removed: 1, originalLen: 4247, newLen: 2398 }\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "27cfa8a7-564e-436b-9f4b-7dcd593af238",
+    "level": "log",
+    "timestamp": 1755701022089000
+  },
+  {
+    "event_message": "✂️ Card sanitation removed conflicting sentences { removed: 1, originalLen: 1652, newLen: 0 }\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "2070bf11-9e10-490b-83b2-c9fad4db70f1",
+    "level": "log",
+    "timestamp": 1755701022089000
+  },
+  {
+    "event_message": "✅ Fetched & normalized context: {\n  raw: { clothing: \"Red dress\", relationship: \"Girlfriend\" },\n  normalized: { clothingInventory: \"Red dress\", relationshipStatus: \"Girlfriend\" }\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "84c30b0e-b6f8-414d-ac3a-c09ee67e55e8",
+    "level": "log",
+    "timestamp": 1755701022087000
+  },
+  {
+    "event_message": "✅ Credits consumed successfully: 10 credits deducted (user: bb0acf17-c3aa-429a-abdd-aef545216a90)\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "6ed0166f-0e8d-4189-82d5-9c35d8bc155c",
+    "level": "log",
+    "timestamp": 1755701021935000
+  },
+  {
+    "event_message": "🔍 Pre-consumption balance check: {\n  userId: \"bb0acf17-c3aa-429a-abdd-aef545216a90\",\n  startingBalance: 1285002,\n  required: 10\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "93e8f621-b861-4100-88e4-72eec6ff9fd5",
+    "level": "log",
+    "timestamp": 1755701021893000
+  },
+  {
+    "event_message": "🌍 World Info Status: {\n  requested: true,\n  fetched: true,\n  entriesCount: 6,\n  dynamicWorldInfoEnabled: true,\n  globalSettings: \"loaded\",\n  effectiveAddonSettings: {\n    dynamicWorldInfo: true,\n    enhancedMemory: true,\n    moodTracking: true,\n    clothingInventory: true,\n    locationTracking: true,\n    timeAndWeather: true,\n    relationshipStatus: true,\n    characterPosition: true,\n    godMode: false\n  },\n  worldInfoEntries: [\n    {\n      keywords: [ \"french\", \"France\", \"lesson\", \"lessons\", \"teach\" ],\n      entry_text: \"Nina is teaching {{user}} how to speak french\"\n    },\n    {\n      keywords: [ \"Pain au Chocolat\", \"pastry\", \"dessert\" ],\n      entry_text: \"{{char}} recommended Pain au Chocolat as breakfast to {{user}} the day they first met. Upon trying it {{user}} cried in joy of tasting something so good. This created a lovely memory on {{char}} and Pain au Chocolat became her favorite dessert and this breakfast a treasured memory.\"\n    },\n    {\n      keywords: [ \"staff\" ],\n      entry_text: \"Rockwood mansion has a big staff of cooks, maids, butlers and people ready to attend {{user}}'s needs. \"\n    },\n    {\n      keywords: [ \"wine\" ],\n      entry_text: \"Rockwood Mansion has a wine cellar that houses an impressive collection of fine vintages, many untouched since the days of {{users}}’s uncle.\"\n    },\n    {\n      keywords: [ \"chef\", \"cook\", \"meal\", \"hungry\", \"food\" ],\n      entry_text: \"Chef Pierre is the principal cook in Rockwood Mansion and the chef in charge for all of the lord's dishes. He sees Nina as a daughter even thought they are not related and has some idea of Nina's secret love towards the lord.\"\n    },\n    {\n      keywords: [ \"Ava\" ],\n      entry_text: \"Whenever {{user}} mentions Ava, Nina will get super jealous, acting annoyed and angry towards {{user}} unable to suppress this feelings to maintain her professional composure. Whenever {{user}} is interacting with Ava, {{char}} will try to interrupt and get {{user}}'s attention towards her instead. She also wants {{user}} to end things with her so nothing stands on her way to make {{user}} fall in love with her.\\n\"\n    }\n  ]\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "c2446c81-a264-4ce0-b6ac-9ce0ec7ec095",
+    "level": "log",
+    "timestamp": 1755701021845000
+  },
+  {
+    "event_message": "💰 Credit calculation: Base(10) + 0% addon increase = Total(10)\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "d04991c8-5987-4275-b1b4-34ec39c3cba0",
+    "level": "log",
+    "timestamp": 1755701021845000
+  },
+  {
+    "event_message": "💰 New billing system: The Whale = 10 credits (addons included for free)\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f4240d5b-8c63-4850-905d-befcb3826882",
+    "level": "log",
+    "timestamp": 1755701021845000
+  },
+  {
+    "event_message": "🧠 Memory 1: {\n  id: \"a0787aec-971a-4f11-8deb-a08df965b1cc\",\n  isAuto: false,\n  keywords: [\n    \"extensive staff\",\n    \"intimate spaces\",\n    \"nervous hesitation\",\n    \"devoted servant\",\n    \"2025-08-19\",\n    \"august 19 2025\"\n  ],\n  hasEmbedding: false,\n  contentLength: 1976,\n  contentPreview: \"Nina, the new French maid at Rockwood Mansion, introduces herself with a mix of professionalism and ...\",\n  createdAt: \"2025-08-19T23:38:10.273823+00:00\",\n  updatedAt: \"2025-08-19T23:38:10.273823+00:00\",\n  lastInjectedAt: \"2025-08-20T00:15:50.235589+00:00\",\n  injectionCount: 5,\n  contentHash: \"dec36ada\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "13366bdb-ca10-44a4-882b-835ebc5be9d2",
+    "level": "log",
+    "timestamp": 1755701021844000
+  },
+  {
+    "event_message": "✅ Fetched memories -> nonAuto: 1, auto: 0\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "d4333c62-ef07-40b9-9aba-53cf1717076f",
+    "level": "log",
+    "timestamp": 1755701021844000
+  },
+  {
+    "event_message": "📋 Entry 6: {\n  keywords: [ \"Ava\" ],\n  textLength: 416,\n  textPreview: \"Whenever {{user}} mentions Ava, Nina will get supe...\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f4ecf476-1e63-4175-b3f5-bc33084b2c80",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "✅ Fetched 6 world info entries\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "6cdc9404-0b64-4647-a5cf-202cb01dc937",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "📋 Entry 4: {\n  keywords: [ \"wine\" ],\n  textLength: 141,\n  textPreview: \"Rockwood Mansion has a wine cellar that houses an ...\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "a1b54237-e85a-4994-a0cc-50d430a8bc78",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "📋 Entry 2: {\n  keywords: [ \"Pain au Chocolat\", \"pastry\", \"dessert\" ],\n  textLength: 282,\n  textPreview: \"{{char}} recommended Pain au Chocolat as breakfast...\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f2adeb58-fc90-455b-8c38-05f23d2e8945",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "📋 Entry 1: {\n  keywords: [ \"french\", \"France\", \"lesson\", \"lessons\", \"teach\" ],\n  textLength: 45,\n  textPreview: \"Nina is teaching {{user}} how to speak french...\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "46ab308d-35ee-42ee-9fd9-1022faaa82f1",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "📝 World info entries query result: {\n  entries: [\n    {\n      keywords: [ \"french\", \"France\", \"lesson\", \"lessons\", \"teach\" ],\n      entry_text: \"Nina is teaching {{user}} how to speak french\"\n    },\n    {\n      keywords: [ \"Pain au Chocolat\", \"pastry\", \"dessert\" ],\n      entry_text: \"{{char}} recommended Pain au Chocolat as breakfast to {{user}} the day they first met. Upon trying it {{user}} cried in joy of tasting something so good. This created a lovely memory on {{char}} and Pain au Chocolat became her favorite dessert and this breakfast a treasured memory.\"\n    },\n    {\n      keywords: [ \"staff\" ],\n      entry_text: \"Rockwood mansion has a big staff of cooks, maids, butlers and people ready to attend {{user}}'s needs. \"\n    },\n    {\n      keywords: [ \"wine\" ],\n      entry_text: \"Rockwood Mansion has a wine cellar that houses an impressive collection of fine vintages, many untouched since the days of {{users}}’s uncle.\"\n    },\n    {\n      keywords: [ \"chef\", \"cook\", \"meal\", \"hungry\", \"food\" ],\n      entry_text: \"Chef Pierre is the principal cook in Rockwood Mansion and the chef in charge for all of the lord's dishes. He sees Nina as a daughter even thought they are not related and has some idea of Nina's secret love towards the lord.\"\n    },\n    {\n      keywords: [ \"Ava\" ],\n      entry_text: \"Whenever {{user}} mentions Ava, Nina will get super jealous, acting annoyed and angry towards {{user}} unable to suppress this feelings to maintain her professional composure. Whenever {{user}} is interacting with Ava, {{char}} will try to interrupt and get {{user}}'s attention towards her instead. She also wants {{user}} to end things with her so nothing stands on her way to make {{user}} fall in love with her.\\n\"\n    }\n  ],\n  error: null,\n  entriesCount: 6,\n  firstEntryKeywords: [ \"french\", \"France\", \"lesson\", \"lessons\", \"teach\" ],\n  firstEntryText: \"Nina is teaching {{user}} how to speak french...\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "577ecd92-872f-4e8b-8b2b-3f52b5a29415",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "📋 Entry 3: {\n  keywords: [ \"staff\" ],\n  textLength: 103,\n  textPreview: \"Rockwood mansion has a big staff of cooks, maids, ...\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "90cc0314-6e69-4adf-8d01-2065f4be468d",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "📋 Entry 5: {\n  keywords: [ \"chef\", \"cook\", \"meal\", \"hungry\", \"food\" ],\n  textLength: 225,\n  textPreview: \"Chef Pierre is the principal cook in Rockwood Mans...\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f323007d-3dbc-4def-9344-6725bdbc1d1e",
+    "level": "log",
+    "timestamp": 1755701021781000
+  },
+  {
+    "event_message": "✅ User has access to world info: 834b9c38-84e7-42a0-8821-f0cfc3b17036\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "ef3a0cff-7345-4ec3-9a50-f4b358d759b7",
+    "level": "log",
+    "timestamp": 1755701021730000
+  },
+  {
+    "event_message": "👤 Ownership check: {\n  isOwner: true,\n  worldInfoCreatorId: \"bb0acf17-c3aa-429a-abdd-aef545216a90\",\n  userId: \"bb0acf17-c3aa-429a-abdd-aef545216a90\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "46c8841d-5564-418b-82c0-ce307bc4311b",
+    "level": "log",
+    "timestamp": 1755701021730000
+  },
+  {
+    "event_message": "🔍 World info access check: {\n  worldInfoAccess: {\n    id: \"834b9c38-84e7-42a0-8821-f0cfc3b17036\",\n    creator_id: \"bb0acf17-c3aa-429a-abdd-aef545216a90\",\n    name: \"Rockwood Mansion\"\n  },\n  accessError: null,\n  worldInfoId: \"834b9c38-84e7-42a0-8821-f0cfc3b17036\"\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "a26baf17-b59f-428f-a072-b308235b0156",
+    "level": "log",
+    "timestamp": 1755701021730000
+  },
+  {
+    "event_message": "🧠 Fetching character memories for: {\n  userId: \"bb0acf17-c3aa-429a-abdd-aef545216a90\",\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  opts: {\n    chatId: \"fa7192c5-08ee-4491-b32a-fb2af99beff5\",\n    includeAutoSummaries: true,\n    limitNonAuto: 30,\n    limitAuto: 5\n  }\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "262ab181-fd79-4b6d-a891-4bc48891d791",
+    "level": "log",
+    "timestamp": 1755701021606000
+  },
+  {
+    "event_message": "🌍 fetchUserSelectedWorldInfo called with: {\n  userId: \"bb0acf17-c3aa-429a-abdd-aef545216a90\",\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  worldInfoId: \"834b9c38-84e7-42a0-8821-f0cfc3b17036\",\n  worldInfoIdType: \"string\",\n  worldInfoIdNull: false,\n  worldInfoIdUndefined: false,\n  worldInfoIdEmpty: false\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "ab84db6c-fd95-4e34-895f-36a0554475c1",
+    "level": "log",
+    "timestamp": 1755701021605000
+  },
+  {
+    "event_message": "🌍 Fetching world info entries for: 834b9c38-84e7-42a0-8821-f0cfc3b17036\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "e06d3e61-9a35-4017-bb6d-765fb4ac8db1",
+    "level": "log",
+    "timestamp": 1755701021605000
+  },
+  {
+    "event_message": "📊 Fetching required data...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "8e2e0bc4-0e4b-403c-a07e-c0be4335ead5",
+    "level": "log",
+    "timestamp": 1755701021603000
+  },
+  {
+    "event_message": "✅ Required fields validated: {\n  chatId: \"fa7192c5-08ee-4491-b32a-fb2af99beff5\",\n  characterId: \"6bc3c92d-e9e5-4161-864e-3aa718cf3da8\",\n  messageLength: 7,\n  hasSelectedWorldInfo: true,\n  selectedWorldInfoId: \"834b9c38-84e7-42a0-8821-f0cfc3b17036\",\n  selectedWorldInfoIdType: \"string\",\n  addonSettings: {\n    dynamicWorldInfo: true,\n    enhancedMemory: true,\n    moodTracking: true,\n    clothingInventory: true,\n    locationTracking: true,\n    timeAndWeather: true,\n    relationshipStatus: true,\n    characterPosition: true,\n    enchantmentStatus: true,\n    itemInventory: true,\n    chainOfThought: true,\n    fewShotExamples: true\n  }\n}\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "9bbc7ff5-0192-4405-8151-af03ab9d79c5",
+    "level": "log",
+    "timestamp": 1755701021603000
+  },
+  {
+    "event_message": "📋 Operation requested: send-message\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "f2f7c7cc-9292-4e19-bd68-a9ed9d47c8f3",
+    "level": "log",
+    "timestamp": 1755701021601000
+  },
+  {
+    "event_message": "🎯 Routing to message streaming...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "5eec21b3-78e1-4021-b551-41bcade356d6",
+    "level": "log",
+    "timestamp": 1755701021601000
+  },
+  {
+    "event_message": "📥 Parsing request body (body size guarded)...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "e49fb62f-3a7f-402e-a20e-089eb60d60ff",
+    "level": "log",
+    "timestamp": 1755701021598000
   },
   {
     "event_message": "✅ User authenticated successfully: bb0acf17-c3aa-429a-abdd-aef545216a90\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "6edd0fbb-7c4d-4487-b6aa-1015bfb72616",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "1aae23a2-ea76-48d3-abfc-376d69e978b6",
     "level": "log",
-    "timestamp": 1755653262416000
+    "timestamp": 1755701021597000
   },
   {
-    "event_message": "📥 Parsing request body...\n",
+    "event_message": "🚀 Unified Chat Management function called\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "2653aa47-fdf5-456f-a390-af089f15683b",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "bc455041-acc7-4a41-accf-d9960e4aecda",
     "level": "log",
-    "timestamp": 1755653262416000
+    "timestamp": 1755701021491000
   },
   {
-    "event_message": "🔐 Starting user authentication...\n",
+    "event_message": "📝 Request ID: e996c386-0786-484b-b341-565bb22e8b80\n",
     "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "a67ec095-0a8e-4a7f-b34c-a7da0433d8b6",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "5913bdc8-f476-48ba-949d-78d0317b3402",
     "level": "log",
-    "timestamp": 1755653262302000
+    "timestamp": 1755701021491000
   },
   {
-    "event_message": "📝 Request ID: d9c8bb80-41fe-48d9-990a-0a1cce0ae4ab\n",
-    "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "869dcc11-7e17-4555-9c96-9194578f896e",
-    "level": "log",
-    "timestamp": 1755653262302000
-  },
-  {
-    "event_message": "🔍 Extract chat context function called - Refactored Version v2\n",
-    "event_type": "Log",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "ea555727-d4e9-4cba-a6c3-a306fcc44aa3",
-    "level": "log",
-    "timestamp": 1755653262302000
-  },
-  {
-    "event_message": "booted (time: 28ms)",
+    "event_message": "booted (time: 37ms)",
     "event_type": "Boot",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "a4089fe8-0834-4e0b-b927-861edacaa450",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "7fdb12d0-0a6b-4818-8749-fdb577c87808",
     "level": "log",
-    "timestamp": 1755653262288000
+    "timestamp": 1755701021482000
   },
   {
-    "event_message": "shutdown",
-    "event_type": "Shutdown",
-    "function_id": "f6f19ab9-deca-4f6f-9940-000d1f115a00",
-    "id": "5d333be9-90fc-4b19-8ca9-38b9187dd759",
+    "event_message": "🔄 Initial extract-addon-context (seed) status 200\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "9b8b5570-6572-4ed3-a534-4a374d3f3b6c",
     "level": "log",
-    "timestamp": 1755653206826000
+    "timestamp": 1755701020938000
+  },
+  {
+    "event_message": "✅ Operation 'create-with-greeting' completed in 960ms\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "642b436e-8031-4388-a5e9-482c401254f6",
+    "level": "log",
+    "timestamp": 1755701020709000
+  },
+  {
+    "event_message": "✅ Fallback: Found character in character_definitions only\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "2907e3d9-2b42-48ff-b299-897bec72231e",
+    "level": "log",
+    "timestamp": 1755701020263000
+  },
+  {
+    "event_message": "Character not found in characters table, trying character_definitions...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "c278549c-b738-4f44-8780-d642eaff1e62",
+    "level": "log",
+    "timestamp": 1755701020181000
+  },
+  {
+    "event_message": "📋 Operation requested: create-with-greeting\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "96bd61cc-c135-4da5-8c3f-18ab32542f8f",
+    "level": "log",
+    "timestamp": 1755701019886000
+  },
+  {
+    "event_message": "🎯 Routing to greeting chat creation...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "700cdbfd-eb25-4926-96ed-88ca89937568",
+    "level": "log",
+    "timestamp": 1755701019886000
+  },
+  {
+    "event_message": "📥 Parsing request body (body size guarded)...\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "1cf1257b-c743-49b0-b522-95c848d20411",
+    "level": "log",
+    "timestamp": 1755701019882000
+  },
+  {
+    "event_message": "✅ User authenticated successfully: bb0acf17-c3aa-429a-abdd-aef545216a90\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "3c710957-deb4-470d-a503-b3ebc1a2cb76",
+    "level": "log",
+    "timestamp": 1755701019882000
+  },
+  {
+    "event_message": "📝 Request ID: 210beefd-af9d-478c-b464-0b4cc30a9fff\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "fad5cbe2-b28e-4e70-8e28-8cc5b9813e85",
+    "level": "log",
+    "timestamp": 1755701019749000
+  },
+  {
+    "event_message": "🚀 Unified Chat Management function called\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "cf61937a-9a86-4512-9a0a-c90d66bb4d82",
+    "level": "log",
+    "timestamp": 1755701019749000
+  },
+  {
+    "event_message": "booted (time: 37ms)",
+    "event_type": "Boot",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "67d6b4f6-e5fc-4c02-8595-95de53727b72",
+    "level": "log",
+    "timestamp": 1755701019741000
+  },
+  {
+    "event_message": "📋 CORS preflight request received\n",
+    "event_type": "Log",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "1405cdaf-c178-4dad-94e2-169ea4f32dca",
+    "level": "log",
+    "timestamp": 1755701019447000
+  },
+  {
+    "event_message": "booted (time: 38ms)",
+    "event_type": "Boot",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "da7d5c1f-10bb-4511-ad28-f7675efe14d3",
+    "level": "log",
+    "timestamp": 1755701019439000
+  },
+  {
+    "event_message": "booted (time: 38ms)",
+    "event_type": "Boot",
+    "function_id": "88d738de-72e8-4cde-afca-349017b90546",
+    "id": "da7d5c1f-10bb-4511-ad28-f7675efe14d3",
+    "level": "log",
+    "timestamp": 1755701019439000
   }
 ]

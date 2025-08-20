@@ -39,9 +39,9 @@ function buildPrompt(opts: {
   const priorFiltered = prior ? Object.fromEntries(Object.entries(prior).filter(([k]) => enabled.includes(k))) : {};
   const lines: string[] = [];
   lines.push('You output ONLY minified JSON. No markdown fences.');
-  lines.push(`Fields:${enabled.join(',')}`);
+  lines.push(`EnabledFields:${enabled.join(',')}`);
   if (firstExtraction) {
-    lines.push('MODE: FIRST_EXTRACTION');
+    lines.push('MODE:FIRST_EXTRACTION');
     if (character?.description) lines.push(`Description:${String(character.description).slice(0,600)}`);
     if (character?.scenario) lines.push(`Scenario:${(typeof character.scenario==='string'?character.scenario:JSON.stringify(character.scenario)).slice(0,600)}`);
     if (greetingUsed) lines.push(`GreetingUsed:${greetingUsed.slice(0,600)}`);
@@ -50,9 +50,15 @@ function buildPrompt(opts: {
   lines.push(`Prior:${JSON.stringify(priorFiltered)}`);
   lines.push(`User:${userMessage.slice(0,800)}`);
   lines.push(`AI:${aiResponse.slice(0,800)}`);
-  lines.push('Each field => {"value":string,"changed":boolean,"reason":one_of[explicit_user,user_request,environment_shift,narrative_followup,ai_spontaneous,no_change]}');
-  lines.push('If unknown -> value "No context", changed false, reason "no_change"');
-  lines.push('Return object with only the field keys.');
+  lines.push('TASK: Decide which enabled fields have a NEW value (different from Prior ignoring case/spacing) that is supported by the latest user/AI exchange OR (first extraction) can be confidently inferred from seed/messages.');
+  lines.push('OUTPUT RULES:');
+  lines.push('- Return ONLY those fields that truly change. Omit unchanged or unknown fields entirely.');
+  lines.push('- For each included field output: "field_name":{"value":string,"changed":true,"reason":one_of[explicit_user,user_request,environment_shift,narrative_followup,ai_spontaneous]}.');
+  lines.push('- Do NOT output fields with no evidence, speculative guesses, or values identical to Prior (case-insensitive).');
+  lines.push('- If a field would be "No context" / unknown -> OMIT it.');
+  lines.push('- If nothing changes return {}.');
+  lines.push('- Keep value concise (≤8 words), no conjunction chains.');
+  lines.push('Return ONLY minified JSON object (no prose, no markdown).');
   return lines.join('\n');
 }
 
@@ -128,6 +134,7 @@ Deno.serve(async (req) => {
     const mode = body.mode === 'conversation' ? 'conversation' : 'initial';
     const userMsg = typeof body.user_message === 'string' ? body.user_message : '';
     const aiMsg = typeof body.ai_response === 'string' ? body.ai_response : '';
+    const injectedInitialContext = (body.initial_context && typeof body.initial_context === 'object') ? body.initial_context : null; // NEW
     const normalizedAddonSettings = sanitizeAddonSettings(body.addon_settings || {});
     logPhase(requestId, 'parse', parseStart, { mode });
     if (!chat_id || !character_id) return createErrorResponse('Missing chat_id or character_id', 400);
@@ -145,6 +152,36 @@ Deno.serve(async (req) => {
       supabase.from('chat_context').select('current_context').eq('chat_id', chat_id).maybeSingle()
     ]);
     const priorContext = priorCtxRow?.data?.current_context || null;
+
+    // If injected initial context is provided, merge & persist it BEFORE any extraction and suppress extraction for its fields
+    if (injectedInitialContext && Object.keys(injectedInitialContext).length) {
+      const baseObj = (priorContext && typeof priorContext === 'object') ? priorContext : {};
+      const merged = { ...(baseObj as Record<string,any>), ...(injectedInitialContext as Record<string,any>) };
+      try {
+        await supabaseAdmin.from('chat_context').upsert({
+          user_id: user.id,
+          chat_id,
+          character_id,
+          current_context: merged,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'chat_id' });
+        console.log('✅ Injected initial context persisted (server)');
+      } catch (injErr) {
+        console.warn('⚠️ Failed to persist injected initial context (continuing):', injErr);
+      }
+    }
+
+    // Backend guard: if initial mode and any pre-seeded non-empty field exists, skip extraction entirely
+    if (mode === 'initial') {
+      const baseObj2 = (priorContext && typeof priorContext === 'object') ? priorContext : {};
+      const effectivePrior = injectedInitialContext ? { ...(baseObj2 as Record<string,any>), ...(injectedInitialContext as Record<string,any>) } : priorContext;
+      if (effectivePrior && typeof effectivePrior === 'object') {
+        const hasManual = Object.values(effectivePrior as any).some(v => typeof v === 'string' && v.trim());
+        if (hasManual) {
+          return createCorsResponse({ success: true, chat_id, message: 'Initial addon context provided/skipped extraction', context_summary: null, timings: { totalMs: ms(tStart) } });
+        }
+      }
+    }
     let greetingUsed: string | null = null;
     let templateReplacer: ((s:string)=>string) | null = null;
     if (!priorContext) {
@@ -173,7 +210,15 @@ Deno.serve(async (req) => {
       return createCorsResponse({ success: true, chat_id, message: 'Greeting updated (extraction deferred)', context_summary: null, timings: { totalMs: ms(tStart) } });
     }
 
-    // DETERMINE enabled fields
+    // DETERMINE enabled fields (skip those already present via injected initial context)
+    const skipFields = new Set<string>();
+    if (injectedInitialContext) {
+      for (const k of Object.keys(injectedInitialContext)) {
+        if (injectedInitialContext[k] && typeof injectedInitialContext[k] === 'string') {
+          skipFields.add(k); // database key form (mood, clothing, location...)
+        }
+      }
+    }
     const fieldMap: Record<string,string> = {
       moodTracking: 'mood',
       clothingInventory: 'clothing',
@@ -184,15 +229,15 @@ Deno.serve(async (req) => {
       timeAwareness: 'conversation_tone' // urgency_level also under timeAwareness
     };
     const enabledFields: string[] = [];
-    if (normalizedAddonSettings.moodTracking) enabledFields.push('mood');
-    if (normalizedAddonSettings.clothingInventory) enabledFields.push('clothing');
-    if (normalizedAddonSettings.locationTracking) enabledFields.push('location');
-    if (normalizedAddonSettings.timeAndWeather) enabledFields.push('time_weather');
-    if (normalizedAddonSettings.relationshipStatus) enabledFields.push('relationship');
-    if (normalizedAddonSettings.characterPosition) enabledFields.push('character_position');
+    if (normalizedAddonSettings.moodTracking && !skipFields.has('mood')) enabledFields.push('mood');
+    if (normalizedAddonSettings.clothingInventory && !skipFields.has('clothing')) enabledFields.push('clothing');
+    if (normalizedAddonSettings.locationTracking && !skipFields.has('location')) enabledFields.push('location');
+    if (normalizedAddonSettings.timeAndWeather && !skipFields.has('time_weather')) enabledFields.push('time_weather');
+    if (normalizedAddonSettings.relationshipStatus && !skipFields.has('relationship')) enabledFields.push('relationship');
+    if (normalizedAddonSettings.characterPosition && !skipFields.has('character_position')) enabledFields.push('character_position');
     if (normalizedAddonSettings.timeAwareness) { enabledFields.push('conversation_tone', 'urgency_level'); }
     logPhase(requestId, 'fields', performance.now(), { enabled: enabledFields });
-    if (!enabledFields.length) return createCorsResponse({ success: true, chat_id, message: 'No enabled fields', context_summary: null, timings: { totalMs: ms(tStart) } });
+    if (!enabledFields.length) return createCorsResponse({ success: true, chat_id, message: 'No enabled fields (all satisfied by initial context or disabled)', context_summary: null, timings: { totalMs: ms(tStart) } });
 
     // PROMPT
     const promptStart = performance.now();
@@ -209,7 +254,7 @@ Deno.serve(async (req) => {
     // MODEL CALL (timeout 6000ms)
     const modelStart = performance.now();
     const controller = new AbortController();
-    const to = setTimeout(()=>controller.abort(), 6000);
+    const to = setTimeout(()=>controller.abort(), 20000);
     let raw = null;
     try { raw = await callModel(prompt, controller.signal); } catch (e) { console.warn(`[${requestId}] model error`, e); }
     clearTimeout(to);

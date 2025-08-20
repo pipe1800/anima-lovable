@@ -41,7 +41,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   const rawName: string = character?.name || '';
   const displayName = rawName.length > 15 ? rawName.slice(0, 15) + '…' : rawName;
   return (
-    <header className="bg-[#0f0f0f] border-b border-gray-700/50 p-3 sm:p-4 w-full">
+    <header className="bg-[#1a1a2e] border-b border-gray-700/50 p-3 sm:p-4 w-full">
       <div className="flex items-center justify-between w-full overflow-hidden">
         <div className="flex items-center space-x-2 sm:space-x-3 min-w-0 flex-1 overflow-hidden">
           <Avatar className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0">
@@ -71,7 +71,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         <div className="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
           {creditsBalance !== undefined && (
             <div 
-              className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-[#0f0f0f] border border-gray-700/50 rounded-lg"
+              className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-1 sm:py-1.5 bg-[#1a1a2e] border border-gray-700/50 rounded-lg"
               data-tutorial="credits-display"
             >
               <Zap className="w-3 h-3 sm:w-4 sm:h-4 text-[#FF7A00]" />
@@ -88,7 +88,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                 // Open the tutorial welcome modal via a global event
                 window.dispatchEvent(new CustomEvent('openTutorialWelcome'));
               }}
-              className="bg-[#0f0f0f] border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 hover:border-blue-400 transition-all duration-200 text-sm sm:text-base px-2 sm:px-3"
+              className="bg-[#1a1a2e] border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 hover:border-blue-400 transition-all duration-200 text-sm sm:text-base px-2 sm:px-3"
               title="Start tutorial (dev only)"
             >
               <span className="hidden sm:inline">📚 Tutorial</span>
@@ -103,7 +103,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
                   variant="outline"
                   size="sm"
                   disabled={isCreatingMemory}
-                  className="bg-[#0f0f0f] border-purple-500/50 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 hover:border-purple-400 transition-all duration-200 text-sm sm:text-base px-2 sm:px-3"
+                  className="bg-[#1a1a2e] border-purple-500/50 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 hover:border-purple-400 transition-all duration-200 text-sm sm:text-base px-2 sm:px-3"
                   title="Create memory from this conversation"
                   data-tutorial="create-memory"
                 >

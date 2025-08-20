@@ -225,6 +225,16 @@ export async function handleCreateWithGreeting(
     if (!characterData) {
       throw new Error('Character not found or access denied');
     }
+    // Parse personality_summary for manual initial addon context
+    let manualInitialEnabled = false; let manualInitialContext: any = null;
+    try {
+      const rawSummary = characterData?.character_definitions?.personality_summary;
+      if (rawSummary) {
+        const parsed = typeof rawSummary === 'string' ? JSON.parse(rawSummary) : rawSummary;
+        manualInitialEnabled = !!parsed?.initial_addon_context_enabled;
+        manualInitialContext = parsed?.initial_addon_context || null;
+      }
+    } catch {}
     const { data: userCharSettings } = await supabaseAdmin
       .from('user_character_settings')
       .select('chat_mode')
@@ -251,7 +261,12 @@ export async function handleCreateWithGreeting(
     }
     const templateReplacer = createTemplateReplacer(userPersona, userProfile, character_name);
     const greetingText = greeting || generateGreeting(characterData, character_name, templateReplacer);
-    const processedGreeting = greetingText;
+    let processedGreeting = greetingText;
+    // Sanitize (remove) conflicting clothing/location lines instead of injecting overrides
+    if (manualInitialEnabled && manualInitialContext) {
+      try { processedGreeting = sanitizeGreetingConflicts(processedGreeting, manualInitialContext); } catch (e) { console.warn('⚠️ Greeting sanitize failed', e); }
+    }
+
     const { error: messageError } = await supabase
       .from('messages')
       .insert({
@@ -266,7 +281,42 @@ export async function handleCreateWithGreeting(
     if (messageError) {
       throw new Error('Failed to create greeting message');
     }
-  // Initial addon context extraction is now deferred until first user → AI exchange; removed fire-and-forget call.
+    // Seed manual initial addon context into chat_context if enabled
+    if (manualInitialEnabled && manualInitialContext && typeof manualInitialContext === 'object') {
+      const cleaned = Object.fromEntries(Object.entries(manualInitialContext).filter(([_,v]) => typeof v === 'string' && v.trim()));
+      if (Object.keys(cleaned).length) {
+        try {
+          await supabase.from('chat_context').upsert({
+            chat_id: chat.id,
+            user_id: user.id,
+            character_id: character_id,
+            current_context: cleaned
+          }, { onConflict: 'chat_id' });
+          // Fire-and-forget initial extraction call with injected context so extractor skips those fields
+          try {
+            const supabaseUrl = (() => { try { return globalThis.Deno?.env?.get('SUPABASE_URL'); } catch { return (globalThis as any)?.process?.env?.SUPABASE_URL; } })();
+            if (supabaseUrl) {
+              const authHeader = req?.headers.get('authorization') || '';
+              fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
+                method: 'POST',
+                headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: chat.id,
+                  character_id: character_id,
+                  mode: 'initial',
+                  initial_context: cleaned,
+                  addon_settings: {}
+                })
+              }).then(r => console.log('🔄 Initial extract-addon-context (seed) status', r.status)).catch(e => console.warn('⚠️ initial extract-addon-context call failed', e));
+            }
+          } catch (callErr) {
+            console.warn('⚠️ Failed to invoke initial extract-addon-context function', callErr);
+          }
+        } catch (seedErr) {
+          console.log('⚠️ Failed to seed manual initial addon context (greeting path)', seedErr);
+        }
+      }
+    }
 
     return {
       success: true,
@@ -289,4 +339,34 @@ export function prepareCharacterForContext(character: any): any {
     scenario: character.character_definitions?.scenario || '',
     greeting: character.character_definitions?.greeting || ''
   };
+}
+
+// Helper: sanitize greeting by stripping conflicting clothing/location sentences when canonical initial context present
+function sanitizeGreetingConflicts(greeting: string, initialCtx: any | null): string {
+  if (!initialCtx || !greeting || typeof greeting !== 'string') return greeting;
+  const clothing = typeof initialCtx.clothing === 'string' ? initialCtx.clothing.trim().toLowerCase() : '';
+  const location = typeof initialCtx.location === 'string' ? initialCtx.location.trim().toLowerCase() : '';
+  if (!clothing && !location) return greeting;
+  const sentences = greeting.split(/(?<=[.!?])\s+/).filter(s => s.trim().length);
+  const clothingPatterns = /(\bwearing\b|\bdressed\b|\bclad in\b|\boutfit\b|\buniform\b|\bgarb\b|\battire\b|\bcoat\b|\bdress\b|\bshirt\b|\bskirt\b|\bjeans\b|\bhar[dm]or\b)/i;
+  const locationPatterns = /(\bat the\b|\bin the\b|\bat a\b|\bin a\b|\bhere in\b|\binside the\b|\bwithin the\b)/i;
+  const cleaned: string[] = [];
+  for (const sent of sentences) {
+    const lower = sent.toLowerCase();
+    let drop = false;
+    if (clothing && clothingPatterns.test(lower) && !lower.includes(clothing)) {
+      drop = true;
+    }
+    if (location && locationPatterns.test(lower) && !lower.includes(location)) {
+      // If sentence mentions a location but not the canonical one, drop it
+      drop = true;
+    }
+    if (!drop) cleaned.push(sent);
+  }
+  // If everything got stripped, fall back to original greeting to avoid empty first message
+  if (cleaned.length === 0) return greeting;
+  const result = cleaned.join(' ');
+  // Avoid overly short / degenerate output
+  if (result.trim().length < 8) return greeting;
+  return result;
 }

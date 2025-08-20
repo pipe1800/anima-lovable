@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 interface FinalizeStepProps {
   data: CharacterFormData;
   onUpdate: (data: Partial<CharacterFormData>) => void;
-  onFinalize: () => void;
+  onFinalize: (overrides?: Partial<CharacterFormData>) => void; // modified to accept overrides
   onPrevious: () => void;
   isCreating?: boolean;
   isEditing?: boolean;
@@ -36,6 +36,17 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   const [characterNotes, setCharacterNotes] = useState<string>(data.notes?.character_notes || '');
   const [creatorNotes, setCreatorNotes] = useState<string>(data.notes?.creator_notes || '');
   const [showPublishWarning, setShowPublishWarning] = useState(false);
+
+  // Custom Initial Addon Context state
+  const [manualAddonContextEnabled, setManualAddonContextEnabled] = useState<boolean>((data as any)?.manual_addon_context_enabled || false);
+  const [manualAddonContext, setManualAddonContext] = useState<any>({
+    mood: (data as any)?.manual_addon_context?.mood || '',
+    clothing: (data as any)?.manual_addon_context?.clothing || '',
+    location: (data as any)?.manual_addon_context?.location || '',
+    time_weather: (data as any)?.manual_addon_context?.time_weather || '',
+    relationship: (data as any)?.manual_addon_context?.relationship || '',
+    character_position: (data as any)?.manual_addon_context?.character_position || ''
+  });
 
   const { user } = useAuth();
 
@@ -85,6 +96,15 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
       setVersion(data.version || version || '1.0.0');
       setCharacterNotes(data.notes?.character_notes || '');
       setCreatorNotes(data.notes?.creator_notes || '');
+      setManualAddonContextEnabled((data as any)?.manual_addon_context_enabled || false);
+      setManualAddonContext({
+        mood: (data as any)?.manual_addon_context?.mood || '',
+        clothing: (data as any)?.manual_addon_context?.clothing || '',
+        location: (data as any)?.manual_addon_context?.location || '',
+        time_weather: (data as any)?.manual_addon_context?.time_weather || '',
+        relationship: (data as any)?.manual_addon_context?.relationship || '',
+        character_position: (data as any)?.manual_addon_context?.character_position || ''
+      });
     }
   }, [data]);
 
@@ -121,13 +141,22 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   };
 
   const handleFinalize = () => {
-    onUpdate({
+    const cleanedManualContext = Object.fromEntries(Object.entries(manualAddonContext).filter(([_, v]) => typeof v === 'string' && v.trim()));
+    const overrides: Partial<CharacterFormData> = {
       visibility,
       nsfw_enabled: enableNSFW,
       version,
-      notes: { character_notes: characterNotes, creator_notes: creatorNotes }
-    });
-    onFinalize();
+      notes: { character_notes: characterNotes, creator_notes: creatorNotes },
+      ...(manualAddonContextEnabled && Object.keys(cleanedManualContext).length > 0 ? {
+        manual_addon_context_enabled: true,
+        manual_addon_context: cleanedManualContext
+      } : {
+        manual_addon_context_enabled: false,
+        manual_addon_context: null
+      })
+    };
+    console.log('🧪 [FinalizeStep] Submitting finalize overrides:', overrides);
+    onFinalize(overrides);
   };
 
   const tokenInfo = estimateCreatorTokenUsage(data, userPlan);
@@ -319,6 +348,45 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
         </div>
       </div>
 
+      {/* Custom Initial Addon Context Section */}
+      <div className="mb-6 md:mb-8 border border-gray-700/50 rounded-xl p-4 md:p-6 bg-gray-800/30">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <Label className="text-white text-base md:text-lg font-medium block mb-2">Custom Initial Addon Context</Label>
+            <p className="text-gray-400 text-xs md:text-sm mb-2">Pre-seed selected tracking fields for this character. Blank fields will be auto-extracted on first message. If any field here is set, the initial extraction for those specific fields is skipped.</p>
+            <p className="text-gray-500 text-[11px] md:text-xs">Max 160 characters per field.</p>
+          </div>
+          <div className="flex-shrink-0">
+            <Switch checked={manualAddonContextEnabled} onCheckedChange={setManualAddonContextEnabled} className="data-[state=checked]:bg-[#FF7A00]" />
+          </div>
+        </div>
+        {manualAddonContextEnabled && (
+          <div className="mt-4 grid md:grid-cols-2 gap-4">
+            {[
+              { key: 'mood', label: 'Mood' },
+              { key: 'clothing', label: 'Clothing / Inventory' },
+              { key: 'location', label: 'Location / Setting' },
+              { key: 'time_weather', label: 'Time & Weather' },
+              { key: 'relationship', label: 'Relationship Status' },
+              { key: 'character_position', label: 'Character Position' }
+            ].map(f => (
+              <div key={f.key} className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-300">{f.label}</label>
+                <textarea
+                  rows={2}
+                  maxLength={160}
+                  placeholder="Leave blank to auto-extract"
+                  className="bg-[#1e1e1e] border border-gray-700 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  value={manualAddonContext[f.key]}
+                  onChange={(e) => setManualAddonContext((prev: any) => ({ ...prev, [f.key]: e.target.value }))}
+                />
+                <div className="flex justify-end text-[10px] text-gray-500">{manualAddonContext[f.key]?.length || 0}/160</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Navigation */}
       <div className="flex flex-col sm:flex-row justify-between gap-3 sm:gap-0">
         <Button
@@ -332,7 +400,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
         
         <Button
           onClick={handleFinalize}
-          className="bg-gradient-to-r from-[#FF7A00] to-[#FF7A00]/80 hover:from-[#FF7A00]/90 hover:to-[#FF7A00]/70 text-white px-8 md:px-12 py-2.5 md:py-3 text-base md:text-lg font-bold shadow-lg order-1 sm:order-2"
+          className="bg-gradient-to-r from-[#FF7A00] to-[#FF7A00]/80 hover:from-[#FF7A00]/90 hover:to-[#FF7A00]/70 text-white px-8 md:px-12 py-2.5 md:py-3 text-base md:text-lg font-bold order-1 sm:order-2"
           disabled={isCreating}
         >
           {isCreating ? (

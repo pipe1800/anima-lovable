@@ -23,6 +23,8 @@ export interface TrackedContext {
   timeAndWeather: string;
   relationshipStatus: string;
   characterPosition: string;
+  enchantmentStatus: string; // NEW
+  itemInventory: string; // NEW
 }
 
 export interface Character {

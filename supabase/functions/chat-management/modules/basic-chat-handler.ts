@@ -48,6 +48,17 @@ export async function handleCreateBasicChat(
     let characterDetails = characterDetailsResult.status === 'fulfilled' ? characterDetailsResult.value.data : null;
     const selectedPersona = selectedPersonaResult.status === 'fulfilled' ? selectedPersonaResult.value.data : null;
 
+    // Attempt to parse manual initial addon context
+    let manualInitialEnabled = false; let manualInitialContext: any = null;
+    try {
+      const rawSummary = characterDetails?.character_definitions?.personality_summary;
+      if (rawSummary) {
+        const parsed = typeof rawSummary === 'string' ? JSON.parse(rawSummary) : rawSummary;
+        manualInitialEnabled = !!parsed?.initial_addon_context_enabled;
+        manualInitialContext = parsed?.initial_addon_context || null;
+      }
+    } catch {}
+
     // Fallback: Try character_definitions if not found in characters
     if (!characterDetails) {
       console.log('Character not found in characters table, trying character_definitions...');
@@ -92,6 +103,23 @@ export async function handleCreateBasicChat(
 
     console.log('Chat created:', chat.id);
 
+    // Seed manual initial addon context if applicable
+    if (manualInitialEnabled && manualInitialContext && typeof manualInitialContext === 'object') {
+      const cleaned = Object.fromEntries(Object.entries(manualInitialContext).filter(([_,v]) => typeof v === 'string' && v.trim()));
+      if (Object.keys(cleaned).length) {
+        try {
+          await supabase.from('chat_context').upsert({
+            chat_id: chat.id,
+            user_id: user.id,
+            character_id: character_id,
+            current_context: cleaned
+          }, { onConflict: 'chat_id' });
+        } catch (seedErr) {
+          console.log('⚠️ Failed to seed manual initial addon context (basic path)', seedErr);
+        }
+      }
+    }
+
     // Template replacement function
     const replaceTemplates = (content: string): string => {
       if (!content) return content;
@@ -104,10 +132,32 @@ export async function handleCreateBasicChat(
         .replace(/\{\{char\}\}/g, charName);
     };
 
+    // Helper reused from greeting processor for sanitation (lightweight duplication to avoid cross-import complexity)
+    function sanitizeGreetingConflictsBasic(greeting: string, initialCtx: any | null): string {
+      if (!initialCtx || !greeting || typeof greeting !== 'string') return greeting;
+      const clothing = typeof initialCtx.clothing === 'string' ? initialCtx.clothing.trim().toLowerCase() : '';
+      const location = typeof initialCtx.location === 'string' ? initialCtx.location.trim().toLowerCase() : '';
+      if (!clothing && !location) return greeting;
+      const sentences = greeting.split(/(?<=[.!?])\s+/).filter(s => s.trim().length);
+      const clothingPatterns = /(\bwearing\b|\bdressed\b|\bclad in\b|\boutfit\b|\buniform\b|\bgarb\b|\battire\b|\bcoat\b|\bdress\b|\bshirt\b|\bskirt\b|\bjeans\b|\bhar[dm]or\b)/i;
+      const locationPatterns = /(\bat the\b|\bin the\b|\bat a\b|\bin a\b|\bhere in\b|\binside the\b|\bwithin the\b)/i;
+      const cleaned: string[] = [];
+      for (const sent of sentences) {
+        const lower = sent.toLowerCase();
+        let drop = false;
+        if (clothing && clothingPatterns.test(lower) && !lower.includes(clothing)) drop = true;
+        if (location && locationPatterns.test(lower) && !lower.includes(location)) drop = true;
+        if (!drop) cleaned.push(sent);
+      }
+      if (cleaned.length === 0) return greeting; // avoid empty
+      const result = cleaned.join(' ');
+      return result.trim().length < 8 ? greeting : result;
+    }
+
     // Get raw greeting and apply template replacement
     const rawGreeting = characterDetails.character_definitions?.greeting || 
       `Hello! I'm ${character_name}. It's great to meet you. What would you like to talk about?`;
-    const processedGreeting = replaceTemplates(rawGreeting);
+    const processedGreeting = manualInitialEnabled ? sanitizeGreetingConflictsBasic(replaceTemplates(rawGreeting), manualInitialContext) : replaceTemplates(rawGreeting);
     
     console.log('✅ Processed greeting:', processedGreeting);
 

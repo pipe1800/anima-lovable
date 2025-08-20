@@ -82,13 +82,13 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
             <Menu className="w-10 h-10" strokeWidth={2.5} />
           </Button>
         </SheetTrigger>
-      <SheetContent side="left" className="w-2/3 md:w-80 bg-[#121212] border-gray-700 p-0 [&>button]:hidden" data-tutorial="mobile-nav-sheet">
+      <SheetContent side="left" className="w-2/3 md:w-80 bg-[#1a1a2e] border-gray-700 p-0 [&>button]:hidden" data-tutorial="mobile-nav-sheet">
         {/* A11y: Provide title and description for the dialog */}
         <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
         <SheetDescription className="sr-only">Choose a destination from the list of links.</SheetDescription>
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="p-6 border-b border-gray-700 relative">
+          <div className="p-6 border-b border-gray-700 relative bg-[#1a1a2e]">
             <div className="flex items-center justify-center">
               <img 
                 src={LOGO_URL} 
@@ -144,7 +144,7 @@ export const MobileNavMenu = ({ userCredits = 0, username = 'User', pageTitle, s
           </div>
 
           {/* Footer */}
-          <div className="p-4 border-t border-gray-700 space-y-4">
+          <div className="p-4 border-t border-gray-700 space-y-4 bg-[#1a1a2e]">
             {/* NSFW Toggle */}
             <div className="px-2">
               <NSFWToggle />

@@ -318,6 +318,31 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
       console.warn('⚠️ Heuristic enhancement failed (non-fatal):', heurErr);
     }
 
+    // === USER INTENT GATING (prevents spontaneous drift) ===
+    try {
+      if (!godMode) {
+        const intentRegex = /(change|put on|take off|remove|switch|swap|go to|move to|head to|walk to|enter|leave|travel to|pick up|drop|equip|unequip|wear|put .* on|move over to|step into|steps into|heads toward|heads to)/i;
+        const userShowsIntent = intentRegex.test(message || '');
+        if (!userShowsIntent) {
+          const gateFields = ['mood','clothing','location','relationship','time_weather','character_position'];
+          let gatedCount = 0;
+          for (const f of gateFields) {
+            const priorVal = (prior as any)[f];
+            if (priorVal && flattened[f] && flattened[f] !== priorVal) {
+              console.log(`🚫 Gated spontaneous change for ${f}: '${flattened[f]}' -> reverting to prior '${priorVal}'`);
+              flattened[f] = priorVal;
+              gatedCount++;
+            }
+          }
+          if (gatedCount > 0) {
+            console.log(`🔒 User intent gating reverted ${gatedCount} field(s) due to lack of explicit user intent.`);
+          }
+        }
+      }
+    } catch (gateErr) {
+      console.warn('⚠️ User intent gating failed (non-fatal):', gateErr);
+    }
+
     return flattened;
   } catch (error) {
     console.error('Context extraction error:', error);
@@ -326,6 +351,20 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
 }
 export async function saveContextUpdates(extractedContext, addonSettings, userId, chatId, characterId, supabase, options: { forcePersist?: boolean } = {}) {
   if (!extractedContext || !addonSettings) return;
+
+  // Fetch existing persisted context so we don't erase unchanged fields
+  let existing: any = null;
+  try {
+    const { data: existingRow } = await supabase
+      .from('chat_context')
+      .select('current_context')
+      .eq('chat_id', chatId)
+      .maybeSingle();
+    existing = existingRow?.current_context || null;
+  } catch (e) {
+    console.warn('⚠️ Failed to fetch existing chat_context (continuing with null):', e);
+  }
+
   const contextMappings = [
     { setting: 'moodTracking', field: 'mood', type: 'mood' },
     { setting: 'clothingInventory', field: 'clothing', type: 'clothing' },
@@ -337,109 +376,82 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
     { setting: 'timeAwareness', field: 'urgency_level', type: 'urgency_level' }
   ];
 
-  // Build the context object for the chat_context table
+  // Start with existing (so unchanged fields persist)
   const contextData: DbContext = {
-    mood: null,
-    clothing: null,
-    location: null,
-    relationship: null,
-    time_weather: null,
-    character_position: null,
-    conversation_tone: null,
-    urgency_level: null
+    mood: existing?.mood ?? null,
+    clothing: existing?.clothing ?? null,
+    location: existing?.location ?? null,
+    relationship: existing?.relationship ?? null,
+    time_weather: existing?.time_weather ?? null,
+    character_position: existing?.character_position ?? null,
+    conversation_tone: existing?.conversation_tone ?? null,
+    urgency_level: existing?.urgency_level ?? null
   };
 
   let hasUpdates = false;
 
   for (const { setting, field } of contextMappings) {
-    if (addonSettings[setting] && extractedContext[field]) {
-      const newValue = extractedContext[field];
-      // Only update if we got a meaningful value (not "No context")
-      if (newValue !== 'No context') {
-        (contextData as any)[field] = newValue;
+    if (!addonSettings[setting]) continue; // skip disabled addons
+    const newValue = extractedContext[field]; // only present when model signaled change
+    if (typeof newValue === 'string' && newValue && newValue !== 'No context') {
+      if ((contextData as any)[field] !== newValue) {
+        (contextData as any)[field] = newValue; // apply change
         hasUpdates = true;
-        console.log(`💾 Setting ${field} context:`, newValue);
-      } else {
-        console.log(`⏭️ Skipping ${field} context update - no changes detected`);
+        console.log(`💾 Updated ${field} context ->`, newValue);
       }
+    } else {
+      // No new value provided -> keep existing as-is
+      // (Do NOT null it out; this preserves prior state until an explicit update arrives)
     }
   }
 
-  if (hasUpdates || options.forcePersist) {
-    try {
-      if (options.forcePersist && !hasUpdates) {
-        // Populate contextData with "No context" values to initialize row
-        for (const k of Object.keys(contextData)) {
-          (contextData as any)[k] = null; // keep as null so UI can still show placeholders
-        }
-        console.log('💾 Forcing baseline chat_context row creation (no meaningful updates yet)');
-      } else {
-        console.log('💾 Updating chat_context table with:', contextData);
-      }
-      
-      const { error } = await supabase
-        .from('chat_context')
-        .upsert({
-          user_id: userId,
-          chat_id: chatId,
-          character_id: characterId,
-          current_context: contextData,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'chat_id'
-        });
+  // If forcing persist for first-time baseline and we still have no row, allow upsert (will just store existing merged nulls)
+  if (!hasUpdates && !options.forcePersist) {
+    console.log('⏭️ No context changes detected; skipping persist (existing values retained in DB)');
+    return;
+  }
 
-      if (error) {
-        console.error('Context update error:', error);
-      } else {
-        console.log('✅ Context saved to chat_context table successfully');
-        
-        // ALSO update the latest AI message with the new context for immediate UI update
-  console.log('🔄 Updating latest AI message with extracted context...');
-        try {
-          // Build message context format using shared mapper
-          const messageContext = dbToUi(contextData);
-          if (options.forcePersist && !hasUpdates) {
-            // Ensure all expected keys present with 'No context' so UI recognizes initialized state
-            for (const key of Object.keys(messageContext)) {
-              if (messageContext[key] == null) messageContext[key] = 'No context';
-            }
-          }
-          
-          // Find the latest AI message in this chat
-          const { data: latestMessage, error: messageError } = await supabase
-            .from('messages')
-            .select('id')
-            .eq('chat_id', chatId)
-            .eq('is_ai_message', true)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          
-          if (messageError) {
-            console.error('❌ Failed to find latest AI message:', messageError);
-          } else if (latestMessage) {
-            // Update the latest AI message with the extracted context
-            const { error: updateError } = await supabase
-              .from('messages')
-              .update({ 
-                current_context: messageContext,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', latestMessage.id);
-            
-            if (updateError) {
-              console.error('❌ Failed to update latest AI message with context:', updateError);
-            } else {
-              console.log('✅ Latest AI message updated with context - UI should update immediately');
-            }
-          }
-        } catch (msgUpdateError) {
-          console.error('❌ Error updating latest AI message:', msgUpdateError);
-        }
-      }
-    } catch (error) {
+  try {
+    const { error } = await supabase
+      .from('chat_context')
+      .upsert({
+        user_id: userId,
+        chat_id: chatId,
+        character_id: characterId,
+        current_context: contextData,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'chat_id' });
+
+    if (error) {
       console.error('Context update error:', error);
+    } else {
+      console.log('✅ Context saved (merged) to chat_context table');
+      // Also update latest AI message with FULL merged context for UI
+      try {
+        const messageContext = dbToUi(contextData);
+        const { data: latestMessage, error: messageError } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('chat_id', chatId)
+          .eq('is_ai_message', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (messageError) {
+          console.error('❌ Failed to find latest AI message:', messageError);
+        } else if (latestMessage) {
+          const { error: updateError } = await supabase
+            .from('messages')
+            .update({ current_context: messageContext, updated_at: new Date().toISOString() })
+            .eq('id', latestMessage.id);
+          if (updateError) console.error('❌ Failed to update latest AI message with merged context:', updateError);
+          else console.log('✅ Latest AI message updated with merged context');
+        }
+      } catch (msgErr) {
+        console.error('❌ Error updating latest AI message with merged context:', msgErr);
+      }
     }
+  } catch (err) {
+    console.error('Context update error:', err);
   }
 }

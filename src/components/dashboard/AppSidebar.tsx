@@ -21,6 +21,8 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { getUserCredits } from '@/lib/supabase-queries';
+import { Badge } from '@/components/ui/badge';
+import { SidebarModeToggle } from '@/components/chat/SidebarModeToggle';
 
 // Preload the logo image to prevent reloading
 const LOGO_URL = '/assets/logo.png';
@@ -35,11 +37,25 @@ const baseMainItems = [
   { title: "Profile", url: "/profile", icon: User },
 ];
 
-const AppSidebar = () => {
+
+// Add props interface for sidebar mode + context count
+interface AppSidebarProps {
+  sidebarMode?: 'navigation' | 'context';
+  onToggleMode?: () => void;
+  contextCount?: number;
+  userCreditsOverride?: number; // new: external credits value to prevent flicker
+}
+
+const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onToggleMode, contextCount = 0, userCreditsOverride }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile, signOut, loading, subscription: authSubscription } = useAuth();
-  const [userCredits, setUserCredits] = useState(0);
+  const [userCredits, setUserCredits] = useState(() => {
+    // initialize from override or cached value to reduce flicker
+    if (typeof userCreditsOverride === 'number') return userCreditsOverride;
+    const cached = localStorage.getItem('lastUserCredits');
+    return cached ? parseInt(cached, 10) : 0;
+  });
   const [isCollapsed, setIsCollapsed] = useState(false);
   const currentPath = location.pathname;
 
@@ -93,18 +109,25 @@ const AppSidebar = () => {
     ];
   }, [authSubscription?.status, authSubscription?.plan]);
 
+  useEffect(() => {
+    if (typeof userCreditsOverride === 'number') {
+      setUserCredits(userCreditsOverride);
+      localStorage.setItem('lastUserCredits', String(userCreditsOverride));
+    }
+  }, [userCreditsOverride]);
+
   const fetchCredits = useCallback(async () => {
-    if (!user) return;
-    
+    if (!user || typeof userCreditsOverride === 'number') return; // skip fetch if override provided
     try {
       const creditsResult = await getUserCredits(user.id);
       if (creditsResult.data && typeof creditsResult.data.balance === 'number') {
         setUserCredits(creditsResult.data.balance);
+        localStorage.setItem('lastUserCredits', String(creditsResult.data.balance));
       }
     } catch (error) {
       console.error('Error fetching credits:', error);
     }
-  }, [user]);
+  }, [user, userCreditsOverride]);
 
   useEffect(() => {
     fetchCredits();
@@ -145,7 +168,7 @@ const AppSidebar = () => {
 
   if (loading) {
     return (
-      <div className="fixed left-0 top-0 w-64 h-screen bg-[#1b1b1b] border-r border-gray-700/50 z-40">
+      <div className="fixed left-0 top-0 w-64 h-screen bg-[#1a1a2e] border-r border-gray-700/50 z-40">
         <div className="flex items-center justify-center h-full">
           <div className="text-white">Loading...</div>
         </div>
@@ -158,7 +181,7 @@ const AppSidebar = () => {
   }
 
   return (
-    <div className={`bg-[#0f0f0f] h-full text-white flex flex-col transition-all duration-300 select-none relative z-40 ${
+    <div className={`bg-[#1a1a2e] h-full text-white flex flex-col transition-all duration-300 select-none relative z-40 ${
       isCollapsed ? 'w-16' : 'w-64'
     }`}>
       <div className="flex flex-col h-full">
@@ -193,6 +216,22 @@ const AppSidebar = () => {
 
         {/* Navigation items */}
         <div className="px-2 py-4 flex-1">
+          {/* Nav / Context Toggle - only show inside chat */}
+          {currentPath.startsWith('/chat') && (
+            <SidebarModeToggle
+              isCollapsed={isCollapsed}
+              activeMode={sidebarMode === 'context' ? 'context' : 'navigation'}
+              onSelect={(mode) => {
+                if (mode !== sidebarMode && onToggleMode) onToggleMode();
+                if (mode === 'navigation' && sidebarMode === 'context') {
+                  // nothing else; ChatLayout handles switching view
+                }
+              }}
+              contextCount={contextCount}
+              className="mb-4"
+            />
+          )}
+
           <div className="space-y-3">
             {mainItems.map((item) => {
               const IconComponent = item.icon;

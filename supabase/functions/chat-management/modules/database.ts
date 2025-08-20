@@ -550,46 +550,58 @@ export async function fetchCurrentContext(
   characterId: string,
   supabase: SupabaseClient
 ): Promise<CurrentContext> {
-  // Query the correct table: chat_context
   const { data: contextData, error } = await supabase
     .from('chat_context')
     .select('current_context')
     .eq('user_id', userId)
     .eq('chat_id', chatId)
     .eq('character_id', characterId)
-    .single();
+    .maybeSingle();
 
-  if (error || !contextData?.current_context) {
+  let raw = contextData?.current_context || null;
+
+  // Fallback: if no stored context, attempt to derive from character_definitions (initial_addon_context in personality_summary)
+  if ((!raw || Object.values(raw).every(v => v == null)) && characterId) {
+    try {
+      const { data: def } = await supabase
+        .from('character_definitions')
+        .select('personality_summary')
+        .eq('character_id', characterId)
+        .maybeSingle();
+      if (def?.personality_summary) {
+        let parsed: any = null;
+        try { parsed = typeof def.personality_summary === 'string' ? JSON.parse(def.personality_summary) : def.personality_summary; } catch {}
+        if (parsed?.initial_addon_context_enabled && parsed?.initial_addon_context && typeof parsed.initial_addon_context === 'object') {
+          raw = parsed.initial_addon_context;
+          console.log('🌱 Fallback initial_addon_context loaded from character_definitions');
+        }
+      }
+    } catch (fbErr) {
+      console.warn('⚠️ Fallback initial_addon_context load failed', fbErr);
+    }
+  }
+
+  if (error && !raw) {
     console.log('No context found in chat_context table for chat:', chatId);
-    return {};
+    return {} as any;
   }
 
-  // The context is stored in database format, convert to interface format
-  const dbContext = contextData.current_context as any;
-  const currentContext: CurrentContext = {};
-  
-  // Convert database field names to interface field names
-  if (dbContext && typeof dbContext === 'object' && dbContext.mood && dbContext.mood !== 'No context') {
-    currentContext.moodTracking = dbContext.mood;
-  }
-  if (dbContext && dbContext.clothing && dbContext.clothing !== 'No context') {
-    currentContext.clothingInventory = dbContext.clothing;
-  }
-  if (dbContext && dbContext.location && dbContext.location !== 'No context') {
-    currentContext.locationTracking = dbContext.location;
-  }
-  if (dbContext && dbContext.time_weather && dbContext.time_weather !== 'No context') {
-    currentContext.timeAndWeather = dbContext.time_weather;
-  }
-  if (dbContext && dbContext.relationship && dbContext.relationship !== 'No context') {
-    currentContext.relationshipStatus = dbContext.relationship;
-  }
-  if (dbContext && dbContext.character_position && dbContext.character_position !== 'No context') {
-    currentContext.characterPosition = dbContext.character_position;
-  }
+  const pick = (k: string) => (typeof raw?.[k] === 'string' && raw[k].trim() && raw[k] !== 'No context') ? raw[k].trim() : null;
+  const normalized: any = {
+    moodTracking: pick('moodTracking') || pick('mood'),
+    clothingInventory: pick('clothingInventory') || pick('clothing'),
+    locationTracking: pick('locationTracking') || pick('location'),
+    timeAndWeather: pick('timeAndWeather') || pick('time_weather'),
+    relationshipStatus: pick('relationshipStatus') || pick('relationship'),
+    characterPosition: pick('characterPosition') || pick('character_position'),
+    enchantmentStatus: pick('enchantmentStatus') || pick('enchantment_status'),
+    itemInventory: pick('itemInventory') || pick('item_inventory')
+  };
 
-  console.log('✅ Fetched and converted context:', { dbContext, currentContext });
-  return currentContext;
+  Object.keys(normalized).forEach(k => normalized[k] == null && delete normalized[k]);
+
+  console.log('✅ Fetched & normalized context:', { raw, normalized });
+  return normalized;
 }
 
 export async function getNextMessageOrder(

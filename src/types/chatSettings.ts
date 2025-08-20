@@ -15,6 +15,8 @@ export interface UserGlobalChatSettings {
   time_and_weather: boolean;
   relationship_status: boolean;
   character_position: boolean;
+  enchantment_status: boolean; // NEW
+  item_inventory: boolean; // NEW
   chain_of_thought: boolean;
   few_shot_examples: boolean;
   god_mode: boolean; // NEW: user assertions override context when true

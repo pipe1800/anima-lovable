@@ -8,6 +8,8 @@ export interface DatabaseContext {
   time_weather?: string | null;
   relationship?: string | null;
   character_position?: string | null;
+  enchantment_status?: string | null; // NEW
+  item_inventory?: string | null; // NEW
 }
 
 /**
@@ -20,14 +22,15 @@ export function convertDatabaseContextToTrackedContext(dbContext: any): TrackedC
 
   // Check if it's already in TrackedContext format
   if ('moodTracking' in dbContext) {
-    // Already in frontend format, return as-is
     return {
       moodTracking: (dbContext.moodTracking && dbContext.moodTracking !== 'No context') ? dbContext.moodTracking : 'No context',
       clothingInventory: (dbContext.clothingInventory && dbContext.clothingInventory !== 'No context') ? dbContext.clothingInventory : 'No context',
       locationTracking: (dbContext.locationTracking && dbContext.locationTracking !== 'No context') ? dbContext.locationTracking : 'No context',
       timeAndWeather: (dbContext.timeAndWeather && dbContext.timeAndWeather !== 'No context') ? dbContext.timeAndWeather : 'No context',
       relationshipStatus: (dbContext.relationshipStatus && dbContext.relationshipStatus !== 'No context') ? dbContext.relationshipStatus : 'No context',
-      characterPosition: (dbContext.characterPosition && dbContext.characterPosition !== 'No context') ? dbContext.characterPosition : 'No context'
+      characterPosition: (dbContext.characterPosition && dbContext.characterPosition !== 'No context') ? dbContext.characterPosition : 'No context',
+      enchantmentStatus: (dbContext.enchantmentStatus && dbContext.enchantmentStatus !== 'No context') ? dbContext.enchantmentStatus : 'No context',
+      itemInventory: (dbContext.itemInventory && dbContext.itemInventory !== 'No context') ? dbContext.itemInventory : 'No context'
     };
   }
 
@@ -38,7 +41,9 @@ export function convertDatabaseContextToTrackedContext(dbContext: any): TrackedC
     locationTracking: (dbContext.location && dbContext.location !== 'No context') ? dbContext.location : 'No context',
     timeAndWeather: (dbContext.time_weather && dbContext.time_weather !== 'No context') ? dbContext.time_weather : 'No context',
     relationshipStatus: (dbContext.relationship && dbContext.relationship !== 'No context') ? dbContext.relationship : 'No context',
-    characterPosition: (dbContext.character_position && dbContext.character_position !== 'No context') ? dbContext.character_position : 'No context'
+    characterPosition: (dbContext.character_position && dbContext.character_position !== 'No context') ? dbContext.character_position : 'No context',
+    enchantmentStatus: (dbContext.enchantment_status && dbContext.enchantment_status !== 'No context') ? dbContext.enchantment_status : 'No context',
+    itemInventory: (dbContext.item_inventory && dbContext.item_inventory !== 'No context') ? dbContext.item_inventory : 'No context'
   };
   
   return result;
@@ -54,7 +59,9 @@ export function convertTrackedContextToDatabaseContext(trackedContext: TrackedCo
     location: (trackedContext.locationTracking && trackedContext.locationTracking !== 'No context') ? trackedContext.locationTracking : null,
     time_weather: (trackedContext.timeAndWeather && trackedContext.timeAndWeather !== 'No context') ? trackedContext.timeAndWeather : null,
     relationship: (trackedContext.relationshipStatus && trackedContext.relationshipStatus !== 'No context') ? trackedContext.relationshipStatus : null,
-    character_position: (trackedContext.characterPosition && trackedContext.characterPosition !== 'No context') ? trackedContext.characterPosition : null
+    character_position: (trackedContext.characterPosition && trackedContext.characterPosition !== 'No context') ? trackedContext.characterPosition : null,
+    enchantment_status: (trackedContext.enchantmentStatus && trackedContext.enchantmentStatus !== 'No context') ? trackedContext.enchantmentStatus : null,
+    item_inventory: (trackedContext.itemInventory && trackedContext.itemInventory !== 'No context') ? trackedContext.itemInventory : null
   };
 }
 

@@ -267,6 +267,15 @@ const CharacterCreator = () => {
     guardedNavigate(destination);
   }, [guardedNavigate]);
 
+  const handleSaveCharacterWithOverrides = (overrides?: Partial<typeof characterData>) => {
+    const tokenInfo = estimateCreatorTokenUsage({ ...characterData, ...(overrides || {}) });
+    if (tokenInfo.totals.overTotal) {
+      toast({ title: 'Cannot Save', description: 'Character exceeds 3,500 token limit. Reduce content before saving.', variant: 'destructive' });
+      return;
+    }
+    saveCharacter(overrides);
+  };
+
   const handleSaveCharacter = () => {
     const tokenInfo = estimateCreatorTokenUsage(characterData);
     if (tokenInfo.totals.overTotal) {
@@ -309,7 +318,7 @@ const CharacterCreator = () => {
         return (
           <FinalizeStep
             {...stepProps}
-            onFinalize={handleSaveCharacter}
+            onFinalize={(overrides) => handleSaveCharacterWithOverrides(overrides)}
             isCreating={isCreating}
             isEditing={isEditing}
             selectedTags={selectedTags}

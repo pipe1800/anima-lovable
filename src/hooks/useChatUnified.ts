@@ -36,7 +36,9 @@ const initialChatState: ChatState = {
     locationTracking: 'No context',
     timeAndWeather: 'No context',
     relationshipStatus: 'No context',
-    characterPosition: 'No context'
+    characterPosition: 'No context',
+    enchantmentStatus: 'No context', // NEW
+    itemInventory: 'No context' // NEW
   },
   pendingMessages: new Map(),
   lastActivity: Date.now(),
@@ -262,10 +264,12 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
         const convertedContext = {
           moodTracking: rawContext?.mood || 'No context',
           clothingInventory: rawContext?.clothing || 'No context',
-          locationTracking: rawContext?.location || 'No context',
+            locationTracking: rawContext?.location || 'No context',
           timeAndWeather: rawContext?.time_weather || 'No context',
           relationshipStatus: rawContext?.relationship || 'No context',
-          characterPosition: rawContext?.character_position || 'No context'
+          characterPosition: rawContext?.character_position || 'No context',
+          enchantmentStatus: rawContext?.enchantment_status || 'No context', // NEW
+          itemInventory: rawContext?.item_inventory || 'No context' // NEW
         } as TrackedContext;
 
         dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
@@ -646,6 +650,22 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
       dispatch({ type: 'SET_TYPING', payload: false });
     }
   }, [user, chatId, characterId, sendMessageMutation, state.trackedContext, creditsBalance]);
+
+  // Listen for optimistic/authoritative context events from extraction util
+  useEffect(() => {
+    function onAddonContextUpdated(e: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+      try {
+        const ctx = e.detail?.context as TrackedContext | undefined;
+        if (!ctx) return;
+        logger.debug('⚡ addon-context-updated event received', { optimistic: e.detail?.optimistic, ts: e.detail?.ts });
+        dispatch({ type: 'UPDATE_CONTEXT', payload: ctx });
+      } catch (err) {
+        logger.warn('addon-context-updated handler failed', err);
+      }
+    }
+    window.addEventListener('addon-context-updated', onAddonContextUpdated as any);
+    return () => window.removeEventListener('addon-context-updated', onAddonContextUpdated as any);
+  }, []);
 
   // ==========================================================================
   // RETURN UNIFIED INTERFACE (restored)

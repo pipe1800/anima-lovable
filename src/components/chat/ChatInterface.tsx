@@ -244,6 +244,8 @@ const ChatInterface = ({
     timeAndWeather: globalSettings.time_and_weather,
     relationshipStatus: globalSettings.relationship_status,
     characterPosition: globalSettings.character_position,
+    enchantmentStatus: (globalSettings as any).enchantment_status, // NEW
+    itemInventory: (globalSettings as any).item_inventory, // NEW
     chainOfThought: globalSettings.chain_of_thought,
     fewShotExamples: globalSettings.few_shot_examples,
   } : {
@@ -255,6 +257,8 @@ const ChatInterface = ({
     timeAndWeather: false,
     relationshipStatus: false,
     characterPosition: false,
+    enchantmentStatus: false, // NEW
+    itemInventory: false, // NEW
     chainOfThought: false,
     fewShotExamples: false,
   };
@@ -308,10 +312,34 @@ const ChatInterface = ({
       window.history.replaceState(null, '', `/chat/${character.id}/${newChatId}`);
       onChatCreated?.(newChatId);
 
+      // Attempt to seed manual addon context if character has initial_addon_context
+      try {
+        const initialCtx = (characterDetails as any)?.definition?.[0]?.personality_summary;
+        let parsed: any = null;
+        if (initialCtx) {
+          try { parsed = typeof initialCtx === 'string' ? JSON.parse(initialCtx) : initialCtx; } catch {}
+        }
+        const enabled = parsed?.initial_addon_context_enabled;
+        const manualCtx = parsed?.initial_addon_context;
+        if (enabled && manualCtx && typeof manualCtx === 'object') {
+          const cleaned = Object.fromEntries(Object.entries(manualCtx).filter(([_,v]) => typeof v === 'string' && v.trim()));
+          if (Object.keys(cleaned).length > 0) {
+            log.info('🟢 Seeding manual initial addon context', cleaned);
+            await supabase.from('chat_context').upsert({
+              chat_id: newChatId,
+              user_id: user.id,
+              character_id: character.id,
+              current_context: cleaned as any
+            }, { onConflict: 'chat_id' as any });
+          }
+        }
+      } catch (seedErr) {
+        log.warn('Manual addon context seed failed', seedErr);
+      }
+
   // Skip greeting polling; first AI message arrives via realtime and unified hook
   try { await queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(newChatId) }); } catch {}
 
-      // Now hide greeting bubble deterministically only after attempt to show persisted greeting
       if (chatPhase === 'greeting') {
         setChatPhase('creating');
       }
@@ -342,7 +370,7 @@ const ChatInterface = ({
       setIsCreatingChat(false);
       setSendingFirstMessage(false);
     }
-  }, [user, currentChatId, sendingFirstMessage, greetingVariants, selectedGreetingIndex, log, character.id, character.name, propSelectedPersonaId, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, onChatCreated, sendMessage, onFirstMessage, toast, chatPhase, queryClient]);
+  }, [user, currentChatId, sendingFirstMessage, greetingVariants, selectedGreetingIndex, log, character.id, character.name, propSelectedPersonaId, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, onChatCreated, sendMessage, onFirstMessage, toast, chatPhase, queryClient, characterDetails]);
 
   // Sync tracked context with parent
   useEffect(() => {

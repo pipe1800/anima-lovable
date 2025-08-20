@@ -98,16 +98,20 @@ export const ChatConfigurationTab = ({
     effectiveSettings.time_and_weather,
     effectiveSettings.relationship_status,
     effectiveSettings.character_position,
+    (effectiveSettings as any).enchantment_status,
+    (effectiveSettings as any).item_inventory,
   ].filter(Boolean).length : 0;
 
   // Define which keys are considered stateful tracking addons (for limit checks)
-  const STATEFUL_KEYS: Array<keyof UserGlobalChatSettings> = [
+  const STATEFUL_KEYS: Array<keyof UserGlobalChatSettings | string> = [
     'mood_tracking',
     'clothing_inventory',
     'location_tracking',
     'time_and_weather',
     'relationship_status',
     'character_position',
+    'enchantment_status', // NEW
+    'item_inventory', // NEW
   ];
 
   // Display persona shows pending selection or current selection
@@ -189,6 +193,20 @@ export const ChatConfigurationTab = ({
         available: isTrueFanOrWhale || effectiveSettings?.character_position || activeStatefulAddons < 2,
         dynamicCost: null
       },
+      enchantment_status: {
+        name: 'Enchantment Status',
+        cost: 5,
+        description: 'Track magical effects & buffs',
+        available: isTrueFanOrWhale || (effectiveSettings as any)?.enchantment_status || activeStatefulAddons < 2,
+        dynamicCost: null
+      },
+      item_inventory: {
+        name: 'Item Inventory',
+        cost: 5,
+        description: 'Track items carried',
+        available: isTrueFanOrWhale || (effectiveSettings as any)?.item_inventory || activeStatefulAddons < 2,
+        dynamicCost: null
+      },
     },
     'Advanced Prompting Toolkit': {
       chain_of_thought: { 
@@ -214,7 +232,7 @@ export const ChatConfigurationTab = ({
   const handleToggleAddon = (addonKey: keyof Pick<UserGlobalChatSettings, 
     'dynamic_world_info' | 'enhanced_memory' | 'mood_tracking' | 'clothing_inventory' | 
     'location_tracking' | 'time_and_weather' | 'relationship_status' | 'character_position' | 
-    'chain_of_thought' | 'few_shot_examples' | 'god_mode'>) => {
+    'chain_of_thought' | 'few_shot_examples' | 'god_mode'> | 'enchantment_status' | 'item_inventory') => {
     
     if (!globalSettings) return;
 
