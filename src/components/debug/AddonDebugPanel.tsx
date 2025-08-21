@@ -7,7 +7,7 @@ import { ChevronDown, Bug, RefreshCw, AlertTriangle, MessageCircle } from 'lucid
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserGlobalChatSettings } from '@/data/chats/settings';
 import { Chats } from '@/data';
-import { getLatestAutoSummary } from '@/data/memories/queries';
+import { getLatestAutoSummary } from '@/data/chats/queries';
 
 interface AddonDebugPanelProps {
   characterId?: string;

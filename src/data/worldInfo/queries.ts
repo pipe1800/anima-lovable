@@ -129,22 +129,7 @@ export const searchPublicWorldInfos = async (params: SearchParams): Promise<Sear
   return { data: results, total: count || 0, hasMore: offset + limit < (count || 0) };
 };
 
-export const getTags = async () => {
-  const { data, error } = await supabase
-    .from('tags')
-    .select('id, name')
-    .order('name');
-  return { data: data || [], error };
-};
-
-export const getTagByName = async (name: string) => {
-  const { data, error } = await supabase
-    .from('tags')
-    .select('id, name')
-    .ilike('name', name)
-    .maybeSingle();
-  return { data, error };
-};
+// Removed duplicate generic tag getters (2025-08-21). Use Tags.getAllTags / Tags.getTagNames / Tags.getNSFWTag / Tags.getTagByNameInsensitive from '@/data/tags/queries'.
 
 export const getUserOwnedWorldInfos = async (userId: string) => {
   const { data, error } = await supabase

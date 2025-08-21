@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { updateMemory, deleteMemory } from '@/data/memories/queries';
+import { updateMemory, deleteMemory } from '@/data/chats/queries';
 
 interface MemoriesDialogProps {
   open: boolean;

@@ -8,8 +8,6 @@ export * as CharacterInteractions from './characters/interactions';
 export * as CharacterUserSettings from './characters/userCharacterSettings';
 export * as CharacterProfileView from './characters/profileView';
 export * as Billing from './billing/queries';
-// Payments module deprecated (paypal Management handled via edge). KEEP alias temporarily.
-export * as PaymentsDeprecated from './payments/queries';
 export * as WorldInfo from './worldInfo/queries';
 export * as WorldInfoMutations from './worldInfo/mutations';
 export * as WorldInfoInteractions from './worldInfo/interactions';
@@ -24,7 +22,11 @@ export * as Uploads from './uploads/storage';
 export * from './shared/searchTypes';
 export * as Tags from './tags/queries';
 export * as PersonaMutations from './personas/mutations';
-// Removed deprecated exports: WorldInfoPublic, WorldInfoExtendedDeprecated, WorldInfoTagsDeprecated
+export * as Payments from './payments/client'; // compatibility layer
+export * as PayPalClient from './billing/paypalClient'; // New export for PayPal client
+// Legacy Payments compatibility already points to payments/client -> now index.ts in payments re-exports billing/paypalClient
+
+// Removed deprecated exports: WorldInfoPublic, WorldInfoExtendedDeprecated, WorldInfoTagsDeprecated, CharacterExtended, PaymentsDeprecated
 
 // Flattened re-exports (to be pruned later)
 export * from './profile/queries';

@@ -1,5 +1,5 @@
 import { supabase } from '@/db/client';
-import { Uploads } from '@/data';
+import { Uploads, Profile as ProfileData } from '@/data';
 
 export const getSession = () => supabase.auth.getSession();
 export const onAuthStateChange = (callback: Parameters<typeof supabase.auth.onAuthStateChange>[0]) => supabase.auth.onAuthStateChange(callback);
@@ -16,13 +16,7 @@ export const resetPasswordForEmail = (email: string, redirectTo: string) =>
 export const setSession = (access_token: string, refresh_token: string) =>
   supabase.auth.setSession({ access_token, refresh_token });
 
-export const markOnboardingCompleted = async (userId: string) => {
-  const { error } = await supabase
-    .from('profiles')
-    .update({ onboarding_completed: true })
-    .eq('id', userId);
-  return { error };
-};
+export const markOnboardingCompleted = (userId: string) => ProfileData.setOnboardingCompleted(userId, true);
 
 // Delegated avatar provisioning (was duplicated). Uses Uploads.ensureDefaultAvatar now.
 export const ensureDefaultAvatar = async (userId: string) => {
@@ -42,7 +36,7 @@ export const ensureDefaultAvatar = async (userId: string) => {
 
 export const completeOnboarding = async (userId: string) => {
   await updateUser({ onboarding_completed: true });
-  await markOnboardingCompleted(userId);
+  await ProfileData.setOnboardingCompleted(userId, true);
 };
 
 export const ensureDefaultAvatarIfMissing = async (userId: string) => {

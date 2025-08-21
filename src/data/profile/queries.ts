@@ -1,6 +1,17 @@
 import { supabase } from '@/db/client';
 import type { Profile } from '@/types/database';
 
+// Consolidated profile mutations (migrated from auth/queries.ts & profile/tutorial.ts)
+export const setOnboardingCompleted = async (userId: string, completed = true) => {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ onboarding_completed: completed })
+    .eq('id', userId);
+  return { error };
+};
+
+export const updateTutorialStatus = async (userId: string, completed: boolean) => setOnboardingCompleted(userId, completed);
+
 export const getPublicProfile = async (userId: string) => {
   const { data, error } = await supabase
     .from('public_profiles')

@@ -20,7 +20,7 @@ import {
   Lock
 } from 'lucide-react';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
-import { WorldInfoPublic, WorldInfoMutations, Auth } from '@/data';
+import { WorldInfo, WorldInfoMutations, WorldInfoInteractions, Auth } from '@/data';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -78,11 +78,11 @@ export default function PublicWorldInfoProfile() {
       if (!id) return;
       try {
         setLoading(true);
-        const { data, error } = await WorldInfoPublic.getPublicWorldInfoDetailsCentral({ worldInfoId: id, currentUserId: user?.id });
+        const { data, error } = await WorldInfo.getPublicWorldInfoDetailsFull(id, user?.id );
         if (error || !data) throw error || new Error('Failed to load world info');
         setWorldInfo(data as any);
         if (data.tags && data.tags.length > 0) {
-          // TODO: move similar world info lookup into data layer (WorldInfoPublic.getSimilar)
+          // TODO: move similar world info lookup into data layer (WorldInfo.getSimilar)
         }
       } catch (err) {
         console.error('Error fetching world info:', err);
@@ -102,7 +102,7 @@ export default function PublicWorldInfoProfile() {
     }
     setIsLiking(true);
     try {
-      const { data, error } = await WorldInfoPublic.toggleWorldInfoLikeCentral(worldInfo.id);
+      const { data, error } = await WorldInfoInteractions.toggleWorldInfoLike(worldInfo.id);
       if (error) throw error;
       setWorldInfo(prev => prev ? { ...prev, isLiked: !!data?.isLiked, likesCount: data?.likesCount ?? prev.likesCount } : prev);
     } catch (error) {
@@ -118,12 +118,12 @@ export default function PublicWorldInfoProfile() {
     setIsUsingLorebook(true);
     try {
       if (worldInfo.isUsed) {
-        const { data, error } = await WorldInfoPublic.removeWorldInfoFromCollectionCentral(worldInfo.id, user.id);
+        const { data, error } = await WorldInfoInteractions.removeWorldInfoFromCollection(worldInfo.id);
         if (error) throw error;
         setWorldInfo(prev => prev ? { ...prev, isUsed: false, interaction_count: Math.max((prev.interaction_count || 0) - 1, 0) } : null);
         toast({ title: 'Lorebook Removed', description: 'This lorebook has been removed from your collection' });
       } else {
-        const { data, error } = await WorldInfoPublic.addWorldInfoToCollectionCentral(worldInfo.id, user.id);
+        const { data, error } = await WorldInfoInteractions.addWorldInfoToCollection(worldInfo.id);
         if (error) throw error;
         setWorldInfo(prev => prev ? { ...prev, isUsed: true, interaction_count: (prev.interaction_count || 0) + 1 } : null);
         toast({ title: 'Lorebook Added', description: 'This lorebook has been added to your collection' });
