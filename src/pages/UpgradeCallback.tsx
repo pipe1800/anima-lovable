@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { Payments } from '@/data';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import logger from '@/utils/logger';
 import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/queries/chatQueries';
+import { chatQueryKeys } from '@/data/chats/queryKeys';
 
 export const UpgradeCallback = () => {
   const [searchParams] = useSearchParams();
@@ -28,12 +28,7 @@ export const UpgradeCallback = () => {
       try {
         log.info('Using paypal-management to verify subscription upgrade');
 
-        const { data, error } = await supabase.functions.invoke('paypal-management', {
-          body: { 
-            operation: 'verify-subscription',
-            subscriptionId: subscriptionId
-          }
-        });
+        const { data, error } = await Payments.verifySubscription(subscriptionId);
 
         log.debug('Function response:', { data, error });
 

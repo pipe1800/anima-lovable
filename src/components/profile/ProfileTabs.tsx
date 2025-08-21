@@ -1,11 +1,12 @@
-
 import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CharacterGrid } from './CharacterGrid';
 import { PersonasTab } from './PersonasTab';
-import { getUserCharacters } from '@/lib/supabase-queries';
+import { CharacterUser } from '@/data';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
+
+// import { getUserCharacters } from '@/lib/supabase-queries';
 
 export const ProfileTabs = () => {
   const { user } = useAuth();
@@ -14,7 +15,7 @@ export const ProfileTabs = () => {
     queryKey: ['user-characters', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const { data } = await getUserCharacters(user.id);
+      const { data } = await CharacterUser.getUserCharacters(user.id);
       return data || [];
     },
     enabled: !!user?.id,

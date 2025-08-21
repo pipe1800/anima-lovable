@@ -6,8 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { X, ChevronDown, ChevronRight } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-import { getUserActiveSubscription } from '@/lib/supabase-queries';
+import { Billing, Tags } from '@/data';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Tables } from '@/integrations/supabase/types';
 import type { CharacterFormData } from '@/hooks/useCharacterCreation';
@@ -44,19 +43,18 @@ const PersonalityStep = ({ data, onUpdate, onNext, onPrevious, selectedTags, set
       try {
         // Fetch user subscription
         if (user) {
-          const { data: subscription } = await getUserActiveSubscription(user.id);
+          const { data: subscription } = await Billing.getUserActiveSubscription(user.id);
           setUserPlan(subscription?.plan?.name || 'Guest Pass');
         } else {
           setUserPlan('Guest Pass');
         }
 
         // Fetch tags
-        const { data: tagsData, error } = await supabase.from('tags').select('*').order('name');
+        const { data: tagsData, error } = await Tags.getAllTags();
         if (error) {
           console.error('Error fetching tags:', error);
           setAllTags([]);
         } else {
-          console.log('PersonalityStep: Fetched tags:', tagsData);
           setAllTags((tagsData as Tag[]) || []);
         }
       } catch (error) {

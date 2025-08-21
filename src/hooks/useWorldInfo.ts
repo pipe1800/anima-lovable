@@ -4,22 +4,29 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  createWorldInfo,
-  updateWorldInfo,
-  deleteWorldInfo,
-  addWorldInfoEntry,
-  updateWorldInfoEntry,
-  deleteWorldInfoEntry,
+  createWorldInfo as createWorldInfoData,
+  updateWorldInfoCore,
+  cascadeDeleteWorldInfo,
+  addWorldInfoEntry as addWorldInfoEntryData,
+  updateWorldInfoEntry as updateWorldInfoEntryData,
+  deleteWorldInfoEntry as deleteWorldInfoEntryData,
   addWorldInfoTag,
-  removeWorldInfoTag,
-  type WorldInfoCreationData,
-  type WorldInfoEntryData
-} from '@/lib/world-info-operations';
-import { uploadAvatar } from '@/lib/avatar-upload';
+  removeWorldInfoTag
+} from '@/data/worldInfo/mutations';
+import { uploadAvatar } from '@/data/uploads/storage';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Tag = Tables<'tags'>;
 type WorldInfoEntry = Tables<'world_info_entries'>;
+
+export interface WorldInfoCreationData {
+  name: string;
+  short_description?: string;
+  visibility: 'public' | 'unlisted' | 'private';
+  avatar_url?: string;
+}
+
+export interface WorldInfoEntryData { keywords: string[]; entry_text: string; }
 
 export interface WorldInfoFormData {
   name: string;
@@ -63,27 +70,26 @@ export function useWorldInfo(options: UseWorldInfoOptions = {}) {
   const loadWorldInfo = async (id: string) => {
     setIsLoading(true);
     try {
-      // Fetch world info details with entries and tags
       const [worldInfoData, entriesData, tagsData] = await Promise.all([
-        queryClient.fetchQuery({
+        queryClient.fetchQuery<any>({
           queryKey: ['world-info', id],
-          staleTime: 5 * 60 * 1000, // 5 minutes
+          staleTime: 5 * 60 * 1000,
         }),
-        queryClient.fetchQuery({
+        queryClient.fetchQuery<WorldInfoEntry[]>({
           queryKey: ['world-info-entries', id],
           staleTime: 5 * 60 * 1000,
         }),
-        queryClient.fetchQuery({
+        queryClient.fetchQuery<Tag[]>({
           queryKey: ['world-info-tags', id],
           staleTime: 5 * 60 * 1000,
         })
       ]);
 
       setFormData({
-        name: worldInfoData.name,
-        short_description: worldInfoData.short_description || '',
-        avatar_url: worldInfoData.avatar_url || '',
-        visibility: worldInfoData.visibility,
+        name: worldInfoData?.name || '',
+        short_description: worldInfoData?.short_description || '',
+        avatar_url: (worldInfoData as any)?.avatar_url || '',
+        visibility: (worldInfoData?.visibility as any) || 'private',
         entries: entriesData || [],
         tags: tagsData || []
       });
@@ -135,14 +141,15 @@ export function useWorldInfo(options: UseWorldInfoOptions = {}) {
 
       if (worldInfoId) {
         // Update existing
-        await updateWorldInfo(worldInfoId, worldInfoData);
+        await updateWorldInfoCore(worldInfoId, worldInfoData as any);
         toast({
           title: "Success",
           description: "World info updated successfully"
         });
       } else {
         // Create new
-        const newWorldInfo = await createWorldInfo(worldInfoData);
+        const { data: newWorldInfo } = await createWorldInfoData(worldInfoData as any);
+        if (!newWorldInfo) throw new Error('Create failed');
         savedWorldInfoId = newWorldInfo.id;
 
         // Add tags to new world info
@@ -180,12 +187,13 @@ export function useWorldInfo(options: UseWorldInfoOptions = {}) {
     if (!user) return;
 
     try {
-      const avatarUrl = await uploadAvatar(file, user.id);
-      if (avatarUrl) {
-        updateFormData({ avatar_url: avatarUrl });
+      const { publicUrl, error } = await uploadAvatar(user.id, file);
+      if (error) throw error;
+      if (publicUrl) {
+        updateFormData({ avatar_url: publicUrl });
         toast({
-          title: "Success",
-          description: "Avatar uploaded successfully"
+          title: 'Success',
+          description: 'Avatar uploaded successfully'
         });
       }
     } catch (error) {
@@ -210,7 +218,7 @@ export function useWorldInfo(options: UseWorldInfoOptions = {}) {
     }
 
     try {
-      await addWorldInfoEntry(worldInfoId, entry);
+      await addWorldInfoEntryData(worldInfoId, entry);
       await queryClient.invalidateQueries({ queryKey: ['world-info-entries', worldInfoId] });
       toast({
         title: "Success",
@@ -228,7 +236,7 @@ export function useWorldInfo(options: UseWorldInfoOptions = {}) {
 
   const updateEntry = async (entryId: string, entry: WorldInfoEntryData) => {
     try {
-      await updateWorldInfoEntry(entryId, entry);
+      await updateWorldInfoEntryData(entryId, entry);
       await queryClient.invalidateQueries({ queryKey: ['world-info-entries', worldInfoId] });
       toast({
         title: "Success",
@@ -246,7 +254,7 @@ export function useWorldInfo(options: UseWorldInfoOptions = {}) {
 
   const deleteEntry = async (entryId: string) => {
     try {
-      await deleteWorldInfoEntry(entryId);
+      await deleteWorldInfoEntryData(entryId);
       await queryClient.invalidateQueries({ queryKey: ['world-info-entries', worldInfoId] });
       toast({
         title: "Success",

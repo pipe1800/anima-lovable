@@ -18,10 +18,9 @@ import {
 import { Eye, EyeOff, Upload, Image, Loader2, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrentUser } from '@/hooks/useProfile';
-import { updateProfile } from '@/lib/supabase-queries';
-import { supabase } from '@/integrations/supabase/client';
+import { Profile as ProfileQueries, Auth } from '@/data';
 import { useToast } from '@/hooks/use-toast';
-import { uploadAvatar, uploadBanner } from '@/lib/upload-operations';
+import { uploadAvatar, uploadBanner } from '@/data/uploads/storage';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { useNSFW } from '@/contexts/NSFWContext';
@@ -115,52 +114,33 @@ export const AccountSettings = () => {
 
     try {
       setIsLoading(true);
-      
-      // First verify current password by attempting to sign in
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user.email!,
-        password: passwordData.currentPassword
-      });
-
+      const { error: signInError } = await Auth.signInWithPassword(user.email!, passwordData.currentPassword);
       if (signInError) {
         toast({
-          title: "Error",
-          description: "Current password is incorrect",
-          variant: "destructive"
+          title: 'Error',
+          description: 'Current password is incorrect',
+          variant: 'destructive'
         });
         return;
       }
-
-      // Update password
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: passwordData.newPassword
-      });
-
+      const { error: updateError } = await Auth.updateUser({ password: passwordData.newPassword });
       if (updateError) {
         toast({
-          title: "Error", 
-          description: `Failed to update password: ${updateError.message}`,
-          variant: "destructive"
+          title: 'Error',
+            description: `Failed to update password: ${updateError.message}`,
+          variant: 'destructive'
         });
       } else {
         toast({
-          title: "Success",
-          description: "Password updated successfully"
+          title: 'Success',
+          description: 'Password updated successfully'
         });
-        setPasswordData({
-          currentPassword: '',
-          newPassword: '',
-          confirmPassword: ''
-        });
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
         setShowPasswordFields(false);
       }
     } catch (error) {
       console.error('Password update error:', error);
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive"
-      });
+      toast({ title: 'Error', description: 'An unexpected error occurred', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
@@ -172,7 +152,7 @@ export const AccountSettings = () => {
     try {
       setIsLoading(true);
       
-      const { error } = await updateProfile(user.id, {
+      const { error } = await ProfileQueries.updateProfile(user.id, {
         username: formData.username,
         bio: formData.bio,
         avatar_url: formData.avatar_url || '/default_avatar.jpg',
@@ -211,8 +191,8 @@ export const AccountSettings = () => {
 
     try {
       setIsLoading(true);
-      const avatarUrl = await uploadAvatar(file, user.id);
-      
+      const { publicUrl: avatarUrl, error: avatarErr } = await uploadAvatar(user.id, file);
+      if (avatarErr) throw avatarErr;
       if (avatarUrl) {
         setFormData(prev => ({ ...prev, avatar_url: avatarUrl }));
         toast({
@@ -238,8 +218,8 @@ export const AccountSettings = () => {
 
     try {
       setIsLoading(true);
-      const bannerUrl = await uploadBanner(file, user.id);
-      
+      const { publicUrl: bannerUrl, error: bannerErr } = await uploadBanner(user.id, file);
+      if (bannerErr) throw bannerErr;
       if (bannerUrl) {
         setFormData(prev => ({ ...prev, banner_url: bannerUrl }));
         toast({
@@ -261,24 +241,13 @@ export const AccountSettings = () => {
 
   const handleDeleteAccount = async () => {
     if (deleteConfirmation !== profile?.username || !user) return;
-
     try {
       setIsDeleting(true);
-      
-      // For now, just sign out the user - the actual deletion would need to be implemented
-      // in the backend or as a proper RPC function once it's added to the Supabase types
-      await supabase.auth.signOut();
+      await Auth.signOut();
       window.location.href = '/';
-      
-      // Note: The delete_user_account RPC function needs to be properly typed in Supabase
-      // before we can use it here. For now, we'll just sign out the user.
     } catch (error) {
       console.error('Account deletion error:', error);
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive"
-      });
+      toast({ title: 'Error', description: 'An unexpected error occurred', variant: 'destructive' });
     } finally {
       setIsDeleting(false);
     }

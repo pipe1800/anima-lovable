@@ -5,8 +5,8 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
 import { Upload, X, Type, Image as ImageIcon } from 'lucide-react';
-import { useUserGlobalChatSettings, useUpdateGlobalChatSettings, useUpdateBackgroundImage } from '@/queries/chatSettingsQueries';
-import { supabase } from '@/integrations/supabase/client';
+import { useUserGlobalChatSettings, useUpdateGlobalChatSettings, useUpdateBackgroundImage } from '@/data/chats/settings';
+import { Uploads, Auth } from '@/data';
 
 interface ChatStyleTabProps {
   currentChatId?: string | null;
@@ -96,16 +96,14 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUns
     if (!file) return;
     try {
       setSaving(true);
-      // Upload to storage now so preview works, but do not persist DB setting until Save
-      const ext = file.name.split('.').pop() || 'png';
-      const { data: auth } = await supabase.auth.getUser();
+      const { data: auth } = await Auth.getCurrentUser();
       const userId = auth.user?.id;
       if (!userId) throw new Error('Not authenticated');
+      const ext = file.name.split('.').pop() || 'png';
       const path = `backgrounds/${userId}.${ext}`;
-      const uploadRes = await supabase.storage.from('user-style').upload(path, file, { upsert: true, contentType: file.type });
-      if (uploadRes.error) throw uploadRes.error;
-      const { data: pub } = supabase.storage.from('user-style').getPublicUrl(path);
-      setField('background_image_url', pub.publicUrl);
+      const { publicUrl, error } = await Uploads.uploadToBucket({ bucket: 'user-style', path, file, upsert: true });
+      if (error) throw error;
+      setField('background_image_url', publicUrl || null);
     } catch (e) {
       console.error('Background upload failed', e);
     } finally {

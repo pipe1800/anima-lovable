@@ -1,0 +1,150 @@
+import { supabase } from '@/db/client';
+
+// CONSOLIDATED CHAT DOMAIN NOTE (2025-08-21):
+// - chat/context.ts deprecated; its RPC-based context loader is now exposed here as getChatContextRPC
+// - messages/queries.ts deprecated; updateMessageContent moved here
+// After removing legacy files, only use exports from this module for chat data access.
+
+export const deleteChat = async (chatId: string, userId: string) => {
+  try {
+    const { data, error } = await (supabase as any).rpc('delete_chat_complete', {
+      p_chat_id: chatId,
+      p_user_id: userId,
+    });
+    return { data, error };
+  } catch (err) {
+    return { data: null, error: err };
+  }
+};
+
+export const deleteMultipleChats = async (chatIds: string[], userId: string) => {
+  const results: Array<{ data: any; error: any }> = [];
+  const batchSize = 3;
+  for (let i = 0; i < chatIds.length; i += batchSize) {
+    const batch = chatIds.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(chatId => deleteChat(chatId, userId)));
+    results.push(...batchResults);
+    if (i + batchSize < chatIds.length) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  return results;
+};
+
+export const deleteAllUserChats = async (userId: string) => {
+  const { data: allChats, error: fetchError } = await supabase
+    .from('chats')
+    .select('id')
+    .eq('user_id', userId);
+  if (fetchError) return { success: false, error: fetchError, deletedCount: 0 };
+  if (!allChats?.length) return { success: true, error: null, deletedCount: 0 };
+  const chatIds = allChats.map(c => c.id);
+  const results = await deleteMultipleChats(chatIds, userId);
+  const successCount = results.filter(r => !r.error).length;
+  const errorCount = results.filter(r => r.error).length;
+  return { success: errorCount === 0, error: errorCount ? `Failed ${errorCount}` : null, deletedCount: successCount };
+};
+
+export const getUserChatsPaginated = async (userId: string, page = 1, limit = 20) => {
+  const safeLimit = Math.min(Math.max(limit, 1), 100);
+  const offset = (page - 1) * safeLimit;
+  const { data, error } = await (supabase as any).rpc('get_user_chats', { p_limit: safeLimit, p_offset: offset });
+  const rows = (data || []) as any[];
+  if (error) return { data: [], totalCount: 0, currentPage: page, totalPages: 0, hasMore: false, error };
+  const total = rows.length ? rows[0].total_count || 0 : 0;
+  const chats = rows.map(row => ({
+    chat_id: row.chat_id,
+    character_id: row.character_id,
+    chat_created_at: row.chat_created_at,
+    chat_updated_at: row.chat_updated_at,
+    character_name: row.character_name,
+    character_avatar_url: row.character_avatar_url,
+    last_message: row.last_message_id ? {
+      id: row.last_message_id,
+      created_at: row.last_message_created_at,
+      is_ai: row.last_message_is_ai,
+      content: row.last_message_content,
+    } : null,
+    message_count: row.message_count || 0,
+  }));
+  return { data: chats, totalCount: total, currentPage: page, totalPages: safeLimit ? Math.ceil(total / safeLimit) : 0, hasMore: offset + safeLimit < total, error: null };
+};
+
+export const getChatMessages = async (chatId: string, limit = 30, beforeOrder?: number) => {
+  const { data, error } = await (supabase as any)
+    .rpc('get_chat_messages', { p_chat_id: chatId, p_limit: limit, p_before_order: beforeOrder ?? null });
+  if (error) return { data: [], hasMore: false, error };
+  const rows = (data || []) as any[];
+  const hasMore = rows.length ? !!rows[0].has_more : false;
+  return { data: rows, hasMore, error: null };
+};
+
+// NEW: centralized helper to upsert chat context (used by ChatInterface manual seed)
+export const upsertChatContext = async (args: { chatId: string; userId: string; characterId: string; currentContext: Record<string, any>; }) => {
+  const { chatId, userId, characterId, currentContext } = args;
+  return supabase.from('chat_context').upsert({
+    chat_id: chatId,
+    user_id: userId,
+    character_id: characterId,
+    current_context: currentContext as any
+  }, { onConflict: 'chat_id' as any });
+};
+
+// NEW: Fetch chat mode (centralized)
+export const getChatMode = async (chatId: string, userId: string) => {
+  if (!chatId || !userId) return { data: null, error: null };
+  const { data, error } = await supabase
+    .from('chats')
+    .select('chat_mode')
+    .eq('id', chatId)
+    .eq('user_id', userId)
+    .single();
+  return { data, error };
+};
+
+// RPC variant (from deprecated chat/context.ts) retained for specialized context assembly logic
+export const getChatContextRPC = async (chatId: string, userId: string, characterId: string) => {
+  const { data, error } = await (supabase as any).rpc('get_chat_context', {
+    p_chat_id: chatId,
+    p_user_id: userId,
+    p_character_id: characterId,
+  });
+  return { data: (data as any[]) || null, error };
+};
+
+// Existing direct table fetch (canonical lightweight accessor)
+export const getChatContext = async (args: { chatId: string; userId: string; characterId: string }) => {
+  const { chatId, userId, characterId } = args;
+  if (!chatId || !userId || !characterId) return { data: null, error: null };
+  const { data, error } = await supabase
+    .from('chat_context')
+    .select('current_context')
+    .eq('chat_id', chatId)
+    .eq('user_id', userId)
+    .eq('character_id', characterId)
+    .maybeSingle();
+  return { data, error };
+};
+
+// NEW (debug): minimal fields for message stats panel
+export const getChatMessagesForStats = async (chatId: string) => {
+  if (!chatId) return { data: [], error: null };
+  return supabase
+    .from('messages')
+    .select('is_ai_message, content, message_order')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: true });
+};
+
+// Centralized message content update (moved from messages/queries.ts)
+export const updateMessageContent = async (messageId: string, content: string) => {
+  const { error } = await supabase
+    .from('messages')
+    .update({ content })
+    .eq('id', messageId);
+  return { error };
+};
+
+// NOTE: Ensure any imports referencing deprecated paths are updated:
+//  - '@/data/chat/context' -> use getChatContext or getChatContextRPC from '@/data/chats/queries'
+//  - '@/data/messages/queries' -> use updateMessageContent from '@/data/chats/queries'

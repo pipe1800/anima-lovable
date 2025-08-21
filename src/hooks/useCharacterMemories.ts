@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getCharacterMemories } from '@/data/edge';
 
 export interface CharacterMemory {
   id: string;
@@ -31,16 +31,11 @@ export const useCharacterMemories = (characterId: string | null, userId: string 
     try {
       console.log('🧠 Fetching memories for character:', characterId);
 
-      const { data, error } = await supabase.functions.invoke('get-character-memories', {
-        body: {
-          characterId,
-          userId
-        }
-      });
+      const { data, error } = await getCharacterMemories({ characterId, userId });
 
       if (error) {
         console.error('❌ Error fetching memories:', error);
-        setError(error.message);
+        setError(error.message || 'Failed to fetch memories');
         return;
       }
 

@@ -5,8 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Upload, User, Loader2, Check, X } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useProfile';
-import { updateProfile } from '@/lib/supabase-queries';
-import { supabase } from '@/integrations/supabase/client';
+import { Profile as ProfileQueries, Uploads } from '@/data';
 import { toast } from 'sonner';
 
 interface ProfileSetupProps {
@@ -72,17 +71,10 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
 
       try {
         // Check if username is taken
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('username', username)
-          .neq('id', user?.id) // Exclude current user
-          .single();
-
-        if (error && (error as any).code === 'PGRST116') {
-          // No rows returned means username is available
+        const { available } = await ProfileQueries.isUsernameAvailable(username, user?.id);
+        if (available) {
           setUsernameAvailable(true);
-        } else if (data) {
+        } else {
           setUsernameAvailable(false);
           setUsernameError('Username is already taken');
         }
@@ -127,25 +119,10 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
       let avatarUrl = avatarPreview || profile?.avatar_url || '';
 
       if (!avatarUrl) {
-        // Upload default avatar from public folder to storage and use its public URL
-        const response = await fetch('/default_avatar.jpg');
-        const blob = await response.blob();
-        const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('character-avatars')
-          .upload(`${user.id}/avatar-default.jpg`, file, { upsert: true });
-        if (!uploadError && uploadData?.path) {
-          const { data: pub } = supabase.storage
-            .from('character-avatars')
-            .getPublicUrl(uploadData.path);
-          avatarUrl = pub.publicUrl;
-        } else {
-          // Fallback to public path if storage upload fails
-          avatarUrl = '/default_avatar.jpg';
-        }
+        avatarUrl = await Uploads.ensureDefaultAvatar(user.id);
       }
       
-      const { error } = await updateProfile(user.id, {
+      const { error } = await ProfileQueries.updateProfile(user.id, {
         username: username.trim() || undefined,
         bio: bio.trim() || undefined,
         avatar_url: avatarUrl || undefined

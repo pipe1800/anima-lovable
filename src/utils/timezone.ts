@@ -1,3 +1,5 @@
+import { supabase } from '@/db/client';
+
 export function getBrowserTimezone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -8,8 +10,6 @@ export function getBrowserTimezone(): string {
 }
 
 export async function updateUserTimezone(userId: string, timezone: string): Promise<boolean> {
-  const { supabase } = await import('@/integrations/supabase/client');
-  
   const { error } = await supabase
     .from('profiles')
     .update({ timezone })

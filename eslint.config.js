@@ -24,6 +24,19 @@ export default tseslint.config(
         { allowConstantExport: true },
       ],
       "@typescript-eslint/no-unused-vars": "off",
+      // Disallow importing the raw integrations supabase client anywhere except db/client.ts
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@/integrations/supabase/client",
+              message: "Import supabase from '@/db/client' to ensure centralization.",
+            },
+          ],
+          patterns: [],
+        },
+      ],
     },
   }
 );

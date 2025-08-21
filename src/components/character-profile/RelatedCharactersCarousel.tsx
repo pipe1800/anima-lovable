@@ -5,7 +5,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Heart, MessageCircle } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { Characters } from '@/data';
 import { formatNumberWithK } from '@/lib/utils/formatting';
 
 interface RelatedCharactersCarouselProps {
@@ -27,26 +27,18 @@ interface RelatedCharacter {
   chats_count: number;
 }
 
-const fetchRelatedCharacters = async (currentCharacterId: string, tagIds: number[]): Promise<RelatedCharacter[]> => {
-  const { data, error } = await supabase
-    .rpc('related_characters', { current_character_id: currentCharacterId, tag_ids: tagIds || [] });
-
-  if (error) throw error;
-
-  const normalize = (list: any[]): RelatedCharacter[] =>
-    (list || []).map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      avatar_url: c.avatar_url ?? null,
-      short_description: c.short_description ?? null,
-      creator: c.creator || null,
-      tags: Array.isArray(c.tags) ? c.tags : [],
-      likes_count: c.likes_count ?? 0,
-      chats_count: c.chats_count ?? 0,
-    }));
-
-  return normalize(data as any[]);
-};
+// Normalization function moved local (query logic now centralized in data layer)
+const normalizeRelatedCharacters = (list: any[]): RelatedCharacter[] =>
+  (list || []).map((c: any) => ({
+    id: c.id,
+    name: c.name,
+    avatar_url: c.avatar_url ?? null,
+    short_description: c.short_description ?? null,
+    creator: c.creator || null,
+    tags: Array.isArray(c.tags) ? c.tags : [],
+    likes_count: c.likes_count ?? 0,
+    chats_count: c.chats_count ?? 0,
+  }));
 
 export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedCharactersCarouselProps) {
   const navigate = useNavigate();
@@ -54,7 +46,11 @@ export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedC
 
   const { data: relatedCharacters = [], isLoading } = useQuery({
     queryKey: ['relatedCharacters', currentCharacterId, tagIds],
-    queryFn: () => fetchRelatedCharacters(currentCharacterId, tagIds),
+    queryFn: async () => {
+      const { data, error } = await Characters.getRelatedCharacters(currentCharacterId, tagIds);
+      if (error) throw error;
+      return normalizeRelatedCharacters(data as any[]);
+    },
     enabled: !!currentCharacterId,
   });
 

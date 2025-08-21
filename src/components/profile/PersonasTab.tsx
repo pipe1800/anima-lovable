@@ -7,7 +7,7 @@ import { Upload, Plus, User, X, Edit } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { toast } from 'sonner';
-import { createPersona, getUserPersonas, deletePersona, updatePersona, type Persona } from '@/lib/persona-operations';
+import { createPersona, getUserPersonas, deletePersona, updatePersona, type Persona } from '@/data/personas/mutations';
 import { useAuth } from '@/contexts/AuthContext';
 
 export const PersonasTab = () => {

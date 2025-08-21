@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Upload, User, Loader2, Clock, MessageSquare, Image as ImageIcon } from 'lucide-react';
-import { uploadAvatar } from '@/lib/avatar-upload';
+import { uploadAvatar } from '@/data/uploads/storage';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -90,10 +90,10 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
       setIsUploading(true);
       
       // Upload directly without cropping
-      const avatarUrl = await uploadAvatar(file, user.id);
-      
-      if (avatarUrl) {
-        handleInputChange('avatar', avatarUrl);
+      const { publicUrl, error: uploadErr } = await uploadAvatar(user.id, file);
+      if (uploadErr) throw uploadErr;
+      if (publicUrl) {
+        handleInputChange('avatar', publicUrl);
         toast({
           title: "Upload Successful",
           description: "Avatar uploaded successfully!",

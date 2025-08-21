@@ -17,7 +17,7 @@ import {
   Loader2,
   TrendingUp
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { CharacterProfileView } from '@/data';
 import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
 
 interface CharacterData {
@@ -62,73 +62,30 @@ export default function PublicCharacterProfile() {
         setLoading(true);
 
         // Prefer the view for a single round-trip with normalized shape
-        const { data, error: viewError } = await supabase
-          .from('character_profile_view')
-          .select('*')
-          .eq('id', characterId)
-          .eq('visibility', 'public')
-          .single();
-
-        if (viewError || !data) {
+        try {
+          const full = await CharacterProfileView.getPublicCharacterProfile(characterId);
+          setCharacter({
+            id: full.id,
+            name: full.name,
+            short_description: full.short_description || null,
+            avatar_url: full.avatar_url || null,
+            interaction_count: full.interaction_count,
+            created_at: full.created_at,
+            creator_id: full.creator_id,
+            visibility: full.visibility,
+            character_definitions: {
+              personality_summary: full.character_definitions.personality_summary,
+              description: full.character_definitions.description || null,
+              greeting: full.character_definitions.greeting || null,
+            },
+            creator: full.creator ? { username: full.creator.username, avatar_url: full.creator.avatar_url || null } : undefined,
+            tags: full.tags,
+            chats_count: full.stats.total_chats,
+            likes_count: full.stats.total_likes,
+          });
+        } catch (e) {
           setError('Character not found or not public');
-          setLoading(false);
-          return;
         }
-
-        // Normalize JSON fields from the view
-        const rawDefs = (data as any).character_definitions;
-        let character_definitions: CharacterData['character_definitions'] | undefined = undefined;
-        if (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs)) {
-          const d = rawDefs as any;
-          character_definitions = {
-            personality_summary: d.personality_summary ?? '',
-            description: d.description ?? null,
-            greeting: d.greeting ?? null,
-          } as CharacterData['character_definitions'];
-        }
-
-        const rawCreator = (data as any).creator;
-        let creator: CharacterData['creator'] | undefined = undefined;
-        if (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator)) {
-          const c = rawCreator as any;
-          creator = {
-            username: c.username ?? 'Unknown',
-            avatar_url: c.avatar_url ?? null,
-          } as CharacterData['creator'];
-        } else {
-          creator = { username: 'Unknown', avatar_url: null } as CharacterData['creator'];
-        }
-
-        const rawTags = (data as any).tags;
-        let tags: CharacterData['tags'] = [];
-        if (Array.isArray(rawTags)) {
-          tags = rawTags
-            .map((t: any) => {
-              if (t && typeof t === 'object') {
-                return { id: Number((t as any).id), name: String((t as any).name) };
-              }
-              return null;
-            })
-            .filter(Boolean) as { id: number; name: string }[];
-        }
-
-        const characterData: CharacterData = {
-          id: data.id,
-          name: data.name,
-          short_description: data.short_description,
-          avatar_url: data.avatar_url,
-          interaction_count: data.interaction_count,
-          created_at: data.created_at,
-          creator_id: data.creator_id,
-          visibility: data.visibility,
-          character_definitions,
-          creator,
-          tags,
-          chats_count: Number((data as any).chats_count ?? 0),
-          likes_count: Number((data as any).likes_count ?? 0),
-        };
-
-        setCharacter(characterData);
       } catch (err) {
         console.error('Error:', err);
         setError('Failed to load character');

@@ -7,9 +7,9 @@ import { Brain, Calendar, MessageSquare, Coins, RefreshCw, Edit, Save, Trash2 } 
 import { CharacterMemory } from '@/hooks/useCharacterMemories';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { updateMemory, deleteMemory } from '@/data/memories/queries';
 
 interface MemoriesDialogProps {
   open: boolean;
@@ -71,15 +71,11 @@ export const MemoriesDialog: React.FC<MemoriesDialogProps> = ({
       setSaving(true);
       const normalized = editedSummary.replace(/\s+/g, ' ').trim();
       const trigger_keywords = parseKeywords(editedKeywordsText);
-      const { error: upErr } = await supabase
-        .from('character_memories')
-        .update({
-          summary_content: normalized,
-          trigger_keywords,
-          content_hash: hashString(normalized),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
+      const { error: upErr } = await updateMemory(id, {
+        summary_content: normalized,
+        trigger_keywords,
+        content_hash: hashString(normalized)
+      });
       if (upErr) throw upErr;
       toast.success('Memory updated');
       cancelEdit();
@@ -96,10 +92,7 @@ export const MemoriesDialog: React.FC<MemoriesDialogProps> = ({
     if (!confirm('Delete this memory? This cannot be undone.')) return;
     try {
       setDeletingId(id);
-      const { error: delErr } = await supabase
-        .from('character_memories')
-        .delete()
-        .eq('id', id);
+      const { error: delErr } = await deleteMemory(id);
       if (delErr) throw delErr;
       toast.success('Memory deleted');
       if (editingId === id) cancelEdit();

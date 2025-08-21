@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Upload, Plus, User, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { createPersona, getUserPersonas, deletePersona, type Persona } from '@/lib/persona-operations';
+import { createPersona, getUserPersonas, deletePersona, type Persona } from '@/data/personas/mutations';
 import { useCurrentUser } from '@/hooks/useProfile';
 
 interface CurrentPersona {

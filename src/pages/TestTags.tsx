@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { WorldInfo } from '@/data';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // Define the Tag type
@@ -9,28 +9,18 @@ interface Tag {
   name: string;
 }
 
-// Function to fetch tags from Supabase
-const fetchTags = async (): Promise<Tag[]> => {
-  console.log('Fetching tags...');
-  const { data, error } = await supabase.from('tags').select('id, name').order('name');
-
-  if (error) {
-    console.error('Error fetching tags:', error);
-    // Throwing an error here allows React Query to handle the error state
-    throw new Error(error.message);
-  }
-
-  console.log('Fetched tags successfully:', data);
-  return data || [];
-};
-
 const TestTags = () => {
   // Use React Query to fetch data
-  const { data: allTags = [], isLoading, error } = useQuery<Tag[], Error>({
+  const { data: tagResult, isLoading, error } = useQuery<{ id: number; name: string }[], Error>({
     queryKey: ['tags'],
-    queryFn: fetchTags,
+    queryFn: async () => {
+      const { data, error } = await WorldInfo.getTags();
+      if (error) throw new Error(error.message);
+      return data as Tag[];
+    },
   });
 
+  const allTags = tagResult || [];
   const [selectedTagId, setSelectedTagId] = React.useState<string>('');
 
   const handleTagSelect = (tagId: string) => {

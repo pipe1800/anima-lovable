@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { PayPalManagement } from '@/data/edge';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 
 export const UpgradeVerification = () => {
@@ -31,17 +31,13 @@ export const UpgradeVerification = () => {
       }
 
       // Use paypal-management to verify the subscription in the background
-      supabase.functions.invoke('paypal-management', {
-        body: { 
-          operation: 'verify-subscription',
-          subscriptionId: subscriptionId
-        }
-      }).then(({ data, error }) => {
-        // Log the result but don't change the UI based on it
-        console.log('Background verification result:', { data, error });
-      }).catch((error) => {
-        console.error('Background verification error:', error);
-      });
+      PayPalManagement.verifySubscription({ subscriptionId: subscriptionId! })
+        .then(({ data, error }) => {
+          console.log('Background verification result:', { data, error });
+        })
+        .catch((error) => {
+          console.error('Background verification error:', error);
+        });
 
       // Immediately show success message
       setStatus('success');

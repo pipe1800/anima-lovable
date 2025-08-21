@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 import type { Message, TrackedContext } from '@/types/chat';
 import { MessageGroup } from './MessageGroup';
 import { groupMessages } from '@/utils/messageGrouping';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
 import { logger } from '@/utils/logger';
 
 interface Character {

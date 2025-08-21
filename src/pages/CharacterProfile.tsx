@@ -30,12 +30,13 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { CharacterProfileView, CharacterInteractions } from '@/data';
 import { TopBar } from '@/components/ui/TopBar';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { RelatedCharactersCarousel } from '@/components/character-profile/RelatedCharactersCarousel';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { deletePrivateCharacter } from '@/data/characters/mutations';
 
 
 // Types
@@ -79,86 +80,13 @@ interface CharacterFullData {
   };
 }
 
-// Optimized data fetching hook
+// Optimized data fetching hook now delegates to data layer
 const useCharacterFullProfile = (characterId?: string) => {
   return useQuery({
     queryKey: ['character-full-profile', characterId],
     queryFn: async () => {
       if (!characterId) throw new Error('Character ID required');
-
-      // Get character data via view for flattened, denormalized shape
-      const { data: viewData, error: viewError } = await supabase
-        .from('character_profile_view')
-        .select('*')
-        .eq('id', characterId)
-        .single();
-
-      if (viewError || !viewData) throw viewError || new Error('Character not found');
-
-      // Get creator id to compute user-specific stats
-      const creatorId = (viewData as any).creator_id;
-
-      // Normalize JSON fields from the view
-      const rawDefs = (viewData as any).character_definitions;
-      const character_definitions: CharacterFullData['character_definitions'] = {
-        personality_summary: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).personality_summary) || '',
-        description: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).description) ?? undefined,
-        greeting: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).greeting) ?? undefined,
-        scenario: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).scenario) ?? undefined,
-        model_id: (rawDefs && typeof rawDefs === 'object' && !Array.isArray(rawDefs) && (rawDefs as any).model_id) ?? undefined,
-      };
-
-      const rawCreator = (viewData as any).creator;
-      const creator: CharacterFullData['creator'] = {
-        id: (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator) && (rawCreator as any).id) || creatorId,
-        username: (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator) && (rawCreator as any).username) || 'Unknown',
-        avatar_url: (rawCreator && typeof rawCreator === 'object' && !Array.isArray(rawCreator) && (rawCreator as any).avatar_url) ?? null,
-      };
-
-      const rawTags = (viewData as any).tags;
-      const tags: CharacterFullData['tags'] = Array.isArray(rawTags)
-        ? (rawTags as any[])
-            .map((t: any) => (t && typeof t === 'object' ? { id: Number(t.id), name: String(t.name) } : null))
-            .filter(Boolean) as { id: number; name: string }[]
-        : [];
-
-      const rawWorldInfos = (viewData as any).world_infos;
-      const world_infos: CharacterFullData['world_infos'] = Array.isArray(rawWorldInfos)
-        ? (rawWorldInfos as any[])
-            .map((w: any) => (w && typeof w === 'object' ? { id: String(w.id), name: String(w.name), short_description: (w.short_description as string) ?? undefined } : null))
-            .filter(Boolean) as { id: string; name: string; short_description?: string }[]
-        : [];
-
-      // Build result using counters from the character
-      const stats = {
-        total_chats: (viewData as any).chats_count || 0,
-        total_messages: (viewData as any).messages_count || 0,
-        unique_users: 0,
-        average_rating: null,
-        total_favorites: (viewData as any).favorites_count || 0,
-        total_likes: (viewData as any).likes_count || 0,
-      };
-
-      const result: CharacterFullData = {
-        id: (viewData as any).id,
-        name: (viewData as any).name,
-        tagline: (viewData as any).tagline ?? undefined,
-        short_description: (viewData as any).short_description ?? undefined,
-        avatar_url: (viewData as any).avatar_url ?? undefined,
-        visibility: ((viewData as any).visibility as any) || 'public',
-        was_public: (viewData as any).was_public ?? false,
-        interaction_count: (viewData as any).interaction_count,
-        created_at: (viewData as any).created_at,
-        updated_at: (viewData as any).updated_at ?? (viewData as any).created_at,
-        creator_id: creatorId,
-        character_definitions,
-        creator,
-        tags,
-        world_infos,
-        stats,
-      };
-
-      return result;
+      return CharacterProfileView.getCharacterFullProfile(characterId);
     },
     enabled: !!characterId,
     staleTime: 1000 * 60 * 5,
@@ -174,28 +102,11 @@ const useUserCharacterInteractions = (characterId?: string) => {
     queryFn: async () => {
       if (!characterId || !user) return { isFavorited: false, isLiked: false };
 
-      const [favoriteResult, likeResult] = await Promise.all([
-        supabase
-          .from('character_favorites')
-          .select('id')
-          .eq('character_id', characterId)
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle(),
-        
-        supabase
-          .from('character_likes')
-          .select('id')
-          .eq('character_id', characterId)
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle()
+      const [isFavorited, isLiked] = await Promise.all([
+        CharacterInteractions.isCharacterFavorited(characterId, user.id),
+        CharacterInteractions.isCharacterLiked(characterId, user.id)
       ]);
-
-      return {
-        isFavorited: !!favoriteResult?.data,
-        isLiked: !!likeResult?.data
-      };
+      return { isFavorited, isLiked };
     },
     enabled: !!characterId && !!user,
   });
@@ -228,17 +139,9 @@ export default function CharacterProfile() {
       if (!user || !characterId) throw new Error('Authentication required');
 
       if (interactions?.isFavorited) {
-        const { error } = await supabase
-          .from('character_favorites')
-          .delete()
-          .eq('character_id', characterId)
-          .eq('user_id', user.id);
-        if (error) throw error;
+        await CharacterInteractions.toggleCharacterFavorite(characterId, user.id);
       } else {
-        const { error } = await supabase
-          .from('character_favorites')
-          .insert({ character_id: characterId, user_id: user.id });
-        if (error) throw error;
+        await CharacterInteractions.toggleCharacterFavorite(characterId, user.id);
       }
     },
     onMutate: async () => {
@@ -296,19 +199,7 @@ export default function CharacterProfile() {
     mutationFn: async () => {
       if (!user || !characterId) throw new Error('Authentication required');
 
-      if (interactions?.isLiked) {
-        const { error } = await supabase
-          .from('character_likes')
-          .delete()
-          .eq('character_id', characterId)
-          .eq('user_id', user.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('character_likes')
-          .insert({ character_id: characterId, user_id: user.id });
-        if (error) throw error;
-      }
+      await CharacterInteractions.toggleCharacterLike(characterId, user.id);
     },
     onMutate: async () => {
       await Promise.all([
@@ -366,7 +257,6 @@ export default function CharacterProfile() {
     if (!canDelete) return;
     try {
       setIsDeleting(true);
-      const { deletePrivateCharacter } = await import('@/lib/supabase-queries');
       const { error } = await deletePrivateCharacter(characterId);
       if (error) throw error;
       toast({ title: 'Character deleted' });

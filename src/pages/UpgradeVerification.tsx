@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { Payments } from '@/data';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import logger from '@/utils/logger';
 import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/queries/chatQueries';
+import { chatQueryKeys } from '@/data/chats/queryKeys';
 
 const useQuery = () => {
   return new URLSearchParams(useLocation().search);
@@ -83,13 +83,7 @@ const UpgradeVerification = () => {
 
         // Use paypal-management to verify the subscription
         // Idempotent verification call – backend must ensure safe replays
-        const { data, error } = await supabase.functions.invoke('paypal-management', {
-          body: { 
-            operation: 'verify-subscription',
-            subscriptionId: paypalSubscriptionId,
-            state // forward nonce for ownership assertion
-          }
-        });
+        const { data, error } = await Payments.verifySubscription(paypalSubscriptionId, state || undefined);
 
         log.debug('[UPGRADE-VERIFICATION] Verification response:', { data, error });
 
@@ -106,8 +100,8 @@ const UpgradeVerification = () => {
 
           // Invalidate credits/profile to refresh plan benefits
           if (user?.id) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
+            queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.credits(user.id), exact: true });
+            queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.profile(user.id), exact: true });
           }
           
           // Send success message to parent window and close popup

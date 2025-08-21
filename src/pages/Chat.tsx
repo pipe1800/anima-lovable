@@ -1,18 +1,17 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { Billing } from '@/data';
+import extractAddonContext from '@/data/edge/extractAddonContext';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import ChatInterface from '@/components/chat/ChatInterface';
 import { ChatLayout } from '@/components/chat/ChatLayout';
 import { TutorialManager } from '@/components/tutorial/TutorialManager';
-// import { useContextManagement } from '@/hooks/useContextManagement'; // Disabled to reduce duplicate chat_context queries
+import { chatQueryConfigs, chatQueryKeys } from '@/data/chats/queryKeys';
 import type { TrackedContext } from '@/types/chat';
 import logger from '@/utils/logger';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
-import { queryConfigs } from '@/queries/chatQueries';
-import { queryKeys } from '@/queries/chatQueries';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
 
 const Chat = () => {
   const { user: currentUser } = useAuth();
@@ -39,8 +38,10 @@ const Chat = () => {
     locationTracking: 'No context',
     timeAndWeather: 'No context',
     relationshipStatus: 'No context',
-    characterPosition: 'No context'
-  });
+    characterPosition: 'No context',
+    enchantmentStatus: 'No context',
+    itemInventory: 'No context'
+  } as any);
   
   const log = logger.scoped('ChatPage');
   const initialExtractionAttemptedRef = useRef(false);
@@ -72,7 +73,14 @@ const Chat = () => {
   const { data: globalSettings } = useUserGlobalChatSettings();
   // Fetch user credits once here to avoid duplicate fetch in ChatLayout & ChatInterface
   const { data: creditsBalance = 0 } = useQuery({
-    ...(currentUser?.id ? queryConfigs.userCredits(currentUser.id) : { queryKey: queryKeys.user.credits('none'), queryFn: async () => 0 }),
+    ...(currentUser?.id ? {
+      queryKey: chatQueryKeys.user.credits(currentUser.id),
+      queryFn: async () => {
+        const res = await Billing.getUserCredits(undefined as any, currentUser.id); // client param ignored internally
+        if (res.error) throw res.error;
+        return res.data?.balance || 0;
+      }
+    } : { queryKey: chatQueryKeys.user.credits('none'), queryFn: async () => 0 }),
     enabled: !!currentUser?.id,
   });
 
@@ -106,13 +114,11 @@ const Chat = () => {
 
     log.info('🔄 Triggering initial context extraction (event-driven) for chat', activeChatId);
     try {
-      const { data, error } = await supabase.functions.invoke('extract-addon-context', {
-        body: {
-          chat_id: activeChatId,
-          character_id: characterId,
-          addon_settings: addonSettings,
-          mode: 'initial'
-        }
+      const { data, error } = await extractAddonContext({
+        chatId: activeChatId,
+        characterId: characterId,
+        addonSettings: addonSettings,
+        mode: 'initial'
       });
       if (error) {
         log.warn('extract-addon-context error', error);
@@ -135,7 +141,7 @@ const Chat = () => {
 
   // Dedupe: Prefer react-query for character details, avoid manual fetch
   const characterDetailsQuery = useQuery({
-    ...(characterId ? queryConfigs.characterDetails(characterId) : { queryKey: ['character', 'details', 'none'], queryFn: async () => null }),
+    ...(characterId ? chatQueryConfigs.characterDetails(characterId) : { queryKey: ['character', 'details', 'none'], queryFn: async () => null }),
     enabled: !!characterId && !selectedCharacter,
   });
 

@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNSFW } from '@/contexts/NSFWContext';
-import { getPublicCharacters, searchPublicCharacters, SearchParams } from '@/lib/supabase-queries';
-import { supabase } from '@/integrations/supabase/client';
+import { Characters, SearchParams as CharacterSearchParams } from '@/data';
+import { supabase } from '@/db/client';
+// TODO: Move like/favorite inline queries to Characters or CharacterInteractions data modules.
 
 export const usePublicCharacters = (limit = 50, offset = 0) => {
   const { nsfwEnabled } = useNSFW();
@@ -10,7 +11,7 @@ export const usePublicCharacters = (limit = 50, offset = 0) => {
   return useQuery({
     queryKey: ['characters', 'public', { limit, offset, nsfwEnabled }],
     queryFn: async () => {
-      const result = await getPublicCharacters(limit, offset, nsfwEnabled);
+      const result = await Characters.getPublicCharacters(limit, offset, nsfwEnabled);
       if (result.error) throw result.error;
       return result.data || [];
     },
@@ -20,10 +21,10 @@ export const usePublicCharacters = (limit = 50, offset = 0) => {
   });
 };
 
-export const useSearchPublicCharacters = (params: SearchParams) => {
+export const useSearchPublicCharacters = (params: CharacterSearchParams) => {
   return useQuery({
     queryKey: ['public-characters-search', params],
-    queryFn: () => searchPublicCharacters(params),
+    queryFn: () => Characters.searchPublicCharacters(params),
     enabled: false, // Manual execution only
     staleTime: 60 * 1000, // fresher search cache
     gcTime: 15 * 60 * 1000,

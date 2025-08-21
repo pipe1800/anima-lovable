@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { Auth } from '@/data';
 import { User } from '@supabase/supabase-js';
 
 interface OnboardingGuardProps {
@@ -15,21 +15,20 @@ const OnboardingGuard = ({ children, requireOnboardingComplete = false }: Onboar
   const location = useLocation();
 
   useEffect(() => {
-    // Check for existing session first
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Check for existing session first via data layer
+    Auth.getSession().then(({ data: { session } }: any) => {
       if (session?.user) {
         setUser(session.user);
         checkOnboardingStatus(session.user);
       } else {
-        // No user, redirect to auth
         navigate('/auth');
       }
       setLoading(false);
     });
 
-    // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+    // Set up auth state listener via data layer
+    const { data: { subscription } } = Auth.onAuthStateChange(
+      (event: any, session: any) => {
         if (session?.user) {
           setUser(session.user);
           checkOnboardingStatus(session.user);

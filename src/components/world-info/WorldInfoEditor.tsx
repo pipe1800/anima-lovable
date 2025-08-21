@@ -28,31 +28,23 @@ import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import {
-  createWorldInfo,
-  updateWorldInfo,
-  addWorldInfoEntry,
-  updateWorldInfoEntry,
-  deleteWorldInfoEntry,
-  addWorldInfoTag,
-  removeWorldInfoTag,
-  type WorldInfoCreationData,
-  type WorldInfoEntryData
-} from '@/lib/world-info-operations';
-import { 
-  useWorldInfoWithEntries, 
-  useAllTags, 
-  useWorldInfoTags
-} from '@/hooks/useWorldInfos';
-import type { Tables } from '@/integrations/supabase/types';
+  createWorldInfo as createWorldInfoRaw,
+  updateWorldInfoCore,
+  addWorldInfoEntry as addWorldInfoEntryRaw,
+  updateWorldInfoEntry as updateWorldInfoEntryRaw,
+  deleteWorldInfoEntry as deleteWorldInfoEntryRaw,
+  addWorldInfoTag as addWorldInfoTagRaw,
+  removeWorldInfoTag as removeWorldInfoTagRaw
+} from '@/data/worldInfo/mutations';
+// Removed deprecated worldInfo/tags import
+// Minimal local types to decouple from legacy module
+interface WorldInfoEditorProps { mode: 'create' | 'edit'; worldInfoId?: string; }
+interface WorldInfoEntry { id: string; world_info_id: string; keywords: string[]; entry_text: string; created_at: string; updated_at: string; }
+interface Tag { id: number; name: string; }
+
+// Hooks (ensure they remain imported elsewhere)
+import { useWorldInfoWithEntries, useAllTags, useWorldInfoTags } from '@/hooks/useWorldInfos';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-
-type WorldInfoEntry = Tables<'world_info_entries', never>;
-type Tag = Tables<'tags', never>;
-
-interface WorldInfoEditorProps {
-  mode: 'create' | 'edit';
-  worldInfoId?: string;
-}
 
 export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorProps) {
   const navigate = useNavigate();
@@ -238,7 +230,7 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
 
     setIsSaving(true);
     try {
-      const worldInfoData: WorldInfoCreationData = {
+      const worldInfoData: any = {
         name: formData.name.trim(),
         short_description: formData.description.trim(),
         visibility: formData.visibility
@@ -248,39 +240,37 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
 
       if (mode === 'create') {
         // Create new world info
-        const newWorldInfo = await createWorldInfo(worldInfoData);
+        const newWorldInfoResult = await createWorldInfoRaw(worldInfoData);
+        if (newWorldInfoResult.error || !newWorldInfoResult.data) throw newWorldInfoResult.error || new Error('Create failed');
+        const newWorldInfo = newWorldInfoResult.data;
         savedWorldInfoId = newWorldInfo.id;
-
         // Add tags
         for (const tag of selectedTags) {
-          await addWorldInfoTag(savedWorldInfoId, tag.id);
+          await addWorldInfoTagRaw(savedWorldInfoId, tag.id);
         }
-
         // Add entries
         for (const entry of entries) {
           if (!entry.id.startsWith('temp-')) continue;
-          await addWorldInfoEntry(savedWorldInfoId, {
+          await addWorldInfoEntryRaw(savedWorldInfoId, {
             keywords: entry.keywords,
             entry_text: entry.entry_text
           });
         }
-
         toast({
           title: "Success",
           description: "World info created successfully"
         });
-
         // Navigate to edit mode
         navigate(`/world-info/${savedWorldInfoId}/edit`, { replace: true });
       } else {
         // Update existing world info
-        await updateWorldInfo(savedWorldInfoId!, worldInfoData);
+        await updateWorldInfoCore(savedWorldInfoId!, worldInfoData);
 
         // Handle entry updates
         for (const entry of entries) {
           if (entry.id.startsWith('temp-')) {
             // New entry
-            await addWorldInfoEntry(savedWorldInfoId!, {
+            await addWorldInfoEntryRaw(savedWorldInfoId!, {
               keywords: entry.keywords,
               entry_text: entry.entry_text
             });

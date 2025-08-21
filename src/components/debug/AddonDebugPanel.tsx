@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown, Bug, RefreshCw, AlertTriangle, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
-import { supabase } from '@/integrations/supabase/client';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
+import { Chats } from '@/data';
+import { getLatestAutoSummary } from '@/data/memories/queries';
 
 interface AddonDebugPanelProps {
   characterId?: string;
@@ -40,11 +41,7 @@ export const AddonDebugPanel = ({ characterId, userId, chatId }: AddonDebugPanel
 
       try {
         // Get total message count and AI message count (excluding placeholders)
-        const { data: messages, error: messagesError } = await supabase
-          .from('messages')
-          .select('is_ai_message, content, message_order')
-          .eq('chat_id', chatId)
-          .order('created_at', { ascending: true });
+        const { data: messages, error: messagesError } = await Chats.getChatMessagesForStats(chatId);
 
         if (messagesError) {
           console.error('Debug: Failed to fetch messages:', messagesError);
@@ -60,13 +57,7 @@ export const AddonDebugPanel = ({ characterId, userId, chatId }: AddonDebugPanel
         ) || [];
 
         // Get the most recent auto-summary
-        const { data: summaries, error: summariesError } = await supabase
-          .from('character_memories')
-          .select('message_count, is_auto_summary')
-          .eq('chat_id', chatId)
-          .eq('is_auto_summary', true)
-          .order('message_count', { ascending: false })
-          .limit(1);
+        const { data: summaries, error: summariesError } = await getLatestAutoSummary(chatId);
 
         if (summariesError) {
           console.error('Debug: Failed to fetch summaries:', summariesError);

@@ -1,14 +1,14 @@
 import { useReducer, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useMutation, useQueryClient, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase, SUPABASE_API_URL } from '@/integrations/supabase/client';
-import { getCharacterDetails } from '@/lib/supabase-queries';
+import { supabase, SUPABASE_API_URL } from '@/db/client';
 import { handleChatError } from '@/utils/chatErrorHandling';
-import { queryConfigs, infiniteQueryConfigs, invalidationHelpers, queryKeys } from '@/queries/chatQueries';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { chatQueryConfigs, chatInfiniteQueryConfigs, chatInvalidationHelpers, chatQueryKeys } from '@/data/chats/queryKeys';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
 import type { Message, TrackedContext, ChatState, ChatAction } from '@/types/chat';
 import logger from '@/utils/logger';
 import { StreamingMessageParser, parseSSEMessage } from '@/lib/streaming-utils';
+import { ChatManagement } from '@/data/edge';
 
 /**
  * Unified Chat Hook - Replaces 4 separate hooks
@@ -113,7 +113,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
   }, [queryClient]);
 
   const throttledInvalidateChatData = useCallback((chatIdLocal: string) => {
-    throttledInvalidate(queryKeys.chat.messages(chatIdLocal));
+    throttledInvalidate(chatQueryKeys.chat.messages(chatIdLocal));
   }, [throttledInvalidate]);
   
   // Get global chat settings for streaming preferences (allow external override to prevent duplicate fetch)
@@ -125,13 +125,13 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
   // MESSAGE FETCHING (replaces useChatMessages)
   // ============================================================================
   const messagesQuery = useInfiniteQuery({
-    ...infiniteQueryConfigs.chatMessages(chatId || ''),
+    ...chatInfiniteQueryConfigs.chatMessages(chatId || ''),
     enabled: !!chatId
   });
 
   // Get credits balance unless provided externally to avoid duplicate network calls
   const { data: internalCreditsBalance = 0 } = useQuery({
-    ...queryConfigs.userCredits(user?.id || ''),
+    ...chatQueryConfigs.userCredits(user?.id || ''),
     enabled: !!user && !options.skipCreditsFetch,
   });
   const creditsBalance = options.externalCreditsBalance ?? internalCreditsBalance;
@@ -292,7 +292,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     }
     // Also refresh credits and message count explicitly
     if (user?.id) {
-      throttledInvalidate(queryKeys.user.credits(user.id));
+      throttledInvalidate(chatQueryKeys.user.credits(user.id));
     }
   // Removed message count query invalidation (derived via event)
     // Fetch context shortly after backend finishes
@@ -316,147 +316,35 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
   ) => {
     const startTime = Date.now();
     isStreamingRef.current = true;
-    
     try {
-      // Get fresh session
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData?.session?.access_token) {
-        throw new Error('Authentication failed: Please sign in again');
-      }
-
-      let session = sessionData.session;
-
-      // Check token expiration and refresh if needed
-      const now = Math.floor(Date.now() / 1000);
-      if (session.expires_at && session.expires_at <= (now + 30)) {
-        const { data: refreshResult, error: refreshError } = await supabase.auth.refreshSession();
-        if (refreshError || !refreshResult.session) {
-          await supabase.auth.signOut();
-          throw new Error('Authentication failed: Please sign in again');
-        }
-        session = refreshResult.session;
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      
-      const requestPayload = {
-        operation: 'send-message',
+      const streamingMode = globalSettings?.streaming_mode || 'smooth';
+      dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: '' } });
+      let fullMessage = '';
+      const result = await ChatManagement.sendMessageStreaming({
         chatId,
         message: userMessage,
         characterId,
         addonSettings,
         selectedPersonaId,
-        selectedWorldInfoId
-      };      // Set initial streaming state
-      dispatch({
-        type: 'SET_STREAMING',
-        payload: { isStreaming: true, message: '' }
-      });
-      
-      // Make streaming request to unified chat-management function
-      const response = await fetch(`${SUPABASE_API_URL}/functions/v1/chat-management`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          'apikey': SUPABASE_API_URL ? (supabase as any).rest.headers['apikey'] || (import.meta.env?.VITE_SUPABASE_ANON_KEY as string) : (import.meta.env?.VITE_SUPABASE_ANON_KEY as string),
+        selectedWorldInfoId,
+      }, {
+        streamingMode,
+        onToken: (token, aggregate) => {
+          fullMessage = aggregate;
+          if (streamingMode === 'smooth') {
+            dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: aggregate } });
+          }
         },
-        body: JSON.stringify(requestPayload),
-      });
-      
-      if (!response.ok) {
-        dispatch({
-          type: 'SET_STREAMING',
-          payload: { isStreaming: false, message: '' }
-        });
-        
-        const errorText = await response.text();
-        if (response.status === 401) {
-          throw new Error('Authentication failed: Please sign in again');
-        } else if (response.status === 402) {
-          throw new Error('Insufficient credits');
-        } else {
-          throw new Error(`Request failed: ${response.status} - ${errorText || 'Unknown error'}`);
-        }
-      }
-
-      // ===== STREAMING MODE IMPLEMENTATION =====
-      // Handle different streaming modes based on user preferences
-      const streamingMode = globalSettings?.streaming_mode || 'smooth';
-      const showStreamingUpdates = streamingMode === 'smooth';
-      
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No reader available for streaming response');
-      }
-      
-      let fullMessage = '';
-      const decoder = new TextDecoder();
-      const parser = new StreamingMessageParser();
-      let pendingAppend: Promise<void> = Promise.resolve();
-
-      const scheduleAppend = async (text: string) => {
-        if (!text) return;
-        if (!showStreamingUpdates) {
-          fullMessage += text;
-          return;
-        }
-        const sliceSize = 24; // small slices to keep UI feeling streaming
-        for (let i = 0; i < text.length; i += sliceSize) {
-          const part = text.slice(i, i + sliceSize);
-          fullMessage += part;
-          dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: fullMessage } });
-          // Yield to UI so updates paint progressively
-          await new Promise<void>(r => setTimeout(r, 16));
-        }
-      };
-      
-      // Both modes share the same parsing, only UI updates differ
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          // Accumulate SSE buffer and extract complete data lines
-          const dataLines = parser.parseChunk(value);
-          for (const data of dataLines) {
-            const obj = parseSSEMessage(data);
-            if (!obj) continue;
-
-            if (obj.done === true) {
-              logger.info(`${streamingMode} mode - Stream completed`);
-              isStreamingRef.current = false;
-              // Ensure all pending UI appends are flushed before finalizing
-              await pendingAppend;
-              finalizeStreaming(chatId);
-              const endTime = Date.now();
-              return { content: fullMessage };
-            }
-
-            if (typeof obj?.content === 'string' && obj.content.length > 0) {
-              pendingAppend = pendingAppend.then(() => scheduleAppend(obj.content));
-              continue;
-            }
-
-            if (obj?.choices?.[0]?.delta?.content) {
-              const content = obj.choices[0].delta.content as string;
-              pendingAppend = pendingAppend.then(() => scheduleAppend(content));
-              continue;
-            }
+        onDone: (final) => {
+          if (streamingMode !== 'smooth') {
+            dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: final } });
           }
         }
-        // Stream ended without explicit done flag; flush and finalize
-        await pendingAppend;
-        isStreamingRef.current = false;
-        finalizeStreaming(chatId);
-        return { content: fullMessage };
-      } catch (streamError) {
-        logger.error('Streaming error:', streamError);
-        isStreamingRef.current = false;
-        dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
-        throw new Error('Streaming error, please try again');
-      }
+      });
+      isStreamingRef.current = false;
+      finalizeStreaming(chatId);
+      return { content: result.content };
     } catch (err) {
-      logger.error('Streaming invocation error:', err);
       isStreamingRef.current = false;
       dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
       throw err;
@@ -513,7 +401,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
       }
     },
     onMutate: async ({ chatId, content }) => {
-      const key = queryKeys.chat.messages(chatId);
+      const key = chatQueryKeys.chat.messages(chatId);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData(key);
 
@@ -548,7 +436,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
 
       // Optimistically decrement credits (they will be refetched & reconciled after streaming)
       if (user?.id) {
-        const creditKey = queryKeys.user.credits(user.id);
+        const creditKey = chatQueryKeys.user.credits(user.id);
         const current = queryClient.getQueryData<number>(creditKey);
         if (typeof current === 'number' && current > 0) {
           queryClient.setQueryData(creditKey, current - 1);
@@ -563,10 +451,10 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
       }
       // Rollback optimistic credit decrement if present
       if (user?.id) {
-        throttledInvalidate(queryKeys.user.credits(user.id));
+        throttledInvalidate(chatQueryKeys.user.credits(user.id));
       }
       if (vars?.chatId) {
-        throttledInvalidate(queryKeys.chat.messages(vars.chatId));
+        throttledInvalidate(chatQueryKeys.chat.messages(vars.chatId));
       }
     },
     // We intentionally do NOT invalidate onSettled; finalizeStreaming & real-time handle it
@@ -576,7 +464,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
   // COMBINED MESSAGE LIST WITH SORTING (restored)
   // ==========================================================================
   const allMessages = useMemo(() => {
-    const dbMessages = messagesQuery.data?.pages?.flatMap(page => page.messages) || [];
+    const dbMessages = (messagesQuery.data?.pages as any)?.flatMap((page: any) => page.messages) || [];
     const sorted = dbMessages.sort((a, b) => (a.message_order || 0) - (b.message_order || 0));
     return sorted.map((m: any) => {
       if (m && typeof m === 'object') {
@@ -642,7 +530,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
       logger.error('Send message error:', error);
       // If backend responded 402 while we had fallback credits, force refetch credits
       if ((error as any)?.message?.includes('Insufficient') && user?.id) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
+        queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.credits(user.id) });
       }
       handleChatError(error, 'Failed to send message');
       throw error;

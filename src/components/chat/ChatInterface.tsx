@@ -12,13 +12,14 @@ import type { TrackedContext } from '@/types/chat';
 import { createChat } from '@/lib/chat-operations';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import logger from '@/utils/logger';
-import { type Persona } from '@/lib/persona-operations';
-import { usePersonaById } from '@/queries/personaQueries';
+import { type Persona } from '@/data/personas/mutations';
+import { usePersonaById } from '@/data/personas/hooks';
 import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/queries/chatQueries';
+import { chatQueryKeys } from '@/data/chats/queryKeys';
 import { useNavigate } from 'react-router-dom';
 import { buildGreetingVariants } from '@/lib/greeting-utils'; // still used for initial variants (could swap to getGreetingVariants)
-import { supabase } from '@/integrations/supabase/client';
+import { upsertChatContext } from '@/data/chats/queries';
+import { ChatManagement } from '@/data/edge';
 
 // Removed AddonDebugPanel (no longer needed)
 
@@ -325,12 +326,12 @@ const ChatInterface = ({
           const cleaned = Object.fromEntries(Object.entries(manualCtx).filter(([_,v]) => typeof v === 'string' && v.trim()));
           if (Object.keys(cleaned).length > 0) {
             log.info('🟢 Seeding manual initial addon context', cleaned);
-            await supabase.from('chat_context').upsert({
-              chat_id: newChatId,
-              user_id: user.id,
-              character_id: character.id,
-              current_context: cleaned as any
-            }, { onConflict: 'chat_id' as any });
+            await upsertChatContext({
+              chatId: newChatId,
+              userId: user.id,
+              characterId: character.id,
+              currentContext: cleaned as any
+            });
           }
         }
       } catch (seedErr) {
@@ -338,7 +339,7 @@ const ChatInterface = ({
       }
 
   // Skip greeting polling; first AI message arrives via realtime and unified hook
-  try { await queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(newChatId) }); } catch {}
+  try { await queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(newChatId) }); } catch {}
 
       if (chatPhase === 'greeting') {
         setChatPhase('creating');
@@ -550,7 +551,6 @@ const ChatInterface = ({
       throw new Error('No active chat');
     }
     if (creditsBalance < 1) throw new Error('Insufficient credits');
-  log.warn('[Credits] Regeneration blocked due to low credits', { creditsBalance, userId: user?.id });
     // Derive last user message from cached messages (avoid extra select)
     const all = messages || [];
     const lastUser = [...all].reverse().find(m => (m as any).is_ai_message === false || (m as any).isUser === true || (m as any).role === 'user');
@@ -559,60 +559,36 @@ const ChatInterface = ({
       throw new Error('No previous user message to regenerate');
     }
 
-    const payload = {
-      operation: 'send-message',
-      // IDs (both cases)
-      chatId: currentChatId,
-      chat_id: currentChatId,
-      characterId: character.id,
-      character_id: character.id,
-      // Use the previous user message to trigger a new AI response
-  message: (lastUser as any).content as string,
-      // settings (both cases to be safe)
-      addonSettings: currentAddonSettings,
-      addon_settings: currentAddonSettings,
-      selectedPersonaId: selectedPersonaId ?? null,
-      selected_persona_id: selectedPersonaId ?? null,
-      selectedWorldInfoId: selectedWorldInfoId ?? null,
-      selected_world_info_id: selectedWorldInfoId ?? null,
-      // regenerate hints (optional for backend; harmless if ignored)
-      regenerate: true,
-      regenerateLast: true,
-      regenerate_last: true,
-      keepPrevious: keepPrevious,
-      keep_previous: keepPrevious,
-    } as any;
-
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData?.session?.access_token) {
-        throw new Error('Authentication failed');
-      }
-      const token = sessionData.session.access_token;
-
-      // Use direct fetch like the streaming path to avoid any differences in payload handling
-      const { SUPABASE_API_URL } = await import('@/integrations/supabase/client');
-      const resp = await fetch(`${SUPABASE_API_URL}/functions/v1/chat-management`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'apikey': process.env.SUPABASE_ANON_KEY as any,
+      const streamingMode = (globalSettings?.streaming_mode || 'smooth') as 'smooth' | 'instant';
+      await ChatManagement.sendMessageStreaming({
+        chatId: currentChatId,
+        message: (lastUser as any).content as string,
+        characterId: character.id,
+        addonSettings: currentAddonSettings,
+        selectedPersonaId: selectedPersonaId ?? null,
+        selectedWorldInfoId: selectedWorldInfoId ?? null,
+      }, {
+        streamingMode,
+        onToken: (token, aggregate) => {
+          if (streamingMode === 'smooth') {
+            // dispatch streaming update via custom event for now (optional)
+            const ev = new CustomEvent('chat-ai-variant-stream', { detail: { aggregate } });
+            window.dispatchEvent(ev);
+          }
         },
-        body: JSON.stringify(payload),
+        onDone: (final) => {
+          if (streamingMode !== 'smooth') {
+            const ev = new CustomEvent('chat-ai-variant-stream', { detail: { aggregate: final } });
+            window.dispatchEvent(ev);
+          }
+        }
       });
-
-      if (!resp.ok) {
-        const text = await resp.text();
-        console.warn('regenerateLastAI request failed', { status: resp.status, text, payload });
-        if (resp.status === 402) throw new Error('Insufficient credits');
-        throw new Error(text || `Request failed: ${resp.status}`);
-      }
       return;
     } catch (err) {
       throw err;
     }
-  }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, messages]);
+  }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, messages, globalSettings]);
 
   // Regeneration UI map: messageId -> streaming content
   const [regeneratingContentById, setRegeneratingContentById] = useState<Record<string, string>>({});
@@ -626,104 +602,62 @@ const ChatInterface = ({
     if (!user || !currentChatId) return;
     if (creditsBalance < 1) { setShowInsufficientCreditsModal(true); return; }
     try {
-      // Show placeholder
       setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: '' }));
-  regenerationStartRef.current[aiMessageId] = Date.now();
-
-      // Auth
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData?.session?.access_token) throw new Error('Authentication failed');
-      const token = sessionData.session.access_token;
-
-      // Request
-      const { SUPABASE_API_URL } = await import('@/integrations/supabase/client');
-      const resp = await fetch(`${SUPABASE_API_URL}/functions/v1/chat-management`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'apikey': process.env.SUPABASE_ANON_KEY as any,
-        },
-        body: JSON.stringify({
-          operation: 'regenerate-message',
-          chatId: currentChatId,
-          characterId: character.id,
-          aiMessageId,
-          addonSettings: currentAddonSettings,
-          selectedPersonaId: selectedPersonaId ?? null,
-          selectedWorldInfoId: selectedWorldInfoId ?? null,
-        }),
-      });
-      if (!resp.ok || !resp.body) {
-        const text = await resp.text();
-        throw new Error(text || `Regenerate failed: ${resp.status}`);
-      }
-
-      // Stream
-      const reader = resp.body.getReader();
-      const { StreamingMessageParser, parseSSEMessage } = await import('@/lib/streaming-utils');
-      const parser = new StreamingMessageParser();
+      regenerationStartRef.current[aiMessageId] = Date.now();
       let full = '';
-      const scheduleAppend = async (text: string) => {
-        if (!text) return;
-        if (streamingMode !== 'smooth') { full += text; return; }
-        const chunk = 24;
-        for (let i = 0; i < text.length; i += chunk) {
-          full += text.slice(i, i + chunk);
-          setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
-          await new Promise(r => setTimeout(r, 16));
+      const streamingMode = (globalSettings?.streaming_mode || 'smooth') as 'smooth' | 'instant';
+      await ChatManagement.regenerateMessageStreaming({
+        chatId: currentChatId,
+        characterId: character.id,
+        aiMessageId,
+        addonSettings: currentAddonSettings,
+        selectedPersonaId: selectedPersonaId ?? null,
+        selectedWorldInfoId: selectedWorldInfoId ?? null,
+      }, {
+        streamingMode,
+        onToken: (token, agg) => {
+          if (streamingMode === 'smooth') {
+            full = agg;
+            setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
+          } else {
+            full = agg;
+          }
+        },
+        onDone: (final) => {
+          if (streamingMode !== 'smooth') {
+            full = final;
+            setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
+          }
         }
-      };
-      const startTime = Date.now();
-      let doneFlag = false;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const dataLines = parser.parseChunk(value);
-        for (const data of dataLines) {
-          const obj = parseSSEMessage(data);
-            if (!obj) continue;
-            if (obj.done === true) { doneFlag = true; if (streamingMode === 'instant' && full) setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full })); break; }
-            if (typeof obj?.content === 'string') await scheduleAppend(obj.content);
-            else if (obj?.choices?.[0]?.delta?.content) await scheduleAppend(obj.choices[0].delta.content as string);
-        }
-        if (doneFlag) break;
-        if (Date.now() - startTime > 30000) { console.warn('Regeneration stream timeout'); break; }
-      }
-      // Ensure full content is stored in override (final streamed text)
+      });
       if (full) {
         setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
       }
-
-      // Optimistically patch React Query cache so the updated content appears immediately
       if (currentChatId && full) {
-        const key = queryKeys.chat.messages(currentChatId);
+        const key = chatQueryKeys.chat.messages(currentChatId);
         queryClient.setQueryData(key, (old: any) => {
           if (!old) return old;
-            // Support both paginated (infinite) and flat shapes
-            if (Array.isArray(old)) {
-              return old.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m);
-            }
-            if (old.pages) {
-              return {
-                ...old,
-                pages: old.pages.map((p: any) => ({
-                  ...p,
-                  messages: p.messages?.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
-                }))
-              };
-            }
-            if (old.messages) {
-              return {
-                ...old,
-                messages: old.messages.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
-              };
-            }
+          if (Array.isArray(old)) {
+            return old.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m);
+          }
+          if (old.pages) {
+            return {
+              ...old,
+              pages: old.pages.map((p: any) => ({
+                ...p,
+                messages: p.messages?.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
+              }))
+            };
+          }
+          if (old.messages) {
+            return {
+              ...old,
+              messages: old.messages.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
+            };
+          }
           return old;
         });
       }
-
-      // Schedule override removal shortly after optimistic patch so pulse/animation stops
       setTimeout(() => {
         setRegeneratingContentById(prev => {
           if (!(aiMessageId in prev)) return prev;
@@ -731,19 +665,15 @@ const ChatInterface = ({
           return rest;
         });
       }, 300);
-
-      // Background invalidate to reconcile with backend authoritative state (non-blocking)
       if (currentChatId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) });
-        if (user?.id) queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id) });
-        // Schedule a second invalidate shortly after to pick up async addon context extraction (regeneration)
+        queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(currentChatId) });
+        if (user?.id) queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.credits(user.id) });
         setTimeout(() => {
-          try { queryClient.invalidateQueries({ queryKey: queryKeys.chat.messages(currentChatId) }); } catch {}
+          try { queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(currentChatId) }); } catch {}
         }, 1200);
       }
     } catch (err: any) {
       console.error('Regenerate failed:', err);
-      // Clear override on failure
       setRegeneratingContentById(prev => { 
         const { [aiMessageId]: _, ...rest } = prev; 
         return rest; 
@@ -758,7 +688,7 @@ const ChatInterface = ({
         });
       }
     }
-  }, [user, currentChatId, creditsBalance, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, character.id, streamingMode, queryClient, toast]);
+  }, [user, currentChatId, creditsBalance, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, character.id, queryClient, toast, globalSettings]);
 
   // --- Responsive typing/streaming indicator control ---
   // Track stream progress to detect stagnation (backend slow to flip isStreaming false)

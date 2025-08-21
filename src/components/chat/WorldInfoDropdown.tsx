@@ -5,8 +5,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Badge } from '@/components/ui/badge';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { WorldInfo } from '@/data';
 import { useNavigate } from 'react-router-dom';
+import { getUserOwnedWorldInfos, getUserWorldInfoCollection } from '@/data/worldInfo/queries';
 
 interface WorldInfo {
   id: string;
@@ -42,35 +43,10 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
       
       try {
         // Get user's own world infos
-        const { data: ownWorldInfos } = await supabase
-          .from('world_infos')
-          .select('id, name, short_description, visibility, creator_id')
-          .eq('creator_id', user.id);
-
+        const { data: owned } = await getUserOwnedWorldInfos(user.id);
         // Get user's world info collection (only these, no public world infos)
-        const { data: userWorldInfos } = await supabase
-          .from('world_info_users')
-          .select(`
-            world_info_id,
-            world_infos (
-              id,
-              name,
-              short_description,
-              visibility,
-              creator_id
-            )
-          `)
-          .eq('user_id', user.id);
-
-        const collectionWorldInfos = userWorldInfos
-          ?.map(item => item.world_infos)
-          .filter(Boolean) as WorldInfo[] || [];
-
-        // Combine user's own world infos + world infos in collection
-        const allWorldInfos = [
-          ...(ownWorldInfos || []),
-          ...collectionWorldInfos
-        ];
+        const { data: collection } = await getUserWorldInfoCollection(user.id);
+        const allWorldInfos = [...(owned || []), ...(collection || [])] as any[];
 
         // Remove duplicates
         const uniqueWorldInfos = allWorldInfos.filter(
@@ -105,12 +81,9 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
       }
 
       try {
-        const { data } = await supabase
-          .from('world_infos')
-          .select('id, name, short_description, visibility, creator_id')
-          .eq('id', selectedWorldInfoId)
-          .maybeSingle();
-        if (data) setSelectedWorldInfo(data as WorldInfo);
+        // Fallback single fetch (small scope) – keep until we add a dedicated getWorldInfoSummary(id)
+        const { data } = await WorldInfo.getWorldInfoSummary(selectedWorldInfoId);
+        if (data) setSelectedWorldInfo(data as any);
       } catch (e) {
         console.warn('Failed to fetch selected world info by id:', e);
       }

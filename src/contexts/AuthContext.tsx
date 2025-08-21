@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
-import { getPrivateProfile, getUserSubscription } from '@/lib/supabase-queries';
+import { supabase } from '@/db/client';
+import { Auth as AuthQueries } from '@/data';
+import { Billing, Profile as ProfileQueries, Uploads } from '@/data';
 import { getBrowserTimezone, updateUserTimezone } from '@/utils/timezone';
 import type { Profile, Subscription, Plan } from '@/types/database';
 import { TutorialProvider } from './TutorialContext';
@@ -43,6 +44,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const profileInFlightRef = useRef<Promise<void> | null>(null);
   const timezoneLoggedRef = useRef<boolean>(false);
 
+  const ensureProfileAvatar = async (current: Profile | null) => {
+    if (!user?.id || !current || current.avatar_url) return current;
+    try {
+      // Delegate default avatar provisioning to uploads helper
+      const publicUrl = await Uploads.ensureDefaultAvatar(user.id);
+      const { data, error } = await ProfileQueries.updateProfile(user.id, { avatar_url: publicUrl });
+      if (!error && data) {
+        return data as Profile;
+      }
+    } catch (e) {
+      console.error('Failed to provision default avatar:', e);
+    }
+    return current; // fallback unchanged
+  };
+
   const refreshProfile = async () => {
     if (!user) {
       setProfile(null);
@@ -53,40 +69,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const p = (async () => {
       try {
-        const { data } = await getPrivateProfile(user.id);
+        const { data } = await ProfileQueries.getPrivateProfile(user.id);
         let current = data || null;
+        current = await ensureProfileAvatar(current);
         setProfile(current);
-
-        // If no avatar is set, upload and assign the default avatar once
-        if (current && !current.avatar_url) {
-          try {
-            const response = await fetch('/default_avatar.jpg');
-            const blob = await response.blob();
-            const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
-            const storagePath = `${user.id}/avatar-default.jpg`;
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('character-avatars')
-              .upload(storagePath, file, { upsert: true });
-
-            let avatarUrlToSet: string = '/default_avatar.jpg';
-            if (!uploadError && uploadData?.path) {
-              const { data: pub } = await supabase.storage
-                .from('character-avatars')
-                .getPublicUrl(uploadData.path);
-              avatarUrlToSet = pub.publicUrl || avatarUrlToSet;
-            }
-
-            await supabase
-              .from('profiles')
-              .update({ avatar_url: avatarUrlToSet })
-              .eq('id', user.id);
-
-            // Update local state
-            setProfile(prev => prev ? { ...prev, avatar_url: avatarUrlToSet } as Profile : prev);
-          } catch (e) {
-            console.error('Failed to ensure default avatar on profile refresh:', e);
-          }
-        }
       } catch (error) {
         console.error('Profile fetch failed:', error);
         setProfile(null);
@@ -130,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const p = (async () => {
       try {
         console.debug(`🔄 Fetching subscription (RPC) for user ${user.id} (attempt ${retryCount + 1})`);
-        const { data, error } = await getUserSubscription(supabase, user.id);
+        const { data, error } = await Billing.getUserSubscription(supabase, user.id);
 
         if (error) {
           console.error('❌ Subscription fetch (RPC) failed:', error);
@@ -153,11 +139,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('❌ Subscription fetch exception (RPC):', error);
         if (retryCount < 3) {
           const delay = Math.pow(2, retryCount) * 1000;
-          console.debug(`⏳ Retrying subscription fetch in ${delay}ms...`);
-          await new Promise(res => setTimeout(res, delay));
-          subInFlightRef.current = null;
-          lastSubFetchAtRef.current = Date.now();
-          return refreshSubscription(retryCount + 1);
+            console.debug(`⏳ Retrying subscription fetch in ${delay}ms...`);
+            await new Promise(res => setTimeout(res, delay));
+            subInFlightRef.current = null;
+            lastSubFetchAtRef.current = Date.now();
+            return refreshSubscription(retryCount + 1);
         }
         setSubscription(null);
       } finally {
@@ -177,22 +163,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfile(null);
       setSession(null);
       setSubscription(null);
-      
-      // Attempt to sign out from Supabase
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
-      
-      // Don't throw error if session is already invalid
+      const { error } = await AuthQueries.signOut();
       if (error && !error.message?.includes('session_not_found') && !error.message?.includes('Session not found')) {
         console.error('Sign out error:', error);
         throw error;
       }
-      
-      // Clear any additional local storage that might be cached
       localStorage.removeItem('supabase.auth.token');
-      
     } catch (error) {
       console.error('Error during sign out:', error);
-      // Even if sign out fails, clear local state
       setUser(null);
       setProfile(null);
       setSession(null);
@@ -202,10 +180,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    AuthQueries.getSession().then(({ data: { session } }) => {
       const newUser = session?.user ?? null;
-      // Only update if changed
       if (newUser?.id !== currentUserIdRef.current) {
         setSession(session);
         setUser(newUser);
@@ -214,28 +190,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    // Listen for auth changes
-    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription: authSub } } = AuthQueries.onAuthStateChange(async (event, session) => {
       console.debug('Auth state change:', event, session?.user?.id);
       const newUser = session?.user ?? null;
-
-      // Ignore duplicate events for same user id
       if (newUser?.id === currentUserIdRef.current) {
-        // Still refresh session reference silently
         setSession(session);
         setLoading(false);
         return;
       }
-
       setSession(session);
       setUser(newUser);
       currentUserIdRef.current = newUser?.id || null;
       setLoading(false);
     });
 
-    // Token refresh / expiry monitor
     const refreshInterval = setInterval(async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const { data: { session: currentSession } } = await AuthQueries.getSession();
       if (!currentSession) return;
       const expiresAt = currentSession.expires_at;
       const currentTime = Math.floor(Date.now() / 1000);
@@ -247,9 +217,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const timeUntilExpiry = expiresAt ? expiresAt - currentTime : 0;
       if (timeUntilExpiry > 0 && timeUntilExpiry < 600) {
         console.debug('Proactively refreshing token...');
-        await supabase.auth.refreshSession();
+        await AuthQueries.getSession(); // trigger refresh via standard flow (could add explicit helper)
       }
-    }, 2 * 60 * 1000); // check more frequently for timely expiry handling
+    }, 2 * 60 * 1000);
 
     return () => {
       authSub.unsubscribe();
@@ -257,7 +227,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Fetch profile and subscription when user changes (dedup by user id)
   useEffect(() => {
     const id = user?.id || null;
     if (!id) {
@@ -266,16 +235,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       prevUserIdEffectRef.current = null;
       return;
     }
-    if (prevUserIdEffectRef.current === id) return; // no-op if same id
+    if (prevUserIdEffectRef.current === id) return;
     prevUserIdEffectRef.current = id;
-
     (async () => {
       await refreshProfile();
       await refreshSubscription();
     })();
   }, [user]);
 
-  // Update timezone when profile is loaded
   useEffect(() => {
     if (user && profile) {
       updateTimezoneIfNeeded();
@@ -295,19 +262,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        session,
-        subscription,
-        loading,
-        signOut,
-        refreshProfile,
-        refreshSubscription,
-        supabase,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       <TutorialProvider>{children}</TutorialProvider>
     </AuthContext.Provider>
   );

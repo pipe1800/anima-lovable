@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/db/client';
 
 /**
  * Get the user's last used persona ID from their most recent chat

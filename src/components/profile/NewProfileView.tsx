@@ -15,17 +15,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { 
-  getPublicProfile, 
-  getPrivateProfile,
-  getUserActiveSubscription,
-  updateProfile
-} from '@/lib/supabase-queries';
+import { Profile as ProfileQueries, Billing } from '@/data';
 import { ProfileHeader } from './NewProfileHeader';
 import { StatsBar } from './StatsBar';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
 import BillingSettings from '@/components/settings/categories/BillingSettings';
-import { supabase } from '@/integrations/supabase/client';
 
 // Consolidated data fetching hook
 const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
@@ -33,37 +27,27 @@ const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
     queryKey: ['user-profile-complete', userId],
     queryFn: async () => {
       // Use private profile for own profile, public for others
-      const profileQuery = isOwnProfile ? getPrivateProfile(userId) : getPublicProfile(userId);
+      const profileQuery = isOwnProfile ? ProfileQueries.getPrivateProfile(userId) : ProfileQueries.getPublicProfile(userId);
       
       // Parallel fetch profile data and subscription
       const [profileResult, subscriptionResult, chatCountResult] = await Promise.allSettled([
         profileQuery,
-        getUserActiveSubscription(userId),
-        supabase
-          .from('chats')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', userId)
+        Billing.getUserActiveSubscription(userId),
+        ProfileQueries.getProfileCounts(userId, isOwnProfile)
       ]);
 
       const profile = profileResult.status === 'fulfilled' ? profileResult.value.data : null;
       const subscription = subscriptionResult.status === 'fulfilled' ? subscriptionResult.value.data : null;
-      const chatCount = chatCountResult.status === 'fulfilled' ? chatCountResult.value.count : 0;
-
-      // Get additional stats in parallel
-      const [charactersCount, favoritesCount, personasCount] = await Promise.allSettled([
-        supabase.from('characters').select('id', { count: 'exact', head: true }).eq('creator_id', userId),
-        supabase.from('character_favorites').select('id', { count: 'exact', head: true }).eq('user_id', userId),
-        isOwnProfile ? supabase.from('personas').select('id', { count: 'exact', head: true }).eq('user_id', userId) : Promise.resolve({ count: 0 })
-      ]);
+      const counts = chatCountResult.status === 'fulfilled' ? chatCountResult.value : { chats: 0, characters: 0, favorites: 0, personas: 0 };
 
       return {
         profile,
         subscription,
         stats: {
-          totalChats: chatCount || 0,
-          totalCharacters: charactersCount.status === 'fulfilled' ? charactersCount.value.count || 0 : 0,
-          totalFavorites: favoritesCount.status === 'fulfilled' ? favoritesCount.value.count || 0 : 0,
-          totalPersonas: personasCount.status === 'fulfilled' ? personasCount.value.count || 0 : 0,
+          totalChats: counts.chats,
+          totalCharacters: counts.characters,
+          totalFavorites: counts.favorites,
+          totalPersonas: counts.personas,
           memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
         }
       };
@@ -95,7 +79,7 @@ export const NewProfileView = () => {
     mutationFn: async ({ field, value }: { field: string; value: string }) => {
       if (!profileUserId) throw new Error('No user ID');
       const updates = { [field]: value };
-      return await updateProfile(profileUserId, updates);
+      return await ProfileQueries.updateProfile(profileUserId, updates);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-profile-complete', profileUserId] });

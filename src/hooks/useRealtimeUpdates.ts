@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/db/client';
 import { useQueryClient } from '@tanstack/react-query';
 import logger from '@/utils/logger';
 

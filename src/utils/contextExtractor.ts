@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/db/client';
 import type { TrackedContext } from '@/types/chat';
 import logger from '@/utils/logger';
 

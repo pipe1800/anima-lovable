@@ -5,12 +5,11 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { User, MessageCircle, Heart, Sparkles, Globe, Link, Lock, Loader2 } from 'lucide-react';
-import { getUserActiveSubscription } from '@/lib/supabase-queries';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { Billing, Tags } from '@/data';
 import type { CharacterFormData } from '@/hooks/useCharacterCreation';
 import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface FinalizeStepProps {
   data: CharacterFormData;
@@ -59,9 +58,8 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   useEffect(() => {
     const loadUserData = async () => {
       try {
-        // Fetch user subscription
         if (user) {
-          const { data: subscription } = await getUserActiveSubscription(user.id);
+          const { data: subscription } = await Billing.getUserActiveSubscription(user.id);
           if (subscription?.plan) {
             setUserPlan(subscription.plan.name);
           } else {
@@ -70,17 +68,8 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
         } else {
           setUserPlan('Guest Pass');
         }
-
-        // Fetch NSFW tag from database
-        const { data: tags } = await supabase
-          .from('tags')
-          .select('*')
-          .ilike('name', 'nsfw')
-          .limit(1);
-        
-        if (tags && tags.length > 0) {
-          setNsfwTag(tags[0]);
-        }
+        const { data: tag } = await Tags.getNSFWTag();
+        if (tag) setNsfwTag(tag as any);
       } catch (error) {
         console.error('Error loading user data:', error);
       }

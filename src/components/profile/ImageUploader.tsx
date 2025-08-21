@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Camera, Upload, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/integrations/supabase/client';
+import { Uploads, Auth } from '@/data';
 
 interface ImageUploaderProps {
   currentImage?: string;
@@ -43,27 +43,17 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     setIsUploading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: auth } = await Auth.getCurrentUser();
+      const user = auth.user;
       if (!user) throw new Error('Not authenticated');
 
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/${type}_${Date.now()}.${fileExt}`;
 
-      const { data, error } = await supabase.storage
-        .from('profile-images')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
+      const { publicUrl, error } = await Uploads.uploadToBucket({ bucket: 'profile-images', path: fileName, file, upsert: false });
       if (error) throw error;
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('profile-images')
-        .getPublicUrl(data.path);
-
-      onImageChange(publicUrl);
+      onImageChange(publicUrl || '');
     } catch (error) {
       console.error('Error uploading image:', error);
       alert('Failed to upload image. Please try again.');

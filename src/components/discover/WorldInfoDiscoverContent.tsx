@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { NSFWToggle } from '@/components/NSFWToggle';
 import { useNSFW } from '@/contexts/NSFWContext';
 import { usePublicWorldInfos, useSearchPublicWorldInfos } from '@/hooks/useWorldInfos';
-import { SearchParams } from '@/lib/supabase-queries';
+import { SearchParams } from '@/data';
 import { Search, Sparkles, Filter, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';

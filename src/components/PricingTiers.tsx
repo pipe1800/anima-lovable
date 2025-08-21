@@ -3,7 +3,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription }
 import { Badge } from "@/components/ui/badge";
 import { Check, Crown } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getUserActiveSubscription } from "@/lib/supabase-queries";
+import { Billing } from '@/data';
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 
@@ -19,17 +19,17 @@ const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
   useEffect(() => {
     const fetchUserSubscription = async () => {
       if (!user) {
-        setCurrentPlan('Guest Pass'); // Default for non-authenticated users
+        setCurrentPlan('Guest Pass');
         setLoading(false);
         return;
       }
 
       try {
-        const { data: subscription } = await getUserActiveSubscription(user.id);
+        const { data: subscription } = await Billing.getUserActiveSubscription(user.id);
         if (subscription?.plan) {
           setCurrentPlan(subscription.plan.name);
         } else {
-          setCurrentPlan('Guest Pass'); // Default for users without subscription
+          setCurrentPlan('Guest Pass');
         }
       } catch (error) {
         console.error('Error fetching subscription:', error);

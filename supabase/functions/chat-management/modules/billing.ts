@@ -30,9 +30,23 @@ export async function getUserPlanAndModel(
   userId: string,
   supabaseAdmin: SupabaseClient
 ): Promise<{ plan: string; model: string; maxContextTokens: number; modelIdentifier: string }> {
+  // Simple in-memory cache (per edge instance) to avoid hitting DB every message
+  const now = Date.now();
+  const cacheKey = userId;
+  const ttlMs = 60_000; // 60s TTL
+  const anyGlobal: any = globalThis as any;
+  anyGlobal.__planCache = anyGlobal.__planCache || new Map();
+  const cache: Map<string, { expires: number; value: any }> = anyGlobal.__planCache;
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expires > now) {
+    return cached.value;
+  }
+
+  const billingClient = (supabaseAdmin as any).schema ? (supabaseAdmin as any).schema('billing') : supabaseAdmin;
+
   // Check for active subscription
-  const { data: userSubscription, error: subsError } = await supabaseAdmin
-    .from('billing.subscriptions')
+  const { data: userSubscription, error: subsError } = await billingClient
+    .from('subscriptions')
     .select('plan_id, status, current_period_end')
     .eq('user_id', userId)
     .eq('status', 'active')
@@ -41,45 +55,39 @@ export async function getUserPlanAndModel(
 
   if (subsError) {
     console.error(`Error fetching subscription for user ${userId}:`, subsError);
-    return; // Or handle error appropriately
+    // Fall back to Guest Pass (do not return undefined)
+    const guestConfig = PLAN_MODEL_COSTS['Guest Pass'];
+    const value = { plan: 'Guest Pass', model: guestConfig.model, maxContextTokens: guestConfig.maxContextTokens, modelIdentifier: guestConfig.modelIdentifier };
+    cache.set(cacheKey, { expires: now + ttlMs, value });
+    return value;
   }
 
-  // If user has an active subscription, check their plan
   if (userSubscription) {
-    const { data: planData, error: planError } = await supabaseAdmin
-      .from('billing.plans')
+    const { data: planData, error: planError } = await billingClient
+      .from('plans')
       .select('name')
       .eq('id', userSubscription.plan_id)
-      .single();
+      .maybeSingle();
 
-    if (planData) {
+    if (!planError && planData) {
       const planName = planData.name as keyof typeof PLAN_MODEL_COSTS;
-      const planConfig = PLAN_MODEL_COSTS[planName];
-      
-      if (planConfig) {
-        return {
-          plan: planName,
-          model: planConfig.model,
-          maxContextTokens: planConfig.maxContextTokens,
-          modelIdentifier: planConfig.modelIdentifier
-        };
-      }
-    }
-
-    if (planError) {
-      console.error(`Error fetching plan details for user ${userId}:`, planError);
-      return;
+      const planConfig = PLAN_MODEL_COSTS[planName] || PLAN_MODEL_COSTS['Guest Pass'];
+      const value = {
+        plan: planName in PLAN_MODEL_COSTS ? planName : ('Guest Pass' as const),
+        model: planConfig.model,
+        maxContextTokens: planConfig.maxContextTokens,
+        modelIdentifier: planConfig.modelIdentifier
+      };
+      cache.set(cacheKey, { expires: now + ttlMs, value });
+      return value;
     }
   }
 
   // Default to Guest Pass
   const guestConfig = PLAN_MODEL_COSTS['Guest Pass'];
-  return {
-    plan: 'Guest Pass',
-    model: guestConfig.model,
-    maxContextTokens: guestConfig.maxContextTokens,
-    modelIdentifier: guestConfig.modelIdentifier
-  };
+  const value = { plan: 'Guest Pass', model: guestConfig.model, maxContextTokens: guestConfig.maxContextTokens, modelIdentifier: guestConfig.modelIdentifier };
+  cache.set(cacheKey, { expires: now + ttlMs, value });
+  return value;
 }
 
 export function calculateCreditCost(

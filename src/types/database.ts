@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+// Removed supabase client import; types module should be pure.
 import type { Json } from '@/integrations/supabase/types';
 
 // =============================================================================
@@ -14,7 +14,7 @@ export type Character = PublicTables['characters']['Row'];
 export type Chat = PublicTables['chats']['Row'];
 export type Message = PublicTables['messages']['Row'];
 export type OnboardingChecklistItem = PublicTables['onboarding_checklist_items']['Row'];
-export type UserOnboardingProgress = PublicTables['user_onboarding_progress']['Row'];
+// export type UserOnboardingProgress = PublicTables['user_onboarding_progress']['Row']; // removed pending table presence
 
 // Billing Schema Types
 type BillingTables = Database['billing']['Tables'];

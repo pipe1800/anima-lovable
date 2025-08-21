@@ -42,7 +42,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useUserWorldInfos, usePublicWorldInfos, useAllTags } from '@/hooks/useWorldInfos';
-import { createWorldInfo, addWorldInfoEntry } from '@/lib/world-info-operations';
+import { createWorldInfo as createWorldInfoData, addWorldInfoEntry as addWorldInfoEntryData, addWorldInfoTag } from '@/data/worldInfo/mutations';
+import { importWorldInfo as importWorldInfoData } from '@/data/worldInfo/importExport';
 import { cn } from '@/lib/utils';
 import WorldInfoCard from './WorldInfoCard';
 

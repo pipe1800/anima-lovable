@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { MessageCircle } from 'lucide-react';
-import { getRecommendedCharacters } from '@/lib/supabase-queries';
+import { CharacterRecommendations } from '@/data';
+// import { getRecommendedCharacters } from '@/lib/supabase-queries';
 import type { Character as BaseCharacter } from '@/types/chat';
 import { getThumbUrl } from '@/utils/image';
 
@@ -29,7 +30,7 @@ const CharacterSelection = ({ selectedVibes, onCharacterSelect, onSkip }: Charac
     const fetchCharacters = async () => {
       try {
         setLoading(true);
-        const { data: recommendedChars, error } = await getRecommendedCharacters(selectedVibes, 8);
+        const { data: recommendedChars, error } = await CharacterRecommendations.getRecommendedCharacters(selectedVibes, 8);
         if (error) {
           console.error('Error fetching characters:', error);
           return;

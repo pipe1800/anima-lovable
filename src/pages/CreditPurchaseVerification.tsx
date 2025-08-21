@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { Payments } from '@/data';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, CheckCircle, XCircle, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import logger from '@/utils/logger';
 import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/queries/chatQueries';
+import { chatQueryKeys } from '@/data/chats/queryKeys';
 
 const CreditPurchaseVerification = () => {
   const [searchParams] = useSearchParams();
@@ -59,14 +59,7 @@ const CreditPurchaseVerification = () => {
       }
 
       try {
-        const { data, error } = await supabase.functions.invoke('paypal-management', {
-          body: { 
-            operation: 'capture-order',
-            token,
-            payerId,
-            packId
-          }
-        });
+        const { data, error } = await Payments.captureCreditOrder(token, payerId, packId);
 
         log.debug('Finalization response:', { data, error });
 
@@ -92,8 +85,8 @@ const CreditPurchaseVerification = () => {
 
           // Invalidate user credits and profile so balance updates everywhere
           if (user?.id) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(user.id), exact: true });
-            queryClient.invalidateQueries({ queryKey: queryKeys.user.profile(user.id), exact: true });
+            queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.credits(user.id), exact: true });
+            queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.profile(user.id), exact: true });
           }
           
           // Send success message to parent window and close popup

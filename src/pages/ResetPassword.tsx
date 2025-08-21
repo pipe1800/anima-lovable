@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Eye, EyeOff, Check, X, Lock } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { Auth as AuthQueries } from '@/data';
 
 const ResetPassword = () => {
   const [password, setPassword] = useState('');
@@ -35,11 +35,7 @@ const ResetPassword = () => {
       return;
     }
 
-    // Set the session with the tokens from the URL
-    supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
+    AuthQueries.setSession(accessToken, refreshToken);
   }, [searchParams]);
 
   // Real-time password validation
@@ -72,9 +68,7 @@ const ResetPassword = () => {
       return;
     }
 
-    const { error } = await supabase.auth.updateUser({
-      password: password
-    });
+    const { error } = await AuthQueries.updateUser({ password });
 
     if (error) {
       setError(error.message);

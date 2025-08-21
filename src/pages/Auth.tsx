@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -9,7 +8,9 @@ import { Eye, EyeOff, Check, X } from 'lucide-react';
 import { preloadDashboardData } from '@/hooks/useDashboard';
 import { useQueryClient } from '@tanstack/react-query';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
-const Auth = () => {
+import { Auth as AuthQueries } from '@/data';
+
+const AuthPage = () => {
   const [searchParams] = useSearchParams();
   const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'signup');
   const [email, setEmail] = useState('');
@@ -44,11 +45,7 @@ const Auth = () => {
     }
 
     // Check if user is already logged in
-    const {
-      data: {
-        subscription
-      }
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = AuthQueries.onAuthStateChange((event, session) => {
       console.log('Auth state change:', event, session?.user?.email);
       setUser(session?.user ?? null);
       if (session?.user && !showSuccess) {
@@ -71,11 +68,7 @@ const Auth = () => {
     });
 
     // Check for existing session
-    supabase.auth.getSession().then(({
-      data: {
-        session
-      }
-    }) => {
+    AuthQueries.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user && !showSuccess) {
         const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
@@ -107,14 +100,7 @@ const Auth = () => {
     }
   }, [password, passwordValidation.touched]);
   const handleSocialAuth = async (provider: 'google' | 'discord') => {
-    const {
-      error
-    } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: `${window.location.origin}/`
-      }
-    });
+    const { error } = await AuthQueries.signInWithOAuth(provider, `${window.location.origin}/`);
     if (error) {
       setError(error.message);
     }
@@ -141,20 +127,12 @@ const Auth = () => {
       setLoading(false);
       return;
     }
-    const {
-      data,
-      error
-    } = await supabase.auth.signUp({
+    const { data, error } = await AuthQueries.signUpWithEmail(
       email,
       password,
-      options: {
-        data: {
-          username: username.trim(),
-          onboarding_completed: false // Explicitly set to false for new users
-        },
-        emailRedirectTo: `${window.location.origin}/onboarding`
-      }
-    });
+      { username: username.trim(), onboarding_completed: false },
+      `${window.location.origin}/onboarding`
+    );
     if (error) {
       console.log('Signup error:', error.message);
       setError(`Signup failed: ${error.message}. Try using the login form instead if you added a user manually in Supabase.`);
@@ -171,12 +149,7 @@ const Auth = () => {
     e.preventDefault();
     setLoading(true);
     setError('');
-    const {
-      error
-    } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+    const { error } = await AuthQueries.signInWithPassword(email, password);
     if (error) {
       console.log('Login error:', error.message);
       setError(`Login failed: ${error.message}`);
@@ -450,4 +423,4 @@ const Auth = () => {
       </div>
     </div>;
 };
-export default Auth;
+export default AuthPage;

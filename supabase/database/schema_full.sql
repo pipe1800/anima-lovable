@@ -953,6 +953,50 @@ $$;
 ALTER FUNCTION "public"."get_chat_context"("p_chat_id" "uuid", "p_user_id" "uuid", "p_character_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."get_chat_messages"("p_chat_id" "uuid", "p_limit" integer DEFAULT 30, "p_before_order" bigint DEFAULT NULL::bigint) RETURNS TABLE("id" "uuid", "chat_id" "uuid", "author_id" "uuid", "is_ai_message" boolean, "content" "text", "created_at" timestamp with time zone, "message_order" bigint, "current_context" "jsonb", "context_updates" "jsonb", "has_more" boolean)
+    LANGUAGE "sql"
+    AS $$
+  with base as (
+    select m.id,
+           m.chat_id,
+           m.author_id,
+           m.is_ai_message,
+           m.content,
+           m.created_at,
+           m.message_order,
+           cc.current_context,
+           null::jsonb as context_updates
+    from public.messages m
+    join public.chats c on c.id = m.chat_id and c.user_id = auth.uid()
+    left join public.chat_context cc on cc.chat_id = m.chat_id
+    where m.chat_id = p_chat_id
+      and (p_before_order is null or m.message_order < p_before_order)
+    order by m.message_order desc
+    limit least(greatest(p_limit,1), 100)
+  )
+  select b.id,
+         b.chat_id,
+         b.author_id,
+         b.is_ai_message,
+         b.content,
+         b.created_at,
+         b.message_order,
+         b.current_context,
+         b.context_updates,
+         exists (
+           select 1 from public.messages m2
+           join public.chats c2 on c2.id = m2.chat_id and c2.user_id = auth.uid()
+           where m2.chat_id = p_chat_id
+             and m2.message_order < (select min(message_order) from base)
+         ) as has_more
+  from base b
+  order by b.message_order desc;
+$$;
+
+
+ALTER FUNCTION "public"."get_chat_messages"("p_chat_id" "uuid", "p_limit" integer, "p_before_order" bigint) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer DEFAULT 50, "p_offset" integer DEFAULT 0) RETURNS TABLE("id" bigint, "change_amount" integer, "balance_after" integer, "transaction_type" "text", "description" "text", "created_at" timestamp with time zone)
     LANGUAGE "plpgsql"
     SET "search_path" TO 'public', 'billing', 'auth'
@@ -980,6 +1024,39 @@ $$;
 
 
 ALTER FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer, "p_offset" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_user_chats"("p_limit" integer DEFAULT 20, "p_offset" integer DEFAULT 0) RETURNS TABLE("chat_id" "uuid", "character_id" "uuid", "chat_created_at" timestamp with time zone, "chat_updated_at" timestamp with time zone, "character_name" "text", "character_avatar_url" "text", "last_message_id" "uuid", "last_message_created_at" timestamp with time zone, "last_message_is_ai" boolean, "last_message_content" "text", "total_count" bigint)
+    LANGUAGE "sql"
+    AS $$
+  select
+    c.id as chat_id,
+    c.character_id,
+    c.created_at as chat_created_at,
+    c.updated_at as chat_updated_at,
+    ch.name as character_name,
+    ch.avatar_url as character_avatar_url,
+    lm.id as last_message_id,
+    lm.created_at as last_message_created_at,
+    lm.is_ai_message as last_message_is_ai,
+    lm.content as last_message_content,
+    count(*) over() as total_count
+  from public.chats c
+  left join public.characters ch on ch.id = c.character_id
+  left join lateral (
+    select m.id, m.created_at, m.is_ai_message, m.content
+    from public.messages m
+    where m.chat_id = c.id
+    order by m.created_at desc
+    limit 1
+  ) lm on true
+  where c.user_id = auth.uid()
+  order by c.updated_at desc
+  limit greatest(p_limit,0) offset greatest(p_offset,0);
+$$;
+
+
+ALTER FUNCTION "public"."get_user_chats"("p_limit" integer, "p_offset" integer) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."get_user_credit_purchases"("p_user_id" "uuid", "p_limit" integer DEFAULT 10) RETURNS json
@@ -3354,6 +3431,14 @@ CREATE INDEX "idx_chats_user_id" ON "public"."chats" USING "btree" ("user_id");
 
 
 
+CREATE INDEX "idx_chats_user_updated_at" ON "public"."chats" USING "btree" ("user_id", "updated_at" DESC);
+
+
+
+CREATE INDEX "idx_messages_chat_created_at" ON "public"."messages" USING "btree" ("chat_id", "created_at" DESC);
+
+
+
 CREATE INDEX "idx_messages_chat_id" ON "public"."messages" USING "btree" ("chat_id");
 
 
@@ -4354,8 +4439,18 @@ GRANT ALL ON FUNCTION "public"."get_chat_context"("p_chat_id" "uuid", "p_user_id
 
 
 
+GRANT ALL ON FUNCTION "public"."get_chat_messages"("p_chat_id" "uuid", "p_limit" integer, "p_before_order" bigint) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_chat_messages"("p_chat_id" "uuid", "p_limit" integer, "p_before_order" bigint) TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer, "p_offset" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer, "p_offset" integer) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."get_user_chats"("p_limit" integer, "p_offset" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_user_chats"("p_limit" integer, "p_offset" integer) TO "service_role";
 
 
 

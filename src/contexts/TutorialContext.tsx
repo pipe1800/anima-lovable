@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/db/client';
+import { Tutorial as TutorialProfile } from '@/data/profile/tutorial';
 
 interface TutorialStep {
   id: number;
@@ -236,12 +237,7 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
   // Update tutorial completion status
   const updateTutorialStatus = useCallback(async (userId: string, completed: boolean) => {
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ onboarding_completed: completed })
-        .eq('id', userId);
-
-      if (error) throw error;
+      await TutorialProfile.updateTutorialStatus(userId, completed);
       console.log('🎓 Tutorial status updated in profiles:', completed);
     } catch (error) {
       console.error('Error updating tutorial status:', error);

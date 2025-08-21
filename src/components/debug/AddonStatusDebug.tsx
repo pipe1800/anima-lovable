@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 

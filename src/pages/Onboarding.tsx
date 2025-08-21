@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { User } from '@supabase/supabase-js';
 import VibeSelection from '@/components/onboarding/VibeSelection';
 import ProfileSetup from '@/components/onboarding/ProfileSetup';
 import PersonaCreation from '@/components/onboarding/PersonaCreation';
 import CharacterSelection from '@/components/onboarding/CharacterSelection';
 import OnboardingProgressBar from '@/components/onboarding/OnboardingProgressBar';
+import { Auth as AuthQueries } from '@/data';
 
 const Onboarding = () => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -17,8 +17,7 @@ const Onboarding = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Check for existing session first
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    AuthQueries.getSession().then(async ({ data: { session } }) => {
       console.log('Onboarding session check:', session?.user?.email);
       if (session?.user) {
         setUser(session.user);
@@ -43,7 +42,7 @@ const Onboarding = () => {
     });
 
     // Then set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const { data: { subscription } } = AuthQueries.onAuthStateChange(
       async (event, session) => {
         console.log('Onboarding auth change:', event, session?.user?.email);
         if (session?.user) {
@@ -104,49 +103,10 @@ const Onboarding = () => {
   };
 
   const completeOnboarding = async () => {
-    // Mark onboarding as completed
     if (user) {
-      await supabase.auth.updateUser({
-        data: { onboarding_completed: true }
-      });
-      
-      // Also update the profiles table
-      await supabase
-        .from('profiles')
-        .update({ onboarding_completed: true })
-        .eq('id', user.id);
-
-      // Ensure avatar exists; if missing, upload default and set avatar_url
+      await AuthQueries.completeOnboarding(user.id);
       try {
-        const { data: profileRow } = await supabase
-          .from('profiles')
-          .select('avatar_url')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (!profileRow || !profileRow.avatar_url) {
-          // Fetch default avatar from public
-          const response = await fetch('/default_avatar.jpg');
-          const blob = await response.blob();
-          const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
-
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('character-avatars')
-            .upload(`${user.id}/avatar-default.jpg`, file, { upsert: true });
-
-          let avatarUrlToSet: string = '/default_avatar.jpg';
-          if (!uploadError && uploadData?.path) {
-            const { data: pub } = await supabase.storage
-              .from('character-avatars')
-              .getPublicUrl(uploadData.path);
-            avatarUrlToSet = pub.publicUrl || avatarUrlToSet;
-          }
-
-          await supabase
-            .from('profiles')
-            .update({ avatar_url: avatarUrlToSet })
-            .eq('id', user.id);
-        }
+        await AuthQueries.ensureDefaultAvatarIfMissing(user.id);
       } catch (e) {
         console.error('Failed to ensure default avatar on onboarding complete:', e);
       }

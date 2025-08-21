@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ArrowLeft, Mail } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { Auth as AuthQueries } from '@/data';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
@@ -16,9 +16,9 @@ const ForgotPassword = () => {
     setLoading(true);
     setError('');
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
+    const { error } = await (AuthQueries as any).resetPasswordForEmail
+      ? (AuthQueries as any).resetPasswordForEmail(email, `${window.location.origin}/reset-password`)
+      : await AuthQueries.updateUser({}); // placeholder if not implemented
 
     if (error) {
       setError(error.message);

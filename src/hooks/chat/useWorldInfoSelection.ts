@@ -1,9 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import logger from '@/utils/logger';
-
-// Lazy imports kept internal to avoid adding to initial bundle where used
-const loadWorldInfoOps = async () => import('@/lib/user-world-info-operations');
+import { WorldInfoSelection } from '@/data';
 
 export const worldInfoKeys = {
   selection: (userId?: string, characterId?: string) => ['world-info', 'selection', userId, characterId] as const,
@@ -22,8 +20,7 @@ export function useWorldInfoSelection(
     queryKey: worldInfoKeys.selection(userId, characterId),
     queryFn: async () => {
       if (!userId || !characterId) return { worldInfoId: null } as { worldInfoId: string | null };
-      const { getUserCharacterWorldInfo } = await loadWorldInfoOps();
-      const result = await getUserCharacterWorldInfo(userId, characterId);
+      const result = await WorldInfoSelection.getUserCharacterWorldInfo(userId, characterId);
       return result;
     },
     enabled: !!userId && !!characterId,
@@ -42,11 +39,8 @@ export function useWorldInfoSelection(
   const saveMutation = useMutation({
     mutationFn: async (worldInfoId: string | null) => {
       if (!userId || !characterId) throw new Error('Missing user or character');
-      const { saveUserCharacterWorldInfo, removeUserCharacterWorldInfo } = await loadWorldInfoOps();
-      if (worldInfoId) {
-        return saveUserCharacterWorldInfo(userId, characterId, worldInfoId);
-      }
-      return removeUserCharacterWorldInfo(userId, characterId);
+      if (worldInfoId) return WorldInfoSelection.saveUserCharacterWorldInfo(userId, characterId, worldInfoId);
+      return WorldInfoSelection.removeUserCharacterWorldInfo(userId, characterId);
     },
     onSuccess: (_res, worldInfoId) => {
       setSelectedWorldInfoId(worldInfoId);

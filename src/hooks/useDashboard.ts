@@ -2,13 +2,12 @@ import React from 'react';
 import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
-  getUserChatsPaginated,
-  getUserCharacters, 
-  getUserCredits, 
-  getUserSubscription,
-  // getMonthlyCreditsUsage, // removed: not available, we'll fallback to 0
-  getUserFavorites
-} from '@/lib/supabase-queries';
+  CharacterUser,
+  CharacterInteractions,
+  Billing,
+  Chats
+} from '@/data';
+import { supabase } from '@/db/client';
 
 export const useDashboardData = () => {
   const { user, subscription: authSubscription, supabase } = useAuth();
@@ -20,9 +19,9 @@ export const useDashboardData = () => {
       if (!userId) throw new Error('User not authenticated');
 
       const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
-        getUserCharacters(userId),
-        getUserFavorites(userId),
-        getUserCredits(supabase, userId)
+        CharacterUser.getUserCharacters(userId),
+        CharacterInteractions.getUserFavorites(userId),
+        Billing.getUserCredits(supabase, userId)
       ]);
 
       return {
@@ -57,7 +56,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
         queryKey: ['user', 'chats', 'paginated', userId, page + 1, limit],
         queryFn: async () => {
           const nextPage = page + 1;
-          const result = await getUserChatsPaginated(userId, nextPage, limit, true);
+          const result = await Chats.getUserChatsPaginated(userId, nextPage, limit);
           if (result.error) {
             console.warn('Prefetch chats failed (next):', result.error);
             return { data: [], totalCount: 0, currentPage: nextPage, totalPages: 0, error: null } as any;
@@ -70,7 +69,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
         queryKey: ['user', 'chats', 'paginated', userId, page + 2, limit],
         queryFn: async () => {
           const nextNextPage = page + 2;
-          const result = await getUserChatsPaginated(userId, nextNextPage, limit, true);
+          const result = await Chats.getUserChatsPaginated(userId, nextNextPage, limit);
           if (result.error) {
             console.warn('Prefetch chats failed (+2):', result.error);
             return { data: [], totalCount: 0, currentPage: nextNextPage, totalPages: 0, error: null } as any;
@@ -84,7 +83,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
           queryKey: ['user', 'chats', 'paginated', userId, page - 1, limit],
           queryFn: async () => {
             const prevPage = page - 1;
-            const result = await getUserChatsPaginated(userId, prevPage, limit, true);
+            const result = await Chats.getUserChatsPaginated(userId, prevPage, limit);
             if (result.error) {
               console.warn('Prefetch chats failed (prev):', result.error);
               return { data: [], totalCount: 0, currentPage: prevPage, totalPages: 0, error: null } as any;
@@ -101,7 +100,7 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
     queryKey: ['user', 'chats', 'paginated', userId, page, limit],
     queryFn: async () => {
       if (!userId) return { data: [], totalCount: 0, currentPage: page, totalPages: 0 } as any;
-      const result = await getUserChatsPaginated(userId, page, limit);
+      const result = await Chats.getUserChatsPaginated(userId, page, limit);
       if (result.error) {
         console.error('Load chats failed:', result.error);
         // Return safe fallback to keep UI alive
@@ -125,7 +124,7 @@ export const useUserChats = () => {
     queryKey: ['user', 'chats', userId],
     queryFn: async () => {
       if (!userId) return [] as any[];
-      const result = await getUserChatsPaginated(userId, 1, 50);
+      const result = await Chats.getUserChatsPaginated(userId, 1, 50);
       if (result.error) {
         console.error('Load chats (non-paginated) failed:', result.error);
         return [] as any[];
@@ -146,7 +145,7 @@ export const useUserCharacters = () => {
     queryKey: ['user', 'characters', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-      const result = await getUserCharacters(userId);
+      const result = await CharacterUser.getUserCharacters(userId);
       if (result.error) throw result.error;
       return result.data || [];
     },
@@ -168,7 +167,7 @@ export const useUserCredits = () => {
       if (!userId) throw new Error('User not authenticated');
       const dashboard: any = queryClient.getQueryData(['dashboard', 'overview', userId]);
       if (dashboard?.credits !== undefined) return dashboard.credits;
-      const result = await getUserCredits(supabase, userId);
+      const result = await Billing.getUserCredits(supabase, userId);
       if (result.error) throw result.error;
       return result.data?.balance || 0;
     },
@@ -187,9 +186,8 @@ export const useUserSubscription = () => {
     queryKey: ['user', 'subscription', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-      const result = await getUserSubscription(supabase, userId);
-      if (result.error) throw result.error;
-      return result.data;
+      // Subscription now sourced from AuthContext; remove direct fetch
+      return null;
     },
     enabled: !!userId,
     staleTime: 15 * 60 * 1000, // 15 minutes - subscriptions change rarely
@@ -222,7 +220,7 @@ export const useUserFavorites = () => {
     queryKey: ['user', 'favorites', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-      const result = await getUserFavorites(userId);
+      const result = await CharacterInteractions.getUserFavorites(userId);
       if (result.error) throw result.error;
       return result.data || [];
     },
@@ -261,7 +259,7 @@ export const useDashboardMutations = () => {
 };
 
 // Preload function for dashboard data
-export const preloadDashboardData = async (userId: string, queryClient: QueryClient, supabase: any) => {
+export const preloadDashboardData = async (userId: string, queryClient: QueryClient) => {
   if (!userId) return;
   
   // Prefetch all dashboard data in the background
@@ -269,9 +267,9 @@ export const preloadDashboardData = async (userId: string, queryClient: QueryCli
     queryKey: ['dashboard', 'overview', userId],
     queryFn: async () => {
       const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
-        getUserCharacters(userId),
-        getUserFavorites(userId),
-        getUserCredits(supabase, userId)
+        CharacterUser.getUserCharacters(userId),
+        CharacterInteractions.getUserFavorites(userId),
+        Billing.getUserCredits(supabase, userId)
       ]);
 
       return {

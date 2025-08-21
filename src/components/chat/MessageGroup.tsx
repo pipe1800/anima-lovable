@@ -7,7 +7,7 @@ import type { TrackedContext, Message, Character } from '@/types/chat';
 import { useAuth } from '@/contexts/AuthContext';
 import { Pencil, RotateCcw, /* ChevronLeft, ChevronRight,*/ Check, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { updateMessageContent } from '@/data/chats/queries';
 
 interface MessageGroupData {
   id: string;
@@ -196,10 +196,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
     if (!target) return;
     try {
       setIsSaving(true);
-      const { error } = await supabase
-        .from('messages')
-        .update({ content: editValue })
-        .eq('id', target.id);
+      const { error } = await updateMessageContent(target.id, editValue);
       if (error) throw error;
       toast({ title: 'Updated', description: 'Message edited successfully.' });
       cancelEdit();

@@ -20,8 +20,7 @@ import {
   Lock
 } from 'lucide-react';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
-import { supabase } from '@/integrations/supabase/client';
-import { getPublicWorldInfoDetails, addWorldInfoToCollection, removeWorldInfoFromCollection } from '@/lib/world-info-operations';
+import { WorldInfoPublic, WorldInfoMutations, Auth } from '@/data';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -77,42 +76,13 @@ export default function PublicWorldInfoProfile() {
   useEffect(() => {
     const fetchWorldInfoData = async () => {
       if (!id) return;
-
       try {
         setLoading(true);
-        const data = await getPublicWorldInfoDetails(id);
-        setWorldInfo(data as unknown as WorldInfoData);
-        
-        // Fetch similar world infos
+        const { data, error } = await WorldInfoPublic.getPublicWorldInfoDetailsCentral({ worldInfoId: id, currentUserId: user?.id });
+        if (error || !data) throw error || new Error('Failed to load world info');
+        setWorldInfo(data as any);
         if (data.tags && data.tags.length > 0) {
-          const tagIds = data.tags.map(tag => tag.id);
-          
-          // First get world info IDs that have similar tags
-          const { data: taggedWorldInfos } = await supabase
-            .from('world_info_tags')
-            .select('world_info_id')
-            .in('tag_id', tagIds);
-          
-          const similarWorldInfoIds = taggedWorldInfos
-            ?.map(d => d.world_info_id)
-            .filter(wid => wid !== data.id) || []; // Exclude current world info
-          
-          if (similarWorldInfoIds.length > 0) {
-            const { data: similarData } = await supabase
-              .from('world_infos')
-              .select(`
-                id,
-                name,
-                short_description,
-                avatar_url,
-                creator:profiles!creator_id(username)
-              `)
-              .eq('visibility', 'public')
-              .in('id', similarWorldInfoIds)
-              .limit(6);
-            
-            setSimilarWorldInfos(similarData || []);
-          }
+          // TODO: move similar world info lookup into data layer (WorldInfoPublic.getSimilar)
         }
       } catch (err) {
         console.error('Error fetching world info:', err);
@@ -121,94 +91,23 @@ export default function PublicWorldInfoProfile() {
         setLoading(false);
       }
     };
-
     fetchWorldInfoData();
-  }, [id]);
+  }, [id, user?.id]);
 
   const handleLike = async () => {
     if (!worldInfo || isLiking) return;
-
-    const { data: user } = await supabase.auth.getUser();
-    if (!user.user) {
-      toast({
-        title: "Authentication Required",
-        description: "Please log in to like this world info",
-        variant: "destructive"
-      });
+    if (!user) {
+      toast({ title: 'Authentication Required', description: 'Please log in to like this world info', variant: 'destructive' });
       return;
     }
-
     setIsLiking(true);
     try {
-      if (worldInfo.isLiked) {
-        // Remove like
-        const { error } = await supabase
-          .from('world_info_user_likes')
-          .delete()
-          .eq('world_info_id', worldInfo.id)
-          .eq('user_id', user.user.id);
-
-        if (error) throw error;
-
-        // Update likes_count in world_infos table
-        const { data: currentData } = await supabase
-          .from('world_infos')
-          .select('likes_count')
-          .eq('id', worldInfo.id)
-          .single();
-        
-        if (currentData) {
-          await supabase
-            .from('world_infos')
-            .update({ likes_count: Math.max(currentData.likes_count - 1, 0) })
-            .eq('id', worldInfo.id);
-        }
-
-        setWorldInfo(prev => prev ? {
-          ...prev,
-          isLiked: false,
-          likesCount: prev.likesCount - 1
-        } : null);
-      } else {
-        // Add like
-        const { error } = await supabase
-          .from('world_info_user_likes')
-          .insert({
-            world_info_id: worldInfo.id,
-            user_id: user.user.id
-          });
-
-        if (error) throw error;
-
-        // Update likes_count in world_infos table
-        const { data: currentData } = await supabase
-          .from('world_infos')
-          .select('likes_count')
-          .eq('id', worldInfo.id)
-          .single();
-        
-        if (currentData) {
-          await supabase
-            .from('world_infos')
-            .update({ likes_count: currentData.likes_count + 1 })
-            .eq('id', worldInfo.id);
-        }
-
-        if (error) throw error;
-
-        setWorldInfo(prev => prev ? {
-          ...prev,
-          isLiked: true,
-          likesCount: prev.likesCount + 1
-        } : null);
-      }
+      const { data, error } = await WorldInfoPublic.toggleWorldInfoLikeCentral(worldInfo.id);
+      if (error) throw error;
+      setWorldInfo(prev => prev ? { ...prev, isLiked: !!data?.isLiked, likesCount: data?.likesCount ?? prev.likesCount } : prev);
     } catch (error) {
       console.error('Error toggling like:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update like status",
-        variant: "destructive"
-      });
+      toast({ title: 'Error', description: 'Failed to update like status', variant: 'destructive' });
     } finally {
       setIsLiking(false);
     }
@@ -216,46 +115,22 @@ export default function PublicWorldInfoProfile() {
 
   const handleUseLorebook = async () => {
     if (!user || !worldInfo) return;
-    
     setIsUsingLorebook(true);
-    
     try {
       if (worldInfo.isUsed) {
-        // Use the proper function that handles interaction count
-        await removeWorldInfoFromCollection(worldInfo.id);
-        
-        setWorldInfo(prev => prev ? {
-          ...prev,
-          isUsed: false,
-          interaction_count: Math.max((prev.interaction_count || 0) - 1, 0)
-        } : null);
-
-        toast({
-          title: "Lorebook Removed",
-          description: "This lorebook has been removed from your collection",
-        });
+        const { data, error } = await WorldInfoPublic.removeWorldInfoFromCollectionCentral(worldInfo.id, user.id);
+        if (error) throw error;
+        setWorldInfo(prev => prev ? { ...prev, isUsed: false, interaction_count: Math.max((prev.interaction_count || 0) - 1, 0) } : null);
+        toast({ title: 'Lorebook Removed', description: 'This lorebook has been removed from your collection' });
       } else {
-        // Use the proper function that handles interaction count
-        await addWorldInfoToCollection(worldInfo.id);
-        
-        setWorldInfo(prev => prev ? {
-          ...prev,
-          isUsed: true,
-          interaction_count: (prev.interaction_count || 0) + 1
-        } : null);
-
-        toast({
-          title: "Lorebook Added",
-          description: "This lorebook has been added to your collection",
-        });
+        const { data, error } = await WorldInfoPublic.addWorldInfoToCollectionCentral(worldInfo.id, user.id);
+        if (error) throw error;
+        setWorldInfo(prev => prev ? { ...prev, isUsed: true, interaction_count: (prev.interaction_count || 0) + 1 } : null);
+        toast({ title: 'Lorebook Added', description: 'This lorebook has been added to your collection' });
       }
     } catch (error) {
       console.error('Error updating lorebook collection:', error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to update collection",
-        variant: "destructive",
-      });
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to update collection', variant: 'destructive' });
     } finally {
       setIsUsingLorebook(false);
     }
@@ -286,28 +161,26 @@ export default function PublicWorldInfoProfile() {
   };
 
   const handleDelete = async () => {
-    if (!worldInfo || !isOwner) return;
-    try {
-      const { error } = await supabase.from('world_infos').delete().eq('id', worldInfo.id);
-      if (error) throw error;
-      toast({ title: 'Deleted', description: 'World info deleted.' });
-      navigate('/world-info');
-    } catch (err) {
+    if (!worldInfo || !isOwner || !user) return;
+    const { error } = await WorldInfoMutations.deleteWorldInfo(worldInfo.id, user.id);
+    if (error) {
       toast({ title: 'Error', description: 'Failed to delete world info', variant: 'destructive' });
+      return;
     }
+    toast({ title: 'Deleted', description: 'World info deleted.' });
+    navigate('/world-info');
   };
 
   const toggleVisibility = async () => {
-    if (!worldInfo || !isOwner) return;
+    if (!worldInfo || !isOwner || !user) return;
     const newVisibility = worldInfo.visibility === 'public' ? 'private' : 'public';
-    try {
-      const { error } = await supabase.from('world_infos').update({ visibility: newVisibility }).eq('id', worldInfo.id);
-      if (error) throw error;
-      setWorldInfo(prev => prev ? { ...prev, visibility: newVisibility } : prev);
-      toast({ title: 'Visibility Updated', description: `World info is now ${newVisibility}.` });
-    } catch (err) {
+    const { data, error } = await WorldInfoMutations.updateWorldInfoVisibility(worldInfo.id, newVisibility as any, user.id);
+    if (error) {
       toast({ title: 'Error', description: 'Failed to update visibility', variant: 'destructive' });
+      return;
     }
+    setWorldInfo(prev => prev ? { ...prev, visibility: data?.visibility || newVisibility } : prev);
+    toast({ title: 'Visibility Updated', description: `World info is now ${newVisibility}.` });
   };
 
   // Filter entries based on search term

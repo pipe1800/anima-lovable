@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
-import { getUserChats, getCharacterDetails, deleteChat as deleteChatRpc } from '@/lib/supabase-queries';
-import type { Persona } from '@/lib/persona-operations';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
-import { getUserCharacterSettings, upsertUserCharacterSettings } from '@/queries/userCharacterSettingsQueries';
+// import { supabase } from '@/db/client';
+import { Chats } from '@/data';
+import { CharacterInteractions } from '@/data';
+import type { Persona } from '@/data/personas/mutations';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
+import { CharacterUserSettings } from '@/data';
 import { getBrowserTimezone } from '@/utils/timezone';
 import AppSidebar from '@/components/dashboard/AppSidebar';
 import { ContextSidebar } from './ContextSidebar';
@@ -23,7 +24,7 @@ import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 import type { TrackedContext, Character } from '@/types/chat';
 import { getMemoryCostExplanation } from '@/lib/memory-cost-calculator';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { queryConfigs, queryKeys } from '@/queries/chatQueries';
+import { chatQueryConfigs, chatQueryKeys } from '@/data/chats/queryKeys';
 import logger from '@/utils/logger';
 // import RightPanel from './RightPanel';
 const RightPanelLazy = lazy(() => import('./RightPanel'));
@@ -89,7 +90,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   // Credits (skip if provided by parent)
   const { data: internalCreditsBalance = 0 } = useQuery({
-    ...queryConfigs.userCredits(currentUser?.id || ''),
+    ...chatQueryConfigs.userCredits(currentUser?.id || ''),
     enabled: !!currentUser?.id && typeof creditsBalanceOverride !== 'number'
   });
   const creditsBalance = typeof creditsBalanceOverride === 'number' ? creditsBalanceOverride : internalCreditsBalance;
@@ -187,7 +188,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // =========================
   // Character details
   const characterDetailsQuery = useQuery({
-    ...queryConfigs.characterDetails(character.id),
+    ...chatQueryConfigs.characterDetails(character.id),
     enabled: !characterDetailsOverride, // skip if provided by parent
   });
   const characterDetails = useMemo(() => {
@@ -201,7 +202,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     queryKey: ['user', 'chats', currentUser?.id],
     queryFn: async () => {
       if (!currentUser?.id) return [] as any[];
-      const { data } = await getUserChats(currentUser.id);
+      const { data } = await Chats.getUserChatsPaginated(currentUser.id, 1, 50);
       return data || [];
     },
     enabled: !!currentUser?.id,
@@ -221,30 +222,14 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // Likes / Favorites
   const likedQuery = useQuery({
     queryKey: ['character', 'liked', currentUser?.id, character.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('character_likes')
-        .select('id')
-        .eq('character_id', character.id)
-        .eq('user_id', currentUser!.id)
-        .maybeSingle();
-      return !!data;
-    },
+    queryFn: async () => currentUser ? CharacterInteractions.isCharacterLiked(character.id, currentUser.id) : false,
     enabled: !!currentUser?.id,
   });
   useEffect(() => setIsLiked(!!likedQuery.data), [likedQuery.data]);
 
   const favoritedQuery = useQuery({
     queryKey: ['character', 'favorited', currentUser?.id, character.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('character_favorites')
-        .select('id')
-        .eq('character_id', character.id)
-        .eq('user_id', currentUser!.id)
-        .maybeSingle();
-      return !!data;
-    },
+    queryFn: async () => currentUser ? CharacterInteractions.isCharacterFavorited(character.id, currentUser.id) : false,
     enabled: !!currentUser?.id,
   });
   useEffect(() => setIsFavorited(!!favoritedQuery.data), [favoritedQuery.data]);
@@ -252,7 +237,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // User character settings
   const userCharSettingsQuery = useQuery({
     queryKey: ['user', 'character-settings', currentUser?.id, character.id],
-    queryFn: async () => currentUser ? getUserCharacterSettings(currentUser.id, character.id) : null,
+    queryFn: async () => currentUser ? CharacterUserSettings.getUserCharacterSettings(currentUser.id, character.id) : null,
     enabled: !!currentUser?.id,
   });
   useEffect(() => {
@@ -268,12 +253,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     queryKey: ['chat', 'mode', currentChatId, currentUser?.id],
     queryFn: async () => {
       if (!currentChatId || !currentUser?.id) return null;
-      const { data } = await supabase
-        .from('chats')
-        .select('chat_mode')
-        .eq('id', currentChatId)
-        .eq('user_id', currentUser.id)
-        .single();
+      const { data } = await Chats.getChatMode(currentChatId, currentUser.id);
       return data;
     },
     enabled: !!currentChatId && !!currentUser?.id,
@@ -308,21 +288,9 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   const handleLike = async () => {
     if (!currentUser) return;
-
     try {
-      if (isLiked) {
-        await supabase
-          .from('character_likes')
-          .delete()
-          .eq('character_id', character.id)
-          .eq('user_id', currentUser.id);
-        setIsLiked(false);
-      } else {
-        await supabase
-          .from('character_likes')
-          .insert([{ character_id: character.id, user_id: currentUser.id }]);
-        setIsLiked(true);
-      }
+      const newState = await CharacterInteractions.toggleCharacterLike(character.id, currentUser.id);
+      setIsLiked(newState);
       queryClient.invalidateQueries({ queryKey: ['character', 'liked', currentUser?.id, character.id] });
     } catch (error) {
       logger.error('Error updating like status:', error);
@@ -331,21 +299,9 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   const handleFavorite = async () => {
     if (!currentUser) return;
-
     try {
-      if (isFavorited) {
-        await supabase
-          .from('character_favorites')
-          .delete()
-          .eq('character_id', character.id)
-          .eq('user_id', currentUser.id);
-        setIsFavorited(false);
-      } else {
-        await supabase
-          .from('character_favorites')
-          .insert([{ character_id: character.id, user_id: currentUser.id }]);
-        setIsFavorited(true);
-      }
+      const newState = await CharacterInteractions.toggleCharacterFavorite(character.id, currentUser.id);
+      setIsFavorited(newState);
       queryClient.invalidateQueries({ queryKey: ['character', 'favorited', currentUser?.id, character.id] });
     } catch (error) {
       logger.error('Error updating favorite status:', error);
@@ -472,7 +428,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     }
 
     try {
-      const { error } = await deleteChatRpc(chatId, currentUser.id);
+      const { error } = await Chats.deleteChat(chatId, currentUser.id);
       if (error) throw error;
 
       toast.success('Chat deleted successfully');
@@ -497,7 +453,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     if (!currentUser || !pendingChatMode) return;
     setChatModeLoading(true);
     try {
-      await upsertUserCharacterSettings(currentUser.id, character.id, { chat_mode: pendingChatMode });
+      await CharacterUserSettings.upsertUserCharacterSettings(currentUser.id, character.id, { chat_mode: pendingChatMode });
       setChatMode(pendingChatMode);
       await handleStartNewChat();
       toast.success(`Chat mode updated to ${pendingChatMode}`, {
@@ -519,7 +475,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     if (!currentUser) return;
     setTimeAwarenessLoading(true);
     try {
-      await upsertUserCharacterSettings(currentUser.id, character.id, { time_awareness_enabled: enabled });
+      await CharacterUserSettings.upsertUserCharacterSettings(currentUser.id, character.id, { time_awareness_enabled: enabled });
       setTimeAwarenessEnabled(enabled);
       toast.success(`Time awareness ${enabled ? 'enabled' : 'disabled'}`, {
         description: enabled 
@@ -566,7 +522,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         });
   // Removed: message count query invalidation (now event-driven & derived)
         if (currentUser?.id) {
-          queryClient.invalidateQueries({ queryKey: queryKeys.user.credits(currentUser.id), exact: true });
+          queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.credits(currentUser.id), exact: true });
         }
       } else {
         throw new Error(data?.message || data?.error || 'Failed to create memory');
@@ -583,15 +539,9 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     const fetchInitialContext = async () => {
       try {
         if (!currentChatId || !currentUser?.id || !character?.id) return;
-        const { data, error } = await supabase
-          .from('chat_context')
-          .select('current_context')
-          .eq('chat_id', currentChatId)
-          .eq('user_id', currentUser.id)
-          .eq('character_id', character.id)
-          .maybeSingle();
+        const { data, error } = await Chats.getChatContext({ chatId: currentChatId, userId: currentUser.id, characterId: character.id });
         if (error) {
-          logger.warn('Context fetch skipped/failed:', error.message);
+          logger.warn('Context fetch skipped/failed:', error.message || error.toString());
           return;
         }
         if (data?.current_context) {
@@ -603,8 +553,8 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
             timeAndWeather: raw?.time_weather || 'No context',
             relationshipStatus: raw?.relationship || 'No context',
             characterPosition: raw?.character_position || 'No context',
-            enchantmentStatus: raw?.enchantment_status || 'No context', // NEW
-            itemInventory: raw?.item_inventory || 'No context' // NEW
+            enchantmentStatus: raw?.enchantment_status || 'No context',
+            itemInventory: raw?.item_inventory || 'No context'
           };
           if (onContextUpdate) onContextUpdate(converted);
         }

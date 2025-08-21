@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { Payments, Billing } from '@/data';
 import { useToast } from '@/hooks/use-toast';
 import { Crown, CreditCard, Check, X, TrendingUp } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -50,24 +50,9 @@ const useSubscriptionData = () => {
     queryKey: ['subscription-data', user?.id],
     queryFn: async () => {
       if (!user) return { plans: [], creditPacks: [], credits: null };
-      const { data, error } = await supabase.rpc('get_billing_catalog', { p_user_id: user.id });
+      const { data, error } = await Billing.getUserSubscriptionForUser(user.id);
       if (error) throw error;
-      const catalog = data as any;
-      const rawPlans = (catalog?.plans || []) as any[];
-      const rawPacks = (catalog?.credit_packs || []) as any[];
-      const plans: Plan[] = rawPlans.map(p => ({
-        ...p,
-        price_monthly_display: (p.price_monthly ?? 0) / 100
-      }));
-      const creditPacks: CreditPack[] = rawPacks.map(p => ({
-        ...p,
-        price_display: (p.price_cents ?? 0) / 100
-      }));
-      return {
-        plans,
-        creditPacks,
-        credits: catalog?.credits_balance != null ? { balance: catalog.credits_balance } : null
-      };
+      return { plans: [], creditPacks: [], credits: data };
     },
     staleTime: 1000 * 60 * 5,
     enabled: true
@@ -414,11 +399,7 @@ export default function Subscription() {
       console.log('📤 Sending request to paypal-management:', requestBody);
 
       // Add retry logic for network issues
-      const response = await retryWithDelay(async () => {
-        return await supabase.functions.invoke('paypal-management', {
-          body: requestBody
-        });
-      });
+      const response = await retryWithDelay(async () => Payments.createSubscription(requestBody.planId, requestBody.upgradeFromSubscriptionId));
 
       const { data, error } = response;
 
@@ -495,11 +476,7 @@ export default function Subscription() {
       console.log('📤 Sending credit purchase request to paypal-management:', requestBody);
 
       // Add retry logic for network issues
-      const response = await retryWithDelay(async () => {
-        return await supabase.functions.invoke('paypal-management', {
-          body: requestBody
-        });
-      });
+      const response = await retryWithDelay(async () => Payments.createCreditOrder(requestBody.creditPackId));
 
       const { data, error } = response;
 

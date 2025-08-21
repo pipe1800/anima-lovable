@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Search, X } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { Tags } from '@/data';
 
 interface FilterPanelProps {
   isOpen: boolean;
@@ -41,15 +41,10 @@ export function FilterPanel({ isOpen, onClose, filterBy, setFilterBy, onFiltersA
     const fetchTags = async () => {
       setLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('tags')
-          .select('name')
-          .order('name');
-        
+        const { data, error } = await Tags.getTagNames();
         if (data && !error) {
-          setAvailableTags(data.map(tag => tag.name));
+          setAvailableTags(data as string[]);
         } else {
-          // Fallback to hardcoded tags if database query fails
           setAvailableTags([
             'Action', 'Adventure', 'Anime', 'Comedy', 'Drama', 'Fantasy',
             'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Slice of Life', 'Thriller',
@@ -64,10 +59,7 @@ export function FilterPanel({ isOpen, onClose, filterBy, setFilterBy, onFiltersA
         setLoading(false);
       }
     };
-
-    if (isOpen) {
-      fetchTags();
-    }
+    if (isOpen) fetchTags();
   }, [isOpen]);
 
   const filteredTags = availableTags.filter(tag =>

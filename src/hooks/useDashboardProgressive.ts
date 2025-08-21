@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUserCredits } from '@/lib/supabase-queries';
+import { Billing } from '@/data';
 
 // Combined single query hook to reduce duplicate network calls.
 export const useDashboardData = () => {
@@ -17,7 +17,7 @@ export const useDashboardData = () => {
 
       // Parallel queries: credits, own characters, favorites
       const [creditsResult, charactersQuery, favoritesQuery] = await Promise.all([
-        getUserCredits(supabase, userId),
+        Billing.getUserCredits(supabase, userId),
         supabase
           .from('characters')
           .select(`

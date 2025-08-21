@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/db/client';
 
 /**
  * Update the selected persona for a specific chat

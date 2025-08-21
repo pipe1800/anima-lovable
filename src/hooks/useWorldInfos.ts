@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { searchPublicWorldInfos, SearchParams } from '@/lib/supabase-queries';
-import { supabase } from '@/integrations/supabase/client';
+import { WorldInfo, SearchParams as WorldInfoSearchParams } from '@/data';
+import { supabase } from '@/db/client';
+import { getUserOwnedWorldInfos, getUserWorldInfoCollection, getWorldInfoWithEntries, getWorldInfoTags } from '@/data/worldInfo/queries';
+const sbAny: any = supabase; // temp until world info tables augmented
 
 export interface WorldInfoWithDetails {
   id: string;
@@ -23,76 +25,16 @@ export interface WorldInfoWithDetails {
 
 // Optimized query to get user world infos with all related data in one go
 const fetchUserWorldInfos = async (userId: string): Promise<WorldInfoWithDetails[]> => {
-  // Include all visibilities for owner
-  const { data: worldInfosWithCounts, error } = await supabase
-    .from('world_infos')
-    .select(`
-      *,
-      world_info_entries(id),
-      world_info_tags(
-        tags(id, name)
-      )
-    `)
-    .eq('creator_id', userId)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching world infos:', error);
-    throw new Error('Failed to fetch world infos');
-  }
-
-  // Transform the data to match expected format
-  return (worldInfosWithCounts || []).map(worldInfo => ({
-    ...worldInfo,
-    entriesCount: worldInfo.world_info_entries?.length || 0,
-    likesCount: worldInfo.likes_count || 0,
-    tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || []
-  }));
+  const { data, error } = await getUserOwnedWorldInfos(userId);
+  if (error) throw error;
+  return data as any;
 };
 
 // Optimized query for user collection
 const fetchUserWorldInfoCollection = async (userId: string): Promise<WorldInfoWithDetails[]> => {
-  const { data: collectionData, error } = await supabase
-    .from('world_info_users')
-    .select(`
-      world_infos(
-        *,
-        world_info_entries(id),
-        world_info_tags(
-          tags(id, name)
-        )
-      )
-    `)
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching user collection:', error);
-    throw new Error('Failed to fetch user collection');
-  }
-
-  // Get creator profiles separately
-  const worldInfos = (collectionData || [])
-    .map(item => item.world_infos)
-    .filter(Boolean);
-
-  if (worldInfos.length === 0) return [];
-
-  const creatorIds = [...new Set(worldInfos.map(w => w.creator_id))];
-  const { data: creators } = await supabase
-    .from('profiles')
-    .select('id, username, avatar_url')
-    .in('id', creatorIds);
-
-  const creatorsMap = new Map(creators?.map(c => [c.id, c]) || []);
-
-  return worldInfos.map(worldInfo => ({
-    ...worldInfo,
-    entriesCount: worldInfo.world_info_entries?.length || 0,
-    likesCount: worldInfo.likes_count || 0,
-    tags: worldInfo.world_info_tags?.map(wt => wt.tags).filter(Boolean) || [],
-    creator: creatorsMap.get(worldInfo.creator_id)
-  }));
+  const { data, error } = await getUserWorldInfoCollection(userId);
+  if (error) throw error;
+  return data as any;
 };
 
 export const useUserWorldInfos = () => {
@@ -147,20 +89,13 @@ export const useWorldInfoWithEntries = (worldInfoId: string | null) => {
     queryKey: ['world-info-with-entries', worldInfoId, user?.id],
     queryFn: async () => {
       if (!worldInfoId) throw new Error('Missing required data');
-      const { data: worldInfo, error: worldInfoError } = await supabase
-        .from('world_infos')
-        .select(`
-          *,
-          world_info_entries(*)
-        `)
-        .eq('id', worldInfoId)
-        .single();
+      const { data: worldInfo, error: worldInfoError } = await getWorldInfoWithEntries(worldInfoId);
       if (worldInfoError || !worldInfo) throw new Error('Failed to fetch world info');
-      // Enforce visibility: if private and not owner, block
-      if (worldInfo.visibility === 'private' && (!user || worldInfo.creator_id !== user.id)) {
+      const record: any = worldInfo;
+      if (record.visibility === 'private' && (!user || record.creator_id !== user.id)) {
         throw new Error('World info not public');
       }
-      return { ...worldInfo, entries: worldInfo.world_info_entries || [] };
+      return { ...record, entries: record.entries || [] };
     },
     enabled: !!worldInfoId,
     staleTime: 1000 * 60 * 5,
@@ -237,17 +172,14 @@ export const usePublicWorldInfos = () => {
   });
 };
 
-export const useSearchPublicWorldInfos = (searchParams: SearchParams) => {
+export const useSearchPublicWorldInfos = (params: WorldInfoSearchParams) => {
   return useQuery({
-    queryKey: ['world-infos', 'search', searchParams],
-    queryFn: async () => {
-      const result = await searchPublicWorldInfos(searchParams);
-      if (result.error) throw result.error;
-      return result;
-    },
-    enabled: false, // Only run when manually triggered
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000, // 15 minutes
+    queryKey: ['public-world-infos-search', params],
+    queryFn: () => WorldInfo.searchPublicWorldInfos(params),
+    enabled: false,
+    staleTime: 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    placeholderData: (prev) => prev ?? undefined,
   });
 };
 
@@ -258,18 +190,9 @@ export const useWorldInfoTags = (worldInfoId: string | null) => {
     queryFn: async () => {
       if (!worldInfoId) throw new Error('World info ID required');
       
-      const { data: worldInfoTags, error } = await supabase
-        .from('world_info_tags')
-        .select(`
-          tags(id, name)
-        `)
-        .eq('world_info_id', worldInfoId);
-
-      if (error) {
-        throw new Error('Failed to fetch world info tags');
-      }
-
-      return worldInfoTags?.map(wt => wt.tags).filter(Boolean) || [];
+      const { data: tags, error } = await getWorldInfoTags(worldInfoId);
+      if (error) throw new Error('Failed to fetch world info tags');
+      return tags || [];
     },
     enabled: !!worldInfoId,
     staleTime: 1000 * 60 * 5, // 5 minutes

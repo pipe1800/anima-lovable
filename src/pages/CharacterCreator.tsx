@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCharacterCreation } from '@/hooks/useCharacterCreation';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
-import { getUserCredits } from '@/lib/supabase-queries';
+import { Billing } from '@/data';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Tables } from '@/integrations/supabase/types';
-import { supabase, SUPABASE_API_URL } from '@/integrations/supabase/client';
+import { Auth as AuthQueries, Characters as CharacterQueries } from '@/data';
+import { parseCharacterCard } from '@/data/characters/parseCard';
 import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
 
 // Lazy load heavy components for better performance
@@ -74,7 +75,7 @@ const CharacterCreator = () => {
     const fetchCredits = async () => {
       if (!user) return;
       try {
-        const creditsResult = await getUserCredits(supabase, user.id);
+        const creditsResult = await Billing.getUserCreditsForUser(user.id);
         if (creditsResult.data?.balance) {
           setUserCredits(creditsResult.data.balance);
         }
@@ -139,23 +140,12 @@ const CharacterCreator = () => {
       fd.append('store_avatar', 'true');
       fd.append('bypass_cache', 'true'); // ensure fresh parse during testing to avoid stale cache
 
-      const { data: session } = await supabase.auth.getSession();
+      const { data: session } = await AuthQueries.getSession();
       const token = session.session?.access_token;
       if (!token) throw new Error('Not authenticated');
 
-      const resp = await fetch(`${SUPABASE_API_URL}/functions/v1/parse-character-card`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `Parser error: ${resp.status}`);
-      }
-
-      const payload = await resp.json();
-      const { formData: parsed, meta } = payload || {};
+      const payload = await parseCharacterCard(file, { token });
+      const { formData: parsed, meta } = payload || {} as any;
       if (!parsed) throw new Error('No data returned from parser');
 
       updateCharacterData({ ...parsed, version: payload?.version || '', nsfw_enabled: !!meta?.flags?.nsfwDetected });
@@ -165,11 +155,8 @@ const CharacterCreator = () => {
       // Seed selectedTags from parsed tags for UI chips
       const parsedTagNames: string[] = Array.isArray(parsed?.personality?.tags) ? parsed.personality.tags : [];
       if (parsedTagNames.length > 0) {
-        const { data: tagRows, error: tagErr } = await supabase
-          .from('tags')
-          .select('id, name')
-          .in('name', parsedTagNames);
-        if (!tagErr && Array.isArray(tagRows)) {
+        const { data: tagRows } = await CharacterQueries.getTagsByNames(parsedTagNames);
+        if (Array.isArray(tagRows)) {
           setSelectedTags(tagRows as Tag[]);
         }
       } else {
@@ -179,7 +166,7 @@ const CharacterCreator = () => {
       if (meta?.flags?.nsfwDetected) {
         toast({ title: 'NSFW content detected', description: 'This character may contain NSFW content. Review and adjust visibility if needed.' });
         try {
-          const { data: nsfwTagRow } = await supabase.from('tags').select('id,name').ilike('name','nsfw').maybeSingle();
+          const { data: nsfwTagRow } = await CharacterQueries.getTagByNameInsensitive('nsfw');
           if (nsfwTagRow) {
             setSelectedTags(prev => prev.some(t => t.name.toLowerCase() === 'nsfw') ? prev : [...prev, nsfwTagRow as Tag]);
           }
@@ -198,28 +185,28 @@ const CharacterCreator = () => {
     } catch (err) {
       console.error('Error invoking parse-character-card, attempting fallback...', err);
       try {
-        const mod = await import('@/utils/fallbackCharacterCard');
-        const localForm = await mod.parseCharacterCardToForm(file);
-        if (localForm) {
-          updateCharacterData(localForm);
-          setNsfwDetected(false);
-          setNsfwWarnings([]);
+        const payload = await parseCharacterCard(file).catch(() => null);
+        if (payload) {
+          const { formData: localForm, meta } = payload as any;
+          const localFormData = localForm || (payload as any);
+          if (localFormData) {
+            updateCharacterData(localFormData);
+            setNsfwDetected(!!meta?.flags?.nsfwDetected);
+            setNsfwWarnings(Array.isArray(meta?.warnings) ? meta.warnings : []);
 
-          // Seed tags from fallback as well
-          const parsedTagNames: string[] = Array.isArray(localForm?.personality?.tags) ? localForm.personality.tags : [];
-          if (parsedTagNames.length > 0) {
-            const { data: tagRows } = await supabase
-              .from('tags')
-              .select('id, name')
-              .in('name', parsedTagNames);
-            if (Array.isArray(tagRows)) {
-              setSelectedTags(tagRows as Tag[]);
+            // Seed tags from fallback as well
+            const parsedTagNames: string[] = Array.isArray(localForm?.personality?.tags) ? localForm.personality.tags : [];
+            if (parsedTagNames.length > 0) {
+              const { data: tagRows } = await CharacterQueries.getTagsByNames(parsedTagNames);
+              if (Array.isArray(tagRows)) {
+                setSelectedTags(tagRows as Tag[]);
+              }
+            } else {
+              setSelectedTags([]);
             }
-          } else {
-            setSelectedTags([]);
-          }
 
-          toast({ title: 'Imported Locally', description: 'Edge parsing failed; used local parser successfully.' });
+            toast({ title: 'Imported Locally', description: 'Edge parsing failed; used local parser successfully.' });
+          }
         } else {
           toast({ title: 'Import Failed', description: err instanceof Error ? err.message : 'Failed to import character data.', variant: 'destructive' });
         }

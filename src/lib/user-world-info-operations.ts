@@ -1,4 +1,5 @@
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/db/client";
+const sbAny: any = supabase; // temp any until world_info tables added to generated types
 
 export interface UserWorldInfoSetting {
   id: string;
@@ -126,7 +127,7 @@ export async function canUserAccessWorldInfo(
     }
 
     // Check if user has world info in their collection
-    const { data: collectionWorldInfo, error: collectionError } = await supabase
+    const { data: collectionWorldInfo, error: collectionError } = await sbAny
       .from('world_info_users')
       .select('id')
       .eq('user_id', userId)

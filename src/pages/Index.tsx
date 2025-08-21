@@ -1,7 +1,6 @@
-
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { Auth as AuthQueries } from '@/data';
 import HeroSection from "@/components/HeroSection";
 import ValueProposition from "@/components/ValueProposition";
 import { LandingSubscriptionPlans } from "@/components/landing/LandingSubscriptionPlans";
@@ -15,7 +14,7 @@ const Index = () => {
 
   useEffect(() => {
     const checkAuthStatus = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await AuthQueries.getSession();
       
       if (session?.user) {
         const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;

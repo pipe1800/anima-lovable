@@ -31,8 +31,7 @@ import {
   FavoriteCharacterSkeleton 
 } from '@/components/dashboard/DashboardSkeletons';
 import { useRealtimeUpdates } from '@/hooks/useRealtimeUpdates';
-import { supabase } from '@/integrations/supabase/client';
-import { deleteChat, deleteMultipleChats, deleteAllUserChats } from '@/lib/supabase-queries';
+import { Chats } from '@/data';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { StatsCard } from '@/components/ui/stats-card';
@@ -150,22 +149,31 @@ export function DashboardContent() {
 
   // Memoize formatted data for performance
   const formattedRecentChats = useMemo(() => 
-    recentChats.map((chat: any) => ({
-      id: chat.id,
-      character: {
-        id: chat.character?.id,
-        name: chat.character?.name || 'Unknown',
-        avatar: chat.character?.avatar_url,
-        image: chat.character?.avatar_url, // For backwards compatibility
-      },
-      title: chat.title || `Chat with ${chat.character?.name || 'Unknown'}`,
-      message_count: chat.message_count || 0,
-      last_message_at: chat.last_message_at || chat.created_at,
-      created_at: chat.created_at,
-      chat_mode: chat.userSettings?.chat_mode || 'storytelling',
-      time_awareness_enabled: chat.userSettings?.time_awareness_enabled || false,
-      last_message: chat.messages?.[0]?.content || null,
-    })), [recentChats]
+    recentChats.map((chat: any) => {
+      // Adapt to RPC shape from get_user_chats (chat_id, character_name, character_avatar_url, last_message ...)
+      const chatId = chat.chat_id || chat.id; // fallback if legacy shape
+      const characterId = chat.character_id || chat.character?.id;
+      const characterName = chat.character_name || chat.character?.name || 'Unknown';
+      const avatarUrl = chat.character_avatar_url || chat.character?.avatar_url || chat.character?.avatar;
+      const lastMessageObj = chat.last_message || null; // RPC already normalizes last_message
+      const lastMessageContent = lastMessageObj?.content || chat.messages?.[0]?.content || null;
+      return {
+        id: chatId,
+        character: {
+          id: characterId,
+          name: characterName,
+          avatar: avatarUrl,
+          image: avatarUrl,
+        },
+        title: chat.title || `Chat with ${characterName}`,
+        message_count: chat.message_count || 0, // Now populated by RPC
+        last_message_at: chat.last_message_at || lastMessageObj?.created_at || chat.chat_updated_at || chat.updated_at || chat.created_at || chat.chat_created_at,
+        created_at: chat.created_at || chat.chat_created_at,
+        chat_mode: chat.userSettings?.chat_mode || chat.chat_mode || 'storytelling',
+        time_awareness_enabled: chat.userSettings?.time_awareness_enabled || chat.time_awareness_enabled || false,
+        last_message: lastMessageContent,
+      };
+    }), [recentChats]
   );
 
   const formattedMyCharacters = useMemo(() => 
@@ -271,81 +279,22 @@ export function DashboardContent() {
     navigate(`/chat/${character.id}`, { state: { selectedCharacter: character, deferred: true } });
   }, [navigate]);
 
-  const handleDeleteSelectedChats = useCallback(async () => {
-    if (selectedChats.size === 0) return;
-    
+  const handleDeleteSelected = useCallback(async () => {
+    if (!user) return;
     setIsDeleting(true);
-    const chatIdsToDelete = Array.from(selectedChats);
-    console.log(`Dashboard: Starting deletion of ${chatIdsToDelete.length} chats:`, chatIdsToDelete);
-    
     try {
-      // Optimistic update - immediately remove chats from the UI
-      queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
-        if (!oldData) return oldData;
-        
-        const filteredChats = oldData.data.filter((chat: any) => !chatIdsToDelete.includes(chat.id));
-        console.log(`Optimistically removed ${chatIdsToDelete.length} chats from UI. Remaining: ${filteredChats.length}`);
-        return {
-          ...oldData,
-          data: filteredChats,
-          totalCount: oldData.totalCount - chatIdsToDelete.length,
-          totalPages: Math.ceil((oldData.totalCount - chatIdsToDelete.length) / chatsPerPage)
-        };
-      });
-      
-      // Clear selection immediately
+      await Chats.deleteMultipleChats(Array.from(selectedChats), user.id);
       setSelectedChats(new Set());
-      
-      // Perform actual deletions in the background
-      const results = await deleteMultipleChats(chatIdsToDelete, user.id);
-      console.log('Dashboard: Deletion results:', results);
-      
-      // Check for any errors and revert optimistic updates if needed
-      const errors = results.filter(result => result.error);
-      if (errors.length > 0) {
-        console.error('Dashboard: Errors deleting chats:', errors);
-        const failedChatIds = errors.map((_, index) => chatIdsToDelete[index]);
-        
-        // Revert optimistic update for failed deletions
-        queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
-          if (!oldData) return oldData;
-          
-          // We need to refetch to get the actual state, but for now just show error
-          toast.error(`Failed to delete ${errors.length} chat(s). Refreshing...`);
-          // Force a refresh to get correct state
-          setTimeout(() => refetchChats(), 1000);
-          return oldData;
-        });
-        
-        return;
-      }
-      
-      const successfulDeletions = chatIdsToDelete.length - errors.length;
-      console.log(`Dashboard: Successfully deleted ${successfulDeletions} chats`);
-      if (successfulDeletions > 0) {
-        toast.success(`Successfully deleted ${successfulDeletions} chat(s)`);
-      }
-      
-      // Refetch to load new chats and maintain 10 visible chats
-      await refetchChats();
-      
-      // If we're on a page that's now empty, go to the previous page
-      const newTotalChats = totalChats - successfulDeletions;
-      const newTotalPages = Math.ceil(newTotalChats / chatsPerPage);
-      if (currentPage > newTotalPages && newTotalPages > 0) {
-        setCurrentPage(newTotalPages);
-      }
-      
-    } catch (error) {
-      console.error('Dashboard: Error deleting chats:', error);
-      toast.error('Failed to delete chats');
-      // Revert optimistic updates by refetching
+      // Refetch user chats only after deleting
       refetchChats();
+      toast.success('Selected chats deleted successfully');
+    } catch (error) {
+      toast.error('Failed to delete selected chats');
     } finally {
       setIsDeleting(false);
       setShowDeleteDialog(false);
     }
-  }, [selectedChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
+  }, [user, selectedChats, refetchChats]);
 
   const handleDeleteSingleChat = useCallback(async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -372,7 +321,7 @@ export function DashboardContent() {
       }
       
       // Perform actual deletion
-      const { error } = await deleteChat(chatId, user.id);
+      const { error } = await Chats.deleteChat(chatId, user.id);
         
       if (error) {
         // Revert optimistic update
@@ -402,68 +351,20 @@ export function DashboardContent() {
   }, [queryClient, user.id, currentPage, chatsPerPage, refetchChats]);
 
   const handleDeleteAllChats = useCallback(async () => {
-    if (totalChats === 0) {
-      toast.info('No chats to delete');
-      return;
-    }
-    
+    if (!user) return;
     setIsDeletingAll(true);
-    console.log(`Dashboard: Starting deletion of all ${totalChats} chats for user ${user.id}`);
-    
     try {
-      // Optimistic update - clear all chats from the UI immediately
-      queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
-        if (!oldData) return oldData;
-        
-        console.log(`Optimistically cleared all chats from UI`);
-        return {
-          ...oldData,
-          data: [],
-          totalCount: 0,
-          totalPages: 0
-        };
-      });
-      
-      // Clear selections and reset page
+      await Chats.deleteAllUserChats(user.id);
       setSelectedChats(new Set());
-      setCurrentPage(1);
-      
-      // Perform actual deletion
-      const result = await deleteAllUserChats(user.id);
-      console.log('Dashboard: Delete all result:', result);
-      
-      if (result.error) {
-        console.error('Dashboard: Error deleting all chats:', result.error);
-        toast.error(`Failed to delete all chats: ${result.error}`);
-        // Revert optimistic update by refetching
-        setTimeout(() => refetchChats(), 1000);
-        return;
-      }
-      
-      const { success, error, deletedCount } = result;
-      console.log(`Dashboard: Successfully deleted ${deletedCount} chats`);
-      
-      if (success && deletedCount > 0) {
-        toast.success(`Successfully deleted all ${deletedCount} chat(s)`);
-      }
-      
-      if (!success && error) {
-        toast.warning(`Some chats could not be deleted: ${error}`);
-      }
-      
-      // Refetch to get the actual current state
-      await refetchChats();
-      
-    } catch (error) {
-      console.error('Dashboard: Error deleting all chats:', error);
-      toast.error('Failed to delete all chats');
-      // Revert optimistic updates by refetching
       refetchChats();
+      toast.success('All chats deleted successfully');
+    } catch (error) {
+      toast.error('Failed to delete all chats');
     } finally {
       setIsDeletingAll(false);
       setShowDeleteAllDialog(false);
     }
-  }, [totalChats, user, currentPage, chatsPerPage, queryClient, refetchChats]);
+  }, [user, refetchChats]);
 
   // Ensure currentPage stays within valid bounds whenever totalPages changes
   useEffect(() => {
@@ -909,7 +810,7 @@ export function DashboardContent() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction 
-              onClick={handleDeleteSelectedChats}
+              onClick={handleDeleteSelected}
               disabled={isDeleting}
               className="bg-red-600 hover:bg-red-700 text-white"
             >

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getUserPersonas, createPersona, deletePersona, type Persona } from '@/lib/persona-operations';
+import { getUserPersonas, createPersona, deletePersona, type Persona } from '@/data/personas/mutations';
 import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
 import { getBestPersonaForNewChat } from '@/lib/user-preferences';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/db/client';
 import logger from '@/utils/logger';
 
 export const personaKeys = {

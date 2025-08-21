@@ -6,7 +6,8 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { MessageCircle, Heart, Edit, User } from 'lucide-react';
-import { getUserCharacters } from '@/lib/supabase-queries';
+import { CharacterUser } from '@/data';
+// import { getUserCharacters } from '@/lib/supabase-queries';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 
@@ -24,7 +25,7 @@ export const CharacterGrid = ({ type }: CharacterGridProps) => {
     queryFn: async () => {
       if (!user?.id) return [];
       if (type === 'created') {
-        const { data } = await getUserCharacters(user.id);
+        const { data } = await CharacterUser.getUserCharacters(user.id);
         return data || [];
       }
       // For favorites, we'll return empty for now since we don't have a favorites system yet

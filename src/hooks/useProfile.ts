@@ -1,8 +1,7 @@
-
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client'
-import { getPublicProfile, getPrivateProfile, updateProfile } from '@/lib/supabase-queries'
+import { supabase } from '@/db/client'
+import { Profile as ProfileQueries, Billing as BillingQueries, ProfileStats } from '@/data'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Profile } from '@/types/database'
 
@@ -28,8 +27,8 @@ export const useProfile = (userId?: string) => {
 
         // Use appropriate query based on whether it's the user's own profile
         const { data, error } = isOwnProfile 
-          ? await getPrivateProfile(userId)
-          : await getPublicProfile(userId)
+          ? await ProfileQueries.getPrivateProfile(userId)
+          : await ProfileQueries.getPublicProfile(userId)
 
         if (error) throw error
         
@@ -56,8 +55,8 @@ export const useProfile = (userId?: string) => {
       const isOwnProfile = user?.id === userId
 
       const { data, error } = isOwnProfile 
-        ? await getPrivateProfile(userId)
-        : await getPublicProfile(userId)
+        ? await ProfileQueries.getPrivateProfile(userId)
+        : await ProfileQueries.getPublicProfile(userId)
 
       if (error) throw error
       setProfile(data as Profile)
@@ -92,11 +91,7 @@ export const useCurrentUserOptimized = () => {
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
       
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      const { data: profile, error } = await ProfileQueries.getPrivateProfile(user.id);
 
       if (error) {
         throw new Error('Failed to fetch profile');
@@ -118,36 +113,11 @@ export const useProfileStats = () => {
     queryKey: ['profile-stats', user?.id],
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
-      
-      // Get character count
-      const { count: characterCount } = await supabase
-        .from('characters')
-        .select('*', { count: 'exact', head: true })
-        .eq('creator_id', user.id);
-
-      // Get total chat count  
-      const { count: chatCount } = await supabase
-        .from('chats')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id);
-
-      // Get credits balance
-      const { data: credits } = await supabase
-        .from('credits')
-        .select('balance')
-        .eq('user_id', user.id)
-        .single();
-
-      return {
-        characterCount: characterCount || 0,
-        chatCount: chatCount || 0,
-        creditsBalance: credits?.balance || 0,
-        followersCount: 0, // TODO: Implement when followers system is ready
-      };
+      return ProfileStats.getProfileStats(user.id);
     },
     enabled: !!user,
-    staleTime: 1000 * 60 * 2, // 2 minutes
-    gcTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 2,
+    gcTime: 1000 * 60 * 5,
   });
 };
 
@@ -159,7 +129,7 @@ export const useUpdateProfile = () => {
   return useMutation({
     mutationFn: async (updates: { username?: string; bio?: string; avatar_url?: string }) => {
       if (!user) throw new Error('No authenticated user');
-      return updateProfile(user.id, updates);
+      return ProfileQueries.updateProfile(user.id, updates);
     },
     onSuccess: () => {
       // Invalidate and refetch profile data
@@ -176,26 +146,13 @@ export const useUserSubscription = () => {
     queryKey: ['user-subscription', user?.id],
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
-      
-      const { data: subscription, error } = await supabase
-        .from('subscriptions')
-        .select(`
-          *,
-          plan:plans(*)
-        `)
-        .eq('user_id', user.id)
-        .eq('status', 'active')
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        throw new Error('Failed to fetch subscription');
-      }
-
-      return subscription;
+      const { data, error } = await BillingQueries.getUserActiveSubscription(user.id);
+      if (error) throw new Error('Failed to fetch subscription');
+      return data;
     },
     enabled: !!user,
-    staleTime: 1000 * 60 * 10, // 10 minutes
-    gcTime: 1000 * 60 * 15, // 15 minutes
+    staleTime: 1000 * 60 * 10,
+    gcTime: 1000 * 60 * 15,
   });
 };
 
@@ -203,19 +160,13 @@ export const useAvailablePlans = () => {
   return useQuery({
     queryKey: ['available-plans'],
     queryFn: async () => {
-      const { data: plans, error } = await supabase
-        .from('plans')
-        .select('*')
-        .eq('is_active', true)
-        .order('price_monthly', { ascending: true });
-
+      const { data, error } = await BillingQueries.getActivePlans();
       if (error) {
         throw new Error('Failed to fetch plans');
       }
-
-      return plans || [];
+      return data || [];
     },
-    staleTime: 1000 * 60 * 30, // 30 minutes (plans rarely change)
-    gcTime: 1000 * 60 * 60, // 1 hour
+    staleTime: 1000 * 60 * 30,
+    gcTime: 1000 * 60 * 60,
   });
 };

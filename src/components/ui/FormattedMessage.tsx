@@ -1,6 +1,6 @@
 import React from 'react';
 import { parseMessageContent } from '@/lib/utils/messageFormatting';
-import { useUserGlobalChatSettings } from '@/queries/chatSettingsQueries';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
 
 export interface FormattedMessageProps {
   content: string;

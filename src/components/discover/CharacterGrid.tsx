@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { CharacterCardSkeleton } from './CharacterCardSkeleton';
 import { getThumbUrl } from '@/utils/image';
 import { useQueryClient } from '@tanstack/react-query';
-import { queryConfigs } from '@/queries/chatQueries';
+import { chatQueryConfigs } from '@/data/chats/queryKeys';
 
 interface CharacterGridProps {
   characters: PublicCharacter[];
@@ -161,7 +161,7 @@ export function CharacterGrid({
 
   // Prefetch character details on hover to make details instant
   const prefetchCharacterDetails = (id: string) => {
-    queryClient.prefetchQuery(queryConfigs.characterDetails(id));
+    queryClient.prefetchQuery(chatQueryConfigs.characterDetails(id));
   };
 
   const handleStartChat = (character: PublicCharacter) => {
@@ -274,7 +274,7 @@ export function CharacterGrid({
               {/* Description preview and stats at bottom */}
               <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4">
                 <p className="text-gray-300 text-sm sm:text-base line-clamp-1 sm:line-clamp-2 leading-relaxed mb-2">
-                  {character.short_description || character.character_definitions?.[0]?.greeting || 'A mysterious character waiting to chat with you.'}
+                  {character.short_description || 'A mysterious character waiting to chat with you.'}
                 </p>
                 
                 {/* Likes and Favorites Stats */}

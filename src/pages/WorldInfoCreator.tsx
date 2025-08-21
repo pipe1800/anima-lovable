@@ -18,21 +18,21 @@ import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { Tables } from '@/integrations/supabase/types';
 import {
-  createWorldInfo,
-  updateWorldInfo,
-  deleteWorldInfo,
-  addWorldInfoEntry,
-  updateWorldInfoEntry,
-  deleteWorldInfoEntry,
-  addWorldInfoTag,
-  removeWorldInfoTag,
-  toggleWorldInfoLike,
-  addWorldInfoToCollection,
-  removeWorldInfoFromCollection,
-  type WorldInfoCreationData,
-  type WorldInfoEntryData
-} from '@/lib/world-info-operations';
-import { uploadAvatar } from '@/lib/avatar-upload';
+  createWorldInfo as createWorldInfoRaw,
+  updateWorldInfoCore,
+  cascadeDeleteWorldInfo,
+  addWorldInfoEntry as addWorldInfoEntryRaw,
+  updateWorldInfoEntry as updateWorldInfoEntryRaw,
+  deleteWorldInfoEntry as deleteWorldInfoEntryRaw,
+  addWorldInfoTag as addWorldInfoTagRaw,
+  removeWorldInfoTag as removeWorldInfoTagRaw
+} from '@/data/worldInfo/mutations';
+import {
+  toggleWorldInfoLike as toggleWorldInfoLikeRaw,
+  addWorldInfoToCollection as addWorldInfoToCollectionRaw,
+  removeWorldInfoFromCollection as removeWorldInfoFromCollectionRaw
+} from '@/data/worldInfo/interactions';
+import { uploadAvatar } from '@/data/uploads/storage';
 import { 
   useUserWorldInfos, 
   useUserWorldInfoCollection, 
@@ -222,39 +222,37 @@ const WorldInfoCreator = () => {
       let avatarUrl = '';
       if (editAvatarFile && user) {
         setUploadingAvatar(true);
-        const uploadedUrl = await uploadAvatar(editAvatarFile, user.id);
-        if (uploadedUrl) {
-          avatarUrl = uploadedUrl;
+        const { publicUrl } = await uploadAvatar(user.id, editAvatarFile as any);
+        if (publicUrl) {
+          avatarUrl = publicUrl;
         }
         setUploadingAvatar(false);
       }
 
-      const newWorldInfo = await createWorldInfo({
+      const newWorldInfoResult = await createWorldInfoRaw({
         name: editName,
         short_description: editDescription,
         visibility: editVisibility
       });
-      
+      if (newWorldInfoResult.error || !newWorldInfoResult.data) throw newWorldInfoResult.error || new Error('Create failed');
+      const newWorldInfo = newWorldInfoResult.data;
       // Add avatar_url to local state for display
       const newWorldInfoWithAvatar = { ...newWorldInfo, avatar_url: avatarUrl };
-      
       // Add selected tags
       for (const tag of selectedTags) {
-        await addWorldInfoTag(newWorldInfo.id, tag.id);
+        await addWorldInfoTagRaw(newWorldInfo.id, tag.id);
       }
-      
       // Invalidate queries to refresh data
       await queryClient.invalidateQueries({ queryKey: ['user-world-infos'] });
-      
       // Set selected world info for editing - create proper type
-      const newWorldInfoComplete: WorldInfo = { 
-        ...newWorldInfo, 
-        avatar_url: avatarUrl, 
+      const newWorldInfoComplete: WorldInfo = {
+        ...newWorldInfo,
+        avatar_url: avatarUrl,
         entries: [],
         entriesCount: 0,
-        likesCount: 0,
+        likesCount: newWorldInfo.likes_count || 0,
         tags: selectedTags
-      };
+      } as any;
       setSelectedWorldInfo(newWorldInfoComplete);
       setIsCreating(false);
       
@@ -319,14 +317,14 @@ const WorldInfoCreator = () => {
       let avatarUrl = selectedWorldInfo.avatar_url || '';
       if (editAvatarFile && user) {
         setUploadingAvatar(true);
-        const uploadedUrl = await uploadAvatar(editAvatarFile, user.id);
-        if (uploadedUrl) {
-          avatarUrl = uploadedUrl;
+        const { publicUrl } = await uploadAvatar(user.id, editAvatarFile as any);
+        if (publicUrl) {
+          avatarUrl = publicUrl;
         }
         setUploadingAvatar(false);
       }
 
-      await updateWorldInfo(selectedWorldInfo.id, {
+      await updateWorldInfoCore(selectedWorldInfo.id, {
         name: editName,
         short_description: editDescription,
         visibility: editVisibility
@@ -362,7 +360,7 @@ const WorldInfoCreator = () => {
 
   const handleDeleteWorldInfo = async (worldInfoId: string, worldInfoName?: string) => {
     try {
-      await deleteWorldInfo(worldInfoId);
+      await cascadeDeleteWorldInfo(worldInfoId);
       // Invalidate queries to refresh data
       await queryClient.invalidateQueries({ queryKey: ['user-world-infos'] });
       if (selectedWorldInfo?.id === worldInfoId) {
@@ -391,7 +389,7 @@ const WorldInfoCreator = () => {
     if (!tagToAdd || selectedTags.some(tag => tag.id === tagToAdd.id)) return;
 
     try {
-      await addWorldInfoTag(selectedWorldInfo.id, tagToAdd.id);
+      await addWorldInfoTagRaw(selectedWorldInfo.id, tagToAdd.id);
       setSelectedTags(prev => [...prev, tagToAdd]);
       // Invalidate tags query to refresh
       queryClient.invalidateQueries({ queryKey: ['world-info-tags', selectedWorldInfo.id] });
@@ -409,7 +407,7 @@ const WorldInfoCreator = () => {
     if (!selectedWorldInfo) return;
 
     try {
-      await removeWorldInfoTag(selectedWorldInfo.id, tagId);
+      await removeWorldInfoTagRaw(selectedWorldInfo.id, tagId);
       setSelectedTags(prev => prev.filter(tag => tag.id !== tagId));
       // Invalidate tags query to refresh
       queryClient.invalidateQueries({ queryKey: ['world-info-tags', selectedWorldInfo.id] });
@@ -448,7 +446,7 @@ const WorldInfoCreator = () => {
 
     try {
       const keywords = newEntryKeywords.split(',').map(k => k.trim()).filter(k => k);
-      await addWorldInfoEntry(selectedWorldInfo.id, {
+      await addWorldInfoEntryRaw(selectedWorldInfo.id, {
         keywords,
         entry_text: newEntryText
       });
@@ -480,7 +478,7 @@ const WorldInfoCreator = () => {
 
     try {
       const keywords = editingEntryKeywords.split(',').map(k => k.trim()).filter(k => k);
-      await updateWorldInfoEntry(editingEntryId, {
+      await updateWorldInfoEntryRaw(editingEntryId, {
         keywords,
         entry_text: editingEntryText
       });
@@ -511,7 +509,7 @@ const WorldInfoCreator = () => {
 
   const handleDeleteEntry = async (entryId: string) => {
     try {
-      await deleteWorldInfoEntry(entryId);
+      await deleteWorldInfoEntryRaw(entryId);
       
       // Invalidate queries to refresh data
       if (selectedWorldInfo) {
@@ -1142,7 +1140,7 @@ const WorldInfoCreator = () => {
                           </CardContent>
                         </Card>
 
-                        {/* Entries List */}
+                        {/* World Info Entries - No entries message */}
                         <div className="space-y-4">
                           <div className="text-center py-12 text-gray-400">
                             <BookOpen className="w-16 h-16 mx-auto mb-4 opacity-50" />
@@ -1224,8 +1222,15 @@ const WorldInfoCreator = () => {
                             <TagSection
                               selectedTags={selectedTags}
                               availableTags={availableTags}
-                              onAddTag={handleAddTag}
-                              onRemoveTag={handleRemoveTag}
+                              onAddTag={(tagId: string) => {
+                                const tagToAdd = availableTags.find(tag => tag.id.toString() === tagId);
+                                if (tagToAdd && !selectedTags.some(tag => tag.id === tagToAdd.id)) {
+                                  setSelectedTags(prev => [...prev, tagToAdd]);
+                                }
+                              }}
+                              onRemoveTag={(tagId: number) => {
+                                setSelectedTags(prev => prev.filter(tag => tag.id !== tagId));
+                              }}
                             />
                             <div className="flex gap-2">
                               <Button onClick={handleUpdateWorldInfo} disabled={saving || uploadingAvatar}>

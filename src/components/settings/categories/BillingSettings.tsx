@@ -10,13 +10,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import {
-  getCreditPacks,
-  getSubscriptionPlans,
-  getUserCreditPurchases,
-  getUserCredits,
-  getUserSubscription,
-} from '@/lib/supabase-queries';
+import { Billing } from '@/data';
+import { PayPalManagement } from '@/data/edge';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Database } from '@/integrations/supabase/types';
 
@@ -46,9 +41,9 @@ const BillingSettings = () => {
         setLoading(true);
         try {
           const [subData, creditsData, purchasesData] = await Promise.all([
-            getUserSubscription(supabase, user.id),
-            getUserCredits(supabase, user.id),
-            getUserCreditPurchases(supabase, user.id),
+            Billing.getUserSubscription(supabase, user.id),
+            Billing.getUserCredits(supabase, user.id),
+            Billing.getUserCreditPurchases(supabase, user.id),
           ]);
 
           if (subData.error) throw subData.error;
@@ -73,7 +68,7 @@ const BillingSettings = () => {
 
     const fetchPlans = async () => {
       try {
-        const { data, error } = await getSubscriptionPlans(supabase);
+        const { data, error } = await Billing.getSubscriptionPlans(supabase);
         if (error) throw error;
         setPlans(data || []);
       } catch (err) {
@@ -88,7 +83,7 @@ const BillingSettings = () => {
 
     const fetchCreditPacks = async () => {
       try {
-        const { data, error } = await getCreditPacks(supabase);
+        const { data, error } = await Billing.getCreditPacks(supabase);
         if (error) throw error;
         setCreditPacks(data || []);
       } catch (err) {
@@ -105,42 +100,14 @@ const BillingSettings = () => {
     fetchPlans();
     fetchCreditPacks();
 
-    const subChangeListener = supabase
-      .channel('billing-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'billing',
-          table: 'subscriptions',
-          filter: `user_id=eq.${user?.id}`,
-        },
-        () => fetchBillingData(),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'billing',
-          table: 'credits',
-          filter: `user_id=eq.${user?.id}`,
-        },
-        () => fetchBillingData(),
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'billing',
-          table: 'credit_pack_purchases',
-          filter: `user_id=eq.${user?.id}`,
-        },
-        () => fetchBillingData(),
-      )
-      .subscribe();
+    // Realtime subscription moved to data layer helper
+    let unsubscribe: (() => void) | undefined;
+    if (user && supabase) {
+      unsubscribe = Billing.subscribeToUserBillingChanges(supabase, user.id, fetchBillingData);
+    }
 
     return () => {
-      supabase.removeChannel(subChangeListener);
+      if (unsubscribe) unsubscribe();
     };
   }, [user, supabase, toast]);
 
@@ -172,23 +139,9 @@ const BillingSettings = () => {
     }
     setLoading(true);
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paypal-management`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({
-            action: 'cancel_subscription',
-            subscriptionId: subscription.paypal_subscription_id,
-          }),
-        },
-      );
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to cancel subscription.');
+      const { data, error } = await PayPalManagement.verifySubscription({ subscriptionId: subscription.paypal_subscription_id });
+      if (error || !data?.success) {
+        throw new Error(data?.error || error?.message || 'Failed to cancel subscription.');
       }
       toast({
         title: 'Subscription Cancelled',
@@ -212,23 +165,9 @@ const BillingSettings = () => {
   const handleSubscribe = async (planId: string) => {
     setLoading(true);
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paypal-management`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({ action: 'create_subscription', planId }),
-        },
-      );
-      const result = await response.json();
-      if (!response.ok || !result.approval_url) {
-        throw new Error(result.error || 'Failed to create subscription.');
-      }
-      // Redirect to PayPal for approval
-      window.location.href = result.approval_url;
+      const { data, error } = await PayPalManagement.createSubscription({ planId });
+      if (error || !data?.data?.approval_url) throw new Error(data?.error || error?.message || 'Failed to create subscription.');
+      window.location.href = data.data.approval_url;
     } catch (error) {
       console.error('Error initiating subscription:', error);
       toast({
@@ -246,23 +185,9 @@ const BillingSettings = () => {
   const handleBuyCredits = async (packId: string) => {
     setLoading(true);
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paypal-management`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({ action: 'create_order', packId }),
-        },
-      );
-      const result = await response.json();
-      if (!response.ok || !result.approval_url) {
-        throw new Error(result.error || 'Failed to create credit order.');
-      }
-      // Redirect to PayPal for approval
-      window.location.href = result.approval_url;
+      const { data, error } = await PayPalManagement.createCreditOrder({ creditPackId: packId });
+      if (error || !data?.data?.approval_url) throw new Error(data?.error || error?.message || 'Failed to create credit order.');
+      window.location.href = data.data.approval_url;
     } catch (error) {
       console.error('Error initiating credit purchase:', error);
       toast({

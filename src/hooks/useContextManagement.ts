@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase } from '@/db/client';
 import type { TrackedContext } from '@/types/chat';
 import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
 
@@ -15,8 +15,10 @@ export const useContextManagement = (
     locationTracking: 'No context',
     timeAndWeather: 'No context',
     relationshipStatus: 'No context',
-    characterPosition: 'No context'
-  });
+    characterPosition: 'No context',
+    enchantmentStatus: 'No context',
+    itemInventory: 'No context'
+  } as any);
   const [isLoading, setIsLoading] = useState(false);
   const lastLoadedRef = useRef<string>('');
 

@@ -20,7 +20,7 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUserCredits } from '@/lib/supabase-queries';
+import { Billing } from '@/data';
 import { Badge } from '@/components/ui/badge';
 import { SidebarModeToggle } from '@/components/chat/SidebarModeToggle';
 
@@ -119,7 +119,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
   const fetchCredits = useCallback(async () => {
     if (!user || typeof userCreditsOverride === 'number') return; // skip fetch if override provided
     try {
-      const creditsResult = await getUserCredits(supabase, user.id);
+      const creditsResult = await Billing.getUserCredits(supabase, user.id);
       if (creditsResult.data && typeof creditsResult.data.balance === 'number') {
         setUserCredits(creditsResult.data.balance);
         localStorage.setItem('lastUserCredits', String(creditsResult.data.balance));
