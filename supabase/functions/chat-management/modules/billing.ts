@@ -31,18 +31,23 @@ export async function getUserPlanAndModel(
   supabaseAdmin: SupabaseClient
 ): Promise<{ plan: string; model: string; maxContextTokens: number; modelIdentifier: string }> {
   // Check for active subscription
-  const { data: userSubscription } = await supabaseAdmin
-    .from('subscriptions')
+  const { data: userSubscription, error: subsError } = await supabaseAdmin
+    .from('billing.subscriptions')
     .select('plan_id, status, current_period_end')
     .eq('user_id', userId)
     .eq('status', 'active')
     .gt('current_period_end', new Date().toISOString())
     .maybeSingle();
 
+  if (subsError) {
+    console.error(`Error fetching subscription for user ${userId}:`, subsError);
+    return; // Or handle error appropriately
+  }
+
+  // If user has an active subscription, check their plan
   if (userSubscription) {
-    // Get plan details
-    const { data: planData } = await supabaseAdmin
-      .from('plans')
+    const { data: planData, error: planError } = await supabaseAdmin
+      .from('billing.plans')
       .select('name')
       .eq('id', userSubscription.plan_id)
       .single();
@@ -59,6 +64,11 @@ export async function getUserPlanAndModel(
           modelIdentifier: planConfig.modelIdentifier
         };
       }
+    }
+
+    if (planError) {
+      console.error(`Error fetching plan details for user ${userId}:`, planError);
+      return;
     }
   }
 
@@ -105,106 +115,55 @@ export async function consumeCredits(
   creditInfo: CreditInfo,
   supabaseAdmin: SupabaseClient
 ): Promise<boolean> {
-  console.log(`💰 Credit calculation: Base(${creditInfo.baseCost}) + ${creditInfo.addonPercentage}% addon increase = Total(${creditInfo.totalCost})`);
+  console.log(`💰 Attempting credit deduction (atomic RPC) user=${userId} required=${creditInfo.totalCost}`);
 
-  // 1. Fetch current balance explicitly (to log & detect missing row)
-  const { data: existingCredits, error: creditsSelectError } = await supabaseAdmin
-    .from('credits')
-    .select('balance')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (creditsSelectError) {
-    console.warn('⚠️ Credits select error (will still attempt RPC):', creditsSelectError);
-  }
-
-  let startingBalance: number | undefined = typeof existingCredits?.balance === 'number' ? existingCredits.balance : undefined;
-
-  // 2. Auto-provision credits row if missing (legacy users predating trigger or accidental deletion)
-  if (startingBalance === undefined) {
-    console.log('🛠️ No credits row found; attempting to provision default row for user:', userId);
-    // Attempt to derive default from active plan; fallback 1000
-    let defaultAllowance = 1000;
-    try {
-      const { data: activeSub } = await supabaseAdmin
-        .from('subscriptions')
-        .select('plan_id, status, current_period_end')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .gt('current_period_end', new Date().toISOString())
-        .maybeSingle();
-      if (activeSub?.plan_id) {
-        const { data: planRow } = await supabaseAdmin
-          .from('plans')
-          .select('monthly_credits_allowance, name')
-          .eq('id', activeSub.plan_id)
-          .maybeSingle();
-        if (typeof planRow?.monthly_credits_allowance === 'number') {
-          defaultAllowance = planRow.monthly_credits_allowance;
-          console.log('📦 Using plan allowance for new credits row:', defaultAllowance, 'plan name:', planRow.name);
-        }
-      }
-    } catch (planLookupErr) {
-      console.warn('⚠️ Plan lookup failed while provisioning credits row, using fallback 1000:', planLookupErr);
-    }
-    try {
-      const { error: insertErr } = await supabaseAdmin
-        .from('credits')
-        .insert({ user_id: userId, balance: defaultAllowance });
-      if (insertErr) {
-        console.error('❌ Failed to auto-provision credits row:', insertErr);
-      } else {
-        startingBalance = defaultAllowance;
-        console.log('✅ Provisioned credits row with balance:', defaultAllowance);
-      }
-    } catch (provisionErr) {
-      console.error('❌ Exception provisioning credits row:', provisionErr);
-    }
-  }
-
-  console.log('🔍 Pre-consumption balance check:', { userId, startingBalance, required: creditInfo.totalCost });
-
-  // 3. If after provisioning we still have undefined or < required, short-circuit with explicit log
-  if (startingBalance === undefined) {
-    console.log(`❌ Insufficient credits for user: ${userId} balance: undefined (row missing & provisioning failed)`);
-    return false;
-  }
-  if (startingBalance < creditInfo.totalCost) {
-    console.log(`❌ Insufficient credits for user: ${userId} balance: ${startingBalance} required: ${creditInfo.totalCost}`);
-    return false;
-  }
-
-  // 4. Attempt atomic consumption via RPC
-  const { data: creditCheckResult, error: creditError } = await supabaseAdmin.rpc('consume_credits', {
-    user_id_param: userId,
-    credits_to_consume: creditInfo.totalCost
-  });
-
-  if (creditError) {
-    console.error('Credit consumption error (RPC failed):', creditError);
-    throw new Error('Failed to process credits');
-  }
-
-  if (!creditCheckResult) {
-    // Fetch again for clarity
-    const { data: afterRow } = await supabaseAdmin
-      .from('credits')
-      .select('balance')
-      .eq('user_id', userId)
-      .maybeSingle();
-    console.log('❌ RPC reported insufficient credits despite pre-check', {
-      userId,
-      startingBalance,
-      postCheckBalance: afterRow?.balance,
-      required: creditInfo.totalCost
+  try {
+    const { data: newBalance, error } = await supabaseAdmin.rpc('deduct_user_credits', {
+      p_user_id: userId,
+      p_amount: creditInfo.totalCost,
+      p_operation_type: 'ai_operation',
+      p_description: 'Chat message generation'
     });
-    return false;
-  }
 
-  console.log(`✅ Credits consumed successfully: ${creditInfo.totalCost} credits deducted (user: ${userId})`);
-  return true;
+    if (error) {
+      console.error('❌ deduct_user_credits RPC error:', error);
+      throw new Error('Failed to process credits');
+    }
+
+    if (!newBalance) {
+      console.log('❌ Insufficient credits (RPC returned NULL)', { userId, required: creditInfo.totalCost });
+      return false;
+    }
+
+    const numericBalance = Number(newBalance);
+    const inferredPrevious = numericBalance + creditInfo.totalCost;
+    console.log('✅ Credits consumed', {
+      userId,
+      deducted: creditInfo.totalCost,
+      previousBalance: inferredPrevious,
+      newBalance: numericBalance
+    });
+    return true;
+  } catch (e) {
+    console.error('❌ Exception during credit consumption:', e);
+    throw e;
+  }
 }
 
 export function createInsufficientCreditsError(creditInfo: CreditInfo): string {
   return `Insufficient credits. Required: ${creditInfo.totalCost} credits (fixed cost - addons included)`;
 }
+
+// This function is called by a cron job to reset monthly credits
+export const handleMonthlyCreditReset = async (supabaseAdmin: SupabaseClient) => {
+  try {
+    const { data, error } = await (supabaseAdmin as any).rpc('grant_monthly_allowances');
+    if (error) {
+      console.error('Error running grant_monthly_allowances RPC:', error);
+    } else {
+      console.log('grant_monthly_allowances processed subscriptions:', data);
+    }
+  } catch (e) {
+    console.error('Exception running grant_monthly_allowances RPC:', e);
+  }
+};

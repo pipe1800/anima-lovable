@@ -1,0 +1,111 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE core.character_definitions (
+  character_id uuid NOT NULL,
+  greeting text,
+  long_description text,
+  definition text NOT NULL,
+  contextual_data jsonb,
+  model_id uuid,
+  CONSTRAINT character_definitions_pkey PRIMARY KEY (character_id),
+  CONSTRAINT character_definitions_character_id_fkey FOREIGN KEY (character_id) REFERENCES core.characters(id),
+  CONSTRAINT fk_model_id FOREIGN KEY (model_id) REFERENCES billing.models(id)
+);
+CREATE TABLE core.character_tags (
+  character_id uuid NOT NULL,
+  tag_id integer NOT NULL,
+  CONSTRAINT character_tags_pkey PRIMARY KEY (character_id, tag_id),
+  CONSTRAINT character_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES core.tags(id),
+  CONSTRAINT character_tags_character_id_fkey FOREIGN KEY (character_id) REFERENCES core.characters(id)
+);
+CREATE TABLE core.characters (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  creator_id uuid NOT NULL,
+  name text NOT NULL CHECK (char_length(name) > 0 AND char_length(name) <= 50),
+  short_description text CHECK (char_length(short_description) <= 200),
+  avatar_url text,
+  visibility USER-DEFINED NOT NULL DEFAULT 'private'::core.visibility_status,
+  interaction_count integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT characters_pkey PRIMARY KEY (id),
+  CONSTRAINT characters_creator_id_fkey FOREIGN KEY (creator_id) REFERENCES core.profiles(id)
+);
+CREATE TABLE core.chats (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  character_id uuid NOT NULL,
+  title text,
+  last_message_at timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT chats_pkey PRIMARY KEY (id),
+  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.profiles(id),
+  CONSTRAINT chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES core.characters(id)
+);
+CREATE TABLE core.messages (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  chat_id uuid NOT NULL,
+  author_id uuid NOT NULL,
+  is_ai_message boolean NOT NULL DEFAULT false,
+  content text NOT NULL,
+  token_cost integer,
+  model_id uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT messages_pkey PRIMARY KEY (id),
+  CONSTRAINT fk_model_id FOREIGN KEY (model_id) REFERENCES billing.models(id),
+  CONSTRAINT messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES core.chats(id),
+  CONSTRAINT messages_author_id_fkey FOREIGN KEY (author_id) REFERENCES core.profiles(id)
+);
+CREATE TABLE core.onboarding_checklist_items (
+  id integer NOT NULL DEFAULT nextval('core.onboarding_checklist_items_id_seq'::regclass),
+  task_key text NOT NULL UNIQUE,
+  title text NOT NULL,
+  description text,
+  reward_credits integer DEFAULT 0,
+  CONSTRAINT onboarding_checklist_items_pkey PRIMARY KEY (id)
+);
+CREATE TABLE core.profiles (
+  id uuid NOT NULL,
+  username text NOT NULL UNIQUE CHECK (char_length(username) >= 3 AND char_length(username) <= 20),
+  avatar_url text,
+  bio text CHECK (char_length(bio) <= 250),
+  onboarding_completed boolean NOT NULL DEFAULT false,
+  onboarding_survey_data jsonb,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT profiles_pkey PRIMARY KEY (id),
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+);
+CREATE TABLE core.tags (
+  id integer NOT NULL DEFAULT nextval('core.tags_id_seq'::regclass),
+  name text NOT NULL UNIQUE,
+  CONSTRAINT tags_pkey PRIMARY KEY (id)
+);
+CREATE TABLE core.user_onboarding_progress (
+  user_id uuid NOT NULL,
+  task_id integer NOT NULL,
+  completed_at timestamp with time zone,
+  CONSTRAINT user_onboarding_progress_pkey PRIMARY KEY (user_id, task_id),
+  CONSTRAINT user_onboarding_progress_task_id_fkey FOREIGN KEY (task_id) REFERENCES core.onboarding_checklist_items(id),
+  CONSTRAINT user_onboarding_progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.profiles(id)
+);
+CREATE TABLE core.user_roles (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  role text NOT NULL CHECK (role = ANY (ARRAY['user'::text, 'moderator'::text, 'admin'::text])),
+  granted_by uuid,
+  granted_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT user_roles_pkey PRIMARY KEY (id),
+  CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT user_roles_granted_by_fkey FOREIGN KEY (granted_by) REFERENCES auth.users(id)
+);
+CREATE TABLE core.user_settings (
+  user_id uuid NOT NULL,
+  theme text NOT NULL DEFAULT 'light'::text CHECK (theme = ANY (ARRAY['light'::text, 'dark'::text])),
+  email_notifications jsonb DEFAULT '{"chat_mentions": true, "new_followers": true, "product_updates": true}'::jsonb,
+  language character varying NOT NULL DEFAULT 'en'::character varying,
+  CONSTRAINT user_settings_pkey PRIMARY KEY (user_id),
+  CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);

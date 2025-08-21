@@ -287,24 +287,11 @@ function buildModeration(formData: any) {
 
 // Helper: get user's current plan name (defaults to Guest Pass if none)
 async function getUserPlanName(userId: string, supabaseAdmin: any): Promise<string> {
+  // Consolidated into single existing RPC: get_user_subscription_with_plan
   try {
-    const { data: sub, error: subErr } = await supabaseAdmin
-      .from('subscriptions')
-      .select('id, plan_id, status, created_at')
-      .eq('user_id', userId)
-      .in('status', ['active', 'trialing'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!subErr && sub?.plan_id) {
-      const { data: plan } = await supabaseAdmin
-        .from('plans')
-        .select('name')
-        .eq('id', sub.plan_id)
-        .maybeSingle();
-      if (plan?.name) return plan.name as string;
-    }
+    const { data, error }: { data: any; error: any } = await supabaseAdmin
+      .rpc('get_user_subscription_with_plan', { p_user_id: userId });
+    if (!error && data && data.plan?.name) return data.plan.name as string;
   } catch (_) {
     // ignore and fallback
   }

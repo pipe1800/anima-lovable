@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { getPrivateProfile, getUserActiveSubscription } from '@/lib/supabase-queries';
+import { getPrivateProfile, getUserSubscription } from '@/lib/supabase-queries';
 import { getBrowserTimezone, updateUserTimezone } from '@/utils/timezone';
 import type { Profile, Subscription, Plan } from '@/types/database';
 import { TutorialProvider } from './TutorialContext';
@@ -15,6 +15,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshSubscription: () => Promise<void>;
+  supabase: typeof supabase;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -128,18 +129,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const p = (async () => {
       try {
-        console.debug(`🔄 Fetching subscription for user ${user.id} (attempt ${retryCount + 1})`);
-        const { data, error } = await supabase
-          .from('subscriptions')
-          .select(`*, plan:plans(*)`)
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        console.debug(`🔄 Fetching subscription (RPC) for user ${user.id} (attempt ${retryCount + 1})`);
+        const { data, error } = await getUserSubscription(supabase, user.id);
 
         if (error) {
-          console.error('❌ Subscription fetch failed:', error);
-          if (retryCount < 3 && !error.message?.includes('JWT')) {
+          console.error('❌ Subscription fetch (RPC) failed:', error);
+          if (retryCount < 3 && !(error as any)?.message?.includes('JWT')) {
             const delay = Math.pow(2, retryCount) * 1000;
             console.debug(`⏳ Retrying subscription fetch in ${delay}ms...`);
             await new Promise(res => setTimeout(res, delay));
@@ -152,10 +147,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        console.debug('✅ Subscription fetched successfully:', data);
+        console.debug('✅ Subscription fetched successfully (RPC):', data);
         setSubscription(data || null);
       } catch (error) {
-        console.error('❌ Subscription fetch exception:', error);
+        console.error('❌ Subscription fetch exception (RPC):', error);
         if (retryCount < 3) {
           const delay = Math.pow(2, retryCount) * 1000;
           console.debug(`⏳ Retrying subscription fetch in ${delay}ms...`);
@@ -296,13 +291,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signOut,
     refreshProfile,
     refreshSubscription,
+    supabase,
   };
 
   return (
-    <AuthContext.Provider value={value}>
-      <TutorialProvider>
-        {children}
-      </TutorialProvider>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        session,
+        subscription,
+        loading,
+        signOut,
+        refreshProfile,
+        refreshSubscription,
+        supabase,
+      }}
+    >
+      <TutorialProvider>{children}</TutorialProvider>
     </AuthContext.Provider>
   );
 };

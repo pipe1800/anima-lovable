@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client'
-import type { Profile, Character, Plan, Subscription, Credits, Chat, Message, OnboardingChecklistItem, UserOnboardingProgress } from '@/types/database'
+import { SupabaseClient } from '@supabase/supabase-js';
+import type { Profile, Character, Plan, Subscription, Credits, Chat, Message, OnboardingChecklistItem, UserOnboardingProgress, CreditPack, CreditPackPurchase } from '@/types/database'
 
 // =============================================================================
 // SEARCH INTERFACES
@@ -30,16 +31,15 @@ export interface SearchResult<T> {
 // =============================================================================
 
 /**
- * Get all active subscription plans
+ * Get all active subscription plans (public view or table)
  */
 export const getActivePlans = async () => {
   const { data, error } = await supabase
     .from('plans')
     .select('*')
     .eq('is_active', true)
-    .order('price_monthly', { ascending: true })
-
-  return { data, error }
+    .order('price_monthly', { ascending: true });
+  return { data, error };
 }
 
 /**
@@ -66,9 +66,8 @@ export const getActiveCreditPacks = async () => {
     .from('credit_packs')
     .select('*')
     .eq('is_active', true)
-    .order('price', { ascending: true })
-
-  return { data, error }
+    .order('price', { ascending: true });
+  return { data, error };
 }
 
 /**
@@ -594,44 +593,80 @@ export const createCharacter = async (characterData: {
 /**
  * Get available subscription plans
  */
-export const getSubscriptionPlans = async () => {
+export const getSubscriptionPlans = async (supabase: SupabaseClient) => {
   const { data, error } = await supabase
     .from('plans')
     .select('*')
     .eq('is_active', true)
-    .order('price_monthly', { ascending: true })
-
-  return { data: data || [], error }
+    .order('price_monthly', { ascending: true });
+  return { data: data || [], error };
 }
 
 /**
- * Get user's current subscription
+ * Get available credit packs (billing schema)
  */
-export const getUserSubscription = async (userId: string) => {
+export const getCreditPacks = async (supabase: SupabaseClient) => {
   const { data, error } = await supabase
-    .from('subscriptions')
-    .select(`
-      *,
-      plan:plans(*)
-    `)
-    .eq('user_id', userId)
-    .maybeSingle()
+    .from('credit_packs')
+    .select('*')
+    .eq('is_active', true)
+    .order('price', { ascending: true });
+  return { data: data || [], error };
+};
 
-  return { data, error }
+/**
+ * Get user's current subscription using RPC function
+ */
+export const getUserSubscription = async (
+  supabase: SupabaseClient,
+  userId: string,
+) => {
+  const { data, error } = await supabase
+    .rpc('get_user_subscription_with_plan', { p_user_id: userId });
+
+  if (error) {
+    console.error('Error fetching subscription via RPC:', error);
+    return { data: null, error };
+  }
+
+  return { data, error: null };
+};
+
+/**
+ * Get user's credit balance using RPC function
+ */
+export const getUserCredits = async (
+  supabase: SupabaseClient,
+  userId: string,
+) => {
+  console.log('🔍 Getting user credits via RPC for user:', userId);
+  
+  const { data, error } = await supabase
+    .rpc('get_user_credits', { p_user_id: userId });
+
+  if (error) {
+    console.error('❌ Error fetching credits via RPC:', error);
+    return { data: null, error };
+  }
+
+  console.log('✅ Successfully got credits via RPC:', data);
+  return { data: { balance: data || 0 }, error: null };
 }
 
 /**
- * Get user's credit balance
+ * Get user's credit purchases using RPC (replaces direct table join)
  */
-export const getUserCredits = async (userId: string) => {
+export const getUserCreditPurchases = async (
+  supabase: SupabaseClient,
+  userId: string,
+) => {
   const { data, error } = await supabase
-    .from('credits')
-    .select('balance')
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  return { data, error }
-}
+    .rpc('get_user_credit_purchases', { p_user_id: userId });
+  if (error) return { data: [], error };
+  // RPC returns JSON array (or null). Normalize to array.
+  const purchases = Array.isArray(data) ? data : (data ? [data] : []);
+  return { data: purchases, error: null };
+};
 
 // =============================================================================
 // ONBOARDING QUERIES
@@ -1079,18 +1114,7 @@ export const getEarlierChatMessages = async (chatId: string, beforeMessageOrder:
 // NOTE: Message creation is now handled by the unified chat-management edge function
 // Direct database message creation has been replaced with proper edge function calls
 
-/**
- * Consume credits for a user
- */
-export async function consumeCredits(userId: string, credits: number): Promise<{ data: boolean | null, error: any }> {
-  const { data, error } = await supabase
-    .rpc('consume_credits', { 
-      user_id_param: userId,
-      credits_to_consume: credits 
-    })
-
-  return { data, error }
-}
+// Removed client-side consumeCredits; credit deductions are enforced server-side via edge function.
 
 /**
  * Get monthly credit usage for a user
@@ -1653,7 +1677,7 @@ export const getUserPersonasForProfile = async (userId: string) => {
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
-  return { data: data || [], error }
+  return { data, error }
 }
 
 // =============================================================================

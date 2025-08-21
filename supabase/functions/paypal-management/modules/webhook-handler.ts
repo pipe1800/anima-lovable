@@ -194,58 +194,48 @@ export async function handleWebhook(
 
     console.log('[WEBHOOK] Found The Whale plan:', whalePlan.id);
 
-    // ============================================================================
-    // GRANT CREDIT DIFFERENCE
-    // ============================================================================
-    const creditDifference = CREDIT_AMOUNTS['The Whale'] - CREDIT_AMOUNTS['True Fan']; // 17,000
-    
-    const { data: currentCreditsData, error: getCurrentError } = await supabaseAdmin
-      .from('credits')
-      .select('balance')
-      .eq('user_id', customId)
-      .single();
+    // Compute credit difference between plans
+    const creditDifference = CREDIT_AMOUNTS['The Whale'] - CREDIT_AMOUNTS['True Fan'];
 
-    if (getCurrentError) {
-      throw new Error(`Failed to get current credits: ${getCurrentError.message}`);
+    // Fetch current balance (for logging only)
+    let priorBalance: number | null = null;
+    try {
+      const { data: balRow } = await supabaseAdmin.from('credits').select('balance').eq('user_id', customId).maybeSingle();
+      priorBalance = balRow?.balance ?? null;
+    } catch {}
+
+    // =========================================================================
+    // GRANT CREDIT DIFFERENCE (use add_user_credits RPC)
+    // =========================================================================
+    try {
+      const { data: newBal, error: creditRpcErr } = await (supabaseAdmin as any).rpc('add_user_credits', {
+        p_user_id: customId,
+        p_amount: creditDifference,
+        p_transaction_type: 'subscription_allowance',
+        p_reference_id: currentSub.id
+      });
+      if (creditRpcErr) {
+        throw new Error(`add_user_credits RPC failed: ${creditRpcErr.message}`);
+      }
+      console.log('[WEBHOOK] Credits granted via RPC. Prior balance:', priorBalance, 'New balance (reported):', newBal);
+      var newBalance = newBal; // expose for response payload
+    } catch (e:any) {
+      throw new Error(`Failed to grant credit difference: ${e.message}`);
     }
 
-    const newBalance = currentCreditsData.balance + creditDifference;
-    
-    const { error: creditError } = await supabaseAdmin
-      .from('credits')
-      .update({ balance: newBalance })
-      .eq('user_id', customId);
-
-    if (creditError) {
-      throw new Error(`Failed to update credits: ${creditError.message}`);
-    }
-
-    console.log('[WEBHOOK] Credits updated successfully:', {
-      creditsAdded: creditDifference,
-      newBalance
+    // =========================================================================
+    // UPDATE SUBSCRIPTION (use upsert_subscription RPC)
+    // =========================================================================
+    const { error: upsertErr } = await (supabaseAdmin as any).rpc('upsert_subscription', {
+      p_user_id: customId,
+      p_plan_id: whalePlan.id,
+      p_paypal_subscription_id: newPaypalSubscriptionId,
+      p_status: 'active',
+      p_current_period_end: null
     });
-
-    // ============================================================================
-    // UPDATE SUBSCRIPTION
-    // ============================================================================
-    const { error: updateError } = await supabaseAdmin
-      .from('subscriptions')
-      .update({
-        plan_id: whalePlan.id,
-        paypal_subscription_id: newPaypalSubscriptionId,
-        status: 'active'
-      })
-      .eq('id', currentSub.id);
-
-    if (updateError) {
-      throw new Error(`Failed to update subscription: ${updateError.message}`);
+    if (upsertErr) {
+      throw new Error(`Failed to upsert subscription via RPC: ${upsertErr.message}`);
     }
-
-    console.log('[WEBHOOK] Subscription updated successfully:', {
-      subscriptionId: currentSub.id,
-      newPlanId: whalePlan.id,
-      newPaypalId: newPaypalSubscriptionId
-    });
 
     // ============================================================================
     // SUCCESS RESPONSE

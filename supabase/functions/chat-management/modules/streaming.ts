@@ -1,4 +1,5 @@
 import type { StreamingUpdate, CORS_HEADERS } from '../types/streaming-interfaces.ts';
+import { logger } from '../../_shared/logger.ts';
 
 /**
  * Streaming optimization utilities
@@ -115,4 +116,68 @@ export function createStreamingErrorResponse(error: string, model: string, plan:
   });
 
   return createStreamingResponse(errorStream);
+}
+
+export interface StreamPipelineOptions {
+  aiResponse: Response;
+  onChunk?(content: string, full: string): Promise<void> | void;
+  onComplete?(full: string): Promise<void> | void;
+  onError?(err: any): Promise<void> | void;
+  sse?: boolean; // default true
+  includeDoneEnvelope?: boolean; // default true
+}
+
+export function streamAIResponse(opts: StreamPipelineOptions): Response {
+  const encoder = new TextEncoder();
+  const { aiResponse, onChunk, onComplete, onError, sse = true, includeDoneEnvelope = true } = opts;
+  const readable = new ReadableStream({
+    async start(controller) {
+      let full = '';
+      try {
+        const reader = aiResponse.body?.getReader();
+        if (!reader) throw new Error('No reader');
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+            if (done) break;
+          buffer += new TextDecoder().decode(value, { stream: true });
+          const { lines, remainingBuffer } = processStreamBuffer(buffer);
+          buffer = remainingBuffer;
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const { content, isDone } = parseStreamChunk(line);
+            if (isDone) {
+              if (onComplete) await onComplete(full.trim());
+              if (includeDoneEnvelope) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+              controller.close();
+              return;
+            }
+            if (content) {
+              full += content;
+              if (onChunk) await onChunk(content, full);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+            }
+          }
+        }
+        // If upstream does not send [DONE]
+        if (onComplete) await onComplete(full.trim());
+        if (includeDoneEnvelope) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+        controller.close();
+      } catch (e) {
+        logger.error('stream.pipeline.error', { message: (e as Error)?.message });
+        if (onError) await onError(e);
+        controller.error(e);
+      }
+    }
+  });
+  return new Response(readable, {
+    headers: {
+      'Content-Type': sse ? 'text/event-stream' : 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS'
+    }
+  });
 }

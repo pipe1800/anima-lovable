@@ -1,5 +1,5 @@
 import { createErrorResponse } from '../../_shared/auth.ts';
-import { createStreamingErrorResponse, processStreamBuffer, parseStreamChunk } from './streaming.ts';
+import { createStreamingErrorResponse, processStreamBuffer, parseStreamChunk, streamAIResponse } from './streaming.ts';
 import type { RegenerateMessageRequest } from '../types/index.ts';
 import { 
   fetchCharacterData,
@@ -22,6 +22,7 @@ import {
 import { assembleConversation } from './conversation-assembler.ts';
 import { anyAddonEnabled, mapGlobalSettingsToAddonSettings, sanitizeAddonSettings } from '../../_shared/settings-mapper.ts';
 import { generateAIResponse } from './message-handler.ts';
+import { getEnv } from '../../_shared/env.ts';
 
 export async function handleRegenerateMessage(
   request: RegenerateMessageRequest,
@@ -131,9 +132,7 @@ export async function handleRegenerateMessage(
       maxContextTokens: planAndModel.maxContextTokens
     });
 
-    const openRouterKey = (() => {
-      try { return globalThis.Deno?.env?.get('OPENROUTER_API_KEY'); } catch { return process?.env?.OPENROUTER_API_KEY; }
-    })();
+    const openRouterKey = getEnv('OPENROUTER_API_KEY');
     if (!openRouterKey) return createErrorResponse('OpenRouter API key not configured', 500);
 
     const aiResponse = await generateAIResponse(conversationResult.messages, planAndModel.model, openRouterKey);
@@ -142,95 +141,30 @@ export async function handleRegenerateMessage(
       return createStreamingErrorResponse(`Status: ${aiResponse.status} - ${errorText}`, planAndModel.model, planAndModel.plan);
     }
 
-    const encoder = new TextEncoder();
-
-    const readable = new ReadableStream({
-      async start(controller) {
-        try {
-          const reader = aiResponse.body?.getReader();
-          if (!reader) throw new Error('No reader available');
-          let fullResponse = '';
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += new TextDecoder().decode(value, { stream: true });
-            const { lines, remainingBuffer } = processStreamBuffer(buffer);
-            buffer = remainingBuffer;
-
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              const { content, isDone } = parseStreamChunk(line);
-              if (isDone) {
-                const final = fullResponse.trim();
-                if (final) {
-                  await updateMessageContent(supabaseAdmin, aiMessageId, final);
-                  const basicContext = {
-                    moodTracking: 'No context',
-                    clothingInventory: 'No context',
-                    locationTracking: 'No context',
-                    timeAndWeather: 'No context',
-                    relationshipStatus: 'No context',
-                    characterPosition: 'No context'
-                  } as any;
-                  await saveCharacterMessage(supabase, supabaseAdmin, user.id, chatId, final, basicContext, aiMessageId, aiMsg.message_order);
-                  await updateChatLastActivity(supabase, chatId, characterId);
-
-                  // Trigger addon context extraction (same behavior as new message)
-                  try {
-                    const addonsActive = anyAddonEnabled(effectiveAddonSettings);
-                    if (!addonsActive) {
-                      console.log('⏭️ Regeneration: addons disabled; skipping extract-addon-context');
-                    } else {
-                      const supabaseUrl = (() => { try { return globalThis.Deno?.env?.get('SUPABASE_URL'); } catch { return process?.env?.SUPABASE_URL; } })();
-                      const authHeader = req.headers.get('authorization');
-                      const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
-                        method: 'POST',
-                        headers: { 'Authorization': authHeader || '', 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          chat_id: chatId,
-                          character_id: characterId,
-                          addon_settings: effectiveAddonSettings,
-                          mode: 'conversation'
-                        })
-                      });
-                      if (extractResponse.ok) {
-                        console.log('✅ Regeneration context extraction triggered');
-                      } else {
-                        console.error('❌ Regeneration context extraction failed:', extractResponse.status);
-                      }
-                    }
-                  } catch (regenExtractErr) {
-                    console.error('💥 Regeneration extract-addon-context error:', regenExtractErr);
-                  }
-                }
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
-                controller.close();
-                return;
-              }
-              if (content) {
-                fullResponse += content;
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-              }
+    return streamAIResponse({
+      aiResponse,
+      async onComplete(final) {
+        if (final) {
+          await updateMessageContent(supabaseAdmin, aiMessageId, final);
+          const basicContext = { moodTracking: 'No context', clothingInventory: 'No context', locationTracking: 'No context', timeAndWeather: 'No context', relationshipStatus: 'No context', characterPosition: 'No context' } as any;
+          await saveCharacterMessage(supabase, supabaseAdmin, user.id, chatId, final, basicContext, aiMessageId, aiMsg.message_order);
+          await updateChatLastActivity(supabase, chatId, characterId);
+          try {
+            const addonsActive = anyAddonEnabled(effectiveAddonSettings);
+            if (addonsActive) {
+              const supabaseUrl = getEnv('SUPABASE_URL', { required: false });
+              const authHeader = req.headers.get('authorization');
+              await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
+                method: 'POST',
+                headers: { 'Authorization': authHeader || '', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, character_id: characterId, addon_settings: effectiveAddonSettings, mode: 'conversation' })
+              });
             }
+          } catch (e) {
+            console.error('regen.extract.error', e);
           }
-        } catch (err) {
-          controller.error(err);
         }
       }
-    });
-
-    return new Response(readable, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      },
     });
   } catch (error) {
     console.error('Regenerate handler error:', error);

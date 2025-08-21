@@ -2,7 +2,7 @@ import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ProfileSettings } from '@/components/settings/categories/ProfileSettings';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
-import { BillingSettings } from '@/components/settings/categories/BillingSettings';
+import BillingSettings from '@/components/settings/categories/BillingSettings';
 
 export const ProfileSettingsView = () => {
   return (

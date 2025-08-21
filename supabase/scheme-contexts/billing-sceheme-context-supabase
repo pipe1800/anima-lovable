@@ -1,0 +1,97 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE billing.credit_ledger (
+  id bigint NOT NULL DEFAULT nextval('billing.credit_ledger_id_seq'::regclass),
+  user_id uuid NOT NULL,
+  change_amount integer NOT NULL,
+  transaction_type USER-DEFINED NOT NULL,
+  description text,
+  related_transaction_id uuid,
+  related_message_id uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT credit_ledger_pkey PRIMARY KEY (id),
+  CONSTRAINT credit_ledger_related_message_id_fkey FOREIGN KEY (related_message_id) REFERENCES public.messages(id),
+  CONSTRAINT credit_ledger_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT credit_ledger_related_transaction_id_fkey FOREIGN KEY (related_transaction_id) REFERENCES billing.transactions(id)
+);
+CREATE TABLE billing.credit_pack_purchases (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  credit_pack_id uuid NOT NULL,
+  paypal_order_id text UNIQUE,
+  amount_paid_cents integer NOT NULL CHECK (amount_paid_cents >= 0),
+  credits_granted integer NOT NULL CHECK (credits_granted > 0),
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'completed'::text, 'failed'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT credit_pack_purchases_pkey PRIMARY KEY (id),
+  CONSTRAINT credit_pack_purchases_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT credit_pack_purchases_credit_pack_id_fkey FOREIGN KEY (credit_pack_id) REFERENCES billing.credit_packs(id)
+);
+CREATE TABLE billing.credit_packs (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  name text NOT NULL UNIQUE,
+  price_cents integer NOT NULL CHECK (price_cents >= 0),
+  credits_granted integer NOT NULL CHECK (credits_granted > 0),
+  description text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT credit_packs_pkey PRIMARY KEY (id)
+);
+CREATE TABLE billing.credits (
+  user_id uuid NOT NULL,
+  balance integer NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  CONSTRAINT credits_pkey PRIMARY KEY (user_id),
+  CONSTRAINT credits_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE billing.models (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  name text NOT NULL,
+  provider_model_id text NOT NULL UNIQUE,
+  CONSTRAINT models_pkey PRIMARY KEY (id)
+);
+CREATE TABLE billing.plans (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  name text NOT NULL,
+  price_monthly integer,
+  price_yearly integer,
+  monthly_credits_allowance integer NOT NULL DEFAULT 0,
+  features jsonb,
+  stripe_price_id_monthly text,
+  is_active boolean NOT NULL DEFAULT true,
+  paypal_subscription_id text,
+  model_id uuid,
+  stripe_price_id_yearly text,
+  CONSTRAINT plans_pkey PRIMARY KEY (id),
+  CONSTRAINT plans_model_id_fkey FOREIGN KEY (model_id) REFERENCES billing.models(id)
+);
+CREATE TABLE billing.subscriptions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  plan_id uuid NOT NULL,
+  status USER-DEFINED NOT NULL,
+  current_period_end timestamp with time zone NOT NULL,
+  stripe_subscription_id text UNIQUE,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  paypal_subscription_id text,
+  CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
+  CONSTRAINT subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES billing.plans(id),
+  CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);
+CREATE TABLE billing.transactions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  gateway USER-DEFINED NOT NULL,
+  gateway_transaction_id text UNIQUE,
+  amount integer NOT NULL,
+  currency text NOT NULL,
+  status USER-DEFINED NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  purchase_type USER-DEFINED,
+  subscription_id uuid,
+  credit_pack_purchase_id uuid,
+  CONSTRAINT transactions_pkey PRIMARY KEY (id),
+  CONSTRAINT transactions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT transactions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES billing.subscriptions(id),
+  CONSTRAINT transactions_credit_pack_purchase_id_fkey FOREIGN KEY (credit_pack_purchase_id) REFERENCES billing.credit_pack_purchases(id)
+);

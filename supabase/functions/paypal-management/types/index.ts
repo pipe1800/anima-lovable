@@ -188,7 +188,7 @@ export interface PlanRecord {
   name: string;
   price_monthly: number;
   paypal_subscription_id: string | null;
-  credits_per_month: number;
+  monthly_credits_allowance: number;
 }
 
 export interface CreditPackRecord {

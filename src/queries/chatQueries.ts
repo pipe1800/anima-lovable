@@ -61,10 +61,10 @@ export const queryConfigs = {
   // Removed chatMessageCount: now derived from messages list in unified hook (no HEAD query)
   
   // User credits - balanced updates with background refresh
-  userCredits: (userId: string) => ({
+  userCredits: (userId: string, supabase: any) => ({
     queryKey: queryKeys.user.credits(userId),
     queryFn: async () => {
-      const result = await getUserCredits(userId);
+      const result = await getUserCredits(supabase, userId);
       if (result.error) throw result.error;
       return result.data?.balance || 0;
     },

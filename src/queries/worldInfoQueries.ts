@@ -221,57 +221,23 @@ export function useWorldInfoLike() {
   const { user } = useAuth();
   
   return useMutation({
-    mutationFn: async ({ worldInfoId, liked }: { worldInfoId: string; liked: boolean }) => {
+    // Accept just the worldInfoId; backend RPC handles toggle & returns new state
+    mutationFn: async (worldInfoId: string) => {
       if (!user) throw new Error('User not authenticated');
-      
-      if (liked) {
-        // Add like
-        const { error } = await supabase
-          .from('world_info_user_likes')
-          .insert({ world_info_id: worldInfoId, user_id: user.id });
-        if (error) throw error;
-        
-        // Increment likes_count
-        const { data: currentData } = await supabase
-          .from('world_infos')
-          .select('likes_count')
-          .eq('id', worldInfoId)
-          .single();
-        
-        if (currentData) {
-          await supabase
-            .from('world_infos')
-            .update({ likes_count: currentData.likes_count + 1 })
-            .eq('id', worldInfoId);
-        }
-      } else {
-        // Remove like
-        const { error } = await supabase
-          .from('world_info_user_likes')
-          .delete()
-          .eq('world_info_id', worldInfoId)
-          .eq('user_id', user.id);
-        if (error) throw error;
-        
-        // Decrement likes_count
-        const { data: currentData } = await supabase
-          .from('world_infos')
-          .select('likes_count')
-          .eq('id', worldInfoId)
-          .single();
-        
-        if (currentData) {
-          await supabase
-            .from('world_infos')
-            .update({ likes_count: Math.max(currentData.likes_count - 1, 0) })
-            .eq('id', worldInfoId);
-        }
-      }
+      const { data, error } = await supabase.rpc('toggle_world_info_like', { p_world_info_id: worldInfoId });
+      if (error) throw error;
+      return { worldInfoId, result: data } as { worldInfoId: string; result: { liked: boolean; likes_count: number } };
     },
-    onSuccess: (_, { worldInfoId }) => {
-      // Invalidate related queries
+    onSuccess: ({ worldInfoId, result }) => {
+      // Optimistically update any cached world-info detail
+      queryClient.setQueryData<any>(['world-info', worldInfoId], (old) => {
+        if (!old) return old;
+        return { ...old, likesCount: result.likes_count };
+      });
+      // Invalidate broader collections to stay consistent
       queryClient.invalidateQueries({ queryKey: ['world-info', worldInfoId] });
       queryClient.invalidateQueries({ queryKey: ['user-world-info-collection'] });
+      queryClient.invalidateQueries({ queryKey: ['public-world-infos'] });
     },
   });
 }

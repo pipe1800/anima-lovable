@@ -13,7 +13,7 @@ export async function getUserActiveSubscription(
   userId: string
 ): Promise<SubscriptionRecord | null> {
   const { data, error } = await supabase
-    .from('subscriptions')
+    .from('billing.subscriptions')
     .select('*, plan:plans(*)')
     .eq('user_id', userId)
     .eq('status', 'active')
@@ -32,10 +32,10 @@ export async function getUserActiveSubscription(
  */
 export async function getPlanById(
   supabase: any, 
-  planId: string
+  planId: string,
 ): Promise<PlanRecord | null> {
   const { data, error } = await supabase
-    .from('plans')
+    .from('billing.plans')
     .select('*')
     .eq('id', planId)
     .single();
@@ -53,12 +53,12 @@ export async function getPlanById(
  */
 export async function getCreditPackById(
   supabase: any, 
-  creditPackId: string
+  packId: string,
 ): Promise<CreditPackRecord | null> {
   const { data, error } = await supabase
-    .from('credit_packs')
+    .from('billing.credit_packs')
     .select('*')
-    .eq('id', creditPackId)
+    .eq('id', packId)
     .single();
 
   if (error) {
@@ -80,18 +80,19 @@ export async function upsertSubscription(
     plan_id: string;
     status: string;
     start_time?: string;
-  }
+  },
 ) {
   const { data, error } = await supabase
-    .from('subscriptions')
-    .upsert({
-      user_id: userId,
-      paypal_subscription_id: subscriptionData.paypal_subscription_id,
-      plan_id: subscriptionData.plan_id,
-      status: subscriptionData.status,
-      created_at: subscriptionData.start_time || new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }, {
+    .from('billing.subscriptions')
+    .upsert(
+      {
+        user_id: userId,
+        paypal_subscription_id: subscriptionData.paypal_subscription_id,
+        plan_id: subscriptionData.plan_id,
+        status: subscriptionData.status,
+        created_at: subscriptionData.start_time || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }, {
       onConflict: 'user_id,paypal_subscription_id'
     })
     .select()
@@ -111,14 +112,11 @@ export async function upsertSubscription(
 export async function updateSubscriptionStatus(
   supabase: any,
   paypalSubscriptionId: string,
-  status: string
+  status: string,
 ) {
   const { error } = await supabase
-    .from('subscriptions')
-    .update({
-      status: status,
-      updated_at: new Date().toISOString()
-    })
+    .from('billing.subscriptions')
+    .update({ status, updated_at: new Date().toISOString() })
     .eq('paypal_subscription_id', paypalSubscriptionId);
 
   if (error) {
@@ -132,26 +130,28 @@ export async function updateSubscriptionStatus(
  */
 export async function createCreditPurchase(
   supabase: any,
-  userId: string,
   orderData: {
-    paypal_order_id: string;
+    user_id: string;
     credit_pack_id: string;
-    amount: number;
+    paypal_order_id: string;
+    amount_paid: number;
     credits_granted: number;
     status: string;
-  }
+  },
 ) {
   const { data, error } = await supabase
-    .from('credit_purchases')
-    .insert({
-      user_id: userId,
-      paypal_order_id: orderData.paypal_order_id,
-      credit_pack_id: orderData.credit_pack_id,
-      amount: orderData.amount,
-      credits_granted: orderData.credits_granted,
-      status: orderData.status,
-      created_at: new Date().toISOString()
-    })
+    .from('billing.credit_pack_purchases')
+    .insert([
+      {
+        user_id: orderData.user_id,
+        credit_pack_id: orderData.credit_pack_id,
+        paypal_order_id: orderData.paypal_order_id,
+        amount_paid: orderData.amount_paid,
+        credits_granted: orderData.credits_granted,
+        status: orderData.status,
+        created_at: new Date().toISOString()
+      }
+    ])
     .select()
     .single();
 
@@ -164,65 +164,29 @@ export async function createCreditPurchase(
 }
 
 /**
- * Update credit purchase status
- */
-export async function updateCreditPurchaseStatus(
-  supabase: any,
-  paypalOrderId: string,
-  status: string
-) {
-  const { error } = await supabase
-    .from('credit_purchases')
-    .update({
-      status: status,
-      updated_at: new Date().toISOString()
-    })
-    .eq('paypal_order_id', paypalOrderId);
-
-  if (error) {
-    console.error('Error updating credit purchase status:', error);
-    throw new Error('Failed to update credit purchase status');
-  }
-}
-
-/**
- * Add credits to user account
+ * Add credits to user account (wrapper around add_user_credits RPC)
  */
 export async function addCreditsToUser(
   supabase: any,
   userId: string,
-  creditsToAdd: number
+  creditsToAdd: number,
+  referenceId?: string,
+  transactionType: string = 'subscription_allowance'
 ) {
-  // Get current credits
-  const { data: profile, error: fetchError } = await supabase
-    .from('profiles')
-    .select('credits')
-    .eq('id', userId)
-    .single();
-
-  if (fetchError) {
-    console.error('Error fetching user credits:', fetchError);
-    throw new Error('Failed to fetch user credits');
+  if (!creditsToAdd || creditsToAdd <= 0) {
+    return { newBalance: null };
   }
-
-  const currentCredits = profile?.credits || 0;
-  const newCredits = currentCredits + creditsToAdd;
-
-  // Update credits
-  const { error: updateError } = await supabase
-    .from('profiles')
-    .update({
-      credits: newCredits,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
-
-  if (updateError) {
-    console.error('Error updating user credits:', updateError);
-    throw new Error('Failed to update user credits');
+  const { data, error } = await supabase.rpc('add_user_credits', {
+    p_user_id: userId,
+    p_amount: creditsToAdd,
+    p_transaction_type: transactionType,
+    p_reference_id: referenceId || null,
+  });
+  if (error) {
+    console.error('Error granting user credits via RPC:', error);
+    throw new Error('Failed to grant credits');
   }
-
-  return { previousCredits: currentCredits, newCredits };
+  return { newBalance: data };
 }
 
 /**
@@ -230,11 +194,11 @@ export async function addCreditsToUser(
  */
 export async function getSubscriptionByPayPalId(
   supabase: any,
-  paypalSubscriptionId: string
+  paypalSubscriptionId: string,
 ): Promise<SubscriptionRecord | null> {
   const { data, error } = await supabase
-    .from('subscriptions')
-    .select('*, plan:plans(*)')
+    .from('billing.subscriptions')
+    .select('*')
     .eq('paypal_subscription_id', paypalSubscriptionId)
     .maybeSingle();
 
@@ -249,12 +213,12 @@ export async function getSubscriptionByPayPalId(
 /**
  * Get credit purchase by PayPal order ID
  */
-export async function getCreditPurchaseByPayPalId(
+export async function getCreditPurchaseByPaypalId(
   supabase: any,
-  paypalOrderId: string
+  paypalOrderId: string,
 ): Promise<CreditPurchaseRecord | null> {
   const { data, error } = await supabase
-    .from('credit_purchases')
+    .from('billing.credit_pack_purchases')
     .select('*')
     .eq('paypal_order_id', paypalOrderId)
     .maybeSingle();
@@ -265,4 +229,44 @@ export async function getCreditPurchaseByPayPalId(
   }
 
   return data;
+}
+
+/**
+ * Get active subscriptions for a user
+ */
+export async function getActiveSubscriptions(
+  supabase: any,
+  userId: string,
+): Promise<SubscriptionRecord[]> {
+  const { data, error } = await supabase
+    .from('billing.subscriptions')
+    .select('*, plan:plans(*)')
+    .eq('user_id', userId)
+    .eq('status', 'active');
+
+  if (error) {
+    console.error('Error fetching active subscriptions:', error);
+    throw new Error('Failed to fetch active subscriptions');
+  }
+
+  return data;
+}
+
+/**
+ * Update credit purchase status
+ */
+export async function updateCreditPurchaseStatus(
+  supabase: any,
+  paypalOrderId: string,
+  status: string,
+) {
+  const { error } = await supabase
+    .from('billing.credit_pack_purchases')
+    .update({ status })
+    .eq('paypal_order_id', paypalOrderId);
+
+  if (error) {
+    console.error('Error updating credit purchase status:', error);
+    throw new Error('Failed to update credit purchase status');
+  }
 }

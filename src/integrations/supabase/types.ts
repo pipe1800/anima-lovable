@@ -7,31 +7,333 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instanciate createClient with right options
+  // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "12.2.3 (519615d)"
   }
-  graphql_public: {
+  billing: {
     Tables: {
-      [_ in never]: never
+      credit_ledger: {
+        Row: {
+          change_amount: number
+          created_at: string
+          description: string | null
+          id: number
+          related_message_id: string | null
+          related_transaction_id: string | null
+          transaction_type: Database["billing"]["Enums"]["credit_transaction_type"]
+          user_id: string
+        }
+        Insert: {
+          change_amount: number
+          created_at?: string
+          description?: string | null
+          id?: number
+          related_message_id?: string | null
+          related_transaction_id?: string | null
+          transaction_type: Database["billing"]["Enums"]["credit_transaction_type"]
+          user_id: string
+        }
+        Update: {
+          change_amount?: number
+          created_at?: string
+          description?: string | null
+          id?: number
+          related_message_id?: string | null
+          related_transaction_id?: string | null
+          transaction_type?: Database["billing"]["Enums"]["credit_transaction_type"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_ledger_related_transaction_id_fkey"
+            columns: ["related_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_pack_purchases: {
+        Row: {
+          amount_paid_cents: number
+          created_at: string
+          credit_pack_id: string
+          credits_granted: number
+          id: string
+          paypal_order_id: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          amount_paid_cents: number
+          created_at?: string
+          credit_pack_id: string
+          credits_granted: number
+          id?: string
+          paypal_order_id?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          amount_paid_cents?: number
+          created_at?: string
+          credit_pack_id?: string
+          credits_granted?: number
+          id?: string
+          paypal_order_id?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_pack_purchases_credit_pack_id_fkey"
+            columns: ["credit_pack_id"]
+            isOneToOne: false
+            referencedRelation: "credit_packs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_packs: {
+        Row: {
+          created_at: string
+          credits_granted: number
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          price_cents: number
+        }
+        Insert: {
+          created_at?: string
+          credits_granted: number
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          price_cents: number
+        }
+        Update: {
+          created_at?: string
+          credits_granted?: number
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          price_cents?: number
+        }
+        Relationships: []
+      }
+      credits: {
+        Row: {
+          balance: number
+          user_id: string
+        }
+        Insert: {
+          balance?: number
+          user_id: string
+        }
+        Update: {
+          balance?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      models: {
+        Row: {
+          id: string
+          name: string
+          provider_model_id: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          provider_model_id: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          provider_model_id?: string
+        }
+        Relationships: []
+      }
+      plans: {
+        Row: {
+          features: Json | null
+          id: string
+          is_active: boolean
+          model_id: string | null
+          monthly_credits_allowance: number
+          name: string
+          paypal_subscription_id: string | null
+          price_monthly: number | null
+          price_yearly: number | null
+          stripe_price_id_monthly: string | null
+          stripe_price_id_yearly: string | null
+        }
+        Insert: {
+          features?: Json | null
+          id?: string
+          is_active?: boolean
+          model_id?: string | null
+          monthly_credits_allowance?: number
+          name: string
+          paypal_subscription_id?: string | null
+          price_monthly?: number | null
+          price_yearly?: number | null
+          stripe_price_id_monthly?: string | null
+          stripe_price_id_yearly?: string | null
+        }
+        Update: {
+          features?: Json | null
+          id?: string
+          is_active?: boolean
+          model_id?: string | null
+          monthly_credits_allowance?: number
+          name?: string
+          paypal_subscription_id?: string | null
+          price_monthly?: number | null
+          price_yearly?: number | null
+          stripe_price_id_monthly?: string | null
+          stripe_price_id_yearly?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plans_model_id_fkey"
+            columns: ["model_id"]
+            isOneToOne: false
+            referencedRelation: "models"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      subscriptions: {
+        Row: {
+          created_at: string
+          current_period_end: string
+          id: string
+          paypal_subscription_id: string | null
+          plan_id: string
+          status: Database["billing"]["Enums"]["subscription_status"]
+          stripe_subscription_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_period_end: string
+          id?: string
+          paypal_subscription_id?: string | null
+          plan_id: string
+          status: Database["billing"]["Enums"]["subscription_status"]
+          stripe_subscription_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          current_period_end?: string
+          id?: string
+          paypal_subscription_id?: string | null
+          plan_id?: string
+          status?: Database["billing"]["Enums"]["subscription_status"]
+          stripe_subscription_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transactions: {
+        Row: {
+          amount: number
+          created_at: string
+          credit_pack_purchase_id: string | null
+          currency: string
+          gateway: Database["billing"]["Enums"]["gateway_type"]
+          gateway_transaction_id: string | null
+          id: string
+          purchase_type:
+            | Database["billing"]["Enums"]["transaction_purchase_type"]
+            | null
+          status: Database["billing"]["Enums"]["transaction_status"]
+          subscription_id: string | null
+          user_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          credit_pack_purchase_id?: string | null
+          currency: string
+          gateway: Database["billing"]["Enums"]["gateway_type"]
+          gateway_transaction_id?: string | null
+          id?: string
+          purchase_type?:
+            | Database["billing"]["Enums"]["transaction_purchase_type"]
+            | null
+          status: Database["billing"]["Enums"]["transaction_status"]
+          subscription_id?: string | null
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          credit_pack_purchase_id?: string | null
+          currency?: string
+          gateway?: Database["billing"]["Enums"]["gateway_type"]
+          gateway_transaction_id?: string | null
+          id?: string
+          purchase_type?:
+            | Database["billing"]["Enums"]["transaction_purchase_type"]
+            | null
+          status?: Database["billing"]["Enums"]["transaction_status"]
+          subscription_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transactions_credit_pack_purchase_id_fkey"
+            columns: ["credit_pack_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "credit_pack_purchases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transactions_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      graphql: {
-        Args: {
-          operationName?: string
-          query?: string
-          variables?: Json
-          extensions?: Json
-        }
-        Returns: Json
-      }
+      [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      credit_transaction_type:
+        | "initial_grant"
+        | "subscription_allowance"
+        | "top_up_purchase"
+        | "message_cost"
+        | "image_gen_cost"
+        | "admin_adjustment"
+        | "onboarding_reward"
+      gateway_type: "stripe" | "paypal"
+      model_tier: "standard" | "premium" | "experimental"
+      subscription_status: "active" | "past_due" | "canceled" | "trialing"
+      transaction_purchase_type: "subscription" | "credit_pack"
+      transaction_status: "succeeded" | "pending" | "failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -44,6 +346,8 @@ export type Database = {
           character_id: string
           description: string | null
           greeting: string | null
+          initial_addon_context: Json | null
+          initial_addon_context_enabled: boolean
           model_id: string | null
           personality_summary: string
           scenario: Json | null
@@ -52,6 +356,8 @@ export type Database = {
           character_id: string
           description?: string | null
           greeting?: string | null
+          initial_addon_context?: Json | null
+          initial_addon_context_enabled?: boolean
           model_id?: string | null
           personality_summary: string
           scenario?: Json | null
@@ -60,6 +366,8 @@ export type Database = {
           character_id?: string
           description?: string | null
           greeting?: string | null
+          initial_addon_context?: Json | null
+          initial_addon_context_enabled?: boolean
           model_id?: string | null
           personality_summary?: string
           scenario?: Json | null
@@ -155,12 +463,18 @@ export type Database = {
       }
       character_memories: {
         Row: {
+          ai_sequence_end: number | null
+          ai_sequence_start: number | null
           character_id: string
           chat_id: string
+          content_hash: string | null
           created_at: string | null
+          embedding: string | null
           id: string
+          injection_count: number | null
           input_token_cost: number
           is_auto_summary: boolean | null
+          last_injected_at: string | null
           message_count: number
           name: string | null
           summary_content: string
@@ -169,12 +483,18 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_sequence_end?: number | null
+          ai_sequence_start?: number | null
           character_id: string
           chat_id: string
+          content_hash?: string | null
           created_at?: string | null
+          embedding?: string | null
           id?: string
+          injection_count?: number | null
           input_token_cost: number
           is_auto_summary?: boolean | null
+          last_injected_at?: string | null
           message_count: number
           name?: string | null
           summary_content: string
@@ -183,12 +503,18 @@ export type Database = {
           user_id: string
         }
         Update: {
+          ai_sequence_end?: number | null
+          ai_sequence_start?: number | null
           character_id?: string
           chat_id?: string
+          content_hash?: string | null
           created_at?: string | null
+          embedding?: string | null
           id?: string
+          injection_count?: number | null
           input_token_cost?: number
           is_auto_summary?: boolean | null
+          last_injected_at?: string | null
           message_count?: number
           name?: string | null
           summary_content?: string
@@ -316,6 +642,7 @@ export type Database = {
           tagline: string | null
           updated_at: string
           visibility: string
+          was_public: boolean
         }
         Insert: {
           avatar_url?: string | null
@@ -332,6 +659,7 @@ export type Database = {
           tagline?: string | null
           updated_at?: string
           visibility?: string
+          was_public?: boolean
         }
         Update: {
           avatar_url?: string | null
@@ -348,6 +676,7 @@ export type Database = {
           tagline?: string | null
           updated_at?: string
           visibility?: string
+          was_public?: boolean
         }
         Relationships: []
       }
@@ -357,7 +686,9 @@ export type Database = {
           chat_id: string
           created_at: string
           current_context: Json
+          enchantment_status: string | null
           id: string
+          item_inventory: string | null
           last_updated_by_message_id: string | null
           updated_at: string
           user_id: string
@@ -367,7 +698,9 @@ export type Database = {
           chat_id: string
           created_at?: string
           current_context?: Json
+          enchantment_status?: string | null
           id?: string
+          item_inventory?: string | null
           last_updated_by_message_id?: string | null
           updated_at?: string
           user_id: string
@@ -377,7 +710,9 @@ export type Database = {
           chat_id?: string
           created_at?: string
           current_context?: Json
+          enchantment_status?: string | null
           id?: string
+          item_inventory?: string | null
           last_updated_by_message_id?: string | null
           updated_at?: string
           user_id?: string
@@ -545,23 +880,9 @@ export type Database = {
         }
         Relationships: []
       }
-      credits: {
-        Row: {
-          balance: number
-          user_id: string
-        }
-        Insert: {
-          balance?: number
-          user_id: string
-        }
-        Update: {
-          balance?: number
-          user_id?: string
-        }
-        Relationships: []
-      }
       messages: {
         Row: {
+          ai_sequence_number: number | null
           author_id: string | null
           chat_id: string
           content: string
@@ -576,6 +897,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          ai_sequence_number?: number | null
           author_id?: string | null
           chat_id: string
           content: string
@@ -590,6 +912,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          ai_sequence_number?: number | null
           author_id?: string | null
           chat_id?: string
           content?: string
@@ -650,15 +973,7 @@ export type Database = {
           model_identifier?: string
           tier_name?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "models_min_plan_id_fkey"
-            columns: ["min_plan_id"]
-            isOneToOne: false
-            referencedRelation: "plans"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       onboarding_checklist_items: {
         Row: {
@@ -681,6 +996,33 @@ export type Database = {
           reward_credits?: number
           task_key?: string
           title?: string
+        }
+        Relationships: []
+      }
+      parsed_character_cards: {
+        Row: {
+          avatar_public_url: string | null
+          created_at: string
+          hash: string
+          normalized: Json
+          vendor: string | null
+          version: string | null
+        }
+        Insert: {
+          avatar_public_url?: string | null
+          created_at?: string
+          hash: string
+          normalized: Json
+          vendor?: string | null
+          version?: string | null
+        }
+        Update: {
+          avatar_public_url?: string | null
+          created_at?: string
+          hash?: string
+          normalized?: Json
+          vendor?: string | null
+          version?: string | null
         }
         Relationships: []
       }
@@ -714,36 +1056,6 @@ export type Database = {
           name?: string
           updated_at?: string
           user_id?: string
-        }
-        Relationships: []
-      }
-      plans: {
-        Row: {
-          features: Json | null
-          id: string
-          is_active: boolean
-          monthly_credits_allowance: number
-          name: string
-          paypal_subscription_id: string | null
-          price_monthly: number | null
-        }
-        Insert: {
-          features?: Json | null
-          id?: string
-          is_active?: boolean
-          monthly_credits_allowance?: number
-          name: string
-          paypal_subscription_id?: string | null
-          price_monthly?: number | null
-        }
-        Update: {
-          features?: Json | null
-          id?: string
-          is_active?: boolean
-          monthly_credits_allowance?: number
-          name?: string
-          paypal_subscription_id?: string | null
-          price_monthly?: number | null
         }
         Relationships: []
       }
@@ -815,43 +1127,44 @@ export type Database = {
         }
         Relationships: []
       }
-      subscriptions: {
+      subscription_nonces: {
         Row: {
           created_at: string
-          current_period_end: string
           id: string
-          paypal_subscription_id: string | null
-          plan_id: string
-          status: string
+          provisional_subscription_id: string
           user_id: string
         }
         Insert: {
           created_at?: string
-          current_period_end: string
-          id?: string
-          paypal_subscription_id?: string | null
-          plan_id: string
-          status: string
+          id: string
+          provisional_subscription_id: string
           user_id: string
         }
         Update: {
           created_at?: string
-          current_period_end?: string
           id?: string
-          paypal_subscription_id?: string | null
-          plan_id?: string
-          status?: string
+          provisional_subscription_id?: string
           user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "subscriptions_plan_id_fkey"
-            columns: ["plan_id"]
-            isOneToOne: false
-            referencedRelation: "plans"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
+      }
+      summary_locks: {
+        Row: {
+          chat_id: string
+          created_at: string
+          expires_at: string
+        }
+        Insert: {
+          chat_id: string
+          created_at?: string
+          expires_at: string
+        }
+        Update: {
+          chat_id?: string
+          created_at?: string
+          expires_at?: string
+        }
+        Relationships: []
       }
       tags: {
         Row: {
@@ -983,69 +1296,171 @@ export type Database = {
           },
         ]
       }
+      user_daily_usage: {
+        Row: {
+          created_at: string
+          manual_memory_calls: number
+          summary_calls: number
+          updated_at: string
+          usage_date: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          manual_memory_calls?: number
+          summary_calls?: number
+          updated_at?: string
+          usage_date?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          manual_memory_calls?: number
+          summary_calls?: number
+          updated_at?: string
+          usage_date?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_global_chat_settings: {
         Row: {
+          action_color: string | null
+          ai_bubble_color: string
+          ai_bubble_opacity: number
+          ai_text_color: string
+          avatar_blur_nsfw: boolean | null
+          avatar_overlay_color: string | null
+          avatar_overlay_opacity: number | null
+          avatar_shape: string
+          avatar_size: string
+          avatar_style: string
+          background_image_url: string | null
+          banner_tint_from_avatar: boolean | null
+          banner_width: string | null
           chain_of_thought: boolean | null
           character_position: boolean | null
           clothing_inventory: boolean | null
           created_at: string | null
           dynamic_world_info: boolean | null
+          emphasis_color: string | null
+          enchantment_status: boolean | null
           enhanced_memory: boolean | null
           few_shot_examples: boolean | null
           font_size: string | null
+          god_mode: boolean
           id: string
+          item_inventory: boolean | null
           location_tracking: boolean | null
           mood_tracking: boolean | null
           nsfw_enabled: boolean | null
+          parenthetical_color: string | null
+          portrait_frame_color: string | null
+          portrait_frame_style: string | null
           relationship_status: boolean | null
+          semantic_overrides_mode: string
+          show_character_avatar: boolean
+          show_user_avatar: boolean
+          speech_color: string | null
           streaming_mode: string | null
           time_and_weather: boolean | null
           updated_at: string | null
+          user_bubble_color: string
+          user_bubble_opacity: number
           user_id: string
-          enchantment_status: boolean | null
-          item_inventory: boolean | null
+          user_text_color: string
         }
         Insert: {
+          action_color?: string | null
+          ai_bubble_color?: string
+          ai_bubble_opacity?: number
+          ai_text_color?: string
+          avatar_blur_nsfw?: boolean | null
+          avatar_overlay_color?: string | null
+          avatar_overlay_opacity?: number | null
+          avatar_shape?: string
+          avatar_size?: string
+          avatar_style?: string
+          background_image_url?: string | null
+          banner_tint_from_avatar?: boolean | null
+          banner_width?: string | null
           chain_of_thought?: boolean | null
           character_position?: boolean | null
           clothing_inventory?: boolean | null
           created_at?: string | null
           dynamic_world_info?: boolean | null
+          emphasis_color?: string | null
+          enchantment_status?: boolean | null
           enhanced_memory?: boolean | null
           few_shot_examples?: boolean | null
           font_size?: string | null
+          god_mode?: boolean
           id?: string
+          item_inventory?: boolean | null
           location_tracking?: boolean | null
           mood_tracking?: boolean | null
           nsfw_enabled?: boolean | null
+          parenthetical_color?: string | null
+          portrait_frame_color?: string | null
+          portrait_frame_style?: string | null
           relationship_status?: boolean | null
+          semantic_overrides_mode?: string
+          show_character_avatar?: boolean
+          show_user_avatar?: boolean
+          speech_color?: string | null
           streaming_mode?: string | null
           time_and_weather?: boolean | null
           updated_at?: string | null
+          user_bubble_color?: string
+          user_bubble_opacity?: number
           user_id: string
-          enchantment_status?: boolean | null
-          item_inventory?: boolean | null
+          user_text_color?: string
         }
         Update: {
+          action_color?: string | null
+          ai_bubble_color?: string
+          ai_bubble_opacity?: number
+          ai_text_color?: string
+          avatar_blur_nsfw?: boolean | null
+          avatar_overlay_color?: string | null
+          avatar_overlay_opacity?: number | null
+          avatar_shape?: string
+          avatar_size?: string
+          avatar_style?: string
+          background_image_url?: string | null
+          banner_tint_from_avatar?: boolean | null
+          banner_width?: string | null
           chain_of_thought?: boolean | null
           character_position?: boolean | null
           clothing_inventory?: boolean | null
           created_at?: string | null
           dynamic_world_info?: boolean | null
+          emphasis_color?: string | null
+          enchantment_status?: boolean | null
           enhanced_memory?: boolean | null
           few_shot_examples?: boolean | null
           font_size?: string | null
+          god_mode?: boolean
           id?: string
+          item_inventory?: boolean | null
           location_tracking?: boolean | null
           mood_tracking?: boolean | null
           nsfw_enabled?: boolean | null
+          parenthetical_color?: string | null
+          portrait_frame_color?: string | null
+          portrait_frame_style?: string | null
           relationship_status?: boolean | null
+          semantic_overrides_mode?: string
+          show_character_avatar?: boolean
+          show_user_avatar?: boolean
+          speech_color?: string | null
           streaming_mode?: string | null
           time_and_weather?: boolean | null
           updated_at?: string | null
+          user_bubble_color?: string
+          user_bubble_opacity?: number
           user_id?: string
-          enchantment_status?: boolean | null
-          item_inventory?: boolean | null
+          user_text_color?: string
         }
         Relationships: []
       }
@@ -1233,6 +1648,57 @@ export type Database = {
       }
     }
     Views: {
+      character_definitions_with_notes: {
+        Row: {
+          character_id: string | null
+          character_notes: string | null
+          creator_notes: string | null
+          description: string | null
+          greeting: string | null
+          model_id: string | null
+          personality_summary: string | null
+          scenario: Json | null
+          version: string | null
+        }
+        Insert: {
+          character_id?: string | null
+          character_notes?: never
+          creator_notes?: never
+          description?: string | null
+          greeting?: string | null
+          model_id?: string | null
+          personality_summary?: string | null
+          scenario?: Json | null
+          version?: never
+        }
+        Update: {
+          character_id?: string | null
+          character_notes?: never
+          creator_notes?: never
+          description?: string | null
+          greeting?: string | null
+          model_id?: string | null
+          personality_summary?: string | null
+          scenario?: Json | null
+          version?: never
+        }
+        Relationships: [
+          {
+            foreignKeyName: "character_definitions_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: true
+            referencedRelation: "character_profile_view"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "character_definitions_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: true
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       character_profile_view: {
         Row: {
           avatar_url: string | null
@@ -1256,18 +1722,161 @@ export type Database = {
         }
         Relationships: []
       }
+      credits: {
+        Row: {
+          balance: number | null
+          user_id: string | null
+        }
+        Insert: {
+          balance?: number | null
+          user_id?: string | null
+        }
+        Update: {
+          balance?: number | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      plans: {
+        Row: {
+          features: Json | null
+          id: string | null
+          is_active: boolean | null
+          model_id: string | null
+          monthly_credits_allowance: number | null
+          name: string | null
+          paypal_subscription_id: string | null
+          price_monthly: number | null
+          price_yearly: number | null
+          stripe_price_id_monthly: string | null
+          stripe_price_id_yearly: string | null
+        }
+        Insert: {
+          features?: Json | null
+          id?: string | null
+          is_active?: boolean | null
+          model_id?: string | null
+          monthly_credits_allowance?: number | null
+          name?: string | null
+          paypal_subscription_id?: string | null
+          price_monthly?: number | null
+          price_yearly?: number | null
+          stripe_price_id_monthly?: string | null
+          stripe_price_id_yearly?: string | null
+        }
+        Update: {
+          features?: Json | null
+          id?: string | null
+          is_active?: boolean | null
+          model_id?: string | null
+          monthly_credits_allowance?: number | null
+          name?: string | null
+          paypal_subscription_id?: string | null
+          price_monthly?: number | null
+          price_yearly?: number | null
+          stripe_price_id_monthly?: string | null
+          stripe_price_id_yearly?: string | null
+        }
+        Relationships: []
+      }
+      public_profiles: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          created_at: string | null
+          id: string | null
+          username: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          id?: string | null
+          username?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          id?: string | null
+          username?: string | null
+        }
+        Relationships: []
+      }
+      subscriptions: {
+        Row: {
+          created_at: string | null
+          current_period_end: string | null
+          id: string | null
+          paypal_subscription_id: string | null
+          plan_id: string | null
+          status: Database["billing"]["Enums"]["subscription_status"] | null
+          stripe_subscription_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          current_period_end?: string | null
+          id?: string | null
+          paypal_subscription_id?: string | null
+          plan_id?: string | null
+          status?: Database["billing"]["Enums"]["subscription_status"] | null
+          stripe_subscription_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          current_period_end?: string | null
+          id?: string | null
+          paypal_subscription_id?: string | null
+          plan_id?: string | null
+          status?: Database["billing"]["Enums"]["subscription_status"] | null
+          stripe_subscription_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
-      add_monthly_credits: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
+      add_user_credits: {
+        Args: {
+          p_amount: number
+          p_reference_id?: string
+          p_transaction_type: string
+          p_user_id: string
+        }
+        Returns: number
+      }
+      array_all_item_length_lte: {
+        Args: { arr: string[]; max_len: number }
+        Returns: boolean
+      }
+      binary_quantize: {
+        Args: { "": string } | { "": unknown }
+        Returns: unknown
+      }
+      cancel_subscription: {
+        Args: { p_subscription_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      check_subscription_status: {
+        Args: { p_user_id: string }
+        Returns: Json
       }
       cleanup_disabled_addon_context: {
         Args: Record<PropertyKey, never>
         Returns: undefined
       }
       consume_credits: {
-        Args: { user_id_param: string; credits_to_consume: number }
+        Args: { credits_to_consume: number; user_id_param: string }
         Returns: boolean
       }
       create_chat_with_greeting: {
@@ -1282,9 +1891,22 @@ export type Database = {
         Args: { p_character_id: string; p_user_id: string }
         Returns: string
       }
+      current_user_id: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
       decrement_world_info_interaction_count: {
         Args: { world_info_id: string }
         Returns: undefined
+      }
+      deduct_user_credits: {
+        Args: {
+          p_amount: number
+          p_description?: string
+          p_operation_type?: string
+          p_user_id: string
+        }
+        Returns: number
       }
       delete_chat_complete: {
         Args: { p_chat_id: string; p_user_id: string }
@@ -1294,26 +1916,89 @@ export type Database = {
         Args: { p_character_id: string }
         Returns: undefined
       }
+      delete_user_account: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
+      get_available_plans: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
       get_character_stats: {
         Args: { character_id: string }
         Returns: {
-          total_chats: number
-          total_messages: number
-          unique_users: number
           average_rating: number
+          total_chats: number
           total_favorites: number
           total_likes: number
+          total_messages: number
+          unique_users: number
         }[]
       }
       get_chat_context: {
-        Args: { p_chat_id: string; p_user_id: string; p_character_id: string }
+        Args: { p_character_id: string; p_chat_id: string; p_user_id: string }
         Returns: {
           current_context: Json
         }[]
       }
+      get_credit_history: {
+        Args: { p_limit?: number; p_offset?: number; p_user_id: string }
+        Returns: {
+          amount: number
+          balance_after: number
+          created_at: string
+          description: string
+          id: string
+          transaction_type: string
+        }[]
+      }
+      get_user_credit_purchases: {
+        Args: { p_limit?: number; p_user_id: string }
+        Returns: Json
+      }
+      get_user_credits: {
+        Args: { p_user_id: string }
+        Returns: number
+      }
       get_user_role: {
         Args: Record<PropertyKey, never>
         Returns: string
+      }
+      get_user_subscription_with_plan: {
+        Args: { p_user_id: string }
+        Returns: Json
+      }
+      halfvec_avg: {
+        Args: { "": number[] }
+        Returns: unknown
+      }
+      halfvec_out: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      halfvec_send: {
+        Args: { "": unknown }
+        Returns: string
+      }
+      halfvec_typmod_in: {
+        Args: { "": unknown[] }
+        Returns: number
+      }
+      hnsw_bit_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      hnsw_halfvec_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      hnsw_sparsevec_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      hnswhandler: {
+        Args: { "": unknown }
+        Returns: unknown
       }
       increment_world_info_interaction: {
         Args: { p_world_info_id: string }
@@ -1323,22 +2008,101 @@ export type Database = {
         Args: { world_info_id: string }
         Returns: undefined
       }
+      ivfflat_bit_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      ivfflat_halfvec_support: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      ivfflathandler: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      l2_norm: {
+        Args: { "": unknown } | { "": unknown }
+        Returns: number
+      }
+      l2_normalize: {
+        Args: { "": string } | { "": unknown } | { "": unknown }
+        Returns: string
+      }
+      mark_memories_injected: {
+        Args: { mem_ids: string[] }
+        Returns: undefined
+      }
+      prune_expired_summary_locks: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      prune_stale_subscription_nonces: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
       related_characters: {
         Args: { current_character_id: string; tag_ids: number[] }
         Returns: {
-          id: string
-          name: string
           avatar_url: string
-          short_description: string
-          likes_count: number
           chats_count: number
           creator: Json
+          id: string
+          likes_count: number
+          name: string
+          short_description: string
           tags: Json
         }[]
+      }
+      sparsevec_out: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      sparsevec_send: {
+        Args: { "": unknown }
+        Returns: string
+      }
+      sparsevec_typmod_in: {
+        Args: { "": unknown[] }
+        Returns: number
       }
       toggle_world_info_like: {
         Args: { p_world_info_id: string }
         Returns: Json
+      }
+      upsert_subscription: {
+        Args: {
+          p_current_period_end?: string
+          p_paypal_subscription_id?: string
+          p_plan_id: string
+          p_status?: string
+          p_stripe_subscription_id?: string
+          p_user_id: string
+        }
+        Returns: string
+      }
+      vector_avg: {
+        Args: { "": number[] }
+        Returns: string
+      }
+      vector_dims: {
+        Args: { "": string } | { "": unknown }
+        Returns: number
+      }
+      vector_norm: {
+        Args: { "": string }
+        Returns: number
+      }
+      vector_out: {
+        Args: { "": string }
+        Returns: unknown
+      }
+      vector_send: {
+        Args: { "": string }
+        Returns: string
+      }
+      vector_typmod_in: {
+        Args: { "": unknown[] }
+        Returns: number
       }
     }
     Enums: {
@@ -1363,7 +2127,7 @@ export type Tables<
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never,
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1468,8 +2232,23 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
+  billing: {
+    Enums: {
+      credit_transaction_type: [
+        "initial_grant",
+        "subscription_allowance",
+        "top_up_purchase",
+        "message_cost",
+        "image_gen_cost",
+        "admin_adjustment",
+        "onboarding_reward",
+      ],
+      gateway_type: ["stripe", "paypal"],
+      model_tier: ["standard", "premium", "experimental"],
+      subscription_status: ["active", "past_due", "canceled", "trialing"],
+      transaction_purchase_type: ["subscription", "credit_pack"],
+      transaction_status: ["succeeded", "pending", "failed"],
+    },
   },
   public: {
     Enums: {},

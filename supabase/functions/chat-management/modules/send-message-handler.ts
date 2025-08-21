@@ -1,6 +1,5 @@
 import { createErrorResponse } from '../../_shared/auth.ts';
-import { mapGlobalSettingsToAddonSettings } from '../../_shared/settings-mapper.ts';
-import { anyAddonEnabled, sanitizeAddonSettings } from '../../_shared/settings-mapper.ts';
+import { mapGlobalSettingsToAddonSettings, anyAddonEnabled, sanitizeAddonSettings } from '../../_shared/settings-mapper.ts';
 import type { SendMessageRequest } from '../types/index.ts';
 import type { TemplateContext, CurrentContext } from '../types/streaming-interfaces.ts';
 
@@ -11,8 +10,10 @@ import {
 import { 
   createStreamingErrorResponse,
   processStreamBuffer,
-  parseStreamChunk
+  parseStreamChunk,
+  streamAIResponse
 } from './streaming.ts';
+import { getEnv } from '../../_shared/env.ts';
 import { 
   getUserPlanAndModel, 
   calculateCreditCost, 
@@ -38,49 +39,134 @@ import {
   updateChatLastActivity,
   buildTemplateReplacer
 } from './database.ts';
-import {
-  buildSystemPrompt,
-  buildConversationMessages,
-  generateAIResponse
-} from './message-handler.ts';
-import { buildConversationMessagesWithMessageBudget } from './message-counter.ts';
-import { triggerMessageBasedSummary, getMostRecentAutoSummary } from './auto-summary-new.ts';
 import { assembleConversation } from './conversation-assembler.ts';
 import type { ConversationKnobs } from './message-counter.ts';
+import { triggerMessageBasedSummary } from './auto-summary-new.ts';
+import { generateAIResponse } from './message-handler.ts';
 import { logger } from '../../_shared/logger.ts';
 
-/**
- * Send Message Handler - Streaming AI Responses
- * 
- * This handler reuses the exact same logic as chat-stream but integrates
- * it into the unified chat-management function.
- */
+// Pre-created encoder (avoid reallocation per request)
+const encoder = new TextEncoder();
+
+// Default conversation knobs (immutable)
+const DEFAULT_KNOBS: ConversationKnobs = Object.freeze({
+  maxPairs: 5,
+  historyTokenLimit: 0, // filled dynamically per model (see buildKnobs)
+  safetyMarginTokens: 0,
+  greedyBaseline: { maxPairs: 10, historyTokenLimit: 0 }
+});
+
+function buildKnobs(maxContextTokens: number): ConversationKnobs {
+  return {
+    ...DEFAULT_KNOBS,
+    historyTokenLimit: Math.floor(maxContextTokens * 2 / 3),
+    safetyMarginTokens: Math.floor(maxContextTokens * 0.05),
+    greedyBaseline: { maxPairs: 10, historyTokenLimit: maxContextTokens }
+  };
+}
+
+function env(key: string): string | undefined {
+  try { return (globalThis as any).Deno?.env?.get(key) ?? (typeof process !== 'undefined' ? (process as any).env?.[key] : undefined); } catch { return undefined; }
+}
+
+function redact(id?: string) { if (!id) return 'anon'; return id.length > 8 ? `${id.slice(0,4)}…${id.slice(-2)}` : id; }
+
+interface TimeAwarenessResult {
+  enabled: boolean;
+  delaySeconds: number;
+  userTimezone: string;
+  userLocalTime: string;
+  conversationTone?: string;
+  urgencyLevel?: string;
+}
+
+function computeTimeAwareness(userCharacterSettings: any, userProfile: any, messageHistory: any[], currentContext: any): TimeAwarenessResult | undefined {
+  if (!userCharacterSettings?.time_awareness_enabled) return undefined;
+  const userTimezone = userProfile?.timezone || 'UTC';
+  const userLocalTime = new Date().toLocaleString('en-US', { timeZone: userTimezone, hour: 'numeric', minute: '2-digit', hour12: true, weekday: 'short', month: 'short', day: 'numeric' });
+  // Single pass scan for last AI message (avoid sort)
+  let lastAiCreatedAt: number | null = null;
+  for (let i = messageHistory.length - 1; i >= 0; i--) {
+    const m = messageHistory[i];
+    if (m.is_ai_message) { lastAiCreatedAt = new Date(m.created_at).getTime(); break; }
+  }
+  const delaySeconds = lastAiCreatedAt ? Math.floor((Date.now() - lastAiCreatedAt)/1000) : 0;
+  return { enabled: true, delaySeconds, userTimezone, userLocalTime, conversationTone: currentContext?.conversationTone || undefined, urgencyLevel: currentContext?.urgencyLevel || undefined };
+}
+
+async function markContextCeilingWarned(supabase: any, chatId: string, truncated: boolean) {
+  if (!truncated) return { shouldWarnContextCeiling: false };
+  const { data, error } = await supabase
+    .from('chats')
+    .update({ context_ceiling_warned: true })
+    .eq('id', chatId)
+    .eq('context_ceiling_warned', false)
+    .select('id');
+  if (error) {
+    logger.warn('contextCeiling.update.error', { chatId, message: error.message });
+  }
+  return { shouldWarnContextCeiling: Array.isArray(data) && data.length > 0 };
+}
+
+async function triggerAddonExtraction(options: { addonsActive: boolean; supabaseUrl?: string; authHeader?: string|null; chatId: string; characterId: string; effectiveAddonSettings: any; message: string; aiResponse: string; messageId: string; }) {
+  const { addonsActive, supabaseUrl, authHeader, chatId, characterId, effectiveAddonSettings, message, aiResponse, messageId } = options;
+  if (!addonsActive) {
+    logger.debug('addons.skip.allDisabled', { chatId });
+    return;
+  }
+  if (!supabaseUrl) {
+    logger.warn('addons.skip.missingSupabaseUrl');
+    return;
+  }
+  try {
+    const resp = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
+      method: 'POST',
+      headers: { 'Authorization': authHeader || '', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        character_id: characterId,
+        addon_settings: effectiveAddonSettings,
+        mode: 'conversation',
+        message_id: messageId,
+        user_message: message,
+        ai_response: aiResponse
+      })
+    });
+    if (!resp.ok) {
+      logger.warn('addons.extract.failed', { chatId, status: resp.status });
+    } else {
+      logger.debug('addons.extract.triggered', { chatId });
+    }
+  } catch (e) {
+    logger.error('addons.extract.error', { chatId, message: (e as Error)?.message });
+  }
+}
 
 export async function handleSendMessage(
   request: SendMessageRequest,
   user: any,
   supabase: any,
   supabaseAdmin: any,
-  req: Request
+  req: Request,
+  meta?: { requestId?: string }
 ): Promise<Response> {
   const startTime = Date.now();
-  
+  const requestId = meta?.requestId || crypto.randomUUID();
   try {
     const { chatId, message, characterId, selectedPersonaId, selectedWorldInfoId, addonSettings } = request;
 
     if (!chatId || !message || !characterId) {
-      console.error('❌ Missing required fields:', { chatId: !!chatId, message: !!message, characterId: !!characterId });
+      logger.warn('send.validation.missingFields', { requestId, chatId, characterId, hasMessage: !!message });
       return createErrorResponse('Missing required fields', 400);
     }
+    if (message.trim().length === 0) {
+      return createErrorResponse('Empty message', 400);
+    }
 
-    logger.debug('send.required.validated', { chatId, characterId, len: message.length, worldInfo: !!selectedWorldInfoId });
     const trivialInput = message.trim().length < 4;
+    logger.debug('send.init', { requestId, chatId, characterId, len: message.length, trivial: trivialInput, userId: redact(user?.id) });
 
-    // ============================================================================
-    // DATABASE OPERATIONS - PARALLEL FETCHING (same as chat-stream)
-    // ============================================================================
-    console.log('📊 Fetching required data...');
-    
+    // Parallel fetch
     const [
       character,
       messageHistory,
@@ -105,232 +191,56 @@ export async function handleSendMessage(
       fetchCharacterMemories(user.id, characterId, supabase, { chatId, includeAutoSummaries: true, limitNonAuto: 30, limitAuto: 5 })
     ]);
 
-    // Use chat's selected persona, or fallback to request persona, or fallback to null
-    const selectedPersona = chatSelectedPersona || 
-      (selectedPersonaId ? await fetchSelectedPersona(selectedPersonaId, user.id, supabase) : null);
+    const selectedPersona = chatSelectedPersona || (selectedPersonaId ? await fetchSelectedPersona(selectedPersonaId, user.id, supabase) : null);
 
-    // Convert global settings to addon settings for backward compatibility
     const effectiveAddonSettings = sanitizeAddonSettings(globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {}));
-    
-    // Add time awareness from user character settings
-    if (userCharacterSettings?.time_awareness_enabled) {
-      effectiveAddonSettings.timeAwareness = true;
-    }
+    if (userCharacterSettings?.time_awareness_enabled) effectiveAddonSettings.timeAwareness = true;
 
-    // Early guard: if all addons disabled, skip extraction later
     const addonsActive = anyAddonEnabled(effectiveAddonSettings);
-
     if (trivialInput) {
-      // Disable heavy addons for trivial input to reduce latency & cost
       if (effectiveAddonSettings.dynamicWorldInfo) effectiveAddonSettings.dynamicWorldInfo = false;
       if (effectiveAddonSettings.enhancedMemory) effectiveAddonSettings.enhancedMemory = false;
-      logger.debug('addons.skip.trivialInput', { len: message.trim().length });
+      logger.debug('addons.autodisable.trivialInput', { chatId, len: message.trim().length });
     }
 
-    logger.debug('worldInfo.status', {
-      requested: !!selectedWorldInfoId,
-      count: worldInfoEntries?.length || 0,
-      dyn: effectiveAddonSettings?.dynamicWorldInfo || false
-    });
+    logger.debug('worldInfo.status', { requestId, chatId, requested: !!selectedWorldInfoId, count: worldInfoEntries?.length || 0, dynamic: !!effectiveAddonSettings?.dynamicWorldInfo });
 
-    // ============================================================================
-    // BILLING & CREDIT MANAGEMENT (same as chat-stream)
-    // ============================================================================
+    // Billing
     const creditInfo = calculateCreditCost(planAndModel.plan, effectiveAddonSettings);
     const hasCredits = await consumeCredits(user.id, creditInfo, supabaseAdmin);
-    
-    if (!hasCredits) {
-      return createErrorResponse(createInsufficientCreditsError(creditInfo), 402);
-    }
+    if (!hasCredits) return createErrorResponse(createInsufficientCreditsError(creditInfo), 402);
+    logger.info('billing.charge', { requestId, chatId, plan: planAndModel.plan, model: planAndModel.model });
 
-    logger.debug('billing.charge', { plan: planAndModel.plan, model: planAndModel.model });
-
-    // ============================================================================
-    // SAVE USER MESSAGE & CREATE AI PLACEHOLDER (same as chat-stream)
-    // ============================================================================
+    // Persist user + placeholder messages
     const aiMessageOrder = nextUserMessageOrder + 1;
-    
     const [userMessage, placeholder] = await Promise.all([
       saveUserMessage(supabase, chatId, user.id, message, nextUserMessageOrder),
       createPlaceholderMessage(supabase, chatId, aiMessageOrder)
     ]);
+    if (!placeholder) return createErrorResponse('Failed to create placeholder message', 500);
 
-    if (!placeholder) {
-      return createErrorResponse('Failed to create placeholder message', 500);
-    }
-
-    // ============================================================================
-    // TEMPLATE CONTEXT & CURRENT CONTEXT SETUP (same as chat-stream)
-    // ============================================================================
-    const templateContext: TemplateContext = {
-      userName: selectedPersona?.name || userProfile?.username || 'User',
-      charName: character.name || 'Character'
-    };
-
+    const templateContext: TemplateContext = { userName: selectedPersona?.name || userProfile?.username || 'User', charName: character.name || 'Character' };
     const currentContext = await fetchCurrentContext(user.id, chatId, characterId, supabase);
 
-    // ============================================================================
-    // TIME AWARENESS CALCULATION
-    // ============================================================================
-    let timeAwarenessData: {
-      enabled: boolean;
-      delaySeconds: number;
-      userTimezone: string;
-      userLocalTime: string;
-      conversationTone?: string;
-      urgencyLevel?: string;
-    } | undefined = undefined;
-    
-    if (userCharacterSettings?.time_awareness_enabled) {
-      // Always provide timezone and current time when time awareness is enabled
-      const userTimezone = userProfile?.timezone || 'UTC';
-      console.log('🐛 TIME AWARENESS DEBUG - userProfile:', {
-        userProfile,
-        timezone: userProfile?.timezone,
-        userTimezone,
-        profileExists: !!userProfile
-      });
-      
-      const userLocalTime = new Date().toLocaleString('en-US', { 
-        timeZone: userTimezone,
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-        weekday: 'short',
-        month: 'short',
-        day: 'numeric'
-      });
-      
-      // Get the last AI message timestamp for delay calculation
-      const lastAiMessage = messageHistory
-        .filter(msg => msg.is_ai_message)
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    const timeAwarenessData = computeTimeAwareness(userCharacterSettings, userProfile, messageHistory, currentContext);
+    if (timeAwarenessData && logger.isTrace()) logger.trace('time.awareness', { requestId, chatId, delaySeconds: timeAwarenessData.delaySeconds, tz: timeAwarenessData.userTimezone });
 
-      let delaySeconds = 0;
-      let hasDelay = false;
-
-      if (lastAiMessage) {
-        const currentTime = new Date();
-        const lastMessageTime = new Date(lastAiMessage.created_at);
-        delaySeconds = Math.floor((currentTime.getTime() - lastMessageTime.getTime()) / 1000);
-        hasDelay = delaySeconds > 30;
-        console.log('🐛 TIMEZONE DEBUG:', {
-          userTimezoneFromProfile: userProfile?.timezone,
-          fallbackUserTimezone: userTimezone,
-          profileExists: !!userProfile,
-          delaySeconds,
-          hasDelay
-        });
-        
-        // Always create timeAwarenessData when time awareness is enabled
-        timeAwarenessData = {
-          enabled: true,
-          delaySeconds,
-          userTimezone,
-          userLocalTime,
-          conversationTone: (currentContext as any)?.conversationTone || undefined,
-          urgencyLevel: (currentContext as any)?.urgencyLevel || undefined
-        };
-
-        console.log('⏰ Time awareness activated:', {
-          delaySeconds,
-          formattedDelay: delaySeconds < 60 ? `${delaySeconds}s` : 
-                        delaySeconds < 3600 ? `${Math.floor(delaySeconds/60)}m` : 
-                        `${Math.floor(delaySeconds/3600)}h`,
-          userLocalTime,
-          userTimezone,
-          hasDelay,
-          conversationTone: timeAwarenessData.conversationTone,
-          urgencyLevel: timeAwarenessData.urgencyLevel
-        });
-      }
-    }
-
-    // ============================================================================
-    // BUILD SYSTEM PROMPT & CONVERSATION (centralized)
-    // ============================================================================
-    const defaultKnobs: ConversationKnobs = {
-      maxPairs: 5,
-      historyTokenLimit: Math.floor(planAndModel.maxContextTokens * 2 / 3),
-      safetyMarginTokens: Math.floor(planAndModel.maxContextTokens * 0.05), // keep 5% headroom
-      greedyBaseline: { maxPairs: 10, historyTokenLimit: planAndModel.maxContextTokens }
-    };
-
-    const { conversationResult, systemPrompt, promptMeta } = await assembleConversation({
-      character,
-      addonSettings: effectiveAddonSettings,
-      templateContext,
-      currentContext,
-      selectedPersona,
-      replaceTemplatesFn: buildTemplateReplacer(templateContext),
-      supabase,
-      worldInfoEntries,
-      userMessage: message,
-      messageHistory,
-      characterMemories: characterMemories || undefined,
-      chatMode: userCharacterSettings?.chat_mode || 'storytelling',
-      timeAwarenessData,
-      chatId,
-      userId: user.id,
-      maxContextTokens: planAndModel.maxContextTokens,
-      knobs: defaultKnobs
-    });
-    if (promptMeta) {
-      console.log('🧾 Prompt meta (backend-ready for UX drawer):', JSON.stringify(promptMeta));
-    }
+    const knobs = buildKnobs(planAndModel.maxContextTokens);
+    const assembleParams = { character, addonSettings: effectiveAddonSettings, templateContext, currentContext, selectedPersona, replaceTemplatesFn: buildTemplateReplacer(templateContext), supabase, worldInfoEntries, userMessage: message, messageHistory, characterMemories: characterMemories || undefined, chatMode: userCharacterSettings?.chat_mode || 'storytelling', timeAwarenessData, chatId, userId: user.id, maxContextTokens: planAndModel.maxContextTokens, knobs } as const;
+    const { conversationResult, promptMeta } = await assembleConversation(assembleParams);
+    if (promptMeta && logger.isTrace()) logger.trace('prompt.meta', { requestId, chatId, metaKeys: Object.keys(promptMeta) });
 
     let conversationMessages = conversationResult.messages;
 
-    // Check if we should warn about context ceiling
-    let shouldWarnContextCeiling = false;
-    if (conversationResult.truncated) {
-      // Check if we've already warned for this chat
-      const { data: chatData } = await supabase
-        .from('chats')
-        .select('context_ceiling_warned')
-        .eq('id', chatId)
-        .single();
+    // Context ceiling warning optimization
+    const { shouldWarnContextCeiling } = await markContextCeilingWarned(supabase, chatId, conversationResult.truncated);
 
-      if (!chatData?.context_ceiling_warned) {
-        shouldWarnContextCeiling = true;
-        
-        // Update chat to mark warning as shown
-        await supabase
-          .from('chats')
-          .update({ context_ceiling_warned: true })
-          .eq('id', chatId);
-      }
-    }
+    const openRouterKey = getEnv('OPENROUTER_API_KEY');
+    if (!openRouterKey) return createErrorResponse('OpenRouter API key not configured', 500);
 
-    // ============================================================================
-    // AI RESPONSE GENERATION & STREAMING (adapted from chat-stream)
-    // ============================================================================
-    // Get OpenRouter API key (handle both Deno and Node environments)
-    const openRouterKey = (() => {
-      try {
-        return globalThis.Deno?.env?.get('OPENROUTER_API_KEY');
-      } catch {
-        return process?.env?.OPENROUTER_API_KEY;
-      }
-    })();
-    if (!openRouterKey) {
-      return createErrorResponse('OpenRouter API key not configured', 500);
-    }
-
-    // Check if we need to trigger a background summary
     if (conversationResult.needsSummarization) {
-      console.log('🚨 AUTO-SUMMARY TRIGGERED! 15 AI responses reached, triggering synchronous summarization...');
-      console.log('📊 Summary trigger details:', {
-        currentAiMessageCount: conversationResult.currentAiMessageCount,
-        nextSummaryAt: conversationResult.nextSummaryAt,
-        chatId: chatId,
-        characterId: characterId,
-        messagesToSummarizeCount: conversationResult.messagesToSummarize.length
-      });
-      
-      // CRITICAL FIX: Wait for summary to complete before continuing with AI response
+      logger.info('summary.trigger', { requestId, chatId, aiCount: conversationResult.currentAiMessageCount, nextAt: conversationResult.nextSummaryAt });
       try {
-        console.log('⏳ Waiting for summary completion before generating AI response...');
         const summaryResult = await triggerMessageBasedSummary(
           chatId,
           user.id,
@@ -340,262 +250,48 @@ export async function handleSendMessage(
           openRouterKey,
           supabaseAdmin
         );
-        
         if (summaryResult.success) {
-          console.log(`✅ Summary completed successfully: ${summaryResult.summaryId} (${summaryResult.messageRange})`);
-          console.log('🔄 Rebuilding conversation context with new summary...');
-          
-          // Rebuild via centralized assembler to ensure consistent policy
-          const rebuilt = await assembleConversation({
-             character,
-             addonSettings: effectiveAddonSettings,
-             templateContext,
-             currentContext,
-             selectedPersona,
-             replaceTemplatesFn: buildTemplateReplacer(templateContext),
-             supabase: supabaseAdmin,
-             worldInfoEntries,
-             userMessage: message,
-             messageHistory,
-             characterMemories: characterMemories || undefined,
-             chatMode: userCharacterSettings?.chat_mode || 'storytelling',
-             timeAwarenessData,
-             chatId,
-             userId: user.id,
-             maxContextTokens: planAndModel.maxContextTokens
-           });
-           conversationMessages = rebuilt.conversationResult.messages;
-           if (rebuilt.promptMeta) {
-             console.log('🧾 Prompt meta after summary rebuild:', JSON.stringify(rebuilt.promptMeta));
-           }
-          console.log('✅ Context rebuilt with summary, new message count:', conversationMessages.length);
-          console.log('📊 Updated token usage:', rebuilt.conversationResult.totalTokens);
+          logger.debug('summary.success', { requestId, chatId, summaryId: summaryResult.summaryId });
+          // Rebuild only once using same params (avoid redefining object)
+          const rebuilt = await assembleConversation(assembleParams);
+          conversationMessages = rebuilt.conversationResult.messages;
+          if (rebuilt.promptMeta && logger.isTrace()) logger.trace('prompt.meta.rebuilt', { requestId, chatId, metaKeys: Object.keys(rebuilt.promptMeta) });
         } else {
-          console.error(`❌ Summary failed: ${summaryResult.error}. Continuing with current context.`);
-          // Continue with existing context if summary fails
+          logger.warn('summary.failed', { requestId, chatId, error: summaryResult.error });
         }
-      } catch (error) {
-        console.error('⚠️ Summary generation failed, continuing with current context:', error);
-        // Continue with existing context if summary fails
+      } catch (e) {
+        logger.error('summary.exception', { requestId, chatId, message: (e as Error)?.message });
       }
-    } else {
-      console.log('📝 No auto-summary needed:', {
-        currentAiMessageCount: conversationResult.currentAiMessageCount,
-        nextSummaryAt: conversationResult.nextSummaryAt,
-        needsSummarization: conversationResult.needsSummarization
-      });
     }
 
     if (logger.isDebug()) {
-      try {
-        logger.debug('openrouter.payload.meta', {
-          model: planAndModel.model,
-          messages: conversationMessages.length,
-          systemChars: conversationMessages[0]?.content?.length || 0
-        });
-      } catch {}
+      logger.debug('openrouter.payload.meta', { requestId, chatId, model: planAndModel.model, messages: conversationMessages.length, systemChars: conversationMessages[0]?.content?.length || 0 });
     }
 
     const aiResponse = await generateAIResponse(conversationMessages, planAndModel.model, openRouterKey);
-
-    // Enhanced error handling for AI API
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
-      console.error('❌ OpenRouter API Error Status:', aiResponse.status);
-      console.error('❌ OpenRouter Error Details:', errorText);
-      console.error('❌ Request payload was:', JSON.stringify({
-        model: planAndModel.model,
-        messagesCount: conversationMessages.length,
-        messages: conversationMessages.map(m => ({ role: m.role, contentLength: m.content.length }))
-      }, null, 2));
-      
-      return createStreamingErrorResponse(
-        `Status: ${aiResponse.status} - ${errorText}`,
-        planAndModel.model,
-        planAndModel.plan
-      );
+      logger.error('openrouter.error', { requestId, chatId, status: aiResponse.status, detail: errorText.slice(0,400) });
+      return createStreamingErrorResponse(`Status: ${aiResponse.status} - ${errorText}`, planAndModel.model, planAndModel.plan);
     }
 
-    // ============================================================================
-    // STREAMING RESPONSE (copied exactly from chat-stream)
-    // ============================================================================
-    const encoder = new TextEncoder();
-
-    const readable = new ReadableStream({
-      async start(controller) {
-        try {
-          const reader = aiResponse.body?.getReader();
-          if (!reader) throw new Error('No reader available');
-
-          let fullResponse = '';
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            // Decode chunk and add to buffer
-            buffer += new TextDecoder().decode(value, { stream: true });
-
-            // Process complete lines from buffer
-            const { lines, remainingBuffer } = processStreamBuffer(buffer);
-            buffer = remainingBuffer;
-
-            for (const line of lines) {
-              if (!line.trim()) continue;
-
-              const { content, isDone } = parseStreamChunk(line);
-
-              if (isDone) {
-                // Save final message immediately for instant UI feedback
-                const finalMessage = fullResponse.trim();
-                if (finalMessage && placeholder?.id) {
-                  logger.debug('stream.final.save', { placeholderId: placeholder.id, bytes: finalMessage.length });
-
-                  // Update placeholder content first
-                  await updateMessageContent(supabaseAdmin, placeholder.id, finalMessage);
-
-                  // Convert placeholder to real message
-                  const basicContext: CurrentContext = {
-                    moodTracking: 'No context',
-                    clothingInventory: 'No context',
-                    locationTracking: 'No context',
-                    timeAndWeather: 'No context',
-                    relationshipStatus: 'No context',
-                    characterPosition: 'No context'
-                  };
-
-                  await saveCharacterMessage(
-                    supabase,
-                    supabaseAdmin,
-                    user.id,
-                    chatId,
-                    finalMessage,
-                    basicContext,
-                    placeholder.id,
-                    aiMessageOrder
-                  );
-
-                  await updateChatLastActivity(supabase, chatId, characterId);
-
-                  // Trigger addon context extraction after message is saved
-                  console.log('🔍 Triggering addon context extraction...');
-                  try {
-                    if (!addonsActive) {
-                      console.log('⏭️ All addons disabled; skipping extract-addon-context call');
-                    } else {
-                      const supabaseUrl = (() => {
-                        try {
-                          return globalThis.Deno?.env?.get('SUPABASE_URL');
-                        } catch {
-                          return process?.env?.SUPABASE_URL;
-                        }
-                      })();
-                      
-                      // Get the Authorization header from the original request
-                      const authHeader = req.headers.get('authorization');
-                      
-            const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
-                        method: 'POST',
-                        headers: {
-                          'Authorization': authHeader || '',
-                          'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                          chat_id: chatId,
-                          character_id: characterId,
-                          addon_settings: effectiveAddonSettings,
-              mode: 'conversation',
-              message_id: placeholder.id, // explicit AI message id
-              user_message: message,      // explicit user text
-              ai_response: finalMessage   // explicit AI reply
-                        })
-                      });
-                      
-                      if (extractResponse.ok) {
-                        logger.debug('extract.triggered');
-                      } else {
-                        logger.warn('extract.failed', { status: extractResponse.status });
-                      }
-                    }
-                  } catch (extractError) {
-                    console.error('💥 Error triggering addon context extraction:', extractError);
-                  }
-
-                  logger.info('stream.complete', { ms: Date.now() - startTime });
-                }
-                break;
-              }
-
-              if (content) {
-                fullResponse += content;
-                // Stream the content to client
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-              }
-            }
-          }
-
-          // Send completion signal with metadata
-          const completionData: any = { done: true };
-          
-          // Add context ceiling warning if needed
-          if (shouldWarnContextCeiling) {
-            completionData.metadata = {
-              contextCeilingReached: true,
-              droppedMessages: conversationResult.droppedMessages,
-              tokenUsage: {
-                total: conversationResult.totalTokens,
-                max: planAndModel.maxContextTokens,
-                percentUsed: Math.round((conversationResult.totalTokens / planAndModel.maxContextTokens) * 100)
-              }
-            };
-          }
-
-          // Add auto-summary trigger info if needed
-          if (conversationResult.needsSummarization) {
-            completionData.metadata = {
-              ...completionData.metadata,
-              autoSummaryTriggered: true
-            };
-          }
-          
-          // Add prompt meta for UX drawer (world info, memories, context, summary)
-          if (promptMeta) {
-            completionData.promptMeta = promptMeta;
-          }
-
-          // Add diagnostics for token savings and totals
-          if (conversationResult?.diagnostics) {
-            completionData.diagnostics = conversationResult.diagnostics;
-          }
-           
-           controller.enqueue(encoder.encode(`data: ${JSON.stringify(completionData)}\n\n`));
-           controller.close();
-
-         } catch (streamError) {
-           logger.error('stream.error', { message: (streamError as Error)?.message });
-           controller.error(streamError);
-         }
-       }
-     });
-
-    return new Response(readable, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    return streamAIResponse({
+      aiResponse,
+      async onComplete(finalMessage) {
+        if (!finalMessage || !placeholder?.id) return;
+        await updateMessageContent(supabaseAdmin, placeholder.id, finalMessage);
+        const basicContext: CurrentContext = { moodTracking: 'No context', clothingInventory: 'No context', locationTracking: 'No context', timeAndWeather: 'No context', relationshipStatus: 'No context', characterPosition: 'No context' };
+        await saveCharacterMessage(supabase, supabaseAdmin, user.id, chatId, finalMessage, basicContext, placeholder.id, aiMessageOrder);
+        await updateChatLastActivity(supabase, chatId, characterId);
+        await triggerAddonExtraction({ addonsActive, supabaseUrl: getEnv('SUPABASE_URL', { required: false }), authHeader: req.headers.get('authorization'), chatId, characterId, effectiveAddonSettings, message, aiResponse: finalMessage, messageId: placeholder.id });
+        logger.info('stream.complete', { requestId, chatId, ms: Date.now() - startTime });
       },
+      onError(err) {
+        logger.error('stream.error', { requestId, chatId, message: (err as Error)?.message });
+      }
     });
-
   } catch (error) {
-    logger.error('sendMessage.error', { message: (error as Error)?.message });
-    return createStreamingErrorResponse(
-      error instanceof Error ? error.message : 'Internal server error',
-      'unknown',
-      'unknown'
-    );
+    logger.error('sendMessage.error', { requestId, chatId: request.chatId, message: (error as Error)?.message });
+    return createStreamingErrorResponse(error instanceof Error ? error.message : 'Internal server error', 'unknown', 'unknown');
   }
 }

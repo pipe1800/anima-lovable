@@ -74,7 +74,7 @@ const CharacterCreator = () => {
     const fetchCredits = async () => {
       if (!user) return;
       try {
-        const creditsResult = await getUserCredits(user.id);
+        const creditsResult = await getUserCredits(supabase, user.id);
         if (creditsResult.data?.balance) {
           setUserCredits(creditsResult.data.balance);
         }

@@ -1,11 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { getUserCredits } from '@/lib/supabase-queries';
 
 // Combined single query hook to reduce duplicate network calls.
 export const useDashboardData = () => {
-  const { user, subscription: authSubscription } = useAuth();
+  const { user, subscription: authSubscription, supabase } = useAuth();
   const userId = user?.id;
 
   return useQuery({
@@ -17,8 +16,8 @@ export const useDashboardData = () => {
       if (!userId) throw new Error('User not authenticated');
 
       // Parallel queries: credits, own characters, favorites
-  const [creditsResult, charactersQuery, favoritesQuery] = await Promise.all([
-        getUserCredits(userId),
+      const [creditsResult, charactersQuery, favoritesQuery] = await Promise.all([
+        getUserCredits(supabase, userId),
         supabase
           .from('characters')
           .select(`

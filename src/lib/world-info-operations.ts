@@ -594,72 +594,15 @@ export const toggleWorldInfoLike = async (worldInfoId: string) => {
     const { data: user } = await supabase.auth.getUser();
     if (!user.user) throw new Error('Not authenticated');
 
-    // Check if already liked - using correct table name
-    const { data: existingLike } = await supabase
-      .from('world_info_user_likes')
-      .select('*')
-      .eq('world_info_id', worldInfoId)
-      .eq('user_id', user.user.id)
-      .single();
-
-    if (existingLike) {
-      // Unlike - using correct delete approach for composite key table
-      const { error } = await supabase
-        .from('world_info_user_likes')
-        .delete()
-        .eq('world_info_id', worldInfoId)
-        .eq('user_id', user.user.id);
-
-      if (error) {
-        console.error('Error removing like:', error);
-        throw new Error('Failed to remove like');
-      }
-
-      // Decrement likes_count
-      const { data: currentData } = await supabase
-        .from('world_infos')
-        .select('likes_count')
-        .eq('id', worldInfoId)
-        .single();
-      
-      if (currentData) {
-        await supabase
-          .from('world_infos')
-          .update({ likes_count: Math.max(currentData.likes_count - 1, 0) })
-          .eq('id', worldInfoId);
-      }
-
-      return { isLiked: false };
-    } else {
-      // Like
-      const { error } = await supabase
-        .from('world_info_user_likes')
-        .insert({
-          world_info_id: worldInfoId,
-          user_id: user.user.id
-        });
-
-      if (error) {
-        console.error('Error adding like:', error);
-        throw new Error('Failed to add like');
-      }
-
-      // Increment likes_count
-      const { data: currentData } = await supabase
-        .from('world_infos')
-        .select('likes_count')
-        .eq('id', worldInfoId)
-        .single();
-      
-      if (currentData) {
-        await supabase
-          .from('world_infos')
-          .update({ likes_count: currentData.likes_count + 1 })
-          .eq('id', worldInfoId);
-      }
-
-      return { isLiked: true };
+    const { data, error } = await supabase.rpc('toggle_world_info_like', {
+      p_world_info_id: worldInfoId
+    });
+    if (error) {
+      console.error('Error toggling like via RPC:', error);
+      throw new Error('Failed to toggle like');
     }
+    const payload = (data as any) || {};
+    return { isLiked: !!payload.liked, likesCount: payload.likes_count ?? 0 };
   } catch (error) {
     console.error('Error in toggleWorldInfoLike:', error);
     throw error;

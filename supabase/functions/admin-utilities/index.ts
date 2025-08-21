@@ -11,13 +11,11 @@ const corsHeaders = {
  * 
  * Consolidates administrative operations:
  * - cleanup-messages: Clean contaminated messages from database
- * - reset-credits: Add monthly credits to all active subscriptions
  * 
  * Consolidated from:
  * - cleanup-contaminated-messages/index.ts (104 lines)
- * - monthly-credit-reset/index.ts (60 lines)
  * 
- * Total: 164 lines → ~120 lines (27% reduction)
+ * Total: 104 lines → ~80 lines (23% reduction)
  */
 
 Deno.serve(async (req) => {
@@ -39,7 +37,7 @@ Deno.serve(async (req) => {
     const { operation } = requestBody;
 
     if (!operation) {
-      throw new Error('Missing operation parameter. Must be one of: cleanup-messages, reset-credits');
+      throw new Error('Missing operation parameter. Must be one of: cleanup-messages');
     }
 
     console.log('🎯 Operation requested:', operation);
@@ -50,11 +48,6 @@ Deno.serve(async (req) => {
       case 'cleanup-messages':
         console.log('🧹 Starting message cleanup...');
         result = await cleanupContaminatedMessages(supabase);
-        break;
-
-      case 'reset-credits':
-        console.log('💳 Starting monthly credit reset...');
-        result = await monthlyCreditsReset(supabase);
         break;
 
       default:
@@ -180,25 +173,7 @@ async function cleanupContaminatedMessages(supabase: any) {
 }
 
 /**
- * Add monthly credits to all active subscriptions
- * Extracted from: monthly-credit-reset/index.ts
+ * (Deprecated) Monthly credits reset removed.
+ * Use a scheduled job iterating active subscriptions and calling service-side
+ * add_user_credits with allowance if needed.
  */
-async function monthlyCreditsReset(supabase: any) {
-  console.log('💳 Starting monthly credit addition process...');
-
-  // Call the database function to add monthly credits
-  const { data, error } = await supabase.rpc('add_monthly_credits');
-
-  if (error) {
-    console.error('❌ Error adding monthly credits:', error);
-    throw new Error(`Failed to add monthly credits: ${error.message}`);
-  }
-
-  console.log('✅ Monthly credits added successfully');
-
-  return {
-    success: true,
-    message: 'Monthly credits added successfully',
-    data: data
-  };
-}

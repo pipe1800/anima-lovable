@@ -149,9 +149,10 @@ Deno.serve(async (req) => {
     const fetchStart = performance.now();
     const [character, priorCtxRow] = await Promise.all([
       fetchCharacterData(character_id, supabase),
-      supabase.from('chat_context').select('current_context').eq('chat_id', chat_id).maybeSingle()
+      // Replaced direct table query with existing RPC get_chat_context to enforce RLS via auth.uid()
+      supabase.rpc('get_chat_context', { p_chat_id: chat_id, p_user_id: user.id, p_character_id: character_id })
     ]);
-    const priorContext = priorCtxRow?.data?.current_context || null;
+    const priorContext = Array.isArray(priorCtxRow?.data) && priorCtxRow.data[0]?.current_context ? priorCtxRow.data[0].current_context : null;
 
     // If injected initial context is provided, merge & persist it BEFORE any extraction and suppress extraction for its fields
     if (injectedInitialContext && Object.keys(injectedInitialContext).length) {

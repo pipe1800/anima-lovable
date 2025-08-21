@@ -1,141 +1,141 @@
 import { authenticateUser, createCorsResponse, createErrorResponse } from '../_shared/auth.ts';
-import { mapGlobalSettingsToAddonSettings } from '../_shared/settings-mapper.ts';
 import { withRateLimit, enforceJsonBodySize } from '../_shared/rate-limit.ts';
 import { chatRequestUnion, safeParse, sanitizePayload } from '../_shared/validation.ts';
 import { logger } from '../_shared/logger.ts';
 
-// Import handlers for different operations
-import { handleCreateBasicChat } from './modules/basic-chat-handler.ts';
-import { handleCreateWithGreeting } from './modules/greeting-processor.ts';
-import { handleExtractContext } from './modules/extract-context-handler.ts';
-import { handleSendMessage } from './modules/send-message-handler.ts';
-import { handleCreateMemory } from './modules/memory-handler.ts';
-
-// Import types
-import type { 
-  ChatManagementRequest, 
-  ChatResponse,
-  CreateBasicChatRequest,
-  CreateWithGreetingRequest,
-  ExtractContextRequest,
-  CreateMemoryRequest
-} from './types/index.ts';
-
-/**
- * Unified Chat Management Edge Function
- * 
- * Consolidates all chat operations into a single function:
- * 
- * Operations Supported:
- * ✅ 'create-basic'        - Create basic chat with simple greeting
- * ✅ 'create-with-greeting' - Create chat with custom greeting and context
- * ✅ 'send-message'        - Stream AI responses with full persona context
- * ✅ 'extract-context'     - Extract context for existing chats
- * ✅ 'create-memory'       - Create AI-powered chat memory summaries
- * 
- * Key Features:
- * ✅ Authentication & Authorization
- * ✅ Persona Context Integration (name, bio, lore)
- * ✅ Credit Billing & Consumption  
- * ✅ Character Data Fetching
- * ✅ Conversation History Management
- * ✅ Template Replacement
- * ✅ Addon Context Extraction
- * ✅ System Prompt Building
- * ✅ AI Message Generation
- * ✅ Real-time Streaming
- * ✅ Database Message Persistence
- * ✅ Context Updates
- * ✅ Chat Activity Updates
- * ✅ Error Handling & CORS
- * ✅ World Info Integration
- */
-
-// Lightweight PII redaction helper
+// Lightweight PII redaction helper (kept)
 function redactUserId(id?: string) {
   if (!id) return 'anon';
-  // Hash-ish: keep first 4 + last 2 to aid correlation without full UUID exposure
   return id.length > 8 ? `${id.slice(0,4)}…${id.slice(-2)}` : id;
 }
 
-globalThis.Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    logger.trace('cors.preflight');
-    return createCorsResponse();
+// Unified handler context interface
+interface ChatHandlerContext {
+  operation: string;
+  body: any;
+  user: any;
+  supabase: any;
+  supabaseAdmin: any;
+  rawReq: Request;
+  requestId: string;
+}
+
+// Normalized handler type
+type ChatHandler = (ctx: ChatHandlerContext) => Promise<Response | object>;
+
+// Lazy loader registry returning normalized handlers
+const handlerLoaders: Record<string, () => Promise<ChatHandler>> = {
+  'create-basic': async () => {
+    const m = await import('./modules/basic-chat-handler.ts');
+    return async (ctx) => m.handleCreateBasicChat(ctx.body, ctx.user, ctx.supabase, { req: ctx.rawReq, supabaseAdmin: ctx.supabaseAdmin });
+  },
+  'create-with-greeting': async () => {
+    const m = await import('./modules/greeting-processor.ts');
+    return async (ctx) => m.handleCreateWithGreeting(ctx.body, ctx.user, ctx.supabase, ctx.supabaseAdmin, ctx.rawReq);
+  },
+  'send-message': async () => {
+    const m = await import('./modules/send-message-handler.ts');
+    return async (ctx) => m.handleSendMessage(ctx.body, ctx.user, ctx.supabase, ctx.supabaseAdmin, ctx.rawReq, { requestId: ctx.requestId });
+  },
+  'regenerate-message': async () => {
+    const m = await import('./modules/regenerate-message-handler.ts');
+    return async (ctx) => m.handleRegenerateMessage(ctx.body, ctx.user, ctx.supabase, ctx.supabaseAdmin, ctx.rawReq);
+  },
+  'extract-context': async () => {
+    const m = await import('./modules/extract-context-handler.ts');
+    return async (ctx) => m.handleExtractContext(ctx.body, ctx.user, ctx.supabase, ctx.supabaseAdmin);
+  },
+  'create-memory': async () => {
+    const m = await import('./modules/memory-handler.ts');
+    return async (ctx) => m.handleCreateMemory(ctx.body, ctx.user, ctx.supabase, ctx.supabaseAdmin);
   }
+};
+
+// Cache for loaded handlers (race-safe by storing promise first)
+const handlerCache: Record<string, Promise<ChatHandler> | ChatHandler> = {};
+
+async function getHandler(op: string): Promise<ChatHandler | null> {
+  const loader = handlerLoaders[op];
+  if (!loader) return null;
+  const cached = handlerCache[op];
+  if (cached) return typeof cached === 'function' ? cached : await cached;
+  const p = loader();
+  handlerCache[op] = p; // store promise immediately to avoid duplicate loads
+  try {
+    const h = await p;
+    handlerCache[op] = h; // replace with resolved function
+    return h;
+  } catch (e) {
+    logger.error('handler.load.failed', { op, message: (e as Error)?.message });
+    delete handlerCache[op];
+    return null;
+  }
+}
+
+// Preprocess request body (normalize charactersData & sanitize once)
+function preprocessBody(raw: any) {
+  if (!raw || typeof raw !== 'object') return raw;
+  // Shallow clone to avoid mutating upstream references
+  const body = { ...raw };
+  if (!body.charactersData && body.characterId) {
+    body.charactersData = [{ id: body.characterId, name: body.characterName || 'Unknown' }];
+  }
+  sanitizePayload(body); // single pass
+  return body;
+}
+
+globalThis.Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return createCorsResponse();
   if (req.url.includes('test')) {
-    logger.info('test.endpoint');
     return createCorsResponse({
       message: 'Unified chat management function is working',
       timestamp: new Date().toISOString(),
-      version: 'v3-unified',
-      operations: ['create-basic', 'create-with-greeting', 'send-message', 'extract-context', 'create-memory']
+      version: 'v4-unified',
+      operations: Object.keys(handlerLoaders)
     });
   }
-  const startTime = Date.now();
+
+  const start = Date.now();
   const requestId = crypto.randomUUID();
-  logger.info('chat-mgmt.start', { requestId, method: req.method });
+  logger.info('chat.start', { requestId, method: req.method });
+
   try {
     const sizeResp = await enforceJsonBodySize(req);
     if (sizeResp) return sizeResp;
+
     const { user, supabase, supabaseAdmin } = await authenticateUser(req);
+
     return await withRateLimit(req, user?.id, async () => {
-      logger.debug('request.authenticated', { userId: user?.id });
-      logger.debug('request.body.parse');
       let rawBody: any;
       try { rawBody = await req.json(); } catch { return createErrorResponse('Invalid JSON body', 400); }
-      sanitizePayload(rawBody);
-      if (rawBody && typeof rawBody === 'object') {
-        if (!rawBody.charactersData && rawBody.characterId && rawBody.characterName) {
-          rawBody.charactersData = [{ id: rawBody.characterId, name: rawBody.characterName }];
-        }
-        if (!rawBody.charactersData && rawBody.characterId) {
-          rawBody.charactersData = [{ id: rawBody.characterId, name: 'Unknown' }];
-        }
-      }
-      const parsed = safeParse(chatRequestUnion, rawBody);
+      const preprocessed = preprocessBody(rawBody);
+      const parsed = safeParse(chatRequestUnion, preprocessed);
       if (parsed.success === false) {
-        logger.warn('request.validation.failed', { error: parsed.error });
+        logger.warn('validation.fail', { requestId, userId: redactUserId(user?.id), error: parsed.error });
         return createErrorResponse(`Invalid request: ${parsed.error}`, 400);
       }
-      const requestBody = parsed.data as any;
-      const { operation } = requestBody;
-      if (!operation) {
-        logger.error('operation.missing');
-        return createErrorResponse('Missing operation field', 400);
+      const body = parsed.data as any;
+      const { operation } = body;
+      if (!operation) return createErrorResponse('Missing operation field', 400);
+
+      const handler = await getHandler(operation);
+      if (!handler) return createErrorResponse(`Unknown operation: ${operation}`, 400);
+
+      try {
+        const result = await handler({ operation, body, user, supabase, supabaseAdmin, rawReq: req, requestId });
+        const ms = Date.now() - start;
+        logger.info('chat.complete', { requestId, op: operation, ms });
+        if (result instanceof Response) return result; // streaming path
+        // Ensure success flag for non-stream replies if handler didn't include it
+        const payload = (result && typeof result === 'object' && !('success' in result)) ? { success: true, ...result } : result;
+        return createCorsResponse(payload);
+      } catch (handlerErr) {
+        logger.error('handler.error', { requestId, op: operation, message: (handlerErr as Error)?.message });
+        return createErrorResponse('Internal handler error', 500);
       }
-      logger.info('operation.route', { operation });
-      let response: any;
-      switch (operation) {
-        case 'create-basic':
-          response = await (await import('./modules/basic-chat-handler.ts')).handleCreateBasicChat(requestBody, user, supabase, { req, supabaseAdmin });
-          break;
-        case 'create-with-greeting':
-          response = await (await import('./modules/greeting-processor.ts')).handleCreateWithGreeting(requestBody, user, supabase, supabaseAdmin, req);
-          break;
-        case 'send-message':
-          response = await (await import('./modules/send-message-handler.ts')).handleSendMessage(requestBody, user, supabase, supabaseAdmin, req);
-          break;
-        case 'regenerate-message':
-          response = await (await import('./modules/regenerate-message-handler.ts')).handleRegenerateMessage(requestBody, user, supabase, supabaseAdmin, req);
-          break;
-        case 'extract-context':
-          response = await (await import('./modules/extract-context-handler.ts')).handleExtractContext(requestBody, user, supabase, supabaseAdmin);
-          break;
-        case 'create-memory':
-          response = await (await import('./modules/memory-handler.ts')).handleCreateMemory(requestBody, user, supabase, supabaseAdmin);
-          break;
-        default:
-          logger.warn('operation.unknown', { operation });
-          return createErrorResponse(`Unknown operation: ${operation}`, 400);
-      }
-      const duration = Date.now() - startTime;
-      logger.info('operation.complete', { operation, ms: duration });
-      if (operation === 'send-message' && response instanceof Response) return response;
-      return createCorsResponse(response);
     });
-  } catch (error) {
-    logger.error('chat-mgmt.unhandled', { message: (error as Error)?.message });
-    return createErrorResponse(error instanceof Error ? error.message : 'Internal server error', 500);
+  } catch (e) {
+    logger.error('chat.unhandled', { requestId, message: (e as Error)?.message });
+    return createErrorResponse('Internal server error', 500);
   }
 });

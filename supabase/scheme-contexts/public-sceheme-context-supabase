@@ -8,6 +8,8 @@ CREATE TABLE public.character_definitions (
   personality_summary text NOT NULL,
   scenario jsonb,
   model_id text,
+  initial_addon_context_enabled boolean NOT NULL DEFAULT false,
+  initial_addon_context jsonb,
   CONSTRAINT character_definitions_pkey PRIMARY KEY (character_id),
   CONSTRAINT character_definitions_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
 );
@@ -47,9 +49,9 @@ CREATE TABLE public.character_memories (
   ai_sequence_end integer,
   embedding USER-DEFINED,
   CONSTRAINT character_memories_pkey PRIMARY KEY (id),
+  CONSTRAINT character_memories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT character_memories_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
-  CONSTRAINT character_memories_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
-  CONSTRAINT character_memories_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+  CONSTRAINT character_memories_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id)
 );
 CREATE TABLE public.character_tags (
   character_id uuid NOT NULL,
@@ -95,10 +97,12 @@ CREATE TABLE public.chat_context (
   last_updated_by_message_id uuid,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  enchantment_status text,
+  item_inventory text,
   CONSTRAINT chat_context_pkey PRIMARY KEY (id),
-  CONSTRAINT chat_context_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT chat_context_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id),
   CONSTRAINT chat_context_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
+  CONSTRAINT chat_context_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT chat_context_last_updated_by_message_id_fkey FOREIGN KEY (last_updated_by_message_id) REFERENCES public.messages(id)
 );
 CREATE TABLE public.chats (
@@ -113,38 +117,9 @@ CREATE TABLE public.chats (
   context_ceiling_warned boolean DEFAULT false,
   chat_mode text NOT NULL DEFAULT 'storytelling'::text CHECK (chat_mode = ANY (ARRAY['storytelling'::text, 'companion'::text])),
   CONSTRAINT chats_pkey PRIMARY KEY (id),
+  CONSTRAINT chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT fk_chats_selected_persona FOREIGN KEY (selected_persona_id) REFERENCES public.personas(id),
-  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT chats_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id)
-);
-CREATE TABLE public.credit_pack_purchases (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  credit_pack_id uuid NOT NULL,
-  paypal_order_id text UNIQUE,
-  amount_paid numeric NOT NULL,
-  credits_granted integer NOT NULL,
-  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'completed'::text, 'failed'::text])),
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT credit_pack_purchases_pkey PRIMARY KEY (id),
-  CONSTRAINT credit_pack_purchases_credit_pack_id_fkey FOREIGN KEY (credit_pack_id) REFERENCES public.credit_packs(id),
-  CONSTRAINT credit_pack_purchases_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.credit_packs (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  name text NOT NULL UNIQUE,
-  price numeric NOT NULL,
-  credits_granted integer NOT NULL,
-  description text,
-  is_active boolean NOT NULL DEFAULT true,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT credit_packs_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.credits (
-  user_id uuid NOT NULL,
-  balance integer NOT NULL DEFAULT 0,
-  CONSTRAINT credits_pkey PRIMARY KEY (user_id),
-  CONSTRAINT credits_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.messages (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -163,20 +138,6 @@ CREATE TABLE public.messages (
   CONSTRAINT messages_pkey PRIMARY KEY (id),
   CONSTRAINT messages_author_id_fkey FOREIGN KEY (author_id) REFERENCES auth.users(id),
   CONSTRAINT messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id)
-);
-CREATE TABLE public.models (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  tier_name text NOT NULL UNIQUE,
-  credit_multiplier numeric NOT NULL DEFAULT 1,
-  is_nsfw_compatible boolean NOT NULL DEFAULT false,
-  min_plan_id uuid,
-  description text,
-  is_active boolean NOT NULL DEFAULT true,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  model_identifier text NOT NULL DEFAULT ''::text,
-  max_context_tokens integer NOT NULL DEFAULT 12000,
-  CONSTRAINT models_pkey PRIMARY KEY (id),
-  CONSTRAINT models_min_plan_id_fkey FOREIGN KEY (min_plan_id) REFERENCES public.plans(id)
 );
 CREATE TABLE public.onboarding_checklist_items (
   id integer NOT NULL DEFAULT nextval('onboarding_checklist_items_id_seq'::regclass),
@@ -206,16 +167,6 @@ CREATE TABLE public.personas (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT personas_pkey PRIMARY KEY (id)
 );
-CREATE TABLE public.plans (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  name text NOT NULL,
-  price_monthly numeric,
-  monthly_credits_allowance integer NOT NULL DEFAULT 0,
-  features jsonb,
-  is_active boolean NOT NULL DEFAULT true,
-  paypal_subscription_id text,
-  CONSTRAINT plans_pkey PRIMARY KEY (id)
-);
 CREATE TABLE public.profiles (
   id uuid NOT NULL,
   username text NOT NULL UNIQUE,
@@ -230,8 +181,8 @@ CREATE TABLE public.profiles (
   banner_url text,
   banner_updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT profiles_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_profiles_default_persona FOREIGN KEY (default_persona_id) REFERENCES public.personas(id),
-  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)
+  CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
+  CONSTRAINT fk_profiles_default_persona FOREIGN KEY (default_persona_id) REFERENCES public.personas(id)
 );
 CREATE TABLE public.public_app_settings (
   setting_key text NOT NULL,
@@ -245,24 +196,6 @@ CREATE TABLE public.subscription_nonces (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT subscription_nonces_pkey PRIMARY KEY (id),
   CONSTRAINT subscription_nonces_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.subscriptions (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  plan_id uuid NOT NULL,
-  status text NOT NULL CHECK (status = ANY (ARRAY['active'::text, 'past_due'::text, 'canceled'::text, 'trialing'::text])),
-  current_period_end timestamp with time zone NOT NULL,
-  paypal_subscription_id text,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT subscriptions_pkey PRIMARY KEY (id),
-  CONSTRAINT subscriptions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT subscriptions_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.plans(id)
-);
-CREATE TABLE public.summary_locks (
-  chat_id uuid NOT NULL,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  expires_at timestamp with time zone NOT NULL,
-  CONSTRAINT summary_locks_pkey PRIMARY KEY (chat_id)
 );
 CREATE TABLE public.tags (
   id integer NOT NULL DEFAULT nextval('tags_id_seq'::regclass),
@@ -297,18 +230,9 @@ CREATE TABLE public.user_character_world_info_settings (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT user_character_world_info_settings_pkey PRIMARY KEY (id),
-  CONSTRAINT user_character_world_info_settings_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT user_character_world_info_settings_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id),
+  CONSTRAINT user_character_world_info_settings_character_id_fkey FOREIGN KEY (character_id) REFERENCES public.characters(id),
   CONSTRAINT user_character_world_info_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.user_daily_usage (
-  user_id uuid NOT NULL,
-  usage_date date NOT NULL DEFAULT CURRENT_DATE,
-  summary_calls integer NOT NULL DEFAULT 0,
-  manual_memory_calls integer NOT NULL DEFAULT 0,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT user_daily_usage_pkey PRIMARY KEY (user_id, usage_date)
 );
 CREATE TABLE public.user_global_chat_settings (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -352,16 +276,11 @@ CREATE TABLE public.user_global_chat_settings (
   portrait_frame_color text DEFAULT '#4B5563'::text,
   banner_width text DEFAULT 'md'::text CHECK (banner_width = ANY (ARRAY['sm'::text, 'md'::text, 'lg'::text])),
   banner_tint_from_avatar boolean DEFAULT false,
+  god_mode boolean NOT NULL DEFAULT false,
+  enchantment_status boolean DEFAULT false,
+  item_inventory boolean DEFAULT false,
   CONSTRAINT user_global_chat_settings_pkey PRIMARY KEY (id),
   CONSTRAINT user_global_chat_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
-);
-CREATE TABLE public.user_onboarding_progress (
-  user_id uuid NOT NULL,
-  task_id integer NOT NULL,
-  completed_at timestamp with time zone,
-  CONSTRAINT user_onboarding_progress_pkey PRIMARY KEY (user_id, task_id),
-  CONSTRAINT user_onboarding_progress_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.onboarding_checklist_items(id),
-  CONSTRAINT user_onboarding_progress_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
 CREATE TABLE public.world_info_entries (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -376,6 +295,7 @@ CREATE TABLE public.world_info_entries (
 CREATE TABLE public.world_info_tags (
   world_info_id uuid NOT NULL,
   tag_id integer NOT NULL,
+  CONSTRAINT world_info_tags_pkey PRIMARY KEY (world_info_id, tag_id),
   CONSTRAINT world_info_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id),
   CONSTRAINT world_info_tags_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
 );
@@ -386,15 +306,6 @@ CREATE TABLE public.world_info_user_likes (
   CONSTRAINT world_info_user_likes_pkey PRIMARY KEY (user_id, world_info_id),
   CONSTRAINT world_info_user_likes_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
   CONSTRAINT world_info_user_likes_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
-);
-CREATE TABLE public.world_info_users (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  world_info_id uuid NOT NULL,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT world_info_users_pkey PRIMARY KEY (id),
-  CONSTRAINT world_info_users_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
-  CONSTRAINT world_info_users_world_info_id_fkey FOREIGN KEY (world_info_id) REFERENCES public.world_infos(id)
 );
 CREATE TABLE public.world_infos (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

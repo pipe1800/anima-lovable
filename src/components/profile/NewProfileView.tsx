@@ -24,7 +24,7 @@ import {
 import { ProfileHeader } from './NewProfileHeader';
 import { StatsBar } from './StatsBar';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
-import { BillingSettings } from '@/components/settings/categories/BillingSettings';
+import BillingSettings from '@/components/settings/categories/BillingSettings';
 import { supabase } from '@/integrations/supabase/client';
 
 // Consolidated data fetching hook

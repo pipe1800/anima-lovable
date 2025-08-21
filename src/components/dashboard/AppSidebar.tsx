@@ -49,7 +49,7 @@ interface AppSidebarProps {
 const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onToggleMode, contextCount = 0, userCreditsOverride }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, signOut, loading, subscription: authSubscription } = useAuth();
+  const { user, profile, session, subscription, loading, signOut, supabase } = useAuth();
   const [userCredits, setUserCredits] = useState(() => {
     // initialize from override or cached value to reduce flicker
     if (typeof userCreditsOverride === 'number') return userCreditsOverride;
@@ -94,8 +94,8 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
 
   // Create main items with dynamic subscription icon
   const mainItems = useMemo(() => {
-    const hasActiveSubscription = authSubscription?.status === 'active' && authSubscription?.plan?.price_monthly > 0;
-    const planName = authSubscription?.plan?.name?.toLowerCase();
+    const hasActiveSubscription = subscription?.status === 'active' && subscription?.plan?.price_monthly > 0;
+    const planName = subscription?.plan?.name?.toLowerCase();
     
     return [
       ...baseMainItems,
@@ -107,7 +107,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
         planName: planName
       },
     ];
-  }, [authSubscription?.status, authSubscription?.plan]);
+  }, [subscription?.status, subscription?.plan]);
 
   useEffect(() => {
     if (typeof userCreditsOverride === 'number') {
@@ -119,7 +119,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
   const fetchCredits = useCallback(async () => {
     if (!user || typeof userCreditsOverride === 'number') return; // skip fetch if override provided
     try {
-      const creditsResult = await getUserCredits(user.id);
+      const creditsResult = await getUserCredits(supabase, user.id);
       if (creditsResult.data && typeof creditsResult.data.balance === 'number') {
         setUserCredits(creditsResult.data.balance);
         localStorage.setItem('lastUserCredits', String(creditsResult.data.balance));
@@ -127,7 +127,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
     } catch (error) {
       console.error('Error fetching credits:', error);
     }
-  }, [user, userCreditsOverride]);
+  }, [user, userCreditsOverride, supabase]);
 
   useEffect(() => {
     fetchCredits();

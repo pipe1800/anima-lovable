@@ -11,7 +11,7 @@ import {
 } from '@/lib/supabase-queries';
 
 export const useDashboardData = () => {
-  const { user, subscription: authSubscription } = useAuth();
+  const { user, subscription: authSubscription, supabase } = useAuth();
   const userId = user?.id;
 
   return useQuery({
@@ -22,7 +22,7 @@ export const useDashboardData = () => {
       const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId),
-        getUserCredits(userId)
+        getUserCredits(supabase, userId)
       ]);
 
       return {
@@ -157,7 +157,7 @@ export const useUserCharacters = () => {
 };
 
 export const useUserCredits = () => {
-  const { user } = useAuth();
+  const { user, supabase } = useAuth();
   const userId = user?.id;
 
   const queryClient = useQueryClient();
@@ -168,7 +168,7 @@ export const useUserCredits = () => {
       if (!userId) throw new Error('User not authenticated');
       const dashboard: any = queryClient.getQueryData(['dashboard', 'overview', userId]);
       if (dashboard?.credits !== undefined) return dashboard.credits;
-      const result = await getUserCredits(userId);
+      const result = await getUserCredits(supabase, userId);
       if (result.error) throw result.error;
       return result.data?.balance || 0;
     },
@@ -180,14 +180,14 @@ export const useUserCredits = () => {
 };
 
 export const useUserSubscription = () => {
-  const { user } = useAuth();
+  const { user, supabase } = useAuth();
   const userId = user?.id;
 
   return useQuery({
     queryKey: ['user', 'subscription', userId],
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
-      const result = await getUserSubscription(userId);
+      const result = await getUserSubscription(supabase, userId);
       if (result.error) throw result.error;
       return result.data;
     },
@@ -261,7 +261,7 @@ export const useDashboardMutations = () => {
 };
 
 // Preload function for dashboard data
-export const preloadDashboardData = async (userId: string, queryClient: QueryClient) => {
+export const preloadDashboardData = async (userId: string, queryClient: QueryClient, supabase: any) => {
   if (!userId) return;
   
   // Prefetch all dashboard data in the background
@@ -271,7 +271,7 @@ export const preloadDashboardData = async (userId: string, queryClient: QueryCli
       const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
         getUserCharacters(userId),
         getUserFavorites(userId),
-        getUserCredits(userId)
+        getUserCredits(supabase, userId)
       ]);
 
       return {

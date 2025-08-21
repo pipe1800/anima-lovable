@@ -412,31 +412,22 @@ export async function handleCaptureOrder(
           return;
         }
 
-        // Grant credits to user
-        const { data: currentCredits, error: creditsError } = await supabaseAdmin
-          .from('credits')
-          .select('balance')
-          .eq('user_id', user.id)
-          .single();
-
-        if (creditsError) {
-          console.error('[CAPTURE-ORDER] Failed to fetch current credits:', creditsError);
-          return;
+        // Grant credits to user via RPC (instead of direct balance math)
+        try {
+          const { data: newBal, error: creditRpcErr } = await (supabaseAdmin as any).rpc('add_user_credits', {
+            p_user_id: user.id,
+            p_amount: creditPack.credits_granted,
+            p_transaction_type: 'top_up_purchase',
+            p_reference_id: orderID
+          });
+          if (creditRpcErr) {
+            console.error('[CAPTURE-ORDER] add_user_credits RPC failed:', creditRpcErr);
+          } else {
+            console.log('[CAPTURE-ORDER] Credits granted via RPC. New balance:', newBal);
+          }
+        } catch (e:any) {
+          console.error('[CAPTURE-ORDER] Exception granting credits via RPC:', e.message);
         }
-
-        const newBalance = currentCredits.balance + creditPack.credits_granted;
-        
-        const { error: updateError } = await supabaseAdmin
-          .from('credits')
-          .update({ balance: newBalance })
-          .eq('user_id', user.id);
-
-        if (updateError) {
-          console.error('[CAPTURE-ORDER] Failed to update credits:', updateError);
-          return;
-        }
-
-        console.log(`[CAPTURE-ORDER] Successfully granted ${creditPack.credits_granted} credits to user ${user.id}`);
         
       } catch (error) {
         console.error('[CAPTURE-ORDER] Background task error:', error);
