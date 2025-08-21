@@ -19,51 +19,57 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import type { Database } from '@/integrations/supabase/types';
 
 // Types
+// Removed direct billing row types; using RPC result shapes
 interface Plan {
   id: string;
   name: string;
-  description?: string | null;
-  price_monthly: number;
-  price_yearly?: number | null;
-  features: any;
-  is_active: boolean;
+  price_monthly: number | null;
+  price_yearly: number | null;
   monthly_credits_allowance: number;
+  features: any;
   paypal_subscription_id: string | null;
+  price_monthly_display: number; // derived dollars
+  description?: string | null; // may exist in future
 }
-
 interface CreditPack {
   id: string;
   name: string;
+  price_cents: number;
   credits_granted: number;
-  price: number;
-  paypal_plan_id?: string | null;
-  is_active: boolean;
-  description?: string;
-  created_at?: string;
+  description: string | null;
+  price_display: number; // derived dollars
 }
 
 // Hooks
 const useSubscriptionData = () => {
   const { user } = useAuth();
-  
   return useQuery({
     queryKey: ['subscription-data', user?.id],
     queryFn: async () => {
-      const [plansRes, packsRes, creditsRes] = await Promise.allSettled([
-        supabase.from('plans').select('*').eq('is_active', true).order('price_monthly'),
-        supabase.from('credit_packs').select('*').eq('is_active', true).order('price'),
-        user ? supabase.from('credits').select('balance').eq('user_id', user.id).single() : Promise.resolve({ data: null })
-      ]);
-
+      if (!user) return { plans: [], creditPacks: [], credits: null };
+      const { data, error } = await supabase.rpc('get_billing_catalog', { p_user_id: user.id });
+      if (error) throw error;
+      const catalog = data as any;
+      const rawPlans = (catalog?.plans || []) as any[];
+      const rawPacks = (catalog?.credit_packs || []) as any[];
+      const plans: Plan[] = rawPlans.map(p => ({
+        ...p,
+        price_monthly_display: (p.price_monthly ?? 0) / 100
+      }));
+      const creditPacks: CreditPack[] = rawPacks.map(p => ({
+        ...p,
+        price_display: (p.price_cents ?? 0) / 100
+      }));
       return {
-        plans: plansRes.status === 'fulfilled' ? plansRes.value.data || [] : [],
-        creditPacks: packsRes.status === 'fulfilled' ? packsRes.value.data || [] : [],
-        credits: creditsRes.status === 'fulfilled' ? creditsRes.value.data : null
+        plans,
+        creditPacks,
+        credits: catalog?.credits_balance != null ? { balance: catalog.credits_balance } : null
       };
     },
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 5,
     enabled: true
   });
 };
@@ -95,8 +101,9 @@ const PlanCard = ({
   onSelect: () => void;
   disabled?: boolean;
 }) => {
+  const currentMonthly = currentPlan?.price_monthly ?? 0;
   const isCurrentPlan = currentPlan?.id === plan.id;
-  const canUpgrade = currentPlan && !isCurrentPlan && plan.price_monthly > currentPlan.price_monthly;
+  const canUpgrade = currentPlan && !isCurrentPlan && (plan.price_monthly ?? 0) > currentMonthly;
   
   // Extract features from plan
   const getFeatures = () => {
@@ -158,7 +165,7 @@ const PlanCard = ({
           <div className="mt-3 sm:mt-4">
             <div className="flex items-baseline gap-1">
               <span className="text-3xl sm:text-4xl font-bold text-white">
-                ${plan.price_monthly}
+                ${plan.price_monthly_display.toFixed(2)}
               </span>
               <span className="text-gray-400 text-sm">/month</span>
             </div>
@@ -214,7 +221,7 @@ const FeatureComparisonTable = ({ plans }: { plans: Plan[] }) => {
   const getFeatureValue = (plan: Plan, featureKey: string) => {
     switch (featureKey) {
       case 'price':
-        return plan.price_monthly === 0 ? 'Free' : `$${plan.price_monthly}/mo`;
+        return (plan.price_monthly ?? 0) === 0 ? 'Free' : `$${plan.price_monthly_display.toFixed(2)}/mo`;
       case 'credits':
         return plan.monthly_credits_allowance.toLocaleString();
       case 'message_cost':
@@ -293,7 +300,6 @@ const FeatureComparisonTable = ({ plans }: { plans: Plan[] }) => {
 
 const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPurchase: () => void; disabled: boolean }) => {
   const bonusPercentage = pack.credits_granted > 10000 ? Math.round(((pack.credits_granted - 10000) / 10000) * 100) : 0;
-  
   return (
     <motion.div whileHover={{ scale: 1.02 }} transition={{ duration: 0.2 }}>
       <Card className="bg-[#1a1a2e] border-gray-700 hover:border-[#FF7A00]/50 transition-all h-full">
@@ -315,8 +321,8 @@ const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPu
         </CardHeader>
         <CardContent className="px-4 sm:px-6">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <span className="text-xl sm:text-2xl font-bold text-white">${pack.price}</span>
-            <span className="text-sm sm:text-base text-gray-400">${(pack.price / pack.credits_granted * 1000).toFixed(2)}/1k</span>
+            <span className="text-xl sm:text-2xl font-bold text-white">${pack.price_display.toFixed(2)}</span>
+            <span className="text-sm sm:text-base text-gray-400">${(pack.price_display / pack.credits_granted * 1000).toFixed(2)}/1k</span>
           </div>
           <Button 
             onClick={onPurchase} 
@@ -335,6 +341,11 @@ const CreditPackCard = ({ pack, onPurchase, disabled }: { pack: CreditPack; onPu
 // Main Component
 export default function Subscription() {
   const { user, subscription: userSubscription } = useAuth();
+  // Enrich current plan with display field for consistency
+  const currentPlan: Plan | null = userSubscription?.plan ? {
+    ...(userSubscription.plan as any),
+    price_monthly_display: ((userSubscription.plan as any).price_monthly ?? 0) / 100
+  } : null;
   const navigate = useNavigate();
   const { toast } = useToast();
   const { data, isLoading } = useSubscriptionData();
@@ -345,20 +356,11 @@ export default function Subscription() {
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [activeMobilePlan, setActiveMobilePlan] = useState<number>(0);
 
-  const currentPlan = userSubscription?.plan || null;
-
   // Filter plans based on current subscription
   const getVisiblePlans = (allPlans: Plan[]) => {
-    if (!currentPlan || currentPlan.name === 'Guest Pass') {
-      // Show all plans for guest users
-      return allPlans;
-    } else if (currentPlan.name === 'True Fan') {
-      // Show only True Fan and The Whale for True Fan users
-      return allPlans.filter(plan => plan.name === 'True Fan' || plan.name === 'The Whale');
-    } else if (currentPlan.name === 'The Whale') {
-      // Show only The Whale for Whale users
-      return allPlans.filter(plan => plan.name === 'The Whale');
-    }
+    if (!currentPlan || currentPlan.name === 'Guest Pass') return allPlans;
+    if (currentPlan.name === 'True Fan') return allPlans.filter(p => ['True Fan','The Whale'].includes(p.name));
+    if (currentPlan.name === 'The Whale') return allPlans.filter(p => p.name === 'The Whale');
     return allPlans;
   };
 
@@ -750,7 +752,7 @@ export default function Subscription() {
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span>Monthly Price:</span>
-                        <span className="text-white font-semibold">${plan.price_monthly}</span>
+                        <span className="text-white font-semibold">${plan.price_monthly_display.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Monthly Credits:</span>
@@ -827,7 +829,7 @@ export default function Subscription() {
               <div className="bg-[#1a1a2e]/50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between">
                   <span>New monthly price:</span>
-                  <span className="font-semibold">${selectedPlan.price_monthly}/month</span>
+                  <span className="font-semibold">${selectedPlan.price_monthly_display.toFixed(2)}/month</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Additional credits:</span>
@@ -872,6 +874,8 @@ export default function Subscription() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* NOTE: All billing data now sourced from billing.* schema (read-only via RLS). */}
     </>
   );
 }

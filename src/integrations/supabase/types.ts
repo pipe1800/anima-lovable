@@ -377,13 +377,6 @@ export type Database = {
             foreignKeyName: "character_definitions_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: true
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "character_definitions_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: true
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -409,13 +402,6 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "character_favorites_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "character_favorites_character_id_fkey"
             columns: ["character_id"]
@@ -449,13 +435,6 @@ export type Database = {
             foreignKeyName: "character_likes_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "character_likes_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -466,7 +445,7 @@ export type Database = {
           ai_sequence_end: number | null
           ai_sequence_start: number | null
           character_id: string
-          chat_id: string
+          chat_id: string | null
           content_hash: string | null
           created_at: string | null
           embedding: string | null
@@ -486,7 +465,7 @@ export type Database = {
           ai_sequence_end?: number | null
           ai_sequence_start?: number | null
           character_id: string
-          chat_id: string
+          chat_id?: string | null
           content_hash?: string | null
           created_at?: string | null
           embedding?: string | null
@@ -506,7 +485,7 @@ export type Database = {
           ai_sequence_end?: number | null
           ai_sequence_start?: number | null
           character_id?: string
-          chat_id?: string
+          chat_id?: string | null
           content_hash?: string | null
           created_at?: string | null
           embedding?: string | null
@@ -523,13 +502,6 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "character_memories_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "character_memories_character_id_fkey"
             columns: ["character_id"]
@@ -560,13 +532,6 @@ export type Database = {
           tag_id?: number
         }
         Relationships: [
-          {
-            foreignKeyName: "character_tags_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "character_tags_character_id_fkey"
             columns: ["character_id"]
@@ -603,13 +568,6 @@ export type Database = {
           world_info_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "character_world_info_link_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "character_world_info_link_character_id_fkey"
             columns: ["character_id"]
@@ -722,13 +680,6 @@ export type Database = {
             foreignKeyName: "chat_context_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "chat_context_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -790,13 +741,6 @@ export type Database = {
             foreignKeyName: "chats_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "chats_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -808,77 +752,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      credit_pack_purchases: {
-        Row: {
-          amount_paid: number
-          created_at: string
-          credit_pack_id: string
-          credits_granted: number
-          id: string
-          paypal_order_id: string | null
-          status: string
-          user_id: string
-        }
-        Insert: {
-          amount_paid: number
-          created_at?: string
-          credit_pack_id: string
-          credits_granted: number
-          id?: string
-          paypal_order_id?: string | null
-          status?: string
-          user_id: string
-        }
-        Update: {
-          amount_paid?: number
-          created_at?: string
-          credit_pack_id?: string
-          credits_granted?: number
-          id?: string
-          paypal_order_id?: string | null
-          status?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "credit_pack_purchases_credit_pack_id_fkey"
-            columns: ["credit_pack_id"]
-            isOneToOne: false
-            referencedRelation: "credit_packs"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      credit_packs: {
-        Row: {
-          created_at: string
-          credits_granted: number
-          description: string | null
-          id: string
-          is_active: boolean
-          name: string
-          price: number
-        }
-        Insert: {
-          created_at?: string
-          credits_granted: number
-          description?: string | null
-          id?: string
-          is_active?: boolean
-          name: string
-          price: number
-        }
-        Update: {
-          created_at?: string
-          credits_granted?: number
-          description?: string | null
-          id?: string
-          is_active?: boolean
-          name?: string
-          price?: number
-        }
-        Relationships: []
       }
       messages: {
         Row: {
@@ -935,45 +808,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      models: {
-        Row: {
-          created_at: string
-          credit_multiplier: number
-          description: string | null
-          id: string
-          is_active: boolean
-          is_nsfw_compatible: boolean
-          max_context_tokens: number
-          min_plan_id: string | null
-          model_identifier: string
-          tier_name: string
-        }
-        Insert: {
-          created_at?: string
-          credit_multiplier?: number
-          description?: string | null
-          id?: string
-          is_active?: boolean
-          is_nsfw_compatible?: boolean
-          max_context_tokens?: number
-          min_plan_id?: string | null
-          model_identifier?: string
-          tier_name: string
-        }
-        Update: {
-          created_at?: string
-          credit_multiplier?: number
-          description?: string | null
-          id?: string
-          is_active?: boolean
-          is_nsfw_compatible?: boolean
-          max_context_tokens?: number
-          min_plan_id?: string | null
-          model_identifier?: string
-          tier_name?: string
-        }
-        Relationships: []
       }
       onboarding_checklist_items: {
         Row: {
@@ -1148,24 +982,6 @@ export type Database = {
         }
         Relationships: []
       }
-      summary_locks: {
-        Row: {
-          chat_id: string
-          created_at: string
-          expires_at: string
-        }
-        Insert: {
-          chat_id: string
-          created_at?: string
-          expires_at: string
-        }
-        Update: {
-          chat_id?: string
-          created_at?: string
-          expires_at?: string
-        }
-        Relationships: []
-      }
       tags: {
         Row: {
           id: number
@@ -1235,13 +1051,6 @@ export type Database = {
             foreignKeyName: "user_character_settings_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "user_character_settings_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -1277,13 +1086,6 @@ export type Database = {
             foreignKeyName: "user_character_world_info_settings_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "user_character_world_info_settings_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: false
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -1295,33 +1097,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      user_daily_usage: {
-        Row: {
-          created_at: string
-          manual_memory_calls: number
-          summary_calls: number
-          updated_at: string
-          usage_date: string
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          manual_memory_calls?: number
-          summary_calls?: number
-          updated_at?: string
-          usage_date?: string
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          manual_memory_calls?: number
-          summary_calls?: number
-          updated_at?: string
-          usage_date?: string
-          user_id?: string
-        }
-        Relationships: []
       }
       user_global_chat_settings: {
         Row: {
@@ -1464,32 +1239,6 @@ export type Database = {
         }
         Relationships: []
       }
-      user_onboarding_progress: {
-        Row: {
-          completed_at: string | null
-          task_id: number
-          user_id: string
-        }
-        Insert: {
-          completed_at?: string | null
-          task_id: number
-          user_id: string
-        }
-        Update: {
-          completed_at?: string | null
-          task_id?: number
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "user_onboarding_progress_task_id_fkey"
-            columns: ["task_id"]
-            isOneToOne: false
-            referencedRelation: "onboarding_checklist_items"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       world_info_entries: {
         Row: {
           created_at: string
@@ -1581,35 +1330,6 @@ export type Database = {
           },
         ]
       }
-      world_info_users: {
-        Row: {
-          created_at: string
-          id: string
-          user_id: string
-          world_info_id: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          user_id: string
-          world_info_id: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          user_id?: string
-          world_info_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "world_info_users_world_info_id_fkey"
-            columns: ["world_info_id"]
-            isOneToOne: false
-            referencedRelation: "world_infos"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       world_infos: {
         Row: {
           created_at: string
@@ -1648,137 +1368,6 @@ export type Database = {
       }
     }
     Views: {
-      character_definitions_with_notes: {
-        Row: {
-          character_id: string | null
-          character_notes: string | null
-          creator_notes: string | null
-          description: string | null
-          greeting: string | null
-          model_id: string | null
-          personality_summary: string | null
-          scenario: Json | null
-          version: string | null
-        }
-        Insert: {
-          character_id?: string | null
-          character_notes?: never
-          creator_notes?: never
-          description?: string | null
-          greeting?: string | null
-          model_id?: string | null
-          personality_summary?: string | null
-          scenario?: Json | null
-          version?: never
-        }
-        Update: {
-          character_id?: string | null
-          character_notes?: never
-          creator_notes?: never
-          description?: string | null
-          greeting?: string | null
-          model_id?: string | null
-          personality_summary?: string | null
-          scenario?: Json | null
-          version?: never
-        }
-        Relationships: [
-          {
-            foreignKeyName: "character_definitions_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: true
-            referencedRelation: "character_profile_view"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "character_definitions_character_id_fkey"
-            columns: ["character_id"]
-            isOneToOne: true
-            referencedRelation: "characters"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      character_profile_view: {
-        Row: {
-          avatar_url: string | null
-          character_definitions: Json | null
-          chats_count: number | null
-          created_at: string | null
-          creator: Json | null
-          creator_id: string | null
-          favorites_count: number | null
-          id: string | null
-          interaction_count: number | null
-          likes_count: number | null
-          messages_count: number | null
-          name: string | null
-          short_description: string | null
-          tagline: string | null
-          tags: Json | null
-          updated_at: string | null
-          visibility: string | null
-          world_infos: Json | null
-        }
-        Relationships: []
-      }
-      credits: {
-        Row: {
-          balance: number | null
-          user_id: string | null
-        }
-        Insert: {
-          balance?: number | null
-          user_id?: string | null
-        }
-        Update: {
-          balance?: number | null
-          user_id?: string | null
-        }
-        Relationships: []
-      }
-      plans: {
-        Row: {
-          features: Json | null
-          id: string | null
-          is_active: boolean | null
-          model_id: string | null
-          monthly_credits_allowance: number | null
-          name: string | null
-          paypal_subscription_id: string | null
-          price_monthly: number | null
-          price_yearly: number | null
-          stripe_price_id_monthly: string | null
-          stripe_price_id_yearly: string | null
-        }
-        Insert: {
-          features?: Json | null
-          id?: string | null
-          is_active?: boolean | null
-          model_id?: string | null
-          monthly_credits_allowance?: number | null
-          name?: string | null
-          paypal_subscription_id?: string | null
-          price_monthly?: number | null
-          price_yearly?: number | null
-          stripe_price_id_monthly?: string | null
-          stripe_price_id_yearly?: string | null
-        }
-        Update: {
-          features?: Json | null
-          id?: string | null
-          is_active?: boolean | null
-          model_id?: string | null
-          monthly_credits_allowance?: number | null
-          name?: string | null
-          paypal_subscription_id?: string | null
-          price_monthly?: number | null
-          price_yearly?: number | null
-          stripe_price_id_monthly?: string | null
-          stripe_price_id_yearly?: string | null
-        }
-        Relationships: []
-      }
       public_profiles: {
         Row: {
           avatar_url: string | null
@@ -1803,49 +1392,12 @@ export type Database = {
         }
         Relationships: []
       }
-      subscriptions: {
-        Row: {
-          created_at: string | null
-          current_period_end: string | null
-          id: string | null
-          paypal_subscription_id: string | null
-          plan_id: string | null
-          status: Database["billing"]["Enums"]["subscription_status"] | null
-          stripe_subscription_id: string | null
-          user_id: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          current_period_end?: string | null
-          id?: string | null
-          paypal_subscription_id?: string | null
-          plan_id?: string | null
-          status?: Database["billing"]["Enums"]["subscription_status"] | null
-          stripe_subscription_id?: string | null
-          user_id?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          current_period_end?: string | null
-          id?: string | null
-          paypal_subscription_id?: string | null
-          plan_id?: string | null
-          status?: Database["billing"]["Enums"]["subscription_status"] | null
-          stripe_subscription_id?: string | null
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "subscriptions_plan_id_fkey"
-            columns: ["plan_id"]
-            isOneToOne: false
-            referencedRelation: "plans"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
     }
     Functions: {
+      _assert_self: {
+        Args: { p_target: string }
+        Returns: undefined
+      }
       add_user_credits: {
         Args: {
           p_amount: number
@@ -1864,20 +1416,16 @@ export type Database = {
         Returns: unknown
       }
       cancel_subscription: {
-        Args: { p_subscription_id: string; p_user_id: string }
-        Returns: boolean
-      }
-      check_subscription_status: {
-        Args: { p_user_id: string }
+        Args: {
+          p_cancel_immediately?: boolean
+          p_subscription_id?: string
+          p_user_id: string
+        }
         Returns: Json
       }
       cleanup_disabled_addon_context: {
         Args: Record<PropertyKey, never>
         Returns: undefined
-      }
-      consume_credits: {
-        Args: { credits_to_consume: number; user_id_param: string }
-        Returns: boolean
       }
       create_chat_with_greeting: {
         Args: {
@@ -1885,10 +1433,6 @@ export type Database = {
           p_user_id: string
           p_user_message: string
         }
-        Returns: string
-      }
-      create_new_chat_with_greeting: {
-        Args: { p_character_id: string; p_user_id: string }
         Returns: string
       }
       current_user_id: {
@@ -1920,8 +1464,8 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: undefined
       }
-      get_available_plans: {
-        Args: Record<PropertyKey, never>
+      get_billing_catalog: {
+        Args: { p_user_id: string }
         Returns: Json
       }
       get_character_stats: {
@@ -1944,11 +1488,11 @@ export type Database = {
       get_credit_history: {
         Args: { p_limit?: number; p_offset?: number; p_user_id: string }
         Returns: {
-          amount: number
           balance_after: number
+          change_amount: number
           created_at: string
           description: string
-          id: string
+          id: number
           transaction_type: string
         }[]
       }
@@ -1960,13 +1504,13 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: number
       }
-      get_user_role: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
       get_user_subscription_with_plan: {
         Args: { p_user_id: string }
         Returns: Json
+      }
+      grant_monthly_allowances: {
+        Args: Record<PropertyKey, never>
+        Returns: number
       }
       halfvec_avg: {
         Args: { "": number[] }
@@ -1999,10 +1543,6 @@ export type Database = {
       hnswhandler: {
         Args: { "": unknown }
         Returns: unknown
-      }
-      increment_world_info_interaction: {
-        Args: { p_world_info_id: string }
-        Returns: undefined
       }
       increment_world_info_interaction_count: {
         Args: { world_info_id: string }

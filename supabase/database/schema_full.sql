@@ -840,6 +840,62 @@ $$;
 ALTER FUNCTION "public"."gentle_addon_context_cleanup"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."get_billing_catalog"("p_user_id" "uuid") RETURNS json
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_plans json;
+  v_packs json;
+  v_balance integer;
+BEGIN
+  PERFORM public._assert_self(p_user_id);
+
+  SELECT json_agg(row_to_json(t) ORDER BY t.price_monthly NULLS FIRST)
+    INTO v_plans
+  FROM (
+    SELECT p.id,
+           p.name,
+           p.price_monthly,
+           p.price_yearly,
+           p.monthly_credits_allowance,
+           p.features,
+           p.paypal_subscription_id
+    FROM billing.plans p
+    WHERE p.is_active
+    ORDER BY p.price_monthly NULLS FIRST
+  ) t;
+
+  SELECT json_agg(row_to_json(t) ORDER BY t.price_cents)
+    INTO v_packs
+  FROM (
+    SELECT c.id,
+           c.name,
+           c.price_cents,
+           c.credits_granted,
+           c.description
+    FROM billing.credit_packs c
+    WHERE c.is_active
+    ORDER BY c.price_cents
+  ) t;
+
+  SELECT balance INTO v_balance FROM billing.credits WHERE user_id = p_user_id;
+
+  RETURN json_build_object(
+    'plans', coalesce(v_plans, '[]'::json),
+    'credit_packs', coalesce(v_packs, '[]'::json),
+    'credits_balance', coalesce(v_balance, 0)
+  );
+END;$$;
+
+
+ALTER FUNCTION "public"."get_billing_catalog"("p_user_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."get_billing_catalog"("p_user_id" "uuid") IS 'Consolidated billing catalog (active plans, credit packs, and current credit balance) without exposing billing schema.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."get_character_stats"("character_id" "uuid") RETURNS TABLE("total_chats" bigint, "total_messages" bigint, "unique_users" bigint, "average_rating" numeric, "total_favorites" bigint, "total_likes" bigint)
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public', 'auth'
@@ -4279,6 +4335,11 @@ GRANT ALL ON FUNCTION "public"."enforce_credit_pack_purchase_status"() TO "servi
 
 
 GRANT ALL ON FUNCTION "public"."gentle_addon_context_cleanup"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."get_billing_catalog"("p_user_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_billing_catalog"("p_user_id" "uuid") TO "service_role";
 
 
 
