@@ -24,7 +24,8 @@ const MAX_MESSAGES_PER_GROUP = 1; // set to 1 to force each message into its own
 
 export function groupMessages(messages: Message[]): MessageGroup[] {
   if (!messages.length) return [];
-  const normalized: NormalizedMessage[] = messages.map(m => {
+  
+  const normalized: NormalizedMessage[] = messages.map((m, index) => {
     let ts: Date;
     if (m.timestamp instanceof Date) ts = m.timestamp; else ts = new Date(m.timestamp as string);
     if (isNaN(ts.getTime())) ts = new Date();
@@ -32,30 +33,21 @@ export function groupMessages(messages: Message[]): MessageGroup[] {
   });
 
   const groups: MessageGroup[] = [];
-  let currentGroup: MessageGroup | null = null;
 
   normalized.forEach((message, index) => {
-    const shouldStartNewGroup =
-      !currentGroup ||
-      currentGroup.isUser !== message.isUser ||
-      (message.timestamp.getTime() - currentGroup.timestamp.getTime()) > MESSAGE_GROUP_TIME_THRESHOLD ||
-      (currentGroup.messages.length >= MAX_MESSAGES_PER_GROUP);
-
-    if (shouldStartNewGroup) {
-      const prev = normalized[index - 1];
-      const showTimestamp = index === 0 ||
-        (index > 0 && (message.timestamp.getTime() - prev.timestamp.getTime()) > MESSAGE_GROUP_TIME_THRESHOLD);
-      currentGroup = {
-        id: `group-${message.id}`,
-        messages: [message as any],
-        isUser: message.isUser,
-        timestamp: message.timestamp,
-        showTimestamp
-      };
-      groups.push(currentGroup);
-    } else {
-      (currentGroup.messages as any).push(message);
-    }
+    // Always create a new group for each message to ensure separate bubbles
+    const prev = normalized[index - 1];
+    const showTimestamp = index === 0 ||
+      (index > 0 && (message.timestamp.getTime() - prev.timestamp.getTime()) > MESSAGE_GROUP_TIME_THRESHOLD);
+    
+    const currentGroup = {
+      id: `group-${message.id}-${index}`, // Include index to ensure uniqueness
+      messages: [message as any],
+      isUser: message.isUser,
+      timestamp: message.timestamp,
+      showTimestamp
+    };
+    groups.push(currentGroup);
   });
 
   return groups;

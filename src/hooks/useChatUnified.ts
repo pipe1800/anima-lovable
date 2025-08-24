@@ -327,13 +327,15 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     selectedWorldInfoId?: string | null
   ) => {
     if (!chatIdParam) throw new Error('Missing chatId');
-    const streamingModeSetting: 'smooth' | 'instant' = (globalSettings?.streaming_mode === 'instant') ? 'instant' : 'smooth';
+    
+    // Always use instant mode from backend to get complete message
+    // Frontend will handle typewriter animation based on user preference
+    const userStreamingMode = globalSettings?.streaming_mode || 'smooth';
     dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: '' } });
-    console.log('[STREAM][start]', { chatId: chatIdParam, mode: streamingModeSetting, userMessageLen: userMessage.length });
-    let aggregate = '';
-    // remove unused local streamingMessageId variable
+    console.log('[STREAM][start]', { chatId: chatIdParam, mode: userStreamingMode, userMessageLen: userMessage.length });
+    
     try {
-      await ChatManagement.sendMessageStreaming({
+      const result = await ChatManagement.sendMessageStreaming({
         chatId: chatIdParam,
         message: userMessage,
         characterId: characterIdParam,
@@ -341,20 +343,20 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
         selectedPersonaId: selectedPersonaId ?? null,
         selectedWorldInfoId: selectedWorldInfoId ?? null
       }, {
-        streamingMode: streamingModeSetting,
-        onToken: (t, agg) => {
-          aggregate = agg;
-          console.log('[STREAM][token]', { tokenFrag: t, fragLen: t.length, aggLen: agg.length, smooth: streamingModeSetting === 'smooth' });
-          // Only update local streaming state; no cache mutation / placeholder patching
-          dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: agg } });
-        },
+        streamingMode: 'instant', // Always get complete message from backend
         onDone: (final) => {
-          aggregate = final;
           console.log('[STREAM][done]', { finalLen: final.length });
+          // Set the complete message for frontend typewriter animation
+          dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: final } });
         }
       });
-      finalizeStreaming(chatIdParam);
-      return aggregate;
+      
+      // After a short delay, mark streaming as complete
+      setTimeout(() => {
+        finalizeStreaming(chatIdParam);
+      }, 100);
+      
+      return result.content;
     } catch (e) {
       dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
       throw e;

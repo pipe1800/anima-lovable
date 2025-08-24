@@ -180,46 +180,54 @@ const ChatMessages = ({
     return null as any;
   }, [messages]);
 
-  // New decoupled typewriter stream (replaces previous displayedStream/targetText logic)
-  const { text: typewriterText, feedChunk, markStreamFinished, isTyping } = useTypewriterStream({ charsPerSecond: 75 });
-  const previousStreamRef = useRef('');
-  // Feed only new appended substring into typewriter queue
+  // New simplified approach: typewriter animation on complete message based on user preference
+  const streamingMode = effectiveGlobalSettings?.streaming_mode || 'smooth';
+  const shouldAnimate = streamingMode === 'smooth';
+  
+  const { text: typewriterText, feedChunk, markStreamFinished, isTyping, clear } = useTypewriterStream({ 
+    charsPerSecond: 75 
+  });
+  const lastProcessedMessageRef = useRef('');
+  
+  // When we get a complete streaming message, feed it to typewriter (in smooth mode) or show immediately (in instant mode)
   useEffect(() => {
-    if (streamingMessage) {
-      const prev = previousStreamRef.current;
-      if (streamingMessage.length > prev.length) {
-        const newChunk = streamingMessage.slice(prev.length);
-        feedChunk(newChunk);
-        previousStreamRef.current = streamingMessage;
+    if (streamingMessage && streamingMessage !== lastProcessedMessageRef.current) {
+      lastProcessedMessageRef.current = streamingMessage;
+      
+      if (shouldAnimate && isStreaming) {
+        // Clear typewriter and feed complete message for animation
+        clear();
+        feedChunk(streamingMessage);
+        markStreamFinished();
       }
     }
-    // When streaming ends, mark finished so queue can drain smoothly
-    if (!isStreaming && streamingMessage && previousStreamRef.current === streamingMessage) {
-      markStreamFinished();
-    }
-  }, [streamingMessage, isStreaming, feedChunk, markStreamFinished]);
-  const isTypewriterComplete = !isTyping && !!previousStreamRef.current && !isStreaming;
+  }, [streamingMessage, shouldAnimate, isStreaming, clear, feedChunk, markStreamFinished]);
+  const isTypewriterComplete = !isTyping && !!lastProcessedMessageRef.current && !isStreaming;
 
-  // Filter messages - ensure previously persisted AI message remains visible while streaming new one.
+  // Simple filtering - hide real messages that match the message being animated
   const filteredMessages = useMemo(() => {
-    const finalAnimatedTarget = previousStreamRef.current; // full streamed text (may be final target)
     return (messages || []).filter((m: any) => {
       if (!m) return false;
-      if (m.isUser) return true;
       if (!m.content || !String(m.content).trim()) return false;
-      // Only hide if we are still animating AND this message's full content exactly matches the final target
-      // (prevents duplicate full + animated versions of the SAME message). Otherwise keep it.
-      const isDuplicateOfAnimating = !isTypewriterComplete && typewriterText && finalAnimatedTarget && m.content === finalAnimatedTarget;
-      if (isDuplicateOfAnimating) return false;
+      
+      // Hide real message if we're currently animating the same content
+      if (shouldAnimate && isTyping && lastProcessedMessageRef.current && 
+          m.content === lastProcessedMessageRef.current && !m.isTemporaryStreaming) {
+        return false;
+      }
+      
       return true;
     });
-  }, [messages, isTypewriterComplete, typewriterText]);
+  }, [messages, shouldAnimate, isTyping]);
 
-  // Temporary streaming message while typewriter animates
+  // Temporary streaming message while typewriter animates (only in smooth mode)
   const tempStreamingMessage = useMemo(() => {
+    // Don't create temp streaming message in instant mode
+    if (!shouldAnimate) return null;
     if (!typewriterText) return null;
     if (isTypewriterComplete) return null;
-    const maxOrder = filteredMessages.reduce((acc: number, m: any) => Math.max(acc, m.message_order || 0), 0);
+    // Use a very high message_order to ensure it appears last
+    const maxOrder = Math.max(...(filteredMessages.map((m: any) => m.message_order || 0).concat([0])));
     return {
       id: `streaming-${chatId}`,
       content: typewriterText,
@@ -227,24 +235,17 @@ const ChatMessages = ({
       is_ai_message: true,
       isTemporaryStreaming: true,
       timestamp: new Date(),
-      message_order: maxOrder + 1,
+      message_order: maxOrder + 1000, // Large gap to ensure it's always last
     } as any;
-  }, [filteredMessages, chatId, typewriterText, isTypewriterComplete]);
+  }, [filteredMessages, chatId, typewriterText, isTypewriterComplete, shouldAnimate]);
 
-  // Compose final messages list including (or updating) the stable temporary streaming message
+  // Simple logic: show temp message only if animating in smooth mode
   const streamingAugmentedMessages = useMemo(() => {
-    if (!tempStreamingMessage) return filteredMessages;
-    const existingIndex = filteredMessages.findIndex((m: any) => m.id === tempStreamingMessage.id);
-    if (existingIndex >= 0) {
-      const updated = [...filteredMessages];
-      // Only replace if content changed to avoid unnecessary re-renders
-      if (updated[existingIndex].content !== tempStreamingMessage.content) {
-        updated[existingIndex] = tempStreamingMessage;
-      }
-      return updated;
+    if (shouldAnimate && tempStreamingMessage && isTyping) {
+      return [...filteredMessages, tempStreamingMessage];
     }
-    return [...filteredMessages, tempStreamingMessage];
-  }, [filteredMessages, tempStreamingMessage]);
+    return filteredMessages;
+  }, [filteredMessages, tempStreamingMessage, shouldAnimate, isTyping]);
 
   // Group messages (with stabilization for streaming group to reduce avatar flicker)
   const messageGroups = useMemo(() => {
@@ -299,28 +300,56 @@ const ChatMessages = ({
   useEffect(() => {
     if (!isTypewriterComplete) return;
     if (!typewriterText) return;
-    const t = setTimeout(() => { previousStreamRef.current = ''; }, 250);
+    const t = setTimeout(() => { 
+      lastProcessedMessageRef.current = '';
+      clear(); // Also clear the typewriter state
+    }, 250);
     return () => clearTimeout(t);
-  }, [isTypewriterComplete, typewriterText]);
+  }, [isTypewriterComplete, typewriterText, clear]);
 
   // Robust force scroll utility (desktop + mobile) with double rAF to catch late layout (images, fonts, streamed chars)
-  const forceScrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+  const forceScrollToBottom = useCallback((behavior: ScrollBehavior = 'auto', extraPadding: number = 0) => {
     const el = messagesContainerRef.current;
     if (!el) return;
-    // Immediate jump (behavior ignored when setting scrollTop directly)
-    el.scrollTop = el.scrollHeight;
+    // Immediate jump with extra padding for message bubble height
+    const targetScroll = el.scrollHeight + extraPadding;
+    el.scrollTop = targetScroll;
     // Double frame to account for just-rendered streaming characters / images
     requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+      el.scrollTop = el.scrollHeight + extraPadding;
+      requestAnimationFrame(() => { 
+        el.scrollTop = el.scrollHeight + extraPadding; 
+      });
     });
     // Fallback for mobile browsers if outer document scrolls instead
     if (typeof window !== 'undefined') {
       window.requestAnimationFrame(() => {
-        window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+        window.scrollTo({ top: document.documentElement.scrollHeight + extraPadding, behavior });
       });
     }
   }, []);
+
+  // Continuous auto-scroll during typewriter animation
+  useEffect(() => {
+    if (shouldAnimate && isTyping) {
+      // Set up a continuous scroll interval while typing is active
+      const scrollInterval = setInterval(() => {
+        forceScrollToBottom('auto', 300);
+      }, 100); // Every 100ms for smooth continuous scrolling
+      
+      return () => clearInterval(scrollInterval);
+    }
+  }, [shouldAnimate, isTyping, forceScrollToBottom]);
+
+  // Final scroll when typewriter animation completes
+  useEffect(() => {
+    if (isTypewriterComplete && typewriterText) {
+      // Ensure buttons are fully visible when animation finishes
+      setTimeout(() => {
+        forceScrollToBottom('auto', 300);
+      }, 100);
+    }
+  }, [isTypewriterComplete, typewriterText, forceScrollToBottom]);
 
   // On chat switch, mark that we need an initial instantaneous scroll when messages arrive
   useEffect(() => {

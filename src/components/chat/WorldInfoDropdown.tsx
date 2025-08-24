@@ -222,33 +222,20 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
 
               <DropdownMenuSeparator className="bg-gray-700/50" />
               
-              <DropdownMenuItem
-                onClick={handleCreateWorldInfo}
-                className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Create New World Info</span>
-              </DropdownMenuItem>
-              
-              <DropdownMenuItem
-                onClick={handleDiscoverWorldInfos}
-                className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
-              >
-                <Globe className="w-4 h-4" />
-                onClick={handleCreateWorldInfo}
-                className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Create New World Info</span>
-              </DropdownMenuItem>
-              
-              <DropdownMenuItem
-                onClick={handleDiscoverWorldInfos}
-                className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
-              >
-                <Globe className="w-4 h-4" />
-                <span>Discover World Infos</span>
-              </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleCreateWorldInfo}
+                  className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{'>'} Create New World Info</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleDiscoverWorldInfos}
+                  className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
+                >
+                  <Globe className="w-4 h-4" />
+                  <span>Discover World Infos</span>
+                </DropdownMenuItem>
             </div>
           )}
         </div>

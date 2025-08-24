@@ -13,6 +13,7 @@ import {
 import { getMostRecentAutoSummary } from './auto-summary-new.ts';
 import { getTextEmbedding, cosineSimilarity } from './embeddings.ts';
 import { PromptBuilder } from './prompt-builder.ts';
+import { buildRelationshipProgressionBlock } from './relationship-progression.ts';
 import { logger } from '../../_shared/logger.ts';
 
 export type PromptMeta = {
@@ -356,7 +357,14 @@ export async function buildSystemPrompt(
       if (addonSettings.clothingInventory && currentContext.clothingInventory && currentContext.clothingInventory !== 'No context') { fields.push(`Clothing: ${currentContext.clothingInventory}`); meta.currentContext!.clothingInventory = currentContext.clothingInventory; }
       if (addonSettings.locationTracking && currentContext.locationTracking && currentContext.locationTracking !== 'No context') { fields.push(`Location: ${currentContext.locationTracking}`); meta.currentContext!.locationTracking = currentContext.locationTracking; }
       if (addonSettings.timeAndWeather && currentContext.timeAndWeather && currentContext.timeAndWeather !== 'No context') { fields.push(`TimeWeather: ${currentContext.timeAndWeather}`); meta.currentContext!.timeAndWeather = currentContext.timeAndWeather; }
-      if (addonSettings.relationshipStatus && currentContext.relationshipStatus && currentContext.relationshipStatus !== 'No context') { fields.push(`Relationship: ${currentContext.relationshipStatus}`); meta.currentContext!.relationshipStatus = currentContext.relationshipStatus; }
+      // Relationship field: accept either legacy relationshipStatus or new relationship
+      if (addonSettings.relationshipStatus) {
+        const relVal = (currentContext as any).relationshipStatus || (currentContext as any).relationship;
+        if (relVal && relVal !== 'No context') {
+          fields.push(`Relationship: ${relVal}`);
+          meta.currentContext!.relationshipStatus = relVal; // keep meta key stable
+        }
+      }
       if (addonSettings.characterPosition && currentContext.characterPosition && currentContext.characterPosition !== 'No context') { fields.push(`Position: ${currentContext.characterPosition}`); meta.currentContext!.characterPosition = currentContext.characterPosition; }
       if (fields.length) {
         const stale = (timeAwarenessData && timeAwarenessData.delaySeconds && timeAwarenessData.delaySeconds > 1800) ? ' (stale>30m)' : '';
@@ -467,23 +475,8 @@ export async function buildSystemPrompt(
   logger.debug('prompt.tokens.est', { est: estimateTokens(systemPrompt) });
   if (metaCollector) { try { metaCollector(meta); logger.debug('prompt.meta', meta); } catch (e) { logger.warn('prompt.meta.fail', String(e)); } }
 
-  // Relationship progression (compressed)
-  if (currentContext && addonSettings.relationshipStatus && currentContext.relationshipStatus && currentContext.relationshipStatus !== 'No context') {
-    const relLine = currentContext.relationshipStatus;
-    let notReadyMatch = relLine.match(/not ready to move into (.+?)\./i);
-    let readyMatch = relLine.match(/ready to move into (.+?)\./i);
-    const nextStageLabel = (notReadyMatch || readyMatch)?.[1] || null;
-    const isReady = /ready to move into/i.test(relLine) && !/not ready/i.test(relLine);
-    let body = '';
-    if (nextStageLabel) {
-      if (isReady) {
-        body = `RP1 Ready for potential advance to "${nextStageLabel}" but requires explicit user proposal. RP2 You may (once) lightly invite if user has not proposed yet. RP3 Do not repeat invitations until status changes. RP4 Never advance without explicit user acceptance.`;
-      } else {
-        body = `RP1 Not ready to advance to "${nextStageLabel}". RP2 Politely decline proposals; encourage continued bonding. RP3 Do not roleplay being at next stage. RP4 Wait for future readiness update.`;
-      }
-    } else { body = 'RP Final stage reached; no further advancement. Reaffirm politely if pressed.'; }
-    systemPrompt += `\n\n[RELATIONSHIP PROGRESSION]\n${body}\n[/RELATIONSHIP PROGRESSION]`;
-  }
+  // Relationship progression (consolidated helper)
+  systemPrompt += buildRelationshipProgressionBlock(currentContext, addonSettings);
 
   return systemPrompt;
 }
