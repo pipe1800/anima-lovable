@@ -7,7 +7,8 @@ import { Upload, Plus, User, X, Edit } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { toast } from 'sonner';
-import { createPersona, getUserPersonas, deletePersona, updatePersona, type Persona } from '@/data/personas/mutations';
+import { createPersona, deletePersona, updatePersona, type Persona } from '@/data/personas/mutations';
+import { Personas } from '@/data';
 import { useAuth } from '@/contexts/AuthContext';
 
 export const PersonasTab = () => {
@@ -28,7 +29,7 @@ export const PersonasTab = () => {
   useEffect(() => {
     const loadPersonas = async () => {
       try {
-  const userPersonas = await getUserPersonas(user.id);
+  const userPersonas = await Personas.listUserPersonas(user.id);
         setPersonas(userPersonas);
       } catch (error) {
         console.error('Error loading personas:', error);

@@ -544,6 +544,7 @@ globalThis.Deno.serve(async (req) => {
       // Tags: map names to ids and insert relations
       const tags = normalized.formData.personality.tags || [];
       if (tags.length) {
+        // Server-side direct select retained (service role) for atomic creation; could switch to resolve_tag_names RPC if desired.
         const { data: tagRows, error: tagErr } = await supabaseAdmin.from('tags').select('id,name').in('name', tags);
         if (!tagErr && tagRows && tagRows.length) {
           const relations = tagRows.map((t: any) => ({ character_id: character.id, tag_id: t.id }));

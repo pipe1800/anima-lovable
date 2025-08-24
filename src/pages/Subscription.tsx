@@ -45,17 +45,17 @@ interface CreditPack {
 
 // Hooks
 const useSubscriptionData = () => {
-  const { user } = useAuth();
+  const { user, supabase } = useAuth();
   return useQuery({
     queryKey: ['subscription-data', user?.id],
     queryFn: async () => {
-      if (!user) return { plans: [], creditPacks: [], credits: null };
-      const { data, error } = await Billing.getUserSubscriptionForUser(user.id);
+      if (!user) return { overview: null };
+      const { data, error } = await Billing.getUserBillingOverview(supabase, user.id, 100);
       if (error) throw error;
-      return { plans: [], creditPacks: [], credits: data };
+      return { overview: data };
     },
     staleTime: 1000 * 60 * 5,
-    enabled: true
+    enabled: !!user?.id
   });
 };
 
@@ -611,7 +611,25 @@ export default function Subscription() {
     );
   }
 
-  const { plans = [], creditPacks = [], credits = null } = data || {};
+  const overview = (data as any)?.overview || null;
+  // Normalize plans to ensure price_monthly_display always exists (DB stores cents)
+  const rawPlans = overview?.plans || [];
+  const plans: Plan[] = rawPlans.map((p: any) => ({
+    ...p,
+    price_monthly_display: typeof p.price_monthly_display === 'number'
+      ? p.price_monthly_display
+      : ((p.price_monthly ?? 0) / 100)
+  }));
+  // Normalize credit packs to ensure price_display always exists (DB stores cents)
+  const rawCreditPacks = overview?.credit_packs || [];
+  const creditPacks: CreditPack[] = rawCreditPacks.map((cp: any) => ({
+    ...cp,
+    price_display: typeof cp.price_display === 'number'
+      ? cp.price_display
+      : ((cp.price_cents ?? 0) / 100)
+  }));
+  const subscriptionData = overview?.subscription || null;
+  const creditsBalance = overview?.credits ?? null;
   const visiblePlans = getVisiblePlans(plans);
 
   const faqs = [

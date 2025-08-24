@@ -1,6 +1,6 @@
 // PayPal / Billing Edge Client (migrated from payments/client.ts) - 2025-08-21
 // Use these wrappers for PayPal subscription & credit pack operations.
-// Deprecated older import path: '@/data/payments/client' (still re-exported for now)
+// Removed legacy path '@/data/payments/client' after consolidation.
 
 import { supabase } from '@/db/client';
 

@@ -3,8 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { createCharacter as createCharacterBasic, deletePrivateCharacter } from '@/data/characters/mutations';
-import { CharacterDetails } from '@/data';
-import { CharacterUserSettings } from '@/data';
+import { CharacterProfileView, CharacterUserSettings } from '@/data';
 import type { Tables } from '@/integrations/supabase/types';
 
 // CharacterCreationData (previously from deprecated extendedMutations)
@@ -93,6 +92,12 @@ export interface CharacterFormData {
     relationship?: string;
     character_position?: string;
   } | null;
+
+  // Relationship goals template
+  relationshipGoalsTemplate?: {
+    enabled: boolean;
+    path: { id: string; order: number; label: string; threshold: number; description?: string }[];
+  };
 }
 
 const INITIAL_CHARACTER_DATA: CharacterFormData = {
@@ -119,7 +124,8 @@ const INITIAL_CHARACTER_DATA: CharacterFormData = {
   default_persona_id: null,
   timeAwarenessEnabled: false,
   manual_addon_context_enabled: false,
-  manual_addon_context: null
+  manual_addon_context: null,
+  relationshipGoalsTemplate: undefined
 };
 
 // Helper to map extended form data to basic createCharacter payload
@@ -158,6 +164,15 @@ export function useCharacterCreation() {
   const [editingCharacterId, setEditingCharacterId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [originallyPublic, setOriginallyPublic] = useState(false);
+  // New: latent profile extraction progress
+  const [isLatentExtracting, setIsLatentExtracting] = useState(false);
+  // New: hydration status for edit flow
+  const [hydrated, setHydrated] = useState(false);
+
+  // Mark hydrated immediately for creation flow (no edit load needed)
+  useEffect(() => {
+    if (!isEditing && !hydrated) setHydrated(true);
+  }, [isEditing, hydrated]);
 
   // Load character for editing
   useEffect(() => {
@@ -171,11 +186,11 @@ export function useCharacterCreation() {
 
   const loadCharacterForEditing = async (characterId: string) => {
     console.log('🔄 Loading character for editing:', characterId);
-    
+    setHydrated(false); // start of async hydration
     try {
-      const { data: character, error } = await CharacterDetails.getCharacterDetails(characterId);
-      if (error || !character) {
-        console.error('❌ Failed to load character:', error);
+      const character = await CharacterProfileView.getCharacterFullProfile(characterId);
+      if (!character) {
+        console.error('❌ Failed to load character');
         toast({
           title: "Error Loading Character",
           description: "Failed to load character data for editing.",
@@ -193,88 +208,101 @@ export function useCharacterCreation() {
         tagline_length: character.tagline?.length,
         short_description: character.short_description,
         avatar_url: character.avatar_url,
-        visibility: character.visibility,
-        nsfw_enabled: character.nsfw_enabled
+        visibility: character.visibility
       });
 
       // Load user character settings
       const userSettings = user ? (await CharacterUserSettings.getUserCharacterSettings(user.id, characterId)).data : null;
       console.log('⚙️ User character settings loaded:', userSettings);
 
-      // Parse the definition JSON to extract personality and dialogue data
+      // Parse personality summary JSON if present
       let definitionData: any = {};
-      if (character.definition?.[0]?.personality_summary) {
+      if (character.character_definitions?.personality_summary) {
         try {
-          definitionData = JSON.parse(character.definition[0].personality_summary);
+          definitionData = JSON.parse(character.character_definitions.personality_summary);
         } catch (e) {
           console.error('Error parsing character definition:', e);
         }
       }
 
-      // Map character data to form structure
-      const definitionNode = (character as any)?.character_definitions || (character as any)?.definition?.[0];
       const formData: CharacterFormData = {
         name: character.name,
         avatar: character.avatar_url || '',
-        title: character.tagline || '', // ✅ Keep mapping tagline to title
-        description: character.short_description || '', // ✅ Map short_description to description
-        chatMode: (userSettings?.chat_mode as 'storytelling' | 'companion') || 'storytelling', // ✅ Use user settings
-        version: definitionData?.version || (character as any).version || '',
+        title: character.tagline || '',
+        description: character.short_description || '',
+        chatMode: (userSettings?.chat_mode as 'storytelling' | 'companion') || 'storytelling',
+        version: definitionData?.version || '',
         notes: {
-          character_notes: character.definition?.[0]?.character_notes || definitionData?.notes?.character_notes || '',
-          creator_notes: (character as any).creator_notes || definitionData?.notes?.creator_notes || ''
+          character_notes: definitionData?.notes?.character_notes || '',
+          creator_notes: definitionData?.notes?.creator_notes || ''
         },
         personality: {
-          core_personality: character.definition?.[0]?.description || '',
+          core_personality: character.character_definitions?.description || '',
           tags: definitionData.personality?.tags || character.tags?.map((t: any) => t.name) || [],
           knowledge_base: definitionData.personality?.knowledge_base || '',
-          scenario_definition: definitionData.personality?.scenario_definition || ''
+          scenario_definition: definitionData.personality?.scenario_definition || definitionData.personality?.scenario_definition || ''
         },
         dialogue: {
-          greeting: character.definition?.[0]?.greeting || '',
-          example_dialogues: definitionData.dialogue?.example_dialogues || [],
-          alternate_greetings: definitionData.dialogue?.alternate_greetings || []
+          greeting: character.character_definitions?.greeting || definitionData.personality?.greeting || definitionData.dialogue?.greeting || '',
+          example_dialogues: Array.isArray(definitionData.dialogue?.example_dialogues) ? definitionData.dialogue.example_dialogues.filter((d: any)=>d && typeof d === 'object') : [],
+          alternate_greetings: definitionData.dialogue?.alternate_greetings || definitionData.personality?.alternate_greetings || []
         },
-        visibility: character.visibility || 'private',
-        nsfw_enabled: character.nsfw_enabled || false,
-        default_persona_id: character.default_persona_id,
-        // ✅ Include user-specific settings
-        timeAwarenessEnabled: userSettings?.time_awareness_enabled || false,
-        manual_addon_context_enabled: definitionNode?.initial_addon_context_enabled || false,
-        manual_addon_context: definitionNode?.initial_addon_context || null
-      };
+        visibility: character.visibility,
+        wasPublic: character.was_public || false,
+        nsfw_enabled: false,
+        default_persona_id: undefined,
+      } as any; // Keep casting until form type updated
 
-      console.log('📝 Mapped character data to form:', {
-        title_mapping: {
-          database_tagline: character.tagline,
-          mapped_to_form_title: formData.title,
-          mapping_successful: character.tagline === formData.title
-        },
-        user_settings_mapping: {
-          chat_mode: userSettings?.chat_mode || 'default',
-          time_awareness_enabled: userSettings?.time_awareness_enabled || false,
-          user_settings_exist: !!userSettings
-        },
-        formData: JSON.stringify(formData, null, 2)
-      });
+      // Hydrate relationship goals template (new)
+      try {
+        const { RelationshipTemplate } = await import('@/data');
+        const tplResp = await RelationshipTemplate.getTemplate(characterId);
+        console.log('📥 RAW relationship goals template response:', tplResp);
+        if (tplResp?.data) {
+          const raw: any = tplResp.data;
+          // Support possible shapes
+            // 1) { path: [...], version? }
+            // 2) { enabled: bool, path: [...] }
+            // 3) legacy: maybe nested
+          const path: any[] = Array.isArray(raw.path)
+            ? raw.path
+            : Array.isArray(raw?.relationship_goals?.path)
+              ? raw.relationship_goals.path
+              : [];
+          if (path.length >= 2) {
+            formData.relationshipGoalsTemplate = {
+              enabled: raw.enabled !== false, // treat missing or true as enabled
+              path: path
+                .sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0))
+                .map((g: any, idx: number) => ({
+                  id: g.id || crypto.randomUUID(),
+                  order: typeof g.order === 'number' ? g.order : idx + 1,
+                  label: g.label || `Stage ${typeof g.order === 'number' ? g.order : idx + 1}`,
+                  threshold: typeof g.threshold === 'number' ? g.threshold : Number((1 + idx * 0.3).toFixed(2)),
+                  description: g.description
+                }))
+            } as any;
+            console.log('🧩 Hydrated relationship goals template (inferred):', formData.relationshipGoalsTemplate);
+          } else {
+            console.log('ℹ️ Relationship goals template present but path length < 2, skipping hydration (length =', path.length, ')');
+          }
+        } else {
+          console.log('ℹ️ No relationship goals template row found for character');
+        }
+      } catch (tplErr) {
+        console.warn('⚠️ Failed to hydrate relationship goals template (non-blocking):', tplErr);
+      }
 
       setCharacterData(formData);
-      setOriginallyPublic(formData.visibility === 'public');
-       // Set selectedTags with the proper tag objects from the character's tags
-      if (character.tags && Array.isArray(character.tags)) {
-        console.log('🏷️ Setting character tags:', character.tags);
-        setSelectedTags(character.tags);
-      } else {
-        console.log('📝 No tags found for character');
-        setSelectedTags([]);
-      }
-      
-      console.log('✅ Character loading completed successfully');
+      setOriginallyPublic(character.was_public || false);
+      setSelectedTags(character.tags || []);
+      setHydrated(true); // completed hydration
+      setIsDirty(false);
     } catch (error) {
-      console.error('❌ Error loading character:', error);
+      console.error('❌ Error loading character for editing:', error);
       toast({
-        title: "Error",
-        description: "Failed to load character data.",
+        title: "Error Loading Character",
+        description: "An unexpected error occurred.",
         variant: "destructive",
       });
     }
@@ -424,20 +452,62 @@ export function useCharacterCreation() {
            }
          };
          
-         // character = await createCharacterBasic(updatedCharacterData as CharacterCreationData); // removed deprecated call
-         
-         // Save chat mode for new character (time awareness is now handled in createCharacter)
-        if (character.id && effective.chatMode) {
-           await CharacterUserSettings.upsertUserCharacterSettings(user.id, character.id, {
-            chat_mode: effective.chatMode
-           });
+         // Map to basic payload expected by createCharacter
+         const basicPayload = mapToBasicCharacterPayload({
+           name: updatedCharacterData.name,
+           avatar: updatedCharacterData.avatar,
+           title: updatedCharacterData.title,
+           description: updatedCharacterData.description,
+           personality: updatedCharacterData.personality as any,
+           dialogue: updatedCharacterData.dialogue as any,
+           addons: undefined,
+           visibility: updatedCharacterData.visibility,
+           nsfw_enabled: updatedCharacterData.nsfw_enabled,
+           default_persona_id: updatedCharacterData.default_persona_id,
+           time_awareness_enabled: updatedCharacterData.timeAwarenessEnabled,
+           version: updatedCharacterData.version,
+           notes: updatedCharacterData.notes,
+           manual_addon_context_enabled: updatedCharacterData.manual_addon_context_enabled,
+           manual_addon_context: updatedCharacterData.manual_addon_context,
+         } as any);
+
+         const createResp = await createCharacterBasic(basicPayload);
+         if (!createResp?.data) {
+           throw createResp?.error || new Error('Character creation failed');
          }
-         
-         toast({
-           title: "Character Created!",
-           description: `${character.name} has been successfully created.`,
-         });
+         character = createResp.data as any;
        }
+      // After base character persisted, trigger latent profile extraction (fire & wait with timeout)
+      if (character?.id) {
+        // Upsert relationship goals template if provided
+        try {
+          if (effective.relationshipGoalsTemplate?.enabled && effective.relationshipGoalsTemplate.path?.length >= 2) {
+            const { RelationshipTemplate } = await import('@/data');
+            await RelationshipTemplate.upsertTemplate(character.id, {
+              enabled: true,
+              path: effective.relationshipGoalsTemplate.path.map(g => ({ id: g.id, order: g.order, label: g.label.trim(), threshold: g.threshold, description: g.description })),
+            } as any);
+          }
+        } catch (rgErr) {
+          console.warn('⚠️ Failed to upsert relationship goals template (non-blocking):', rgErr);
+        }
+        try {
+          setIsLatentExtracting(true);
+          // Removed AbortController (not supported in supabase.functions.invoke options)
+          try {
+            const { error: lpError } = await (await import('@/db/client')).supabase.functions.invoke('extract-latent-profile', {
+              body: { character_id: character.id }
+            });
+            if (lpError) console.warn('latent profile invoke error', lpError);
+          } catch (invErr) {
+            console.warn('latent profile invoke failed', invErr);
+          }
+        } catch (e) {
+          console.warn('latent extraction failed (non-blocking)', e);
+        } finally {
+          setIsLatentExtracting(false);
+        }
+      }
       
       setIsDirty(false);
       navigate('/dashboard');
@@ -453,6 +523,13 @@ export function useCharacterCreation() {
     }
   };
 
+  // Diagnostic: log when relationship goals template becomes available post-hydration
+  useEffect(() => {
+    if (hydrated && characterData.relationshipGoalsTemplate) {
+      console.log('✅ useCharacterCreation: relationshipGoalsTemplate hydrated:', characterData.relationshipGoalsTemplate);
+    }
+  }, [hydrated, characterData.relationshipGoalsTemplate]);
+
   return {
     currentStep,
     setCurrentStep,
@@ -465,6 +542,7 @@ export function useCharacterCreation() {
     isDirty,
     saveCharacter,
     validateStep,
-    editingCharacterId
+    editingCharacterId,
+    hydrated
   };
 }

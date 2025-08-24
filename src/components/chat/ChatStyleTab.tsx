@@ -96,12 +96,10 @@ export const ChatStyleTab: React.FC<ChatStyleTabProps> = ({ currentChatId, onUns
     if (!file) return;
     try {
       setSaving(true);
-      const { data: auth } = await Auth.getCurrentUser();
-      const userId = auth.user?.id;
+      const { data: auth } = await Auth.getSession();
+      const userId = auth.session?.user?.id;
       if (!userId) throw new Error('Not authenticated');
-      const ext = file.name.split('.').pop() || 'png';
-      const path = `backgrounds/${userId}.${ext}`;
-      const { publicUrl, error } = await Uploads.uploadToBucket({ bucket: 'user-style', path, file, upsert: true });
+      const { publicUrl, error } = await Uploads.uploadMedia({ kind: 'chat-background', userId, file, overwrite: true });
       if (error) throw error;
       setField('background_image_url', publicUrl || null);
     } catch (e) {

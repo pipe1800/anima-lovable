@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/client';
+import { Tags } from '@/data';
 
 const sbAny: any = supabase;
 
@@ -88,11 +89,18 @@ export const useCharacterProfile = (characterId: string | undefined) => {
       let tags: Array<{ id: number; name: string }> = [];
       const tagIds = (charTags || []).map((t: any) => t.tag_id);
       if (tagIds.length > 0) {
-        const { data: tagRows } = await supabase
-          .from('tags')
-          .select('id, name')
-          .in('id', tagIds);
-        tags = (tagRows || []) as Array<{ id: number; name: string }>;
+        // Prefer cached list and filter (avoids extra round trip if already cached)
+        const { data: allTags } = await Tags.listTags();
+        const tagIdSet = new Set(tagIds);
+        tags = (Array.isArray(allTags) ? (allTags as any[]) : []).filter(t => tagIdSet.has(t.id)).map(t => ({ id: t.id, name: t.name }));
+        // Fallback (if cache empty) fetch direct
+        if (!tags.length) {
+          const { data: tagRows } = await supabase
+            .from('tags')
+            .select('id, name')
+            .in('id', tagIds);
+          tags = (tagRows || []) as Array<{ id: number; name: string }>;
+        }
       }
 
       return {

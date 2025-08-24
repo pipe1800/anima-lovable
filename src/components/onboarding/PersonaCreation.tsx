@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Upload, Plus, User, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { createPersona, getUserPersonas, deletePersona, type Persona } from '@/data/personas/mutations';
+import { createPersona, deletePersona, type Persona } from '@/data/personas/mutations';
+import { Personas } from '@/data';
 import { useCurrentUser } from '@/hooks/useProfile';
 
 interface CurrentPersona {
@@ -36,7 +37,7 @@ const PersonaCreation = ({ onComplete, onSkip }: PersonaCreationProps) => {
   useEffect(() => {
     const loadPersonas = async () => {
       try {
-  const userPersonas = await getUserPersonas(user.id);
+  const userPersonas = await Personas.listUserPersonas(user.id);
         setPersonas(userPersonas);
       } catch (error) {
         console.error('Error loading personas:', error);

@@ -234,10 +234,11 @@ export const TutorialProvider: React.FC<TutorialProviderProps> = ({ children }) 
     }
   }, [isActive]);
 
-  // Update tutorial completion status
   const updateTutorialStatus = useCallback(async (userId: string, completed: boolean) => {
     try {
-      await Profile.updateTutorialStatus(userId, completed);
+      if (completed) {
+        await Profile.completeOnboarding(userId);
+      }
       console.log('🎓 Tutorial status updated in profiles:', completed);
     } catch (error) {
       console.error('Error updating tutorial status:', error);

@@ -19,8 +19,6 @@ import ChatHeader from './ChatHeader';
 import { ChatModeMismatchModal } from '@/components/character-creator/ChatModeMismatchModal';
 import { ChatModeChangeModal } from '@/components/character-creator/ChatModeChangeModal';
 import { useCharacterMemories } from '@/hooks/useCharacterMemories';
-import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
-import { getBestPersonaForNewChat } from '@/lib/user-preferences';
 import type { TrackedContext, Character } from '@/types/chat';
 import { getMemoryCostExplanation } from '@/lib/memory-cost-calculator';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -48,14 +46,18 @@ interface ChatLayoutProps {
   characterDetails?: any; // pre-fetched character details to avoid refetch
   creditsBalanceOverride?: number; // provided by page to avoid duplicate /credits queries
   globalSettingsOverride?: any; // provided by page to avoid duplicate global settings fetch
+  relationshipStage?: string | null; // NEW canonical relationship stage display
 }
 
-export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange, characterDetails: characterDetailsOverride, creditsBalanceOverride, globalSettingsOverride }: ChatLayoutProps) => {
+export const ChatLayout = ({ character, children, currentChatId, trackedContext, onContextUpdate, onPersonaChange, onWorldInfoChange, characterDetails: characterDetailsOverride, creditsBalanceOverride, globalSettingsOverride, relationshipStage }: ChatLayoutProps) => {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
-    // Sidebar state
+  // Sidebar state
   const [sidebarView, setSidebarView] = useState<'navigation' | 'context'>('navigation');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
+  // Auth (include profile for mobile header username)
+  const { user: currentUser, profile } = useAuth();
+
   // Listen for sidebar collapse events from AppSidebar
   useEffect(() => {
     const handleSidebarToggled = () => {
@@ -85,15 +87,14 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // const [pendingChatModeAfterGreeting, setPendingChatModeAfterGreeting] = useState<'storytelling' | 'companion' | null>(null);
   const queryClient = useQueryClient();
 
-  // Auth
-  const { user: currentUser } = useAuth();
-
   // Credits (skip if provided by parent)
   const { data: internalCreditsBalance = 0 } = useQuery({
     ...chatQueryConfigs.userCredits(currentUser?.id || ''),
     enabled: !!currentUser?.id && typeof creditsBalanceOverride !== 'number'
   });
   const creditsBalance = typeof creditsBalanceOverride === 'number' ? creditsBalanceOverride : internalCreditsBalance;
+  // Derive username for MobileHeader
+  const mobileUsername = profile?.username || currentUser?.email?.split('@')[0] || 'User';
 
   // Persona manager hook
   const { personas, selectedPersona, setSelectedPersona, showCreateModal, setShowCreateModal, showEditModal, setShowEditModal, personaToEdit, setPersonaToEdit, currentPersonaDraft, setCurrentPersonaDraft, createPersona: createPersonaAsync, deletePersona: deletePersonaAsync } = usePersonaManager(currentUser?.id, currentChatId);
@@ -188,7 +189,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // =========================
   // Character details
   const characterDetailsQuery = useQuery({
-    ...chatQueryConfigs.characterDetails(character.id),
+    ...chatQueryConfigs.characterSummary(character.id),
     enabled: !characterDetailsOverride, // skip if provided by parent
   });
   const characterDetails = useMemo(() => {
@@ -279,7 +280,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const handlePersonaSaved = async () => {
     if (!currentChatId || !currentUser) return;
     logger.debug('🔄 Reloading persona data after save for chat:', currentChatId);
-    queryClient.invalidateQueries({ queryKey: personaKeys.chatSelected(currentChatId) });
+    queryClient.invalidateQueries({ queryKey: personaKeys.context(currentUser?.id, currentChatId || null, true) });
   };
 
   const handleEditCharacter = () => {
@@ -605,61 +606,24 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   }, [currentChatId, onContextUpdate, characterDetailsOverride, character]);
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen-stable md:h-full bg-[#121212] relative overflow-hidden">
-      {/* Mobile Header */}
-      <div className="md:hidden">
-        <MobileHeader 
-          title="Chat" 
-          userCredits={creditsBalance}
-          username={currentUser?.email?.split('@')[0] || 'User'}
+    <div className="flex h-screen w-full overflow-hidden bg-[#121212]">
+      {sidebarView === 'navigation' ? (
+        <AppSidebar 
+          sidebarMode={sidebarView}
+          onToggleMode={handleSidebarModeToggle}
+          contextCount={contextCount}
         />
-      </div>
-
-      {/* Desktop Sidebar - Fixed Position */}
-      <div className={`hidden md:block fixed left-0 top-0 h-full z-40 transition-all duration-300 ${
-        sidebarCollapsed ? 'w-16' : 'w-64'
-      }`}>
-        {sidebarView === 'navigation' ? (
-          <AppSidebar 
-            sidebarMode={sidebarView}
-            onToggleMode={handleSidebarModeToggle}
-            contextCount={contextCount}
-            userCreditsOverride={creditsBalance}
-          />
-        ) : (
-          <ContextSidebar
-            context={trackedContext}
-            currentContext={trackedContext}
+      ) : (
+        <ContextSidebar
+          context={trackedContext as any}
             addonSettings={globalSettings}
-            character={character}
+            character={{ id: character.id, name: character.name, avatar_url: (character as any).avatar_url }}
             onBackToNav={() => setSidebarView('navigation')}
-            onOpenSettings={() => {
-              setRightPanelOpen(true);
-            }}
-          />
-        )}
-      </div>
-
-      {/* Main Chat Area */}
-      <div className={`flex-1 flex flex-col h-full relative transition-all duration-300 ${
-        sidebarCollapsed ? 'md:ml-16' : 'md:ml-64'
-      }`}>
-        <ChatHeader
-          character={character}
-          characterDetails={characterDetails}
-          creditsBalance={creditsBalance}
-          currentUser={currentUser}
-            isCreatingMemory={isCreatingMemory}
-          currentChatId={currentChatId}
-          onConfirmCreateMemory={handleCreateMemory}
-          onToggleRightPanel={handleRightPanelToggle}
-          isTutorialActive={isActive}
-          currentStep={currentStep}
-          startTutorial={startTutorial}
-          isMessageCountLoading={messageCountLoading}
-          messageCount={currentChatMessageCount}
-          getMemoryCostText={getMemoryCostExplanation}
         />
+      )}
+      <div className="flex flex-col flex-1 min-w-0">
+        <MobileHeader title={character.name} userCredits={creditsBalance} username={mobileUsername} showFavoriteIcon={false} />
+        <ChatHeader character={character} relationshipStage={relationshipStage} characterDetails={characterDetailsOverride || character} creditsBalance={creditsBalance} currentUser={currentUser} isCreatingMemory={isCreatingMemory} currentChatId={currentChatId} onConfirmCreateMemory={handleCreateMemory} onToggleRightPanel={() => setRightPanelOpen(!rightPanelOpen)} isTutorialActive={isActive} currentStep={currentStep} startTutorial={startTutorial} isMessageCountLoading={messageCountLoading} messageCount={currentChatMessageCount} getMemoryCostText={getMemoryCostExplanation} />
         <div className="flex-1 overflow-hidden" style={{ pointerEvents: disableInteractions ? 'none' : 'auto' }}>
           {children}
         </div>

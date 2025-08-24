@@ -317,6 +317,43 @@ export async function handleCreateWithGreeting(
         }
       }
     }
+    // After greeting message insertion but before return we attempt to seed relationship goals initial stage
+    try {
+      const relTmplResp = await supabase
+        .from('character_latent_profiles')
+        .select('relationship_goals')
+        .eq('character_id', character_id)
+        .maybeSingle();
+      const tmpl = relTmplResp.data?.relationship_goals;
+      if (tmpl && tmpl.enabled && Array.isArray(tmpl.path) && tmpl.path.length) {
+        const first = tmpl.path.find((g: any)=> g.order === 1) || tmpl.path[0];
+        if (first) {
+          const stageStr = `Stage 1/${tmpl.path.length}: ${first.label}${first.description ? ' - ' + first.description : ''}`;
+          try {
+            // Upsert chat_context relationship if not already set
+            await supabase.from('chat_context').upsert({
+              chat_id: chat.id,
+              user_id: user.id,
+              character_id,
+              current_context: { relationship: stageStr }
+            }, { onConflict: 'chat_id' });
+          } catch (e) { console.warn('rel.seed.context.fail', e); }
+          try {
+            // Force-enable global setting relationship_status so UI shows it
+            const gs = await supabase
+              .from('user_global_chat_settings')
+              .select('relationship_status')
+              .eq('user_id', user.id)
+              .maybeSingle();
+            if (gs.data && gs.data.relationship_status === false) {
+              await supabase.from('user_global_chat_settings').update({ relationship_status: true, updated_at: new Date().toISOString() }).eq('user_id', user.id);
+            }
+          } catch (e) { console.warn('rel.force.enable.fail', e); }
+        }
+      }
+    } catch (e) {
+      console.warn('rel.template.seed.fail', e);
+    }
 
     return {
       success: true,

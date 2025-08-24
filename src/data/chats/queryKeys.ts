@@ -1,5 +1,5 @@
 // Chat domain React Query keys & configs (moved from /queries)
-import { Chats, CharacterDetails, Billing } from '@/data';
+import { Chats, CharacterProfileView, Billing } from '@/data';
 import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
 import { supabase } from '@/db/client';
 
@@ -18,6 +18,7 @@ export const chatQueryKeys = {
     all: ['character'] as const,
     details: (characterId: string) => ['character', 'details', characterId] as const,
     settings: (characterId: string) => ['character', 'settings', characterId] as const,
+    summary: (characterId: string) => ['character', 'summary', characterId] as const,
   }
 } as const;
 
@@ -42,9 +43,34 @@ export const chatQueryConfigs = {
   }),
   characterDetails: (characterId: string) => ({
     queryKey: chatQueryKeys.character.details(characterId),
-    queryFn: () => CharacterDetails.getCharacterDetails(characterId),
+    queryFn: () => CharacterProfileView.getCharacterFullProfile(characterId),
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  }),
+  characterSummary: (characterId: string) => ({
+    queryKey: chatQueryKeys.character.summary(characterId),
+    queryFn: async () => {
+      const { data, error } = await CharacterProfileView.getPublicCharacterSummary(characterId);
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  }),
+  greetingSummary: (characterId: string) => ({
+    queryKey: ['character','greeting-summary', characterId] as const,
+    queryFn: async () => {
+      const { getCharacterGreetingSummary } = await import('@/data/characters/profileView');
+      const { data, error } = await getCharacterGreetingSummary(characterId);
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   }),
@@ -102,9 +128,11 @@ export const chatInvalidationHelpers = {
 export type ChatQueryKey =
   | ReturnType<typeof chatQueryKeys.chat.messages>
   | ReturnType<typeof chatQueryKeys.user.credits>
-  | ReturnType<typeof chatQueryKeys.character.details>;
+  | ReturnType<typeof chatQueryKeys.character.details>
+  | ReturnType<typeof chatQueryKeys.character.summary>;
 
 export type ChatQueryConfig =
   | ReturnType<typeof chatQueryConfigs.chatMessages>
   | ReturnType<typeof chatQueryConfigs.userCredits>
-  | ReturnType<typeof chatQueryConfigs.characterDetails>;
+  | ReturnType<typeof chatQueryConfigs.characterDetails>
+  | ReturnType<typeof chatQueryConfigs.characterSummary>;

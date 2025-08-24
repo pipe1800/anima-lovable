@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Auth } from '@/data';
-import { User } from '@supabase/supabase-js';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface OnboardingGuardProps {
   children: React.ReactNode;
@@ -9,55 +8,24 @@ interface OnboardingGuardProps {
 }
 
 const OnboardingGuard = ({ children, requireOnboardingComplete = false }: OnboardingGuardProps) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, profile, loading, profileReady } = useAuth() as any;
+  const isCompleted = profile?.onboarding_completed;
+  const path = location.pathname;
 
   useEffect(() => {
-    // Check for existing session first via data layer
-    Auth.getSession().then(({ data: { session } }: any) => {
-      if (session?.user) {
-        setUser(session.user);
-        checkOnboardingStatus(session.user);
-      } else {
-        navigate('/auth');
-      }
-      setLoading(false);
-    });
+    if (loading) return;
+    if (!user) { navigate('/auth'); return; }
+    if (!profileReady) return; // still waiting for first attempt
+    // Only act on onboarding status if profile object is present (avoid null -> false race)
+    if (path === '/onboarding' && profile && isCompleted) { navigate('/dashboard'); return; }
+    if (requireOnboardingComplete && profile && !isCompleted && path !== '/onboarding') { navigate('/onboarding'); }
+  }, [loading, user, profile, isCompleted, profileReady, path, requireOnboardingComplete, navigate]);
 
-    // Set up auth state listener via data layer
-    const { data: { subscription } } = Auth.onAuthStateChange(
-      (event: any, session: any) => {
-        if (session?.user) {
-          setUser(session.user);
-          checkOnboardingStatus(session.user);
-        } else if (event !== 'INITIAL_SESSION') {
-          navigate('/auth');
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, [navigate, location.pathname]);
-
-  const checkOnboardingStatus = async (user: User) => {
-    const isCompleted = user.user_metadata?.onboarding_completed;
-    
-    // If user is on onboarding page but has completed it, redirect to dashboard
-    if (location.pathname === '/onboarding' && isCompleted) {
-      navigate('/dashboard');
-      return;
-    }
-
-    // If user is NOT on onboarding page and requires completion but hasn't completed it
-    if (requireOnboardingComplete && !isCompleted && location.pathname !== '/onboarding') {
-      navigate('/onboarding');
-      return;
-    }
-  };
-
-  if (loading) {
+  // Previous logic blocked whenever profile was null OR not ready, causing permanent loading if fetch failed.
+  // We now block ONLY while: initial auth still loading OR we have a user but the first profile attempt not completed.
+  if (loading || (user && !profileReady)) {
     return (
       <div className="min-h-screen bg-[#121212] flex items-center justify-center">
         <div className="text-white">Loading...</div>
@@ -73,7 +41,7 @@ const OnboardingGuard = ({ children, requireOnboardingComplete = false }: Onboar
     );
   }
 
-  return <>{children}</>;
+  return <>{children}</>; 
 };
 
 export default OnboardingGuard;

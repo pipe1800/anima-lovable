@@ -1,9 +1,11 @@
 import { supabase } from '@/db/client';
+import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
 
 // CONSOLIDATED CHAT DOMAIN NOTE (2025-08-21):
-// - chat/context.ts deprecated; its RPC-based context loader is now exposed here as getChatContextRPC
-// - messages/queries.ts deprecated; updateMessageContent moved here
-// After removing legacy files, only use exports from this module for chat data access.
+// - getChatContextRPC REMOVED (use getChatSnapshot for initial load or getChatContext / getChatContextEnhanced)
+// - getChatMessagesForStats REMOVED (stats now provided by getChatSnapshot)
+// - messages/queries.ts deprecated; updateMessageContent centralized here
+// - Use getChatSnapshot to minimize round trips (messages + context + mode + summary stats)
 
 export const deleteChat = async (chatId: string, userId: string) => {
   try {
@@ -102,14 +104,42 @@ export const getChatMode = async (chatId: string, userId: string) => {
   return { data, error };
 };
 
-// RPC variant (from deprecated chat/context.ts) retained for specialized context assembly logic
-export const getChatContextRPC = async (chatId: string, userId: string, characterId: string) => {
-  const { data, error } = await (supabase as any).rpc('get_chat_context', {
-    p_chat_id: chatId,
-    p_user_id: userId,
-    p_character_id: characterId,
-  });
-  return { data: (data as any[]) || null, error };
+// Enhanced context accessor (returns both raw row and converted tracked context)
+export const getChatContextEnhanced = async (chatId: string, userId: string, characterId: string) => {
+  const { data, error } = await getChatContext({ chatId, userId, characterId });
+  const trackedContext = data?.current_context ? convertDatabaseContextToTrackedContext(data.current_context) : null;
+  return { data, trackedContext, error };
+};
+
+// Snapshot RPC: combines first page of messages + context + mode + summary stats
+// Returns raw JSON from RPC. Frontend mapping performed in hooks (e.g., useChatUnified).
+export interface ChatSnapshotResult {
+  chat_id: string;
+  chat_mode: string | null;
+  current_context: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  messages: Array<{ id: string; content: string | null; is_ai_message: boolean | null; created_at: string; message_order: number; current_context?: any; }>;
+  has_more: boolean;
+  last_summary_at: number;
+  ai_messages_after_summary: number;
+  page_limit: number;
+  before_order: number | null;
+}
+
+export const getChatSnapshot = async (chatId: string, userId: string, characterId: string, options?: { limit?: number; beforeOrder?: number | null; }) => {
+  if (!chatId || !userId || !characterId) return { data: null, error: new Error('Missing parameters') };
+  try {
+    const { data, error } = await (supabase as any).rpc('get_chat_snapshot', {
+      p_chat_id: chatId,
+      p_user_id: userId,
+      p_character_id: characterId,
+      p_limit: options?.limit ?? 25,
+      p_before_order: options?.beforeOrder ?? null
+    });
+    if (error) return { data: null, error };
+    return { data: data as ChatSnapshotResult, error: null };
+  } catch (err) {
+    return { data: null, error: err };
+  }
 };
 
 // Existing direct table fetch (canonical lightweight accessor)
@@ -124,16 +154,6 @@ export const getChatContext = async (args: { chatId: string; userId: string; cha
     .eq('character_id', characterId)
     .maybeSingle();
   return { data, error };
-};
-
-// NEW (debug): minimal fields for message stats panel
-export const getChatMessagesForStats = async (chatId: string) => {
-  if (!chatId) return { data: [], error: null };
-  return supabase
-    .from('messages')
-    .select('is_ai_message, content, message_order')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: true });
 };
 
 // Centralized message content update (moved from messages/queries.ts)
@@ -169,5 +189,5 @@ export const getLatestAutoSummary = async (chatId: string) => {
 };
 
 // NOTE: Ensure any imports referencing deprecated paths are updated:
-//  - '@/data/chat/context' -> use getChatContext or getChatContextRPC from '@/data/chats/queries'
+//  - '@/data/chat/context' -> use getChatContext or getChatSnapshot from '@/data/chats/queries'
 //  - '@/data/messages/queries' -> use updateMessageContent from '@/data/chats/queries'

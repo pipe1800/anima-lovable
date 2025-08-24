@@ -1,10 +1,28 @@
-
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TrendingUp, Users, MessageSquare, Zap } from 'lucide-react';
-import { useProfileStats } from '@/hooks/useProfile';
+import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/contexts/AuthContext';
+import { Profile as ProfileQueries } from '@/data';
 
 export const ProfileStats = () => {
-  const { data: stats, isLoading } = useProfileStats();
+  const { user } = useAuth();
+  const { data: statsData, isLoading } = useQuery({
+    queryKey: ['profile-stats-overview', user?.id],
+    queryFn: async () => {
+      if (!user) throw new Error('No authenticated user');
+      const { data, error } = await ProfileQueries.getUserBootstrap(user.id);
+      if (error) throw error;
+      const counts = (data as any)?.counts || { chats:0, characters:0, favorites:0, personas:0 };
+      return {
+        characterCount: counts.characters,
+        chatCount: counts.chats,
+        creditsBalance: (data as any)?.credits ?? 0,
+        followersCount: 0,
+      };
+    },
+    enabled: !!user?.id,
+    staleTime: 1000 * 60 * 2,
+  });
 
   if (isLoading) {
     return (
@@ -26,25 +44,25 @@ export const ProfileStats = () => {
   const statCards = [
     {
       title: 'Characters Created',
-      value: stats?.characterCount || 0,
+      value: statsData?.characterCount || 0,
       icon: Users,
       color: 'text-[#FF7A00]'
     },
     {
       title: 'Total Conversations',
-      value: stats?.chatCount || 0,
+      value: statsData?.chatCount || 0,
       icon: MessageSquare,
       color: 'text-blue-400'
     },
     {
       title: 'Credits Balance',
-      value: stats?.creditsBalance || 0,
+      value: statsData?.creditsBalance || 0,
       icon: Zap,
       color: 'text-yellow-400'
     },
     {
       title: 'Followers',
-      value: stats?.followersCount || 0,
+      value: statsData?.followersCount || 0,
       icon: TrendingUp,
       color: 'text-green-400'
     }

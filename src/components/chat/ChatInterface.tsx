@@ -98,6 +98,25 @@ const ChatInterface = ({
   const greetingVariants = React.useMemo(() => buildGreetingVariants((characterDetails as any) || (character as any)), [characterDetails, character]);
   const hasMultipleGreetings = greetingVariants.length > 1;
 
+  // Lazy fetch character definitions if missing (defense-in-depth)
+  useEffect(() => {
+    if (existingChatId) return;
+    if (greetingVariants.length > 0) return; // already have
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getCharacterGreetingSummary } = await import('@/data/characters/profileView');
+        const { data } = await getCharacterGreetingSummary(character.id);
+        if (!cancelled && data?.character_definitions) {
+          // mutate local prop-like cache by forcing state via ref indirection: wrap into temp object
+          (window as any).__chatCharDefs = (window as any).__chatCharDefs || {};
+          (window as any).__chatCharDefs[character.id] = data.character_definitions;
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [existingChatId, greetingVariants.length, character.id]);
+
   // Input ref now supports textarea for multi-line user input (chat-like behavior)
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const { toast } = useToast();
@@ -191,6 +210,11 @@ const ChatInterface = ({
   }, [messages.length, currentChatId]);
   // Reintroduce effectiveTrackedContext (was removed during duplicate cleanup)
   const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
+  useEffect(() => {
+    if (currentChatId && effectiveTrackedContext?.relationshipStatus && effectiveTrackedContext.relationshipStatus !== 'No context') {
+      try { window.dispatchEvent(new CustomEvent('chat-context-updated', { detail: { chatId: currentChatId, context: { relationship: effectiveTrackedContext.relationshipStatus } } })); } catch {}
+    }
+  }, [effectiveTrackedContext?.relationshipStatus, currentChatId]);
   // Derived: whether any user message exists in this chat (used to lock greeting picker)
   const hasUserMessage = React.useMemo(() => {
     if (!messages || messages.length === 0) return false;

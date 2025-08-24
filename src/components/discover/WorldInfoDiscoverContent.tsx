@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { WorldInfoGrid } from './WorldInfoGrid';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDashboardData, preloadDashboardData } from '@/hooks/useDashboard';
+import { preloadDashboardData } from '@/hooks/useDashboard';
+import { useDashboardOverview } from '@/hooks/useDashboardProgressive';
 import { useQueryClient } from '@tanstack/react-query';
 import { NSFWToggle } from '@/components/NSFWToggle';
 import { useNSFW } from '@/contexts/NSFWContext';
@@ -29,7 +30,7 @@ import { useNavigate } from 'react-router-dom';
 export function WorldInfoDiscoverContent() {
   const { user, profile } = useAuth();
   const { nsfwEnabled } = useNSFW();
-  const { data: dashboardData } = useDashboardData();
+  const { data: dashboardData } = useDashboardOverview();
   const userCredits = dashboardData?.credits || 0;
   const username = profile?.username || user?.email?.split('@')[0] || 'User';
   const queryClient = useQueryClient();

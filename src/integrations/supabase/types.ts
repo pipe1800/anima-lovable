@@ -12,6 +12,710 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "12.2.3 (519615d)"
   }
+  auth: {
+    Tables: {
+      audit_log_entries: {
+        Row: {
+          created_at: string | null
+          id: string
+          instance_id: string | null
+          ip_address: string
+          payload: Json | null
+        }
+        Insert: {
+          created_at?: string | null
+          id: string
+          instance_id?: string | null
+          ip_address?: string
+          payload?: Json | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          instance_id?: string | null
+          ip_address?: string
+          payload?: Json | null
+        }
+        Relationships: []
+      }
+      flow_state: {
+        Row: {
+          auth_code: string
+          auth_code_issued_at: string | null
+          authentication_method: string
+          code_challenge: string
+          code_challenge_method: Database["auth"]["Enums"]["code_challenge_method"]
+          created_at: string | null
+          id: string
+          provider_access_token: string | null
+          provider_refresh_token: string | null
+          provider_type: string
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          auth_code: string
+          auth_code_issued_at?: string | null
+          authentication_method: string
+          code_challenge: string
+          code_challenge_method: Database["auth"]["Enums"]["code_challenge_method"]
+          created_at?: string | null
+          id: string
+          provider_access_token?: string | null
+          provider_refresh_token?: string | null
+          provider_type: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          auth_code?: string
+          auth_code_issued_at?: string | null
+          authentication_method?: string
+          code_challenge?: string
+          code_challenge_method?: Database["auth"]["Enums"]["code_challenge_method"]
+          created_at?: string | null
+          id?: string
+          provider_access_token?: string | null
+          provider_refresh_token?: string | null
+          provider_type?: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      identities: {
+        Row: {
+          created_at: string | null
+          email: string | null
+          id: string
+          identity_data: Json
+          last_sign_in_at: string | null
+          provider: string
+          provider_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          identity_data: Json
+          last_sign_in_at?: string | null
+          provider: string
+          provider_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          identity_data?: Json
+          last_sign_in_at?: string | null
+          provider?: string
+          provider_id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "identities_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      instances: {
+        Row: {
+          created_at: string | null
+          id: string
+          raw_base_config: string | null
+          updated_at: string | null
+          uuid: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id: string
+          raw_base_config?: string | null
+          updated_at?: string | null
+          uuid?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          raw_base_config?: string | null
+          updated_at?: string | null
+          uuid?: string | null
+        }
+        Relationships: []
+      }
+      mfa_amr_claims: {
+        Row: {
+          authentication_method: string
+          created_at: string
+          id: string
+          session_id: string
+          updated_at: string
+        }
+        Insert: {
+          authentication_method: string
+          created_at: string
+          id: string
+          session_id: string
+          updated_at: string
+        }
+        Update: {
+          authentication_method?: string
+          created_at?: string
+          id?: string
+          session_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mfa_amr_claims_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mfa_challenges: {
+        Row: {
+          created_at: string
+          factor_id: string
+          id: string
+          ip_address: unknown
+          otp_code: string | null
+          verified_at: string | null
+          web_authn_session_data: Json | null
+        }
+        Insert: {
+          created_at: string
+          factor_id: string
+          id: string
+          ip_address: unknown
+          otp_code?: string | null
+          verified_at?: string | null
+          web_authn_session_data?: Json | null
+        }
+        Update: {
+          created_at?: string
+          factor_id?: string
+          id?: string
+          ip_address?: unknown
+          otp_code?: string | null
+          verified_at?: string | null
+          web_authn_session_data?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mfa_challenges_auth_factor_id_fkey"
+            columns: ["factor_id"]
+            isOneToOne: false
+            referencedRelation: "mfa_factors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mfa_factors: {
+        Row: {
+          created_at: string
+          factor_type: Database["auth"]["Enums"]["factor_type"]
+          friendly_name: string | null
+          id: string
+          last_challenged_at: string | null
+          phone: string | null
+          secret: string | null
+          status: Database["auth"]["Enums"]["factor_status"]
+          updated_at: string
+          user_id: string
+          web_authn_aaguid: string | null
+          web_authn_credential: Json | null
+        }
+        Insert: {
+          created_at: string
+          factor_type: Database["auth"]["Enums"]["factor_type"]
+          friendly_name?: string | null
+          id: string
+          last_challenged_at?: string | null
+          phone?: string | null
+          secret?: string | null
+          status: Database["auth"]["Enums"]["factor_status"]
+          updated_at: string
+          user_id: string
+          web_authn_aaguid?: string | null
+          web_authn_credential?: Json | null
+        }
+        Update: {
+          created_at?: string
+          factor_type?: Database["auth"]["Enums"]["factor_type"]
+          friendly_name?: string | null
+          id?: string
+          last_challenged_at?: string | null
+          phone?: string | null
+          secret?: string | null
+          status?: Database["auth"]["Enums"]["factor_status"]
+          updated_at?: string
+          user_id?: string
+          web_authn_aaguid?: string | null
+          web_authn_credential?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mfa_factors_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      one_time_tokens: {
+        Row: {
+          created_at: string
+          id: string
+          relates_to: string
+          token_hash: string
+          token_type: Database["auth"]["Enums"]["one_time_token_type"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          relates_to: string
+          token_hash: string
+          token_type: Database["auth"]["Enums"]["one_time_token_type"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          relates_to?: string
+          token_hash?: string
+          token_type?: Database["auth"]["Enums"]["one_time_token_type"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "one_time_tokens_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      refresh_tokens: {
+        Row: {
+          created_at: string | null
+          id: number
+          instance_id: string | null
+          parent: string | null
+          revoked: boolean | null
+          session_id: string | null
+          token: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: number
+          instance_id?: string | null
+          parent?: string | null
+          revoked?: boolean | null
+          session_id?: string | null
+          token?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: number
+          instance_id?: string | null
+          parent?: string | null
+          revoked?: boolean | null
+          session_id?: string | null
+          token?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "refresh_tokens_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      saml_providers: {
+        Row: {
+          attribute_mapping: Json | null
+          created_at: string | null
+          entity_id: string
+          id: string
+          metadata_url: string | null
+          metadata_xml: string
+          name_id_format: string | null
+          sso_provider_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          attribute_mapping?: Json | null
+          created_at?: string | null
+          entity_id: string
+          id: string
+          metadata_url?: string | null
+          metadata_xml: string
+          name_id_format?: string | null
+          sso_provider_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          attribute_mapping?: Json | null
+          created_at?: string | null
+          entity_id?: string
+          id?: string
+          metadata_url?: string | null
+          metadata_xml?: string
+          name_id_format?: string | null
+          sso_provider_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saml_providers_sso_provider_id_fkey"
+            columns: ["sso_provider_id"]
+            isOneToOne: false
+            referencedRelation: "sso_providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      saml_relay_states: {
+        Row: {
+          created_at: string | null
+          flow_state_id: string | null
+          for_email: string | null
+          id: string
+          redirect_to: string | null
+          request_id: string
+          sso_provider_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          flow_state_id?: string | null
+          for_email?: string | null
+          id: string
+          redirect_to?: string | null
+          request_id: string
+          sso_provider_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          flow_state_id?: string | null
+          for_email?: string | null
+          id?: string
+          redirect_to?: string | null
+          request_id?: string
+          sso_provider_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "saml_relay_states_flow_state_id_fkey"
+            columns: ["flow_state_id"]
+            isOneToOne: false
+            referencedRelation: "flow_state"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "saml_relay_states_sso_provider_id_fkey"
+            columns: ["sso_provider_id"]
+            isOneToOne: false
+            referencedRelation: "sso_providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      schema_migrations: {
+        Row: {
+          version: string
+        }
+        Insert: {
+          version: string
+        }
+        Update: {
+          version?: string
+        }
+        Relationships: []
+      }
+      sessions: {
+        Row: {
+          aal: Database["auth"]["Enums"]["aal_level"] | null
+          created_at: string | null
+          factor_id: string | null
+          id: string
+          ip: unknown | null
+          not_after: string | null
+          refreshed_at: string | null
+          tag: string | null
+          updated_at: string | null
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          aal?: Database["auth"]["Enums"]["aal_level"] | null
+          created_at?: string | null
+          factor_id?: string | null
+          id: string
+          ip?: unknown | null
+          not_after?: string | null
+          refreshed_at?: string | null
+          tag?: string | null
+          updated_at?: string | null
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          aal?: Database["auth"]["Enums"]["aal_level"] | null
+          created_at?: string | null
+          factor_id?: string | null
+          id?: string
+          ip?: unknown | null
+          not_after?: string | null
+          refreshed_at?: string | null
+          tag?: string | null
+          updated_at?: string | null
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sso_domains: {
+        Row: {
+          created_at: string | null
+          domain: string
+          id: string
+          sso_provider_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          domain: string
+          id: string
+          sso_provider_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          domain?: string
+          id?: string
+          sso_provider_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sso_domains_sso_provider_id_fkey"
+            columns: ["sso_provider_id"]
+            isOneToOne: false
+            referencedRelation: "sso_providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sso_providers: {
+        Row: {
+          created_at: string | null
+          id: string
+          resource_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id: string
+          resource_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          resource_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      users: {
+        Row: {
+          aud: string | null
+          banned_until: string | null
+          confirmation_sent_at: string | null
+          confirmation_token: string | null
+          confirmed_at: string | null
+          created_at: string | null
+          deleted_at: string | null
+          email: string | null
+          email_change: string | null
+          email_change_confirm_status: number | null
+          email_change_sent_at: string | null
+          email_change_token_current: string | null
+          email_change_token_new: string | null
+          email_confirmed_at: string | null
+          encrypted_password: string | null
+          id: string
+          instance_id: string | null
+          invited_at: string | null
+          is_anonymous: boolean
+          is_sso_user: boolean
+          is_super_admin: boolean | null
+          last_sign_in_at: string | null
+          phone: string | null
+          phone_change: string | null
+          phone_change_sent_at: string | null
+          phone_change_token: string | null
+          phone_confirmed_at: string | null
+          raw_app_meta_data: Json | null
+          raw_user_meta_data: Json | null
+          reauthentication_sent_at: string | null
+          reauthentication_token: string | null
+          recovery_sent_at: string | null
+          recovery_token: string | null
+          role: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          aud?: string | null
+          banned_until?: string | null
+          confirmation_sent_at?: string | null
+          confirmation_token?: string | null
+          confirmed_at?: string | null
+          created_at?: string | null
+          deleted_at?: string | null
+          email?: string | null
+          email_change?: string | null
+          email_change_confirm_status?: number | null
+          email_change_sent_at?: string | null
+          email_change_token_current?: string | null
+          email_change_token_new?: string | null
+          email_confirmed_at?: string | null
+          encrypted_password?: string | null
+          id: string
+          instance_id?: string | null
+          invited_at?: string | null
+          is_anonymous?: boolean
+          is_sso_user?: boolean
+          is_super_admin?: boolean | null
+          last_sign_in_at?: string | null
+          phone?: string | null
+          phone_change?: string | null
+          phone_change_sent_at?: string | null
+          phone_change_token?: string | null
+          phone_confirmed_at?: string | null
+          raw_app_meta_data?: Json | null
+          raw_user_meta_data?: Json | null
+          reauthentication_sent_at?: string | null
+          reauthentication_token?: string | null
+          recovery_sent_at?: string | null
+          recovery_token?: string | null
+          role?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          aud?: string | null
+          banned_until?: string | null
+          confirmation_sent_at?: string | null
+          confirmation_token?: string | null
+          confirmed_at?: string | null
+          created_at?: string | null
+          deleted_at?: string | null
+          email?: string | null
+          email_change?: string | null
+          email_change_confirm_status?: number | null
+          email_change_sent_at?: string | null
+          email_change_token_current?: string | null
+          email_change_token_new?: string | null
+          email_confirmed_at?: string | null
+          encrypted_password?: string | null
+          id?: string
+          instance_id?: string | null
+          invited_at?: string | null
+          is_anonymous?: boolean
+          is_sso_user?: boolean
+          is_super_admin?: boolean | null
+          last_sign_in_at?: string | null
+          phone?: string | null
+          phone_change?: string | null
+          phone_change_sent_at?: string | null
+          phone_change_token?: string | null
+          phone_confirmed_at?: string | null
+          raw_app_meta_data?: Json | null
+          raw_user_meta_data?: Json | null
+          reauthentication_sent_at?: string | null
+          reauthentication_token?: string | null
+          recovery_sent_at?: string | null
+          recovery_token?: string | null
+          role?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      email: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      jwt: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      role: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      uid: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+    }
+    Enums: {
+      aal_level: "aal1" | "aal2" | "aal3"
+      code_challenge_method: "s256" | "plain"
+      factor_status: "unverified" | "verified"
+      factor_type: "totp" | "webauthn" | "phone"
+      one_time_token_type:
+        | "confirmation_token"
+        | "reauthentication_token"
+        | "recovery_token"
+        | "email_change_token_new"
+        | "email_change_token_current"
+        | "phone_change_token"
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   billing: {
     Tables: {
       credit_ledger: {
@@ -348,7 +1052,6 @@ export type Database = {
           greeting: string | null
           initial_addon_context: Json | null
           initial_addon_context_enabled: boolean
-          model_id: string | null
           personality_summary: string
           scenario: Json | null
         }
@@ -358,7 +1061,6 @@ export type Database = {
           greeting?: string | null
           initial_addon_context?: Json | null
           initial_addon_context_enabled?: boolean
-          model_id?: string | null
           personality_summary: string
           scenario?: Json | null
         }
@@ -368,7 +1070,6 @@ export type Database = {
           greeting?: string | null
           initial_addon_context?: Json | null
           initial_addon_context_enabled?: boolean
-          model_id?: string | null
           personality_summary?: string
           scenario?: Json | null
         }
@@ -406,6 +1107,100 @@ export type Database = {
             foreignKeyName: "character_favorites_character_id_fkey"
             columns: ["character_id"]
             isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      character_latent_profile_history: {
+        Row: {
+          character_id: string
+          confidence_avg: number | null
+          created_at: string
+          extraction_version: string
+          id: string
+          populated_domains: number
+          profile: Json
+          relationship_goals: Json | null
+          source_card_hash: string
+          token_cost: number | null
+        }
+        Insert: {
+          character_id: string
+          confidence_avg?: number | null
+          created_at?: string
+          extraction_version: string
+          id?: string
+          populated_domains: number
+          profile: Json
+          relationship_goals?: Json | null
+          source_card_hash: string
+          token_cost?: number | null
+        }
+        Update: {
+          character_id?: string
+          confidence_avg?: number | null
+          created_at?: string
+          extraction_version?: string
+          id?: string
+          populated_domains?: number
+          profile?: Json
+          relationship_goals?: Json | null
+          source_card_hash?: string
+          token_cost?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "character_latent_profile_history_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "characters"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      character_latent_profiles: {
+        Row: {
+          character_id: string
+          confidence_avg: number | null
+          created_at: string
+          extraction_version: string
+          populated_domains: number
+          profile: Json
+          relationship_goals: Json | null
+          source_card_hash: string
+          token_cost: number | null
+          updated_at: string
+        }
+        Insert: {
+          character_id: string
+          confidence_avg?: number | null
+          created_at?: string
+          extraction_version: string
+          populated_domains: number
+          profile: Json
+          relationship_goals?: Json | null
+          source_card_hash: string
+          token_cost?: number | null
+          updated_at?: string
+        }
+        Update: {
+          character_id?: string
+          confidence_avg?: number | null
+          created_at?: string
+          extraction_version?: string
+          populated_domains?: number
+          profile?: Json
+          relationship_goals?: Json | null
+          source_card_hash?: string
+          token_cost?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "character_latent_profiles_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: true
             referencedRelation: "characters"
             referencedColumns: ["id"]
           },
@@ -1018,6 +1813,63 @@ export type Database = {
         }
         Relationships: []
       }
+      user_character_relationship_progress: {
+        Row: {
+          character_id: string
+          created_at: string
+          state: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          character_id: string
+          created_at?: string
+          state?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          character_id?: string
+          created_at?: string
+          state?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_character_relationship_signals: {
+        Row: {
+          character_id: string
+          created_at: string
+          id: string
+          kind: string
+          polarity: number
+          source_message_id: string | null
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          character_id: string
+          created_at?: string
+          id?: string
+          kind: string
+          polarity: number
+          source_message_id?: string | null
+          user_id: string
+          weight: number
+        }
+        Update: {
+          character_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          polarity?: number
+          source_message_id?: string | null
+          user_id?: string
+          weight?: number
+        }
+        Relationships: []
+      }
       user_character_settings: {
         Row: {
           character_id: string
@@ -1427,6 +2279,10 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: undefined
       }
+      confirm_relationship_regression: {
+        Args: { p_character_id: string; p_user_id: string }
+        Returns: Json
+      }
       create_chat_with_greeting: {
         Args: {
           p_character_id: string
@@ -1464,6 +2320,14 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: undefined
       }
+      evaluate_relationship_progress: {
+        Args: { p_character_id: string; p_user_id: string }
+        Returns: Json
+      }
+      fetch_world_info_full: {
+        Args: { p_world_info_id: string }
+        Returns: Json
+      }
       get_billing_catalog: {
         Args: { p_user_id: string }
         Returns: Json
@@ -1485,6 +2349,31 @@ export type Database = {
           current_context: Json
         }[]
       }
+      get_chat_messages: {
+        Args: { p_before_order?: number; p_chat_id: string; p_limit?: number }
+        Returns: {
+          author_id: string
+          chat_id: string
+          content: string
+          context_updates: Json
+          created_at: string
+          current_context: Json
+          has_more: boolean
+          id: string
+          is_ai_message: boolean
+          message_order: number
+        }[]
+      }
+      get_chat_snapshot: {
+        Args: {
+          p_before_order?: number
+          p_character_id: string
+          p_chat_id: string
+          p_limit?: number
+          p_user_id: string
+        }
+        Returns: Json
+      }
       get_credit_history: {
         Args: { p_limit?: number; p_offset?: number; p_user_id: string }
         Returns: {
@@ -1496,6 +2385,61 @@ export type Database = {
           transaction_type: string
         }[]
       }
+      get_public_character_cards: {
+        Args: {
+          p_creator_username?: string
+          p_include_nsfw?: boolean
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_sort?: string
+          p_tag_ids?: number[]
+        }
+        Returns: {
+          avatar_url: string
+          chats_count: number
+          created_at: string
+          creator: Json
+          creator_id: string
+          favorites_count: number
+          id: string
+          interaction_count: number
+          likes_count: number
+          name: string
+          short_description: string
+          tags: Json[]
+          total_count: number
+        }[]
+      }
+      get_public_profile_overview: {
+        Args: { p_target_user_id: string }
+        Returns: Json
+      }
+      get_user_billing_overview: {
+        Args: { p_purchases_limit?: number; p_user_id: string }
+        Returns: Json
+      }
+      get_user_bootstrap: {
+        Args: { p_user_id: string }
+        Returns: Json
+      }
+      get_user_chats: {
+        Args: { p_limit?: number; p_offset?: number }
+        Returns: {
+          character_avatar_url: string
+          character_id: string
+          character_name: string
+          chat_created_at: string
+          chat_id: string
+          chat_updated_at: string
+          last_message_content: string
+          last_message_created_at: string
+          last_message_id: string
+          last_message_is_ai: boolean
+          message_count: number
+          total_count: number
+        }[]
+      }
       get_user_credit_purchases: {
         Args: { p_limit?: number; p_user_id: string }
         Returns: Json
@@ -1504,6 +2448,22 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: number
       }
+      get_user_dashboard_overview: {
+        Args: {
+          p_chars_limit?: number
+          p_favs_limit?: number
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      get_user_persona_context: {
+        Args: {
+          p_chat_id?: string
+          p_include_list?: boolean
+          p_user_id?: string
+        }
+        Returns: Json
+      }
       get_user_subscription_with_plan: {
         Args: { p_user_id: string }
         Returns: Json
@@ -1511,6 +2471,26 @@ export type Database = {
       grant_monthly_allowances: {
         Args: Record<PropertyKey, never>
         Returns: number
+      }
+      gtrgm_compress: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      gtrgm_decompress: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      gtrgm_in: {
+        Args: { "": unknown }
+        Returns: unknown
+      }
+      gtrgm_options: {
+        Args: { "": unknown }
+        Returns: undefined
+      }
+      gtrgm_out: {
+        Args: { "": unknown }
+        Returns: unknown
       }
       halfvec_avg: {
         Args: { "": number[] }
@@ -1568,6 +2548,21 @@ export type Database = {
         Args: { "": string } | { "": unknown } | { "": unknown }
         Returns: string
       }
+      list_public_world_infos: {
+        Args: {
+          p_exclude_nsfw?: boolean
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_sort?: string
+          p_tag_ids?: number[]
+        }
+        Returns: Json
+      }
+      list_user_world_infos: {
+        Args: Record<PropertyKey, never> | { p_user_id: string }
+        Returns: Json
+      }
       mark_memories_injected: {
         Args: { mem_ids: string[] }
         Returns: undefined
@@ -1579,6 +2574,17 @@ export type Database = {
       prune_stale_subscription_nonces: {
         Args: Record<PropertyKey, never>
         Returns: undefined
+      }
+      record_relationship_signal: {
+        Args: {
+          p_character_id: string
+          p_kind: string
+          p_polarity: number
+          p_source_message_id?: string
+          p_user_id: string
+          p_weight: number
+        }
+        Returns: string
       }
       related_characters: {
         Args: { current_character_id: string; tag_ids: number[] }
@@ -1592,6 +2598,25 @@ export type Database = {
           short_description: string
           tags: Json
         }[]
+      }
+      resolve_tag_names: {
+        Args: { p_names: string[] }
+        Returns: {
+          id: number
+          name: string
+        }[]
+      }
+      set_limit: {
+        Args: { "": number }
+        Returns: number
+      }
+      show_limit: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
+      show_trgm: {
+        Args: { "": string }
+        Returns: string[]
       }
       sparsevec_out: {
         Args: { "": unknown }
@@ -1609,6 +2634,22 @@ export type Database = {
         Args: { p_world_info_id: string }
         Returns: Json
       }
+      upsert_character_latent_profile: {
+        Args: {
+          p_character_id: string
+          p_confidence_avg: number
+          p_extraction_version: string
+          p_populated_domains: number
+          p_profile: Json
+          p_source_card_hash: string
+          p_token_cost?: number
+        }
+        Returns: undefined
+      }
+      upsert_relationship_goals: {
+        Args: { p_character_id: string; p_relationship_goals: Json }
+        Returns: Json
+      }
       upsert_subscription: {
         Args: {
           p_current_period_end?: string
@@ -1619,6 +2660,10 @@ export type Database = {
           p_user_id: string
         }
         Returns: string
+      }
+      user_world_infos_list: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
       }
       vector_avg: {
         Args: { "": number[] }
@@ -1643,6 +2688,18 @@ export type Database = {
       vector_typmod_in: {
         Args: { "": unknown[] }
         Returns: number
+      }
+      zz_jsonb_noarg: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      zz_list_user_world_infos: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      zz_test_rpc: {
+        Args: Record<PropertyKey, never>
+        Returns: string
       }
     }
     Enums: {
@@ -1772,6 +2829,22 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  auth: {
+    Enums: {
+      aal_level: ["aal1", "aal2", "aal3"],
+      code_challenge_method: ["s256", "plain"],
+      factor_status: ["unverified", "verified"],
+      factor_type: ["totp", "webauthn", "phone"],
+      one_time_token_type: [
+        "confirmation_token",
+        "reauthentication_token",
+        "recovery_token",
+        "email_change_token_new",
+        "email_change_token_current",
+        "phone_change_token",
+      ],
+    },
+  },
   billing: {
     Enums: {
       credit_transaction_type: [

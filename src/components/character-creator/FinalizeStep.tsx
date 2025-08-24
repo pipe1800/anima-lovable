@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { User, MessageCircle, Heart, Sparkles, Globe, Link, Lock, Loader2 } from 'lucide-react';
-import { Billing, Tags } from '@/data';
+import { Tags } from '@/data';
 import type { CharacterFormData } from '@/hooks/useCharacterCreation';
 import { estimateCreatorTokenUsage } from '@/utils/tokenCounter';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog as UIDialog, DialogContent as UIDialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface FinalizeStepProps {
@@ -20,11 +20,16 @@ interface FinalizeStepProps {
   isEditing?: boolean;
   selectedTags: { id: number; name: string; }[];
   setSelectedTags: React.Dispatch<React.SetStateAction<{ id: number; name: string; }[]>>;
+  editingCharacterId?: string | null; // added
 }
 
 type VisibilityType = 'public' | 'unlisted' | 'private';
 
-const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = false, isEditing = false, selectedTags, setSelectedTags }: FinalizeStepProps) => {
+interface RelationshipGoalDraft { id: string; order: number; label: string; threshold: number; description?: string }
+
+const genId = () => crypto.randomUUID();
+
+const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = false, isEditing = false, selectedTags, setSelectedTags, editingCharacterId }: FinalizeStepProps) => {
   const [visibility, setVisibility] = useState<VisibilityType>(data.visibility || 'private');
   const [enableNSFW, setEnableNSFW] = useState<boolean>(!!data.nsfw_enabled);
   const [userPlan, setUserPlan] = useState<string>('Guest Pass');
@@ -47,7 +52,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
     character_position: (data as any)?.manual_addon_context?.character_position || ''
   });
 
-  const { user } = useAuth();
+  const { user, subscription } = useAuth();
 
   // Check if user is premium (True Fan or Whale)
   const isPremiumUser = () => {
@@ -59,12 +64,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
     const loadUserData = async () => {
       try {
         if (user) {
-          const { data: subscription } = await Billing.getUserActiveSubscription(user.id);
-          if (subscription?.plan) {
-            setUserPlan(subscription.plan.name);
-          } else {
-            setUserPlan('Guest Pass');
-          }
+          setUserPlan(subscription?.plan?.name || 'Guest Pass');
         } else {
           setUserPlan('Guest Pass');
         }
@@ -75,7 +75,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
       }
     };
     loadUserData();
-  }, [user]);
+  }, [user, subscription]);
 
   // Update form data when character data is loaded
   useEffect(() => {
@@ -129,7 +129,156 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
     }
   };
 
+  const confirmPublish = () => {
+    setShowPublishWarning(false);
+    setVisibility('public');
+    onUpdate({ visibility: 'public' });
+  };
+
+  // Relationship Goals state and handlers
+  const [relGoalsEnabled, setRelGoalsEnabled] = useState<boolean>(!!data.relationshipGoalsTemplate?.enabled);
+  const [relGoals, setRelGoals] = useState<RelationshipGoalDraft[]>(() => data.relationshipGoalsTemplate?.path || []);
+  const [showRelGoalErrors, setShowRelGoalErrors] = useState<string | null>(null);
+  const [attemptedRefetch, setAttemptedRefetch] = useState(false);
+  // Debounce + last submitted snapshot refs
+  const relGoalsDebounceRef = useRef<number | null>(null);
+  const lastSubmittedTemplateRef = useRef<string>('');
+  const lastLogRef = useRef<string>('');
+
+  // Diagnostic (throttled): log only when structural aspects change (length, enabled, path ids/order)
+  useEffect(() => {
+    const signature = JSON.stringify({
+      enabled: relGoalsEnabled,
+      len: relGoals.length,
+      ids: relGoals.map(g=>g.id),
+      orders: relGoals.map(g=>g.order)
+    });
+    if (lastLogRef.current !== signature) {
+      lastLogRef.current = signature;
+      console.log('🧪 [FinalizeStep structural change] relGoalsEnabled=', relGoalsEnabled, 'len=', relGoals.length, 'propEnabled=', data.relationshipGoalsTemplate?.enabled, 'propLen=', data.relationshipGoalsTemplate?.path?.length);
+    }
+  }, [relGoalsEnabled, relGoals, data.relationshipGoalsTemplate?.enabled, data.relationshipGoalsTemplate?.path?.length]);
+
+  // Sync from parent whenever template changes (prop change only)
+  // NOTE: Previously this effect depended on relGoalsEnabled and relGoals, causing a race where a local keystroke
+  // updated local state first, then this effect ran with stale props and overwrote the just-typed value.
+  // We restrict dependencies to only the parent prop so user edits are source-of-truth until parent actually changes.
+  useEffect(() => {
+    const tpl = data.relationshipGoalsTemplate;
+    if (!tpl || !Array.isArray(tpl.path)) return;
+    const incoming = tpl.path as any[];
+    // Compare against current local state; only apply if parent truly differs (not just stale snapshot during local edit)
+    const differs = (
+      relGoalsEnabled !== !!tpl.enabled ||
+      incoming.length !== relGoals.length ||
+      incoming.some((g, i) => g.id !== relGoals[i]?.id || g.order !== relGoals[i]?.order || g.label !== relGoals[i]?.label || g.threshold !== relGoals[i]?.threshold)
+    );
+    if (differs) {
+      setRelGoalsEnabled(!!tpl.enabled);
+      setRelGoals(incoming as any);
+      console.log('♻️ [FinalizeStep] Applied relationship goals from parent (prop change).');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.relationshipGoalsTemplate]);
+
+  // One-shot fallback refetch if editing and template still missing shortly after mount
+  useEffect(() => {
+    if (!isEditing) return;
+    if (data.relationshipGoalsTemplate?.path?.length >= 2) return; // already have
+    if (attemptedRefetch) return;
+    const timer = setTimeout(async () => {
+      if (data.relationshipGoalsTemplate?.path?.length >= 2) return;
+      try {
+        if (!editingCharacterId) return;
+        console.log('🔄 [FinalizeStep] Attempting fallback template refetch...');
+        const { RelationshipTemplate } = await import('@/data');
+        const resp = await RelationshipTemplate.getTemplate(editingCharacterId);
+        console.log('📥 [FinalizeStep] Fallback refetch response:', resp);
+        if (resp?.data?.path?.length >= 2) {
+          onUpdate({ relationshipGoalsTemplate: { enabled: resp.data.enabled !== false, path: resp.data.path }} as any);
+        }
+      } catch (e) {
+        console.warn('⚠️ [FinalizeStep] Fallback refetch failed:', e);
+      } finally {
+        setAttemptedRefetch(true);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [isEditing, data.relationshipGoalsTemplate, attemptedRefetch, editingCharacterId, onUpdate]);
+
+  // Persist to parent (debounced) only when structural or content changes & valid
+  useEffect(()=> {
+    // Clear any pending submission when dependencies change
+    if (relGoalsDebounceRef.current) {
+      clearTimeout(relGoalsDebounceRef.current);
+      relGoalsDebounceRef.current = null;
+    }
+    if (relGoalsEnabled) {
+      if (relGoals.length >= 2) {
+        const payload = { enabled: true, path: relGoals };
+        const serialized = JSON.stringify(payload);
+        if (serialized !== lastSubmittedTemplateRef.current) {
+          relGoalsDebounceRef.current = window.setTimeout(() => {
+            onUpdate({ relationshipGoalsTemplate: payload } as any);
+            lastSubmittedTemplateRef.current = serialized;
+          }, 400); // debounce interval
+        }
+      }
+    } else if (data.relationshipGoalsTemplate?.enabled) {
+      // User disabled locally; clear immediately (no debounce) if parent still enabled
+      onUpdate({ relationshipGoalsTemplate: undefined } as any);
+      lastSubmittedTemplateRef.current = '';
+    }
+    return () => {
+      if (relGoalsDebounceRef.current) clearTimeout(relGoalsDebounceRef.current);
+    };
+  }, [relGoalsEnabled, relGoals, onUpdate, data.relationshipGoalsTemplate?.enabled]);
+
+  function flushRelGoalsImmediate() {
+    if (!relGoalsEnabled || relGoals.length < 2) return;
+    const payload = { enabled: true, path: relGoals };
+    const serialized = JSON.stringify(payload);
+    if (serialized !== lastSubmittedTemplateRef.current) {
+      if (relGoalsDebounceRef.current) clearTimeout(relGoalsDebounceRef.current);
+      onUpdate({ relationshipGoalsTemplate: payload } as any);
+      lastSubmittedTemplateRef.current = serialized;
+    }
+  }
+
+  function addGoal() {
+    setShowRelGoalErrors(null);
+    setRelGoals(prev => {
+      const nextOrder = prev.length + 1;
+      if (nextOrder > 10) return prev;
+      return [...prev, { id: genId(), order: nextOrder, label: `Stage ${nextOrder}`, threshold: Number((1 + (nextOrder-1)*0.3).toFixed(2)) }];
+    });
+  }
+  function updateGoal(id: string, patch: Partial<RelationshipGoalDraft>) {
+    setRelGoals(g => g.map(goal => goal.id === id ? { ...goal, ...patch } : goal));
+  }
+  function removeGoal(id: string) {
+    setRelGoals(g => g.filter(goal => goal.id !== id).map((goal, idx) => ({ ...goal, order: idx+1 })));
+  }
+  function moveGoal(id: string, dir: -1|1) {
+    setRelGoals(g => {
+      const idx = g.findIndex(gl=>gl.id===id); if (idx===-1) return g;
+      const ni = idx + dir; if (ni < 0 || ni >= g.length) return g;
+      const copy = [...g];
+      const [item] = copy.splice(idx,1); copy.splice(ni,0,item);
+      return copy.map((goal,i)=> ({ ...goal, order: i+1 }));
+    });
+  }
+  function validateRelGoals(): boolean {
+    if (!relGoalsEnabled) return true;
+    if (relGoals.length < 2) { setShowRelGoalErrors('At least 2 stages required'); return false; }
+    if (relGoals.length > 10) { setShowRelGoalErrors('Max 10 stages'); return false; }
+    if (relGoals.some(g => !g.label.trim())) { setShowRelGoalErrors('All stages need a label'); return false; }
+    if (relGoals.some(g => g.threshold <= 0)) { setShowRelGoalErrors('Thresholds must be > 0'); return false; }
+    setShowRelGoalErrors(null); return true;
+  }
+
   const handleFinalize = () => {
+    if (!validateRelGoals()) return;
     const cleanedManualContext = Object.fromEntries(Object.entries(manualAddonContext).filter(([_, v]) => typeof v === 'string' && v.trim()));
     const overrides: Partial<CharacterFormData> = {
       visibility,
@@ -142,7 +291,8 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
       } : {
         manual_addon_context_enabled: false,
         manual_addon_context: null
-      })
+      }),
+      relationshipGoalsTemplate: relGoalsEnabled ? { enabled: true, path: relGoals } : undefined
     };
     console.log('🧪 [FinalizeStep] Submitting finalize overrides:', overrides);
     onFinalize(overrides);
@@ -150,15 +300,18 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
   const tokenInfo = estimateCreatorTokenUsage(data, userPlan);
 
-  // Publish handling: confirm switching to public
-  const confirmPublish = () => {
-    setShowPublishWarning(false);
-    setVisibility('public');
-    onUpdate({ visibility: 'public' });
-  };
-
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 lg:p-8">
+      {isCreating && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/50">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 max-w-sm w-full text-center animate-in fade-in zoom-in">
+            <Loader2 className="w-10 h-10 mx-auto mb-4 text-[#FF7A00] animate-spin" />
+            <h3 className="text-white font-semibold text-lg mb-2">Creating your character...</h3>
+            <p className="text-gray-400 text-sm">Inferring deeper traits and preparing enhanced context.</p>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6 md:mb-8 text-center">
         <h2 className="text-2xl md:text-3xl font-bold text-white mb-2 md:mb-4">
           {isEditing ? 'Update Your Character' : 'Unleash Your Creation'}
@@ -291,8 +444,8 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
           })}
         </div>
         {/* Publish warning dialog */}
-        <Dialog open={showPublishWarning} onOpenChange={setShowPublishWarning}>
-          <DialogContent>
+        <UIDialog open={showPublishWarning} onOpenChange={setShowPublishWarning}>
+          <UIDialogContent>
             <DialogHeader>
               <DialogTitle>Make character public?</DialogTitle>
             </DialogHeader>
@@ -303,8 +456,8 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
                 Publish
               </Button>
             </div>
-          </DialogContent>
-        </Dialog>
+          </UIDialogContent>
+        </UIDialog>
 
         {/* NSFW Toggle */}
         <div className="bg-gray-800/30 rounded-xl p-4 md:p-6 border border-gray-700/50">
@@ -372,6 +525,73 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
                 <div className="flex justify-end text-[10px] text-gray-500">{manualAddonContext[f.key]?.length || 0}/160</div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Relationship Goals Template */}
+      <div className="mb-6 md:mb-8 border border-gray-700/50 rounded-xl p-4 md:p-6 bg-gray-800/30">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <Label className="text-white text-base md:text-lg font-medium block mb-2">Relationship Goals Path</Label>
+            <p className="text-gray-400 text-xs md:text-sm mb-2">Define a canonical macro relationship progression. Users advance via correlation signals; regression requires confirmation.</p>
+            <p className="text-gray-500 text-[11px] md:text-xs">2–10 ordered stages. Threshold = cumulative score needed to advance from previous stage.</p>
+          </div>
+          <div className="flex-shrink-0">
+            <Switch checked={relGoalsEnabled} onCheckedChange={setRelGoalsEnabled} className="data-[state=checked]:bg-[#FF7A00]" />
+          </div>
+        </div>
+        {relGoalsEnabled && (
+          <div className="mt-4 space-y-4">
+            {relGoals.map(goal => (
+              <div key={goal.id} className="border border-gray-700 rounded-lg p-3 md:p-4 bg-gray-900/40">
+                <div className="flex flex-col md:flex-row md:items-center gap-3">
+                  <div className="flex items-center gap-2 md:w-1/5">
+                    <Badge variant="outline" className="text-[#FF7A00] border-[#FF7A00]/40">{goal.order}</Badge>
+                    <input
+                      value={goal.label}
+                      onChange={e => updateGoal(goal.id, { label: e.target.value })}
+                      onBlur={flushRelGoalsImmediate}
+                      placeholder="Stage label"
+                      className="w-full bg-gray-800/60 border border-gray-700 rounded px-2 py-1 text-sm text-white"
+                      maxLength={40}
+                    />
+                  </div>
+                  <div className="md:w-1/5 flex items-center gap-1">
+                    <label className="text-[10px] uppercase tracking-wide text-gray-400">Threshold</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0.05}
+                      value={goal.threshold}
+                      onChange={e => updateGoal(goal.id, { threshold: Number(e.target.value) })}
+                      onBlur={flushRelGoalsImmediate}
+                      className="w-full bg-gray-800/60 border border-gray-700 rounded px-2 py-1 text-sm text-white"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <textarea
+                      value={goal.description || ''}
+                      onChange={e => updateGoal(goal.id, { description: e.target.value })}
+                      onBlur={flushRelGoalsImmediate}
+                      placeholder="Optional description / nuance"
+                      maxLength={160}
+                      rows={2}
+                      className="w-full bg-gray-800/60 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 resize-none"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 md:w-auto">
+                    <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={()=>moveGoal(goal.id,-1)} disabled={goal.order===1}>↑</Button>
+                    <Button type="button" variant="outline" size="icon" className="h-7 w-7" onClick={()=>moveGoal(goal.id,1)} disabled={goal.order===relGoals.length}>↓</Button>
+                    <Button type="button" variant="destructive" size="icon" className="h-7 w-7" onClick={()=>removeGoal(goal.id)}>✕</Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between">
+              <Button type="button" onClick={addGoal} disabled={relGoals.length>=10} variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800/50">Add Stage</Button>
+              {showRelGoalErrors && <span className="text-xs text-red-400">{showRelGoalErrors}</span>}
+            </div>
           </div>
         )}
       </div>

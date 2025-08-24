@@ -9,11 +9,10 @@ import {
   cascadeDeleteWorldInfo,
   addWorldInfoEntry as addWorldInfoEntryData,
   updateWorldInfoEntry as updateWorldInfoEntryData,
-  deleteWorldInfoEntry as deleteWorldInfoEntryData,
-  addWorldInfoTag,
-  removeWorldInfoTag
+  deleteWorldInfoEntry as deleteWorldInfoEntryData
 } from '@/data/worldInfo/mutations';
-import { uploadAvatar } from '@/data/uploads/storage';
+import { addWorldInfoTag, removeWorldInfoTag } from '@/data/worldInfo/interactions';
+import { uploadMedia } from '@/data/uploads/storage';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Tag = Tables<'tags'>;
@@ -187,7 +186,7 @@ export function useWorldInfo(options: UseWorldInfoOptions = {}) {
     if (!user) return;
 
     try {
-      const { publicUrl, error } = await uploadAvatar(user.id, file);
+      const { publicUrl, error } = await uploadMedia({ kind: 'world-info-avatar', userId: user.id, file });
       if (error) throw error;
       if (publicUrl) {
         updateFormData({ avatar_url: publicUrl });

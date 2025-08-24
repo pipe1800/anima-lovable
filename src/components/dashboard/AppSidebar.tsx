@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, useBillingCredits } from '@/contexts/AuthContext';
 import { Billing } from '@/data';
 import { Badge } from '@/components/ui/badge';
 import { SidebarModeToggle } from '@/components/chat/SidebarModeToggle';
@@ -50,6 +50,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile, session, subscription, loading, signOut, supabase } = useAuth();
+  const { balance: liveCredits } = useBillingCredits();
   const [userCredits, setUserCredits] = useState(() => {
     // initialize from override or cached value to reduce flicker
     if (typeof userCreditsOverride === 'number') return userCreditsOverride;
@@ -113,25 +114,11 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
     if (typeof userCreditsOverride === 'number') {
       setUserCredits(userCreditsOverride);
       localStorage.setItem('lastUserCredits', String(userCreditsOverride));
+    } else {
+      setUserCredits(liveCredits);
+      localStorage.setItem('lastUserCredits', String(liveCredits));
     }
-  }, [userCreditsOverride]);
-
-  const fetchCredits = useCallback(async () => {
-    if (!user || typeof userCreditsOverride === 'number') return; // skip fetch if override provided
-    try {
-      const creditsResult = await Billing.getUserCredits(supabase, user.id);
-      if (creditsResult.data && typeof creditsResult.data.balance === 'number') {
-        setUserCredits(creditsResult.data.balance);
-        localStorage.setItem('lastUserCredits', String(creditsResult.data.balance));
-      }
-    } catch (error) {
-      console.error('Error fetching credits:', error);
-    }
-  }, [user, userCreditsOverride, supabase]);
-
-  useEffect(() => {
-    fetchCredits();
-  }, [fetchCredits]);
+  }, [userCreditsOverride, liveCredits]);
 
   const isActive = useCallback((path: string) => {
     if (path === '/profile') {

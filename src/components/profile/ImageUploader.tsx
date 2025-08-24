@@ -43,14 +43,14 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
     setIsUploading(true);
 
     try {
-      const { data: auth } = await Auth.getCurrentUser();
-      const user = auth.user;
+      const { user } = await Auth.getAuthUser();
       if (!user) throw new Error('Not authenticated');
 
       const fileExt = file.name.split('.').pop();
       const fileName = `${user.id}/${type}_${Date.now()}.${fileExt}`;
 
-      const { publicUrl, error } = await Uploads.uploadToBucket({ bucket: 'profile-images', path: fileName, file, upsert: false });
+      const kind = type === 'avatar' ? 'profile-avatar' : 'profile-banner';
+      const { publicUrl, error } = await Uploads.uploadMedia({ kind, userId: user.id, file });
       if (error) throw error;
 
       onImageChange(publicUrl || '');

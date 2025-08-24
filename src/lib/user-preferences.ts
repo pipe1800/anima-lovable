@@ -53,16 +53,14 @@ export async function getUserDefaultPersona(userId: string): Promise<string | nu
 }
 
 /**
- * Get the best persona for a new chat: user's default persona > last used > first created > null
+ * Deprecated: Use Personas.getPersonaContext RPC instead.
  */
 export async function getBestPersonaForNewChat(userId: string): Promise<string | null> {
-  // First try to get user's default persona from profile
+  console.warn('getBestPersonaForNewChat deprecated: use getPersonaContext');
+  // Keep existing fallback logic for legacy callers
   const defaultPersona = await getUserDefaultPersona(userId);
   if (defaultPersona) return defaultPersona;
-
-  // Fallback to last used persona
   const lastUsed = await getUserLastUsedPersona(userId);
   if (lastUsed) return lastUsed;
-
   return null;
 }

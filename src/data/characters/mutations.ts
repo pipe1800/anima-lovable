@@ -1,4 +1,5 @@
 import { supabase } from '@/db/client';
+import { Auth } from '@/data';
 
 export const createCharacter = async (characterData: {
   name: string;
@@ -9,12 +10,11 @@ export const createCharacter = async (characterData: {
   greeting?: string;
   long_description?: string;
 }) => {
-  const { data: user } = await supabase.auth.getUser();
-  if (!user.user) throw new Error('Not authenticated');
+  const uid = await Auth.requireAuthId();
   const { data: character, error: characterError } = await supabase
     .from('characters')
     .insert({
-      creator_id: user.user.id,
+      creator_id: uid,
       name: characterData.name,
       short_description: characterData.short_description,
       avatar_url: characterData.avatar_url,

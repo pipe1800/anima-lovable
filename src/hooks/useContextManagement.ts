@@ -112,7 +112,7 @@ export const useContextManagement = (
         (payload) => {
           // Check if the message update includes context
           const newMessage = payload.new as any;
-          if (newMessage?.current_context && !newMessage?.is_placeholder) {
+          if (newMessage?.current_context) {
             console.log('🔄 Context change detected in message:', newMessage.current_context);
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {

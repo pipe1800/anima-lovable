@@ -17,3 +17,6 @@ verify_jwt = true
 
 [functions.get-character-memories]
 verify_jwt = true
+
+[functions.extract-latent-profile]
+verify_jwt = true

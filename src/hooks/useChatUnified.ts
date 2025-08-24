@@ -9,6 +9,7 @@ import type { Message, TrackedContext, ChatState, ChatAction } from '@/types/cha
 import logger from '@/utils/logger';
 import { StreamingMessageParser, parseSSEMessage } from '@/lib/streaming-utils';
 import { ChatManagement } from '@/data/edge';
+import { getChatSnapshot, getChatContextEnhanced } from '@/data/chats/queries';
 
 /**
  * Unified Chat Hook - Replaces 4 separate hooks
@@ -53,7 +54,6 @@ const initialChatState: ChatState = {
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case 'SET_STREAMING':
-      // ✅ SIMPLIFIED: Basic streaming state management
       return {
         ...state,
         isStreaming: action.payload.isStreaming,
@@ -95,6 +95,8 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const isStreamingRef = useRef(false);
   const channelRef = useRef<any>(null);
+  // Track current streaming AI message id so we can patch content locally
+  const streamingMessageIdRef = useRef<string | undefined>(undefined);
   // Throttle map to prevent redundant invalidations hammering backend
   const lastInvalidationRef = useRef<Record<string, number>>({});
   const THROTTLE_MS = 1500; // widened to reduce rapid duplicate refetches
@@ -157,9 +159,18 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     dispatch({ type: 'ADD_DEBUG_INFO', payload: info });
   }, []);
 
+  // Wrap dispatch to sync ref when streaming updates
+  const baseDispatch = dispatch as React.Dispatch<ChatAction>;
+  const safeDispatch = useCallback((action: ChatAction) => {
+    if (action.type === 'SET_STREAMING') {
+      isStreamingRef.current = action.payload.isStreaming;
+    }
+    baseDispatch(action);
+  }, [baseDispatch]);
+
   useEffect(() => {
     if (!chatId || !user) {
-      dispatch({ type: 'SET_REALTIME_STATUS', payload: false });
+      safeDispatch({ type: 'SET_REALTIME_STATUS', payload: false });
       return;
     }
     
@@ -186,11 +197,11 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
             addDebugInfo('Skipping real-time update - streaming active (non-greeting)');
             return;
           }
-          if (payload.new.is_placeholder || !payload.new.content?.trim()) {
-            addDebugInfo('Skipping empty/placeholder message');
-            return;
+          if (!payload.new.content?.trim()) {
+            addDebugInfo('Processing empty message');
+          } else {
+            addDebugInfo(`New message: ${payload.new.is_ai_message ? 'AI' : 'User'}`);
           }
-          addDebugInfo(`New message: ${payload.new.is_ai_message ? 'AI' : 'User'}`);
           lastInsertTsRef.current = Date.now();
           setTimeout(() => {
             // Real-time invalidation throttled
@@ -226,10 +237,10 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           addDebugInfo('Real-time connected successfully');
-          dispatch({ type: 'SET_REALTIME_STATUS', payload: true });
+          safeDispatch({ type: 'SET_REALTIME_STATUS', payload: true });
         } else if (status === 'CHANNEL_ERROR') {
           addDebugInfo('Real-time connection failed');
-          dispatch({ type: 'SET_REALTIME_STATUS', payload: false });
+          safeDispatch({ type: 'SET_REALTIME_STATUS', payload: false });
         }
       });
     
@@ -274,82 +285,151 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
 
         dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
         logger.debug('Context updated in UI immediately!');
+
+        // Dispatch relationship meta update (new format: detail = meta). Keep legacy nested for backward compatibility.
+        try {
+          if (rawContext?.relationship_meta && typeof rawContext.relationship_meta === 'object') {
+            const meta = rawContext.relationship_meta;
+            logger.debug('Dispatching relationship meta update (fetch)', meta);
+            window.dispatchEvent(new CustomEvent('relationship-meta-updated', { detail: meta }));
+            // legacy wrapper
+            window.dispatchEvent(new CustomEvent('relationship-meta-updated-legacy', { detail: { relationshipMeta: meta } }));
+          }
+        } catch (e) { logger.warn('relationshipMeta.dispatch.fail', e); }
       }
     } catch (err) {
       logger.error('Failed to fetch fresh context:', err);
     }
   }, [user, characterId]);
 
-  // Helper to finalize streaming and refresh messages/context
+  // finalizeStreaming now that dependencies are declared
   const finalizeStreaming = useCallback((chatIdParam: string) => {
     dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
-    // Avoid double invalidation if real-time INSERT just arrived very recently
     const sinceInsert = Date.now() - (lastInsertTsRef.current || 0);
     if (sinceInsert > 800) {
       throttledInvalidateChatData(chatIdParam);
-    } else {
-      logger.debug('🛑 Skipping redundant post-stream invalidation (recent real-time insert)');
     }
-    // Also refresh credits and message count explicitly
     if (user?.id) {
       throttledInvalidate(chatQueryKeys.user.credits(user.id));
     }
-  // Removed message count query invalidation (derived via event)
-    // Fetch context shortly after backend finishes
-    setTimeout(() => fetchAndUpdateContext(chatIdParam), 1000);
-    // Notify UI that AI response is done
-    try {
-      const ev = new CustomEvent('chat-ai-response-finished');
-      window.dispatchEvent(ev);
-    } catch {}
-  }, [queryClient, fetchAndUpdateContext, user?.id, throttledInvalidate, throttledInvalidateChatData]);
+    setTimeout(() => fetchAndUpdateContext(chatIdParam), 500);
+    try { window.dispatchEvent(new CustomEvent('chat-ai-response-finished')); } catch {}
+  }, [throttledInvalidateChatData, throttledInvalidate, fetchAndUpdateContext, user?.id]);
 
-  const invokeStreamingAI = async (
-    chatId: string, 
-    userMessage: string, 
-    characterId: string, 
+  const invokeStreamingAI = useCallback(async (
+    chatIdParam: string,
+    userMessage: string,
+    characterIdParam: string,
     userId: string,
     trackedContext?: TrackedContext,
     addonSettings?: any,
     selectedPersonaId?: string | null,
     selectedWorldInfoId?: string | null
   ) => {
-    const startTime = Date.now();
-    isStreamingRef.current = true;
+    if (!chatIdParam) throw new Error('Missing chatId');
+    const streamingModeSetting: 'smooth' | 'instant' = (globalSettings?.streaming_mode === 'instant') ? 'instant' : 'smooth';
+    dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: '' } });
+    console.log('[STREAM][start]', { chatId: chatIdParam, mode: streamingModeSetting, userMessageLen: userMessage.length });
+    let aggregate = '';
+    // remove unused local streamingMessageId variable
     try {
-      const streamingMode = globalSettings?.streaming_mode || 'smooth';
-      dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: '' } });
-      let fullMessage = '';
-      const result = await ChatManagement.sendMessageStreaming({
-        chatId,
+      await ChatManagement.sendMessageStreaming({
+        chatId: chatIdParam,
         message: userMessage,
-        characterId,
-        addonSettings,
-        selectedPersonaId,
-        selectedWorldInfoId,
+        characterId: characterIdParam,
+        addonSettings: addonSettings || {},
+        selectedPersonaId: selectedPersonaId ?? null,
+        selectedWorldInfoId: selectedWorldInfoId ?? null
       }, {
-        streamingMode,
-        onToken: (token, aggregate) => {
-          fullMessage = aggregate;
-          if (streamingMode === 'smooth') {
-            dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: aggregate } });
-          }
+        streamingMode: streamingModeSetting,
+        onToken: (t, agg) => {
+          aggregate = agg;
+          console.log('[STREAM][token]', { tokenFrag: t, fragLen: t.length, aggLen: agg.length, smooth: streamingModeSetting === 'smooth' });
+          // Only update local streaming state; no cache mutation / placeholder patching
+          dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: agg } });
         },
         onDone: (final) => {
-          if (streamingMode !== 'smooth') {
-            dispatch({ type: 'SET_STREAMING', payload: { isStreaming: true, message: final } });
-          }
+          aggregate = final;
+          console.log('[STREAM][done]', { finalLen: final.length });
         }
       });
-      isStreamingRef.current = false;
-      finalizeStreaming(chatId);
-      return { content: result.content };
-    } catch (err) {
-      isStreamingRef.current = false;
+      finalizeStreaming(chatIdParam);
+      return aggregate;
+    } catch (e) {
       dispatch({ type: 'SET_STREAMING', payload: { isStreaming: false, message: '' } });
-      throw err;
+      throw e;
     }
-  };
+  }, [ChatManagement, finalizeStreaming, globalSettings?.streaming_mode]);
+
+  // NEW: fetch current context immediately when chat loads (before any user message) so sidebar shows initial relationship goal
+  useEffect(() => {
+    if (chatId && user) {
+      fetchAndUpdateContext(chatId);
+    }
+  }, [chatId, user, fetchAndUpdateContext]);
+
+  // NEW: real-time subscription for chat_context updates (INSERT/UPDATE) to live-update trackers instantly
+  const contextChannelRef = useRef<any>(null);
+  useEffect(() => {
+    if (!chatId || !user) {
+      if (contextChannelRef.current) {
+        supabase.removeChannel(contextChannelRef.current);
+        contextChannelRef.current = null;
+      }
+      return;
+    }
+    // Clean previous
+    if (contextChannelRef.current) {
+      supabase.removeChannel(contextChannelRef.current);
+      contextChannelRef.current = null;
+    }
+    const channel = supabase
+      .channel(`chat-context-${chatId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_context', filter: `chat_id=eq.${chatId}` }, (payload: any) => {
+        try {
+          const row = payload.new || payload.old;
+          if (!row) return;
+          if (row.user_id !== user.id || row.character_id !== characterId) return; // safety
+          const raw = row.current_context || {};
+          const updated: TrackedContext = {
+            moodTracking: raw.mood || 'No context',
+            clothingInventory: raw.clothing || 'No context',
+            locationTracking: raw.location || 'No context',
+            timeAndWeather: raw.time_weather || 'No context',
+            relationshipStatus: raw.relationship || 'No context',
+            characterPosition: raw.character_position || 'No context',
+            enchantmentStatus: raw.enchantment_status || 'No context',
+            itemInventory: raw.item_inventory || 'No context'
+          };
+          // Only dispatch if something changed to avoid re-renders
+            dispatch({ type: 'UPDATE_CONTEXT', payload: updated });
+          logger.debug('Realtime chat_context applied', { rel: updated.relationshipStatus });
+          // Fire custom event for existing listeners (Chat.tsx)
+          try { window.dispatchEvent(new CustomEvent('chat-context-updated', { detail: { chatId, context: { relationship: updated.relationshipStatus } } })); } catch {}
+          try {
+            if (raw.relationship_meta) {
+              logger.debug('Dispatching relationship meta update (realtime)', raw.relationship_meta);
+              window.dispatchEvent(new CustomEvent('relationship-meta-updated', { detail: raw.relationship_meta }));
+              window.dispatchEvent(new CustomEvent('relationship-meta-updated-legacy', { detail: { relationshipMeta: raw.relationship_meta } }));
+            }
+          } catch {}
+        } catch (e) {
+          logger.error('chat_context.realtime.apply.error', e);
+        }
+      });
+    channel.subscribe((status: string) => {
+      if (status === 'SUBSCRIBED') {
+        logger.debug('Subscribed to chat_context realtime for chat', chatId);
+      }
+    });
+    contextChannelRef.current = channel;
+    return () => {
+      if (contextChannelRef.current) {
+        supabase.removeChannel(contextChannelRef.current);
+        contextChannelRef.current = null;
+      }
+    };
+  }, [chatId, user, characterId, logger]);
 
   // ============================================================================
   // EFFECTS & SUBSCRIPTIONS
@@ -576,7 +656,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     isFetchingNextPage: messagesQuery.isFetchingNextPage,
     fetchNextPage: messagesQuery.fetchNextPage,
     
-    clearChatState: () => dispatch({ type: 'CLEAR_STATE' }),
+    clearChatState: () => safeDispatch({ type: 'CLEAR_STATE' }),
     
     metrics: {
       messageCount: allMessages.length,
@@ -585,3 +665,19 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     },
   };
 };
+
+function convertContext(raw: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  try {
+    if (!raw) return null;
+    return {
+      moodTracking: raw.mood || 'No context',
+      clothingInventory: raw.clothing || 'No context',
+      locationTracking: raw.location || 'No context',
+      timeAndWeather: raw.time_weather || 'No context',
+      relationshipStatus: raw.relationship || 'No context',
+      characterPosition: raw.character_position || 'No context',
+      enchantmentStatus: raw.enchantment_status || 'No context',
+      itemInventory: raw.item_inventory || 'No context'
+    };
+  } catch { return null; }
+}

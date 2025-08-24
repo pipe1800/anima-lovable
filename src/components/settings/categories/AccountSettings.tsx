@@ -20,7 +20,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCurrentUser } from '@/hooks/useProfile';
 import { Profile as ProfileQueries, Auth } from '@/data';
 import { useToast } from '@/hooks/use-toast';
-import { uploadAvatar, uploadBanner } from '@/data/uploads/storage';
+import { uploadMedia } from '@/data/uploads/storage';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { useNSFW } from '@/contexts/NSFWContext';
@@ -191,7 +191,7 @@ export const AccountSettings = () => {
 
     try {
       setIsLoading(true);
-      const { publicUrl: avatarUrl, error: avatarErr } = await uploadAvatar(user.id, file);
+      const { publicUrl: avatarUrl, error: avatarErr } = await uploadMedia({ kind: 'profile-avatar', userId: user.id, file });
       if (avatarErr) throw avatarErr;
       if (avatarUrl) {
         setFormData(prev => ({ ...prev, avatar_url: avatarUrl }));
@@ -218,7 +218,7 @@ export const AccountSettings = () => {
 
     try {
       setIsLoading(true);
-      const { publicUrl: bannerUrl, error: bannerErr } = await uploadBanner(user.id, file);
+      const { publicUrl: bannerUrl, error: bannerErr } = await uploadMedia({ kind: 'profile-banner', userId: user.id, file });
       if (bannerErr) throw bannerErr;
       if (bannerUrl) {
         setFormData(prev => ({ ...prev, banner_url: bannerUrl }));

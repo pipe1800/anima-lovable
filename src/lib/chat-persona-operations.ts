@@ -19,9 +19,10 @@ export async function updateChatSelectedPersona(chatId: string, personaId: strin
 }
 
 /**
- * Get the selected persona for a specific chat
+ * Deprecated: Prefer Personas.getPersonaContext with chatId which returns chat_selected_persona
  */
 export async function getChatSelectedPersona(chatId: string) {
+  console.warn('getChatSelectedPersona deprecated: use get_user_persona_context RPC via Personas.getPersonaContext');
   const { data, error } = await supabase
     .from('chats')
     .select(`

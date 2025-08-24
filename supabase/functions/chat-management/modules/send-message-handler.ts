@@ -33,8 +33,6 @@ import {
   fetchCharacterMemories,
   getNextMessageOrder,
   saveUserMessage,
-  createPlaceholderMessage,
-  updateMessageContent,
   saveCharacterMessage,
   updateChatLastActivity,
   buildTemplateReplacer
@@ -207,66 +205,303 @@ export async function handleSendMessage(
 
     // Billing
     const creditInfo = calculateCreditCost(planAndModel.plan, effectiveAddonSettings);
-    const hasCredits = await consumeCredits(user.id, creditInfo, supabaseAdmin);
+    const hasCredits = await consumeCredits(user.id, creditInfo, supabase, supabaseAdmin);
     if (!hasCredits) return createErrorResponse(createInsufficientCreditsError(creditInfo), 402);
     logger.info('billing.charge', { requestId, chatId, plan: planAndModel.plan, model: planAndModel.model });
 
-    // Persist user + placeholder messages
+    // Persist user message only
     const aiMessageOrder = nextUserMessageOrder + 1;
-    const [userMessage, placeholder] = await Promise.all([
-      saveUserMessage(supabase, chatId, user.id, message, nextUserMessageOrder),
-      createPlaceholderMessage(supabase, chatId, aiMessageOrder)
-    ]);
-    if (!placeholder) return createErrorResponse('Failed to create placeholder message', 500);
+    const userMessage = await saveUserMessage(supabase, chatId, user.id, message, nextUserMessageOrder);
 
     const templateContext: TemplateContext = { userName: selectedPersona?.name || userProfile?.username || 'User', charName: character.name || 'Character' };
-    const currentContext = await fetchCurrentContext(user.id, chatId, characterId, supabase);
+    let currentContext = await fetchCurrentContext(user.id, chatId, characterId, supabase);
 
-    const timeAwarenessData = computeTimeAwareness(userCharacterSettings, userProfile, messageHistory, currentContext);
-    if (timeAwarenessData && logger.isTrace()) logger.trace('time.awareness', { requestId, chatId, delaySeconds: timeAwarenessData.delaySeconds, tz: timeAwarenessData.userTimezone });
+    // Evaluate relationship progress early to potentially short-circuit with regression prompt / handle user response
+    let relationshipProgress: any = null;
+    try {
+      const { data: evalState, error: evalErr } = await supabaseAdmin.rpc('evaluate_relationship_progress', { p_user_id: user.id, p_character_id: characterId });
+      if (evalErr) {
+        logger.warn('relationship.eval.error', { requestId, chatId, msg: evalErr.message });
+      } else {
+        relationshipProgress = evalState;
+      }
+    } catch (e) {
+      logger.warn('relationship.eval.exception', { requestId, chatId, message: (e as Error)?.message });
+    }
 
-    const knobs = buildKnobs(planAndModel.maxContextTokens);
-    const assembleParams = { character, addonSettings: effectiveAddonSettings, templateContext, currentContext, selectedPersona, replaceTemplatesFn: buildTemplateReplacer(templateContext), supabase, worldInfoEntries, userMessage: message, messageHistory, characterMemories: characterMemories || undefined, chatMode: userCharacterSettings?.chat_mode || 'storytelling', timeAwarenessData, chatId, userId: user.id, maxContextTokens: planAndModel.maxContextTokens, knobs } as const;
-    const { conversationResult, promptMeta } = await assembleConversation(assembleParams);
-    if (promptMeta && logger.isTrace()) logger.trace('prompt.meta', { requestId, chatId, metaKeys: Object.keys(promptMeta) });
+    // If we are awaiting a regression confirmation (prompt previously asked) interpret this user message's sentiment
+    if (relationshipProgress && relationshipProgress.pending_regression && relationshipProgress.regression_prompt_asked && relationshipProgress.regression_candidate_order) {
+      const lowerMsg = message.toLowerCase();
+      const negativeIndicators = ['distant','distance','apart','worse','regress','falling back','less close','pulled away','pulling away','cold','colder','upset','angry','hurt','uncomfortable','withdraw','drifting','drift','separate','not working','lost spark','lost the spark'];
+      const positiveIndicators = ['close','closer','strong','stronger','stable','good','great','bond','trust','love','affection','intimate','same as','still the same','no change','fine'];
+      let negScore = 0; let posScore = 0;
+      for (const term of negativeIndicators) { if (lowerMsg.includes(term)) negScore++; }
+      for (const term of positiveIndicators) { if (lowerMsg.includes(term)) posScore++; }
+      // Additional polarity: simple emotive words
+      if (/\b(no|not)\b.*\b(regress|worse|back)\b/.test(lowerMsg)) posScore += 2; // explicit denial of regression
+      if (/\b(feel|feels|feeling)\b.*\b(less|more)\b.*\b(close|distant)\b/.test(lowerMsg)) { if (/(less).*close/.test(lowerMsg)) negScore++; if (/(more).*close/.test(lowerMsg)) posScore++; }
 
-    let conversationMessages = conversationResult.messages;
-
-    // Context ceiling warning optimization
-    const { shouldWarnContextCeiling } = await markContextCeilingWarned(supabase, chatId, conversationResult.truncated);
-
-    const openRouterKey = getEnv('OPENROUTER_API_KEY');
-    if (!openRouterKey) return createErrorResponse('OpenRouter API key not configured', 500);
-
-    if (conversationResult.needsSummarization) {
-      logger.info('summary.trigger', { requestId, chatId, aiCount: conversationResult.currentAiMessageCount, nextAt: conversationResult.nextSummaryAt });
-      try {
-        const summaryResult = await triggerMessageBasedSummary(
-          chatId,
-          user.id,
-          characterId,
-          conversationResult.messagesToSummarize,
-          character,
-          openRouterKey,
-          supabaseAdmin
-        );
-        if (summaryResult.success) {
-          logger.debug('summary.success', { requestId, chatId, summaryId: summaryResult.summaryId });
-          // Rebuild only once using same params (avoid redefining object)
-          const rebuilt = await assembleConversation(assembleParams);
-          conversationMessages = rebuilt.conversationResult.messages;
-          if (rebuilt.promptMeta && logger.isTrace()) logger.trace('prompt.meta.rebuilt', { requestId, chatId, metaKeys: Object.keys(rebuilt.promptMeta) });
-        } else {
-          logger.warn('summary.failed', { requestId, chatId, error: summaryResult.error });
+      const decision = negScore > posScore ? 'confirm' : (posScore > negScore ? 'cancel' : 'undecided');
+      if (decision === 'confirm') {
+        try {
+          const { data: newState } = await supabaseAdmin.rpc('confirm_relationship_regression', { p_user_id: user.id, p_character_id: characterId });
+          relationshipProgress = newState || relationshipProgress;
+          // Update canonical relationship string in chat_context
+          try {
+            const { data: tmplRow } = await supabaseAdmin
+              .from('character_latent_profiles')
+              .select('relationship_goals')
+              .eq('character_id', characterId)
+              .maybeSingle();
+            const tmpl = tmplRow?.relationship_goals;
+            if (tmpl && tmpl.enabled && Array.isArray(tmpl.path)) {
+              const activeOrder = relationshipProgress?.active_order;
+              const activeStage = tmpl.path.find((p: any)=> (p.order||p.order===0) && p.order === activeOrder);
+              if (activeStage) {
+                const stageStr = `Stage ${activeOrder}/${tmpl.path.length}: ${activeStage.label}${activeStage.description ? ' - ' + activeStage.description : ''}`;
+                const { data: ctxRow } = await supabaseAdmin.from('chat_context').select('current_context').eq('chat_id', chatId).maybeSingle();
+                const merged = { ...(ctxRow?.current_context || {}), relationship: stageStr };
+                await supabaseAdmin.from('chat_context').upsert({ chat_id: chatId, user_id: user.id, character_id: characterId, current_context: merged }, { onConflict: 'chat_id' });
+              }
+            }
+          } catch (e) { logger.warn('relationship.regression.contextUpdate.error', { requestId, chatId, message: (e as Error)?.message }); }
+          logger.info('relationship.regression.confirmed', { requestId, chatId, newActive: relationshipProgress?.active_order });
+        } catch (e) {
+          logger.warn('relationship.regression.confirm.fail', { requestId, chatId, message: (e as Error)?.message });
         }
-      } catch (e) {
-        logger.error('summary.exception', { requestId, chatId, message: (e as Error)?.message });
+      } else if (decision === 'cancel') {
+        // Clear pending regression flags and streak manually
+        try {
+          await supabaseAdmin.from('user_character_relationship_progress')
+            .update({ state: (supabaseAdmin as any).sql`state - 'pending_regression' - 'regression_candidate_order' - 'regression_prompt_asked' || jsonb_build_object('pending_regression', false, 'negative_streak', 0)` })
+            .eq('user_id', user.id)
+            .eq('character_id', characterId);
+          // Refresh state
+          try {
+            const { data: refreshed } = await supabaseAdmin.rpc('evaluate_relationship_progress', { p_user_id: user.id, p_character_id: characterId });
+            if (refreshed) relationshipProgress = refreshed;
+          } catch {}
+          logger.info('relationship.regression.cancelled', { requestId, chatId });
+        } catch (e) {
+          logger.warn('relationship.regression.cancel.fail', { requestId, chatId, message: (e as Error)?.message });
+        }
+      } else {
+        logger.debug('relationship.regression.awaitingMoreSignal', { requestId, chatId });
       }
     }
 
-    if (logger.isDebug()) {
-      logger.debug('openrouter.payload.meta', { requestId, chatId, model: planAndModel.model, messages: conversationMessages.length, systemChars: conversationMessages[0]?.content?.length || 0 });
+    // After regression handling but before time awareness & conversation assembly, manage relationship readiness & advancement
+    if (relationshipProgress && !relationshipProgress.skipped) {
+      try {
+        // Fetch template once
+        const { data: tmplRow } = await supabaseAdmin
+          .from('character_latent_profiles')
+          .select('relationship_goals')
+          .eq('character_id', characterId)
+          .maybeSingle();
+        const tmpl = tmplRow?.relationship_goals;
+        if (tmpl && tmpl.enabled && Array.isArray(tmpl.path) && tmpl.path.length >= 2) {
+          const activeOrder = relationshipProgress.active_order || 1;
+          const activeStage = tmpl.path.find((p: any)=> (p.order||p.order===0) && p.order === activeOrder);
+          const nextStage = tmpl.path.find((p: any)=> (p.order||p.order===0) && p.order === activeOrder + 1);
+          const readyForNext = !!relationshipProgress.ready_for_next;
+
+          // Heuristic pre-check for possible advancement intent (only when ready and next exists)
+          let advanced = false;
+          if (readyForNext && nextStage) {
+            const userLower = message.toLowerCase();
+            const labelLower = String(nextStage.label||'').toLowerCase();
+            const relationalHints = ['be ', 'become', 'together', 'date', 'girlfriend', 'boyfriend', 'wife', 'husband', 'marry', 'engage', 'partner', 'official', 'relationship', 'couple'];
+            const labelTokens = labelLower.split(/[^a-z0-9]+/).filter(t=>t.length>2);
+            const hintHit = relationalHints.some(h=> userLower.includes(h));
+            const labelHit = labelTokens.some(t=> userLower.includes(t));
+            let intentDetected = false;
+
+            // NEW: detect acceptance of a prior invitation even if user message lacks stage-specific tokens
+            try {
+              const lastAiMsg = (messageHistory||[]).slice().reverse().find((m:any)=> m && m.is_ai_message)?.content?.toLowerCase() || '';
+              const invitationPatterns = [
+                /take (this|things) to the next level/,
+                /ready to (?:move|advance)/,
+                /do you (?:feel|think) (?:we|you)('re)? ready/,
+                /want to (?:be|become)/,
+                new RegExp(`move into ${labelLower.replace(/[-/\\^$*+?.()|[\]{}]/g,'\\$&')}`)
+              ];
+              const invitationIssued = invitationPatterns.some(p=> p.test(lastAiMsg)) || lastAiMsg.includes(labelLower);
+              if (invitationIssued) {
+                const acceptancePatterns = [
+                  /^\s*yes[!.]?\s*$/,
+                  /^\s*yeah[!.]?\s*$/,
+                  /^\s*sure[!.]?\s*$/,
+                  /\b(let'?s|lets) do it\b/,
+                  /\bmake it official\b/,
+                  /\bI'?d love to\b/,
+                  /\bI want to\b/,
+                  /\bthat sounds (good|great|perfect|amazing)\b/,
+                  /\bokay[!.]?$/,
+                  /\bof course\b/,
+                  /\babsolutely\b/,
+                  /\bdefinitely\b/
+                ];
+                const passiveAccept = acceptancePatterns.some(p=> p.test(userLower));
+                // Guard against accidental yes to unrelated question by requiring short affirmative or includes advancement keyword context
+                if (passiveAccept) {
+                  intentDetected = true;
+                  logger.debug('relationship.advance.acceptanceDetected', { requestId, chatId });
+                }
+              }
+            } catch (e) { logger.warn('relationship.advance.acceptanceCheck.error', { requestId, chatId, message: (e as Error)?.message }); }
+
+            if (hintHit || labelHit || intentDetected) {
+              // Optional lightweight model classification to reduce false positives
+              const openRouterKey = getEnv('OPENROUTER_API_KEY');
+              if (!intentDetected && openRouterKey) {
+                try {
+                  const clfPrompt = [
+                    'You are an intent classifier. Decide if the USER is explicitly requesting to advance the RELATIONSHIP to the NEXT_STAGE.',
+                    'Return ONLY compact JSON: {"advancement_request":true|false,"reason":"short"}.',
+                    `CURRENT_STAGE:${activeStage?.label || 'Unknown'}`,
+                    `NEXT_STAGE:${nextStage.label}`,
+                    `LAST_AI_INVITE:${(messageHistory||[]).slice().reverse().find((m:any)=> m && m.is_ai_message)?.content?.slice(0,180) || ''}`,
+                    `USER:${message.slice(0,400)}`,
+                    'Guidelines:',
+                    '- advancement_request true ONLY if the user is clearly proposing / asking / accepting entering NEXT_STAGE (explicit proposal or acceptance of model invitation).',
+                    '- Generic affection without clear acceptance is false.',
+                    '- If ambiguous -> false.'
+                  ].join('\n');
+                  const clfRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${openRouterKey}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      model: 'mistralai/mistral-small-3.1-instruct',
+                      temperature: 0,
+                      max_tokens: 40,
+                      messages: [{ role: 'user', content: clfPrompt }]
+                    })
+                  });
+                  if (clfRes.ok) {
+                    const clfJson: any = await clfRes.json();
+                    const content = clfJson?.choices?.[0]?.message?.content || '';
+                    try {
+                      const parsed = JSON.parse(content.replace(/```json|```/gi,'').trim());
+                      if (parsed && parsed.advancement_request === true) intentDetected = true; else intentDetected = false;
+                      logger.debug('relationship.advance.classifier', { requestId, chatId, intentDetected, reason: parsed?.reason });
+                    } catch { /* ignore parse failure */ }
+                  }
+                } catch (e) {
+                  logger.warn('relationship.advance.classifier.error', { requestId, chatId, message: (e as Error)?.message });
+                }
+              }
+
+              if (intentDetected) {
+                try {
+                  const { data: newState, error: advErr } = await supabaseAdmin.rpc('advance_relationship_stage', { p_user_id: user.id, p_character_id: characterId });
+                  if (!advErr && newState && !newState.error) {
+                    relationshipProgress = newState; // adopt new state
+                    advanced = true;
+                    logger.info('relationship.advance.success', { requestId, chatId, newActive: newState.active_order, via: 'acceptanceOrIntent' });
+                    // NEW: immediate post-advance evaluation to refresh thresholds / progress metrics
+                    try {
+                      const { data: postEval, error: postEvalErr } = await supabaseAdmin.rpc('evaluate_relationship_progress', { p_user_id: user.id, p_character_id: characterId });
+                      if (!postEvalErr && postEval) {
+                        relationshipProgress = postEval; // refreshed state with next_threshold, stage_progress values
+                        logger.debug('relationship.advance.postEval', {
+                          requestId,
+                          chatId,
+                          active_order: postEval.active_order,
+                          next_threshold: postEval.next_threshold,
+                          current_stage_threshold: postEval.current_stage_threshold,
+                          stage_progress_percent: postEval.stage_progress_percent
+                        });
+                      } else {
+                        logger.warn('relationship.advance.postEval.fail', { requestId, chatId, err: postEvalErr?.message });
+                      }
+                    } catch (e) {
+                      logger.warn('relationship.advance.postEval.exception', { requestId, chatId, message: (e as Error)?.message });
+                    }
+                  } else {
+                    logger.debug('relationship.advance.denied', { requestId, chatId, detail: newState?.error || advErr?.message });
+                  }
+                } catch (e) {
+                  logger.warn('relationship.advance.rpc.error', { requestId, chatId, message: (e as Error)?.message });
+                }
+              }
+            }
+          }
+
+          // Build canonical with readiness note AFTER possible advancement
+          const finalActiveOrder = relationshipProgress?.active_order || activeOrder;
+          const finalActiveStage = tmpl.path.find((p: any)=> (p.order||p.order===0) && p.order === finalActiveOrder);
+          const finalNextStage = tmpl.path.find((p: any)=> (p.order||p.order===0) && p.order === finalActiveOrder + 1);
+          const finalReady = !!relationshipProgress?.ready_for_next;
+          let stageStr = '';
+          if (finalActiveStage) {
+            stageStr = `Stage ${finalActiveOrder}/${tmpl.path.length}: ${finalActiveStage.label}` + (finalActiveStage.description ? ` - ${finalActiveStage.description}` : '');
+            if (finalNextStage) {
+              if (finalReady) {
+                stageStr += `. Character is ready to move into ${finalNextStage.label}. Advancement only occurs if the user explicitly requests it. If the user only hints indirectly or is ambiguous, politely ask for explicit confirmation before advancing. Do NOT self-initiate advancement. Do NOT skip stages.`;
+                stageStr += ` Next Stage Details: ${finalNextStage.label}${finalNextStage.description ? ' - ' + finalNextStage.description : ''}.`;
+              } else {
+                stageStr += `. Character is not ready to move into ${finalNextStage.label}. If the user asks, hints, insinuates, roleplays, or proposes advancing to ${finalNextStage.label} (or any wording implying entering that stage), you MUST politely decline and explain you are not ready yet. Do NOT pretend to already be in ${finalNextStage.label}. Encourage continuing to build the current stage first.`;
+                stageStr += ` Next Stage Details: ${finalNextStage.label}${finalNextStage.description ? ' - ' + finalNextStage.description : ''}.`;
+              }
+            } else {
+              stageStr += '. Final relationship stage.';
+            }
+          }
+          if (stageStr) {
+            try {
+              // Previously persisted into chat_context; now we only update in-memory context for this response cycle
+              let mutableCtx: any = currentContext && typeof currentContext === 'object' ? { ...currentContext } : {};
+              mutableCtx.relationshipStatus = stageStr;
+              currentContext = mutableCtx;
+              // Removed DB upsert to avoid injecting stage instructions into persistent chat_context.
+            } catch (e) {
+              logger.warn('relationship.context.localUpdate.error', { requestId, chatId, message: (e as Error)?.message });
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn('relationship.advance.block.error', { requestId, chatId, message: (e as Error)?.message });
+      }
     }
+
+    // Time awareness: adjust message for AI
+    if (userCharacterSettings?.time_awareness_enabled && effectiveAddonSettings.timeAwareness) {
+      const timeResult = computeTimeAwareness(userCharacterSettings, userProfile, messageHistory, currentContext);
+      if (timeResult) {
+        logger.info('timeAwareness.computed', { requestId, chatId, delaySeconds: timeResult.delaySeconds, userTimezone: timeResult.userTimezone, userLocalTime: timeResult.userLocalTime });
+        (currentContext as any)._timeAwareness = timeResult;
+      }
+    }
+
+    // Assemble final conversation for AI using local assembler
+    const assemblyStart = Date.now();
+    const { systemPrompt, conversationResult, promptMeta } = await assembleConversation({
+      character,
+      addonSettings: effectiveAddonSettings,
+      templateContext,
+      currentContext,
+      selectedPersona,
+      replaceTemplatesFn: buildTemplateReplacer(templateContext),
+      supabase,
+      worldInfoEntries,
+      userMessage: message,
+      messageHistory,
+      characterMemories: characterMemories || undefined,
+      chatMode: userCharacterSettings?.chat_mode || 'storytelling',
+      timeAwarenessData: (currentContext as any)._timeAwareness,
+      chatId,
+      userId: user.id,
+      maxContextTokens: planAndModel.maxContextTokens,
+      knobs: buildKnobs(planAndModel.maxContextTokens)
+    });
+    logger.info('conversation.assemble.success', { requestId, chatId, duration: Date.now() - assemblyStart });
+
+    const conversationMessages = conversationResult.messages;
+
+    const openRouterKey = getEnv('OPENROUTER_API_KEY');
+    if (!openRouterKey) return createErrorResponse('OpenRouter API key not configured', 500);
 
     const aiResponse = await generateAIResponse(conversationMessages, planAndModel.model, openRouterKey);
     if (!aiResponse.ok) {
@@ -275,23 +510,46 @@ export async function handleSendMessage(
       return createStreamingErrorResponse(`Status: ${aiResponse.status} - ${errorText}`, planAndModel.model, planAndModel.plan);
     }
 
-    return streamAIResponse({
+    const streamStart = Date.now();
+    const streamResp = streamAIResponse({
       aiResponse,
-      async onComplete(finalMessage) {
-        if (!finalMessage || !placeholder?.id) return;
-        await updateMessageContent(supabaseAdmin, placeholder.id, finalMessage);
-        const basicContext: CurrentContext = { moodTracking: 'No context', clothingInventory: 'No context', locationTracking: 'No context', timeAndWeather: 'No context', relationshipStatus: 'No context', characterPosition: 'No context' };
-        await saveCharacterMessage(supabase, supabaseAdmin, user.id, chatId, finalMessage, basicContext, placeholder.id, aiMessageOrder);
+      async onChunk() {},
+      async onComplete(full) {
+        logger.info('streamAIResponse.complete', { requestId, chatId, duration: Date.now() - streamStart });
+        try {
+          // Save final AI message after streaming completes
+          const finalMessage = await saveCharacterMessage(
+            supabaseAdmin,
+            user.id,
+            characterId,
+            chatId,
+            full,
+            currentContext || {},
+            aiMessageOrder
+          );
+          logger.info('Message saved after streaming', {
+            requestId,
+            chatId,
+            messageId: finalMessage.id
+          });
+        } catch (e) {
+          logger.error('aiMessage.insert.error', { requestId, chatId, message: (e as Error)?.message });
+        }
         await updateChatLastActivity(supabase, chatId, characterId);
-        await triggerAddonExtraction({ addonsActive, supabaseUrl: getEnv('SUPABASE_URL', { required: false }), authHeader: req.headers.get('authorization'), chatId, characterId, effectiveAddonSettings, message, aiResponse: finalMessage, messageId: placeholder.id });
-        logger.info('stream.complete', { requestId, chatId, ms: Date.now() - startTime });
+        await Promise.all([
+          markContextCeilingWarned(supabase, chatId, false),
+          triggerAddonExtraction({ addonsActive, supabaseUrl: env('SUPABASE_URL'), authHeader: req.headers.get('Authorization'), chatId, characterId, effectiveAddonSettings, message, aiResponse: full, messageId: 'final' })
+        ]);
       },
-      onError(err) {
-        logger.error('stream.error', { requestId, chatId, message: (err as Error)?.message });
+      onError: (e) => {
+        logger.error('streamAIResponse.error', { requestId, chatId, message: (e as Error)?.message });
       }
     });
-  } catch (error) {
-    logger.error('sendMessage.error', { requestId, chatId: request.chatId, message: (error as Error)?.message });
-    return createStreamingErrorResponse(error instanceof Error ? error.message : 'Internal server error', 'unknown', 'unknown');
+    return streamResp; // return streaming SSE response directly
+  } catch (e) {
+    logger.error('sendMessage.handler.error', { requestId, message: (e as Error)?.message });
+    return createErrorResponse('Internal server error', 500);
+  } finally {
+    logger.info('sendMessage.handler.complete', { requestId, duration: Date.now() - startTime });
   }
 }

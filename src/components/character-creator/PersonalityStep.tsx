@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { X, ChevronDown, ChevronRight } from 'lucide-react';
-import { Billing, Tags } from '@/data';
+import { Tags } from '@/data';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Tables } from '@/integrations/supabase/types';
 import type { CharacterFormData } from '@/hooks/useCharacterCreation';
@@ -32,18 +32,15 @@ const PersonalityStep = ({ data, onUpdate, onNext, onPrevious, selectedTags, set
   const [isLoading, setIsLoading] = useState(true);
   const [userPlan, setUserPlan] = useState<string>('Guest Pass');
 
-  const { user } = useAuth();
+  const { user, subscription } = useAuth();
 
   // Fetch user subscription and tags when component mounts
   useEffect(() => {
     const fetchData = async () => {
       console.log('PersonalityStep: Starting to fetch data...');
       setIsLoading(true);
-      
       try {
-        // Fetch user subscription
         if (user) {
-          const { data: subscription } = await Billing.getUserActiveSubscription(user.id);
           setUserPlan(subscription?.plan?.name || 'Guest Pass');
         } else {
           setUserPlan('Guest Pass');
@@ -62,12 +59,11 @@ const PersonalityStep = ({ data, onUpdate, onNext, onPrevious, selectedTags, set
         setUserPlan('Guest Pass');
         setAllTags([]);
       }
-      
       setIsLoading(false);
     };
     
     fetchData();
-  }, [user]);
+  }, [user, subscription]);
 
   // Update form data when character data is loaded
   useEffect(() => {

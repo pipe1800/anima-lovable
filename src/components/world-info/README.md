@@ -89,7 +89,7 @@ src/components/world-info/
 - `useUserWorldInfos()` - Fetch user's world info
 - `usePublicWorldInfos()` - Fetch public world info
 - `useWorldInfoWithEntries()` - Fetch world info with entries
-- `useAllTags()` - Fetch available tags
+- `useAllTags()` (from `useTags.ts`) - Fetch available tags (cached)
 
 ## Related Operations
 

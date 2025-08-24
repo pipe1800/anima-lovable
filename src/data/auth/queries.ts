@@ -1,5 +1,4 @@
 import { supabase } from '@/db/client';
-import { Uploads, Profile as ProfileData } from '@/data';
 
 export const getSession = () => supabase.auth.getSession();
 export const onAuthStateChange = (callback: Parameters<typeof supabase.auth.onAuthStateChange>[0]) => supabase.auth.onAuthStateChange(callback);
@@ -16,46 +15,16 @@ export const resetPasswordForEmail = (email: string, redirectTo: string) =>
 export const setSession = (access_token: string, refresh_token: string) =>
   supabase.auth.setSession({ access_token, refresh_token });
 
-export const markOnboardingCompleted = (userId: string) => ProfileData.setOnboardingCompleted(userId, true);
-
-// Delegated avatar provisioning (was duplicated). Uses Uploads.ensureDefaultAvatar now.
-export const ensureDefaultAvatar = async (userId: string) => {
-  const { data: profileRow } = await supabase
-    .from('profiles')
-    .select('avatar_url')
-    .eq('id', userId)
-    .maybeSingle();
-  if (profileRow?.avatar_url) return { avatar_url: profileRow.avatar_url };
-  const avatarUrl = await Uploads.ensureDefaultAvatar(userId);
-  await supabase
-    .from('profiles')
-    .update({ avatar_url: avatarUrl })
-    .eq('id', userId);
-  return { avatar_url: avatarUrl };
-};
-
-export const completeOnboarding = async (userId: string) => {
-  await updateUser({ onboarding_completed: true });
-  await ProfileData.setOnboardingCompleted(userId, true);
-};
-
-export const ensureDefaultAvatarIfMissing = async (userId: string) => {
-  const { data: profileRow } = await supabase
-    .from('profiles')
-    .select('avatar_url')
-    .eq('id', userId)
-    .maybeSingle();
-  if (profileRow?.avatar_url) return { avatar_url: profileRow.avatar_url, created: false };
-  try {
-    const avatarUrl = await Uploads.ensureDefaultAvatar(userId);
-    return { avatar_url: avatarUrl, created: true };
-  } catch (e) {
-    console.warn('Failed to provision default avatar', e);
-    return { avatar_url: '/default_avatar.jpg', created: false };
-  }
-};
-
-export const getCurrentUser = async () => {
+// Returns authenticated user or null (no error throw)
+export const getAuthUser = async () => {
   const { data, error } = await supabase.auth.getUser();
-  return { data, error };
+  if (error) return { user: null, error } as const;
+  return { user: data.user, error: null } as const;
+};
+
+// Helper to enforce authentication (throws if unauthenticated)
+export const requireAuthId = async (): Promise<string> => {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) throw new Error('Not authenticated');
+  return data.user.id;
 };

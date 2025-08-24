@@ -3,7 +3,7 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import AppSidebar from '@/components/dashboard/AppSidebar';
 import { MobileHeader } from './MobileHeader';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDashboardData } from '@/hooks/useDashboard';
+import { useDashboardOverview } from '@/hooks/useDashboardProgressive';
 import { useLocation } from 'react-router-dom';
 
 interface DashboardLayoutProps {
@@ -12,7 +12,7 @@ interface DashboardLayoutProps {
 
 export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
   const { user, profile } = useAuth();
-  const { data: dashboardData } = useDashboardData();
+  const { data: dashboardData } = useDashboardOverview();
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   

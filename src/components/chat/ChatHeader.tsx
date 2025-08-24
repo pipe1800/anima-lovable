@@ -19,6 +19,7 @@ interface ChatHeaderProps {
   isMessageCountLoading: boolean;
   messageCount: number;
   getMemoryCostText: (count: number) => string;
+  relationshipStage?: string | null; // NEW
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = ({
@@ -36,6 +37,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   isMessageCountLoading,
   messageCount,
   getMemoryCostText,
+  relationshipStage,
 }) => {
   // Force display name to first 15 characters
   const rawName: string = character?.name || '';
@@ -57,14 +59,21 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
             >
               {displayName}
             </h1>
-            {character.tagline && (
-              <p
-                className="text-gray-400 text-sm sm:text-base truncate max-w-[55vw] sm:max-w-[32rem] overflow-hidden"
-                title={character.tagline}
-              >
-                {character.tagline}
-              </p>
-            )}
+            <div className="flex flex-wrap gap-1 items-center">
+              {character.tagline && (
+                <p
+                  className="text-gray-400 text-sm sm:text-base truncate max-w-[55vw] sm:max-w-[32rem] overflow-hidden"
+                  title={character.tagline}
+                >
+                  {character.tagline}
+                </p>
+              )}
+              {relationshipStage && (
+                <span className="ml-1 px-2 py-0.5 text-[10px] sm:text-xs rounded bg-[#FF7A00]/20 text-[#FF7A00] border border-[#FF7A00]/40" title={relationshipStage}>
+                  {relationshipStage}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

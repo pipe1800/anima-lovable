@@ -161,7 +161,8 @@ export function CharacterGrid({
 
   // Prefetch character details on hover to make details instant
   const prefetchCharacterDetails = (id: string) => {
-    queryClient.prefetchQuery(chatQueryConfigs.characterDetails(id));
+    // Use lightweight summary for hover prefetch (avoid heavy full profile load)
+    queryClient.prefetchQuery(chatQueryConfigs.characterSummary(id));
   };
 
   const handleStartChat = (character: PublicCharacter) => {

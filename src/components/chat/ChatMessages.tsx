@@ -6,6 +6,7 @@ import { MessageGroup } from './MessageGroup';
 import { groupMessages } from '@/utils/messageGrouping';
 import { useUserGlobalChatSettings } from '@/data/chats/settings';
 import { logger } from '@/utils/logger';
+import { useTypewriterStream } from '../../hooks/useTypewriterStream';
 
 interface Character {
   id: string;
@@ -170,44 +171,7 @@ const ChatMessages = ({
     };
   }, [trackedContext, messages]);
 
-  // ✅ SIMPLIFIED: Basic message grouping without complex streaming logic
-  const messageGroups = useMemo(() => {
-    // ✅ SIMPLIFIED: No frontend streaming message display
-    // Backend handles all message persistence, frontend just shows database messages
-    return groupMessages(messages as any);
-  }, [messages]);
-
-  // Identify the last AI group id to control modify permissions
-  const lastAiGroupId = useMemo(() => {
-    for (let i = messageGroups.length - 1; i >= 0; i--) {
-      const g = messageGroups[i] as any;
-      if (g && g.isUser === false) return g.id as string;
-    }
-    return null as any;
-  }, [messageGroups]);
-
-  // ✅ PHASE 3: Memoized scroll handler to prevent recreation
-  const handleLoadEarlier = useCallback(() => {
-    if (hasMore && !isFetchingNextPage && fetchNextPage) {
-      const currentScrollHeight = messagesContainerRef.current?.scrollHeight || 0;
-      loadingEarlierRef.current = true;
-      fetchNextPage();
-      setTimeout(() => {
-        if (messagesContainerRef.current) {
-          const newScrollHeight = messagesContainerRef.current.scrollHeight;
-            const scrollDiff = newScrollHeight - currentScrollHeight;
-            messagesContainerRef.current.scrollTop = scrollDiff;
-        }
-        // Allow next message append to auto-scroll again
-        requestAnimationFrame(() => { loadingEarlierRef.current = false; });
-      }, 100);
-    }
-  }, [hasMore, isFetchingNextPage, fetchNextPage]);
-
-  // Typewriter-rendered streaming text for smooth mode
-  const [displayedStream, setDisplayedStream] = React.useState('');
-
-  // Compute the last AI message from the current messages list
+  // Compute the last AI message from the current messages list (must be before effects using it)
   const lastAiMessage = useMemo(() => {
     for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
       const m = messages[i] as any;
@@ -216,44 +180,128 @@ const ChatMessages = ({
     return null as any;
   }, [messages]);
 
-  // Incrementally reveal streamingMessage one character at a time
+  // New decoupled typewriter stream (replaces previous displayedStream/targetText logic)
+  const { text: typewriterText, feedChunk, markStreamFinished, isTyping } = useTypewriterStream({ charsPerSecond: 75 });
+  const previousStreamRef = useRef('');
+  // Feed only new appended substring into typewriter queue
   useEffect(() => {
-    if (!isStreaming) return;
-    if (!streamingMessage) return;
-
-    const speedMs = 12; // typing speed per character
-    const interval = setInterval(() => {
-      setDisplayedStream(prev => {
-        if (!isStreaming) return prev; // keep content until final AI message arrives
-        if (prev.length >= (streamingMessage?.length || 0)) return prev;
-        return streamingMessage.slice(0, prev.length + 1);
-      });
-    }, speedMs);
-
-    return () => clearInterval(interval);
-  }, [isStreaming, streamingMessage]);
-
-  // When streaming stops, keep the streamed text until the final AI message is present
-  useEffect(() => {
-    if (isStreaming) return;
-    if (!displayedStream) return;
-    const finalContent = lastAiMessage?.content as string | undefined;
-    if (finalContent && finalContent.includes(displayedStream)) {
-      // Final AI message includes our streamed content, safe to clear
-      setDisplayedStream('');
+    if (streamingMessage) {
+      const prev = previousStreamRef.current;
+      if (streamingMessage.length > prev.length) {
+        const newChunk = streamingMessage.slice(prev.length);
+        feedChunk(newChunk);
+        previousStreamRef.current = streamingMessage;
+      }
     }
-  }, [isStreaming, displayedStream, lastAiMessage?.content]);
+    // When streaming ends, mark finished so queue can drain smoothly
+    if (!isStreaming && streamingMessage && previousStreamRef.current === streamingMessage) {
+      markStreamFinished();
+    }
+  }, [streamingMessage, isStreaming, feedChunk, markStreamFinished]);
+  const isTypewriterComplete = !isTyping && !!previousStreamRef.current && !isStreaming;
 
-  // Decide if the streaming bubble should be shown to avoid flicker
+  // Filter messages - ensure previously persisted AI message remains visible while streaming new one.
+  const filteredMessages = useMemo(() => {
+    const finalAnimatedTarget = previousStreamRef.current; // full streamed text (may be final target)
+    return (messages || []).filter((m: any) => {
+      if (!m) return false;
+      if (m.isUser) return true;
+      if (!m.content || !String(m.content).trim()) return false;
+      // Only hide if we are still animating AND this message's full content exactly matches the final target
+      // (prevents duplicate full + animated versions of the SAME message). Otherwise keep it.
+      const isDuplicateOfAnimating = !isTypewriterComplete && typewriterText && finalAnimatedTarget && m.content === finalAnimatedTarget;
+      if (isDuplicateOfAnimating) return false;
+      return true;
+    });
+  }, [messages, isTypewriterComplete, typewriterText]);
+
+  // Temporary streaming message while typewriter animates
+  const tempStreamingMessage = useMemo(() => {
+    if (!typewriterText) return null;
+    if (isTypewriterComplete) return null;
+    const maxOrder = filteredMessages.reduce((acc: number, m: any) => Math.max(acc, m.message_order || 0), 0);
+    return {
+      id: `streaming-${chatId}`,
+      content: typewriterText,
+      isUser: false,
+      is_ai_message: true,
+      isTemporaryStreaming: true,
+      timestamp: new Date(),
+      message_order: maxOrder + 1,
+    } as any;
+  }, [filteredMessages, chatId, typewriterText, isTypewriterComplete]);
+
+  // Compose final messages list including (or updating) the stable temporary streaming message
+  const streamingAugmentedMessages = useMemo(() => {
+    if (!tempStreamingMessage) return filteredMessages;
+    const existingIndex = filteredMessages.findIndex((m: any) => m.id === tempStreamingMessage.id);
+    if (existingIndex >= 0) {
+      const updated = [...filteredMessages];
+      // Only replace if content changed to avoid unnecessary re-renders
+      if (updated[existingIndex].content !== tempStreamingMessage.content) {
+        updated[existingIndex] = tempStreamingMessage;
+      }
+      return updated;
+    }
+    return [...filteredMessages, tempStreamingMessage];
+  }, [filteredMessages, tempStreamingMessage]);
+
+  // Group messages (with stabilization for streaming group to reduce avatar flicker)
+  const messageGroups = useMemo(() => {
+    const groups = groupMessages(streamingAugmentedMessages as any);
+    return groups.map(g => {
+      if (g.messages.some((m: any) => m.isTemporaryStreaming)) {
+        return {
+          ...g,
+          id: `streaming-group-${chatId}`,
+          _stable: true,
+        } as any;
+      }
+      return g;
+    });
+  }, [streamingAugmentedMessages, chatId]);
+
+  // RE-ADD lastAiGroupId computation (needed for canModify prop)
+  const lastAiGroupId = useMemo(() => {
+    for (let i = messageGroups.length - 1; i >= 0; i--) {
+      const g: any = messageGroups[i];
+      if (g && g.isUser === false) return g.id as string;
+    }
+    return null as any;
+  }, [messageGroups]);
+
+  // RE-ADD load earlier handler
+  const handleLoadEarlier = useCallback(() => {
+    if (hasMore && !isFetchingNextPage && fetchNextPage) {
+      const currentScrollHeight = messagesContainerRef.current?.scrollHeight || 0;
+      loadingEarlierRef.current = true;
+      fetchNextPage();
+      setTimeout(() => {
+        if (messagesContainerRef.current) {
+          const newScrollHeight = messagesContainerRef.current.scrollHeight;
+          const scrollDiff = newScrollHeight - currentScrollHeight;
+          messagesContainerRef.current.scrollTop = scrollDiff;
+        }
+        requestAnimationFrame(() => { loadingEarlierRef.current = false; });
+      }, 100);
+    }
+  }, [hasMore, isFetchingNextPage, fetchNextPage]);
+
+  // Decide if the streaming bubble should be shown (separate bubble strategy)
   const showStreamingBubble = useMemo(() => {
-    if (!displayedStream) return false;
-    if (isStreaming) return true;
-    // After streaming ends, keep bubble until final AI message appears
-    const finalContent = lastAiMessage?.content as string | undefined;
-    if (!finalContent) return true;
-    return !finalContent.includes(displayedStream);
-  }, [isStreaming, displayedStream, lastAiMessage?.content]);
+    return false; // still disabled (we integrate into list)
+  }, []);
 
+  // Remove premature clearing effect that caused flicker (final + temp both hidden)
+  // useEffect(() => { ...existing code... }, [isStreaming, displayedStream, messages]);
+
+  // After animation finishes, clear the streamed buffer (after final message is visible) to avoid holding large strings
+  useEffect(() => {
+    if (!isTypewriterComplete) return;
+    if (!typewriterText) return;
+    const t = setTimeout(() => { previousStreamRef.current = ''; }, 250);
+    return () => clearTimeout(t);
+  }, [isTypewriterComplete, typewriterText]);
 
   // Robust force scroll utility (desktop + mobile) with double rAF to catch late layout (images, fonts, streamed chars)
   const forceScrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -308,12 +356,12 @@ const ChatMessages = ({
   const lastStreamLenRef = useRef(0);
   useEffect(() => {
     if (!showStreamingBubble) { lastStreamLenRef.current = 0; return; }
-    const currentLen = displayedStream.length;
+    const currentLen = typewriterText.length;
     if (currentLen !== lastStreamLenRef.current) {
       lastStreamLenRef.current = currentLen;
       forceScrollToBottom('auto');
     }
-  }, [displayedStream, showStreamingBubble, forceScrollToBottom]);
+  }, [typewriterText, showStreamingBubble, forceScrollToBottom]);
 
   // Fallback: when loading finishes and we have messages but container isn't at bottom (e.g., images loaded after render)
   useEffect(() => {
@@ -417,19 +465,14 @@ const ChatMessages = ({
           </div>
         )}
 
-
-        {/* Live streaming bubble for smooth mode without flicker */}
-        {showStreamingBubble && (
+        {/* Live streaming bubble for smooth mode */}
+        {false && showStreamingBubble && (
           <MessageGroup
             key="streaming-group"
             group={{
               id: 'streaming-group',
               messages: [
-                {
-                  id: 'streaming-temp',
-                  content: displayedStream,
-                  isUser: false,
-                } as any,
+                { id: 'streaming-temp', content: typewriterText, isUser: false } as any,
               ],
               isUser: false,
               timestamp: new Date(),

@@ -1,6 +1,5 @@
 export * as Profile from './profile/queries';
 export * as Characters from './characters/queries';
-export * as CharacterDetails from './characters/details';
 export * as CharacterMutations from './characters/mutations';
 export * as CharacterUser from './characters/userCharacters';
 export * as CharacterRecommendations from './characters/recommendations';
@@ -16,32 +15,15 @@ export * as WorldInfoSelection from './worldInfo/selection';
 export * as Personas from './personas/queries';
 export * as Chats from './chats/queries';
 export * as ChatFunctions from './chats/functions';
-export * as ProfileStats from './profile/stats';
 export * as Auth from './auth/queries';
 export * as Uploads from './uploads/storage';
 export * from './shared/searchTypes';
 export * as Tags from './tags/queries';
 export * as PersonaMutations from './personas/mutations';
-export * as Payments from './payments/client'; // compatibility layer
-export * as PayPalClient from './billing/paypalClient'; // New export for PayPal client
-// Legacy Payments compatibility already points to payments/client -> now index.ts in payments re-exports billing/paypalClient
+export * as Payments from './billing/paypalClient'; // alias (replaces deprecated ./payments)
+export * as PayPalClient from './billing/paypalClient';
+export * as RelationshipTemplate from './relationships/template';
+// @ts-ignore pending generated types update for new module resolution
+export * as RelationshipProgress from './relationships/progress';
 
-// Removed deprecated exports: WorldInfoPublic, WorldInfoExtendedDeprecated, WorldInfoTagsDeprecated, CharacterExtended, PaymentsDeprecated
-
-// Flattened re-exports (to be pruned later)
-export * from './profile/queries';
-export * from './characters/queries';
-export * from './characters/details';
-export * from './characters/mutations';
-export * from './characters/userCharacters';
-export * from './characters/recommendations';
-export * from './characters/userCharacterSettings';
-export * from './billing/queries';
-export * from './worldInfo/mutations';
-export * from './worldInfo/interactions';
-export * from './worldInfo/importExport';
-export * from './personas/queries';
-export * from './profile/stats';
-export * from './auth/queries';
-export * from './chats/functions';
-export * from './characters/profileView';
+// Flattened re-exports removed (2025-08-21 cleanup).

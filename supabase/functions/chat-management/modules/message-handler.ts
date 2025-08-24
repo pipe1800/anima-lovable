@@ -244,7 +244,7 @@ export async function buildSystemPrompt(
   userId?: string,
   metaCollector?: (meta: PromptMeta) => void
 ): Promise<string> {
-  // Canonical block builder (persistent every turn)
+  // Consolidated canonical state builder (compressed)
   const buildPersistentCanonicalOverrides = (ctx: CurrentContext | undefined): { block: string; json: Record<string,string> } => {
     if (!ctx) return { block: '', json: {} };
     const alias = (primary: keyof any, ...alts: string[]) => {
@@ -265,19 +265,22 @@ export async function buildSystemPrompt(
     let canonicalJson = '{}';
     try { canonicalJson = JSON.stringify(collected); } catch {}
     const block = [
-      '[[ PERSISTENT CANONICAL STATE OVERRIDES ]]',
-      'ALWAYS OUTRANKS: description, scenario, personality_summary, greeting, examples, style, world info, memories.',
-      'PRECEDENCE: Canonical State JSON > accepted user-driven changes (post-ack) > persisted addon updates (next turn canonical) > character core > greeting > examples.',
+      '[CANONICAL STATE]',
+      'Source of truth for dynamic situational fields. Outranks card/greeting/examples/memories/world info.',
       '[CANONICAL_STATE_JSON]',
       canonicalJson,
       '[/CANONICAL_STATE_JSON]',
-      'RULES:',
-      '- Any conflicting mention elsewhere is obsolete; never resurrect it.',
-      '- Direct queries: answer with canonical value verbatim.',
-      '- Change only with explicit user request / justified narrative / environment necessity.',
-      '- If user asserts different state without request: reaffirm canonical & optionally offer change.',
-      '- Ignore greeting / core text conflicts for these fields.',
-      '[[ END PERSISTENT CANONICAL STATE OVERRIDES ]]',
+      'RULES (Compressed):',
+      'P1 Precedence: canonical_json > accepted user change > addon updates (next turn) > card core > greeting > examples.',
+      'P2 No spontaneous changes. Only update after explicit user request OR justified environmental necessity (plausibility).',
+      'P3 If user asserts a conflicting value without requesting change: politely restate canonical. Offer to change if they want.',
+      'P4 Never reintroduce removed legacy lines; treat them as deprecated.',
+      'P5 Self-correct immediately if you output a contradiction.',
+      'P6 Micro-transition (single concise sentence) ONLY when a field truly changes (storytelling mode only). None in companion mode.',
+      'P7 Mood shifts only on strong user emotional triggers or explicit assignment; stay stable otherwise.',
+      'P8 Relationship label NEVER upgrades/downgrades without explicit mutual proposal and readiness (see progression rules).',
+      'P9 Refer naturally; do not list all fields every reply.',
+      '[/CANONICAL STATE]',
       ''
     ].join('\n');
     return { block, json: collected };
@@ -286,51 +289,35 @@ export async function buildSystemPrompt(
   // Build canonical block + keep JSON for sanitation
   const { block: canonicalOverrideBlock, json: canonicalJson } = buildPersistentCanonicalOverrides(currentContext);
 
-  // Sanitize character card fields that contradict canonical state (remove conflicting sentences)
-  const sanitizeText = (text: string | null | undefined): string | null => {
-    if (!text || !Object.keys(canonicalJson).length) return text || null;
-    const lowerCanon: Record<string,string> = Object.fromEntries(Object.entries(canonicalJson).map(([k,v])=>[k, v.toLowerCase()]));
-    const fieldsPatterns: Array<{key:string; pat: RegExp}> = [
-      { key: 'clothing', pat: /(wearing|dressed|clad|outfit|uniform|garb|attire|coat|dress|shirt|skirt|jeans|armor|armour)/i },
-      { key: 'location', pat: /(\bat\b|\bin\b|\binside\b|\bwithin\b|\broom\b|\bbeach\b|\bforest\b|\bgarden\b|\blibrary\b|\bpark\b|\boffice\b|\bclassroom\b|\bcastle\b|\binn\b|\btavern\b)/i },
-      { key: 'mood', pat: /(mood|feels|feeling|emotion|temperament|demeanor|demeanour)/i },
-      { key: 'relationship', pat: /(relationship|lover|friend|rival|enemy|spouse|partner)/i },
-      { key: 'character_position', pat: /(sitting|standing|lying|reclining|crouching|kneeling|running|walking|pacing|leaning)/i }
+  // Sanitize character dynamic lines before building core
+  const sanitizeField = (val?: string | null): any => {
+    if (!val || typeof val !== 'string') return val;
+    let out = val;
+    const removalPatterns: RegExp[] = [
+      /current (relationship|clothing|outfit|location|mood|position)[^.\n]*[.\n]?/gi,
+      /\b(stranger|acquaintance|associate|friend|best friend|close friend|girlfriend|boyfriend|lover|partner|spouse|wife|husband|fianc[eé]|crush|enemy|rival|nemesis)\b/gi,
+      /\b(master|owner|pet|sub|dom|servant|maid)\b/gi,
+      /\b(location|wearing|dressed in|outfit)[:]?:[^.\n]*[.\n]?/gi,
     ];
-    const sentences = text.split(/(?<=[.!?])\s+/);
-    const kept: string[] = []; let removed = 0;
-    for (const s of sentences) {
-      const sl = s.toLowerCase();
-      let conflict = false;
-      for (const f of fieldsPatterns) {
-        if (!canonicalJson[f.key]) continue;
-        if (f.pat.test(sl) && !sl.includes(lowerCanon[f.key])) { conflict = true; break; }
-      }
-      if (!conflict) kept.push(s); else removed++;
-    }
-    const result = kept.join(' ').trim();
-    if (removed > 0) console.log('✂️ Card sanitation removed conflicting sentences', { removed, originalLen: text.length, newLen: result.length });
-    return result || text; // fallback to original if empty
+    for (const pat of removalPatterns) out = out.replace(pat, '');
+    out = out.replace(/\n{3,}/g, '\n\n');
+    return out.trim();
   };
+  const sanitizedCharacter: Character = {
+    ...character,
+    personality_summary: sanitizeField(character.personality_summary),
+    description: sanitizeField(character.description),
+    scenario: typeof character.scenario === 'string' ? sanitizeField(character.scenario) : character.scenario,
+    ...(character as any).style_profile ? { style_profile: sanitizeField((character as any).style_profile) } : {},
+    ...(character as any).speech_style ? { speech_style: sanitizeField((character as any).speech_style) } : {},
+  } as Character;
 
-  // Create sanitized clone of character
-  const sanitizedCharacter: Character = { ...character } as any;
-  try {
-    if ((sanitizedCharacter as any).personality_summary) (sanitizedCharacter as any).personality_summary = sanitizeText((sanitizedCharacter as any).personality_summary);
-    if ((sanitizedCharacter as any).description) (sanitizedCharacter as any).description = sanitizeText((sanitizedCharacter as any).description);
-    if ((sanitizedCharacter as any).scenario) (sanitizedCharacter as any).scenario = sanitizeText(typeof (sanitizedCharacter as any).scenario === 'string' ? (sanitizedCharacter as any).scenario : JSON.stringify((sanitizedCharacter as any).scenario));
-  } catch (e) { console.warn('⚠️ Character sanitation failed (non-fatal)', e); }
-
-  // Build core sections with sanitized character
   const builder = new PromptBuilder({ character: sanitizedCharacter, replaceTemplates: replaceTemplatesFn });
   let systemPrompt = builder.addPreamble().addCharacterCore().addStyleProfile().addUserPersona(selectedPersona).build();
 
-  // Prepend canonical block
+  // Prepend canonical block if present
   if (canonicalOverrideBlock) {
-    logger.debug('canonical.inject', canonicalJson);
     systemPrompt = canonicalOverrideBlock + systemPrompt;
-  } else {
-    logger.trace('canonical.none');
   }
 
   const meta: PromptMeta = { currentContext: {}, worldInfoUsed: [], memoryIds: [], summary: null, tokens: {} };
@@ -344,192 +331,55 @@ export async function buildSystemPrompt(
     }
   } catch {}
 
-  // Helper to capture added tokens per section
   const withTokenDelta = (label: keyof NonNullable<PromptMeta['tokens']>, fn: () => void) => {
-    const before = estimateTokens(systemPrompt);
-    fn();
-    const after = estimateTokens(systemPrompt);
-    const delta = Math.max(0, after - before);
-    meta.tokens![label] = (meta.tokens![label] || 0) + delta;
-  };
+    const before = estimateTokens(systemPrompt); fn(); const after = estimateTokens(systemPrompt); const delta = Math.max(0, after - before); meta.tokens![label] = (meta.tokens![label] || 0) + delta; };
 
-  // IMPORTANT DIALOGUE GUIDELINES appended below; record tokens later
+  // Dialogue rules (compressed)
   const beforeGuidelines = estimateTokens(systemPrompt);
-
-  systemPrompt += `
-
-IMPORTANT DIALOGUE GUIDELINES:
-- You are ONLY the character, never speak for the user
-- NEVER write the user's responses or actions
-- NEVER continue the conversation for the user
-- STOP your response when it's the user's turn to speak`;
+  systemPrompt += `\n\n[GLOBAL DIALOGUE RULES]\n- You speak ONLY as ${character.name}.\n- Never write the user's words, actions, or decisions.\n- Stop when it's clearly the user's turn.\n- Maintain immersion; concise, in-character replies.\n[/GLOBAL DIALOGUE RULES]`;
   meta.tokens!.guidelines = (meta.tokens!.guidelines || 0) + (estimateTokens(systemPrompt) - beforeGuidelines);
 
-  // Add chat mode specific guidelines (these count into guidelines bucket)
+  // Mode-specific minimal policies
   const beforeMode = estimateTokens(systemPrompt);
   if (chatMode === 'companion') {
-    systemPrompt += `
-
-## CRITICAL COMPANION MODE RULES - HIGHEST PRIORITY
-
-YOU ARE IN COMPANION MODE. THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS:
-
-1. **RESPOND ONLY WITH DIALOGUE** - Your response must contain ONLY what ${character.name} says. Nothing else.
-
-2. **ABSOLUTELY FORBIDDEN**:
-   - NO descriptions of actions, emotions, or movements
-   - NO text between asterisks (*) or tildes (~)
-   - NO narration or scene-setting
-   - NO descriptions of clothing, appearance, or environment
-   - NO parenthetical statements
-   - NO third-person observations
-   - NO stage directions
-
-3. **IGNORE CONTEXT IN EXAMPLES** - Even if the character's greeting or example messages contain descriptions, actions, or narration, you MUST NOT include any in your responses.
-
-4. **CORRECT FORMAT**:
-   ✓ "Hello! How are you today?"
-   ✓ "That's interesting. Tell me more about it."
-   
-5. **INCORRECT FORMAT**:
-   ✗ "*smiles* Hello! How are you today?"
-   ✗ "Hello! *waves enthusiastically* How are you today?"
-   ✗ "(Speaking softly) Hello! How are you today?"
-
-REMEMBER: You are having a text conversation. Respond as if you're texting or instant messaging - pure dialogue only.`;
+    systemPrompt += `\n\n[COMPANION MODE]\nPURE DIALOGUE ONLY. Forbidden: narration, action tags (* * / ~ ~), stage directions, third-person exposition, parentheticals, user lines.\nFORMAT RULES:\n1. Each spoken line is its own paragraph: one line, blank line, next line.\n2. No blank trailing narration; never add *actions*.\n3. Keep lines concise and natural.\nExamples:\n"Hey, how's your day?"\n\n"That sounds great—tell me more."\nIncorrect: "*smiles* Hi" | "(softly) Hello" | "She smiles and says hi."\n[/COMPANION MODE]`;
   } else {
-    systemPrompt += `
-
-## STORYTELLING MODE ACTIVE
-
-You are in STORYTELLING MODE. You should:
-- Include rich descriptions of actions, emotions, and environment
-- Use asterisks (*) for actions and descriptions
-- Set the scene and create atmosphere
-- Describe ${character.name}'s appearance, movements, and emotional state when relevant
-- Create an immersive narrative experience
-- Focus primarily on dialogue and conversation as the character
-- Use direct speech frequently with quotation marks
-- Keep narrative descriptions brief and essential
-- Respond with natural, engaging conversation as your character
-- Express emotions and thoughts through words and dialogue
-- Avoid lengthy descriptive paragraphs
-- Make your character feel alive through speech
-
-Balance dialogue with descriptive elements to create an engaging story.`;
+    systemPrompt += `\n\n[STORYTELLING MODE]\nNarration is tightly regulated; dialogue leads.\nQUANT RULES:\n- Dialogue >=60% of words.\n- Max 1 narration paragraph after a dialogue paragraph unless user explicitly asks for description.\n- Narration paragraph <=2 short sentences (<=30 words total) unless user requests detail.\n- Optional single *action/emotion* micro block per reply (counts as narration).\nFORMAT RULES (ENFORCED):\n1. Each dialogue line is its own paragraph: "..."\n2. If narration follows, it is the NEXT paragraph ONLY, enclosed in *asterisks*: *She tilts her head, studying you.*\n3. Never mix dialogue and narration in the same paragraph.\n4. If another dialogue line follows, start a NEW paragraph with quotes; do NOT append to narration.\n5. Do not chain multiple narration paragraphs unless user explicitly requested more detail (then max 2).\n6. All narration MUST be inside a single pair of asterisks per paragraph; no bare narration outside * *.\n7. Micro-transition (state change) goes inside that narration paragraph.\n8. Never narrate user actions or internal states.\nSTYLE:\n- Keep narration specific, functional, no filler (avoid idle gestures unless meaningful).\n- Do not restate unchanged clothing/location/mood unless asked or changed.\nSAMPLE STRUCTURE:\n"I wasn't expecting that."\n\n*She folds her arms, a quick flash of curiosity crossing her face.*\n\n"So—what made you decide that?"\nINCORRECT EXAMPLES:\n"I wasn't expecting that," *she folds her arms.* (dialogue + narration same paragraph)\n*She smiles.* *She looks around.* (two narration paragraphs without request)\n[/STORYTELLING MODE]`;
   }
   meta.tokens!.guidelines += (estimateTokens(systemPrompt) - beforeMode);
 
-  // CURRENT CONTEXT section
+  // CURRENT CONTEXT (compressed – data only)
   if (currentContext && addonSettings) {
     withTokenDelta('context', () => {
-      const contextParts: string[] = [];
-      if (addonSettings.moodTracking && currentContext.moodTracking && currentContext.moodTracking !== 'No context') {
-        contextParts.push(`Current Mood: ${currentContext.moodTracking}`);
-        meta.currentContext!.moodTracking = currentContext.moodTracking;
-      }
-      if (addonSettings.clothingInventory && currentContext.clothingInventory && currentContext.clothingInventory !== 'No context') {
-        contextParts.push(`Current Clothing: ${currentContext.clothingInventory}`);
-        meta.currentContext!.clothingInventory = currentContext.clothingInventory;
-      }
-      if (addonSettings.locationTracking && currentContext.locationTracking && currentContext.locationTracking !== 'No context') {
-        contextParts.push(`Current Location: ${currentContext.locationTracking}`);
-        meta.currentContext!.locationTracking = currentContext.locationTracking;
-      }
-      if (addonSettings.timeAndWeather && currentContext.timeAndWeather && currentContext.timeAndWeather !== 'No context') {
-        contextParts.push(`Time & Weather: ${currentContext.timeAndWeather}`);
-        meta.currentContext!.timeAndWeather = currentContext.timeAndWeather;
-      }
-      if (addonSettings.relationshipStatus && currentContext.relationshipStatus && currentContext.relationshipStatus !== 'No context') {
-        contextParts.push(`Relationship Status: ${currentContext.relationshipStatus}`);
-        meta.currentContext!.relationshipStatus = currentContext.relationshipStatus;
-      }
-      if (addonSettings.characterPosition && currentContext.characterPosition && currentContext.characterPosition !== 'No context') {
-        contextParts.push(`Character Position: ${currentContext.characterPosition}`);
-        meta.currentContext!.characterPosition = currentContext.characterPosition;
-      }
-
-      if (contextParts.length > 0) {
-        const staleHint = (timeAwarenessData && timeAwarenessData.delaySeconds && timeAwarenessData.delaySeconds > 1800)
-          ? `\n(Notice: This context may be stale; over 30 minutes since your last message.)`
-          : '';
-        const godMode = !!addonSettings.godMode;
-        // Policy text differs depending on god mode
-        const policyHeader = godMode
-          ? `USER SUPREMACY MODE ACTIVE (godMode=true). The user's explicit statements immediately become canonical unless they contradict immutable character card identity (e.g., species/race if core).`
-          : `SAFE MODE (godMode=false). Stored context + character card are authoritative; user claims that contradict established clothing/location/etc. should be politely corrected unless a plausible transition is initiated.`;
-        const sharedRules = `General Rules:
-- When the user merely ASKS about a field (e.g. "What are you wearing?"), report the stored value verbatim.
-- Never change a field just to add variety.
-- Preserve unchanged fields exactly.
-- Multi-field changes: ${godMode ? 'allowed when user explicitly bundles them.' : 'only apply fields the user clearly drives; reject or defer others.'}
-- Environment or situational hints (temperature, setting) justify change ONLY if the current value is implausible. Setting alone (e.g. beach in winter) does NOT force a change without plausibility.`;
-        const changeRulesSafe = `Valid change triggers (safe mode):
-1. Explicit user request to CHANGE ("put on X", "move to Y") that fits character card OR is plausible with a transition.
-2. Environment shift making old state untenable (remove heavy coat in hot sauna).
-3. Continuation of a previously started change sequence.
-4. Explicit user retcon WITH justification (user begins to narrate change).
-Reject & correct: pure assertions that contradict current state without justification ("you're wearing a blue shirt" when context says red dress). Ask the user to justify or initiate an in-story transition.`;
-        const changeRulesGod = `Valid change triggers (god mode):
-1. Any explicit user statement or request about a field.
-2. Environment-based necessity.
-3. Continuation of earlier change.
-If a user assertion conflicts, ACCEPT and optionally micro-narrate transition (unless in pure dialogue mode).`;
-        const narrationRules = chatMode === 'companion'
-          ? `COMPANION MODE: Do NOT narrate transitions; respond only with dialogue reflecting new state when a change is accepted.`
-          : `STORYTELLING MODE: When a field changes, include a concise micro-transition sentence ONCE (e.g., "She slips off the sweater and pulls on a light swimsuit."). Do not repeat the transition in subsequent turns.`;
-        const moodRules = `Mood: keep consistent with character card; only shift when user action, strong emotional content, or explicit user assignment justifies it. Emotionless / stoic archetypes stay within minimal shifts (neutral, calm, focused).`;
-        systemPrompt += `\n\n[CURRENT CONTEXT]\n${policyHeader}${staleHint}\n${sharedRules}\n${godMode ? changeRulesGod : changeRulesSafe}\n${narrationRules}\n${moodRules}\nCurrent Stored State:\n` +
-          contextParts.join('\n') + `\n[/CURRENT CONTEXT]`;
+      const fields: string[] = [];
+      if (addonSettings.moodTracking && currentContext.moodTracking && currentContext.moodTracking !== 'No context') { fields.push(`Mood: ${currentContext.moodTracking}`); meta.currentContext!.moodTracking = currentContext.moodTracking; }
+      if (addonSettings.clothingInventory && currentContext.clothingInventory && currentContext.clothingInventory !== 'No context') { fields.push(`Clothing: ${currentContext.clothingInventory}`); meta.currentContext!.clothingInventory = currentContext.clothingInventory; }
+      if (addonSettings.locationTracking && currentContext.locationTracking && currentContext.locationTracking !== 'No context') { fields.push(`Location: ${currentContext.locationTracking}`); meta.currentContext!.locationTracking = currentContext.locationTracking; }
+      if (addonSettings.timeAndWeather && currentContext.timeAndWeather && currentContext.timeAndWeather !== 'No context') { fields.push(`TimeWeather: ${currentContext.timeAndWeather}`); meta.currentContext!.timeAndWeather = currentContext.timeAndWeather; }
+      if (addonSettings.relationshipStatus && currentContext.relationshipStatus && currentContext.relationshipStatus !== 'No context') { fields.push(`Relationship: ${currentContext.relationshipStatus}`); meta.currentContext!.relationshipStatus = currentContext.relationshipStatus; }
+      if (addonSettings.characterPosition && currentContext.characterPosition && currentContext.characterPosition !== 'No context') { fields.push(`Position: ${currentContext.characterPosition}`); meta.currentContext!.characterPosition = currentContext.characterPosition; }
+      if (fields.length) {
+        const stale = (timeAwarenessData && timeAwarenessData.delaySeconds && timeAwarenessData.delaySeconds > 1800) ? ' (stale>30m)' : '';
+        systemPrompt += `\n\n[CURRENT CONTEXT${stale}]\n${fields.join('\n')}\n[/CURRENT CONTEXT]`;
       }
     });
   }
 
-  // TIME AWARENESS section
+  // TIME AWARENESS (compressed)
   if (timeAwarenessData?.enabled) {
     withTokenDelta('time', () => {
-      const formatDelay = (seconds: number): string => {
-        if (seconds < 60) return `${seconds} seconds`;
-        if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
-        if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`;
-        return `${Math.floor(seconds / 86400)} days`;
-      };
-      const getDelayCategory = (seconds: number): string => {
-        if (seconds < 300) return 'short';
-        if (seconds < 1800) return 'medium';
-        if (seconds < 7200) return 'long';
-        return 'very_long';
-      };
-      systemPrompt += `\n\n[TIME AWARENESS ACTIVE]
-Current time: ${timeAwarenessData.userLocalTime}
-Timezone: ${timeAwarenessData.userTimezone} (we share the same timezone)`;
-      if (timeAwarenessData.delaySeconds > 30) {
-        const delayCategory = getDelayCategory(timeAwarenessData.delaySeconds);
-        const formattedDelay = formatDelay(timeAwarenessData.delaySeconds);
-        systemPrompt += `\nTime since your last message: ${formattedDelay}
-Delay category: ${delayCategory}`;
-        if (timeAwarenessData.conversationTone && timeAwarenessData.conversationTone !== 'No context') {
-          systemPrompt += `\nConversation tone: ${timeAwarenessData.conversationTone}`;
-        }
-        if (timeAwarenessData.urgencyLevel && timeAwarenessData.urgencyLevel !== 'No context') {
-          systemPrompt += `\nUrgency level: ${timeAwarenessData.urgencyLevel}`;
-        }
-      }
-      systemPrompt += `\n\nIMPORTANT: You and the user are in the same timezone (${timeAwarenessData.userTimezone}). When asked about time, respond with the actual current time (${timeAwarenessData.userLocalTime}), not a placeholder like {current_time}.`;
-      if (timeAwarenessData.delaySeconds > 30) {
-        systemPrompt += `\n\nBased on your character's personality, react appropriately to this delay:
-- Consider the time gap when crafting your response
-- Take into account the current time (are they likely sleeping, working, etc.)
-- Factor in the conversation tone and urgency level
-- React authentically based on your personality traits (patient vs impatient, understanding vs demanding, etc.)
-- You may acknowledge the delay if it fits your character, but don't always mention it
-- When discussing time, remember you both share the same current time`;
-      }
+      const d = timeAwarenessData.delaySeconds || 0;
+      const cat = d < 300 ? 'short' : d < 1800 ? 'medium' : d < 7200 ? 'long' : 'very_long';
+      const fmt = (s:number)=> s<60?`${s}s`: s<3600?`${Math.floor(s/60)}m`: s<86400?`${Math.floor(s/3600)}h`:`${Math.floor(s/86400)}d`;
+      systemPrompt += `\n\n[TIME AWARENESS]\nNow: ${timeAwarenessData.userLocalTime} (${timeAwarenessData.userTimezone})\nDelay: ${fmt(d)} (${cat})`;
+      if (timeAwarenessData.conversationTone && timeAwarenessData.conversationTone !== 'No context') systemPrompt += `\nTone: ${timeAwarenessData.conversationTone}`;
+      if (timeAwarenessData.urgencyLevel && timeAwarenessData.urgencyLevel !== 'No context') systemPrompt += `\nUrgency: ${timeAwarenessData.urgencyLevel}`;
+      if (d > 30) systemPrompt += `\nGuidance: acknowledge delay only if character would; adapt energy to time-of-day + tone.`;
       systemPrompt += `\n[/TIME AWARENESS]`;
     });
   }
 
-  // WORLD INFO section
+  // WORLD INFO (compressed)
   if (addonSettings) {
     console.log('🔍 World Info Processing Check:', {
       dynamicWorldInfoEnabled: addonSettings.dynamicWorldInfo,
@@ -543,18 +393,11 @@ Delay category: ${delayCategory}`;
         if (logger.isDebug()) logger.debug('worldInfo.applied', { count: relevantEntries.length });
         withTokenDelta('world', () => {
           systemPrompt += '\n\n[WORLD INFORMATION]';
-          systemPrompt += '\nUse this world information to enhance your responses when relevant:';
-          
           for (const entry of relevantEntries) {
-            systemPrompt += `\n\n- Keywords: ${entry.keywords.join(', ')}`;
-            systemPrompt += `\n  Content: ${replaceTemplatesFn(entry.entry_text)}`; // template replacement applied
+            systemPrompt += `\n- (${entry.keywords.join(', ')}) ${replaceTemplatesFn(entry.entry_text)}`;
           }
-          
           systemPrompt += '\n[/WORLD INFORMATION]';
-          systemPrompt += "\nReference this world information naturally when it's relevant to the conversation.";
         });
-        
-        console.log('✅ World information added to system prompt');
       } else {
         logger.debug('worldInfo.noneRelevant');
       }
@@ -562,7 +405,7 @@ Delay category: ${delayCategory}`;
       logger.trace('worldInfo.skipped', { dyn: addonSettings.dynamicWorldInfo, entries: worldInfoEntries?.length || 0, hasUserMessage: !!userMessage });
     }
 
-    // MEMORY BANK section
+    // MEMORY BANK (compressed)
     console.log('🔍 Memory Processing Check:', {
       enhancedMemoryEnabled: addonSettings.enhancedMemory,
       hasCharacterMemories: !!characterMemories && characterMemories.length > 0,
@@ -581,109 +424,65 @@ Delay category: ${delayCategory}`;
         relevantMemories = relevantMemories.slice(0,3);
       }
       if (logger.isDebug()) logger.debug('memory.filter.result', { original: characterMemories.length, kept: relevantMemories.length, semanticUsed, topSimScore });
-      
       if (relevantMemories.length > 0) {
         try { meta.memoryIds = relevantMemories.map(m => (m.id || '')).filter(Boolean) as string[]; } catch {}
-        // Persist injection timestamps and counts (best-effort)
         try {
           const ids = relevantMemories.map(m => m.id).filter(Boolean) as string[];
-          if (ids.length > 0) {
-            const callWithRetry = async (retries = 2) => {
-              try {
-                await supabase.rpc('mark_memories_injected', { mem_ids: ids });
-              } catch (err) {
-                if (retries > 0) {
-                  // small backoff and retry
-                  await new Promise(res => setTimeout(res, 200));
-                  return callWithRetry(retries - 1);
-                }
-                throw err;
-              }
-            };
-            await callWithRetry();
-          }
-        } catch (e) {
-          console.warn('⚠️ Failed to persist memory injection metadata (after retries):', e);
-        }
-
+            if (ids.length > 0) {
+              const callWithRetry = async (retries = 2) => {
+                try { await supabase.rpc('mark_memories_injected', { mem_ids: ids }); } catch (err) { if (retries > 0) { await new Promise(res => setTimeout(res, 200)); return callWithRetry(retries - 1); } throw err; }
+              }; await callWithRetry();
+            }
+        } catch (e) { console.warn('⚠️ Failed to persist memory injection metadata (after retries):', e); }
         withTokenDelta('memory', () => {
           systemPrompt += '\n\n[MEMORY BANK]';
-          systemPrompt += '\nPrevious interactions with this user:';
-          
           for (const memory of relevantMemories) {
-            const memoryDate = new Date(memory.created_at).toLocaleDateString('en-US', { 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            });
-            
-            systemPrompt += `\n\n- Date: ${memoryDate}`;
-            systemPrompt += `\n  Summary: ${replaceTemplatesFn(memory.summary_content)}`; // template replacement applied
-            systemPrompt += `\n  Keywords: ${memory.trigger_keywords.join(', ')}`;
+            const memoryDate = new Date(memory.created_at).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+            systemPrompt += `\n- ${memoryDate} :: ${replaceTemplatesFn(memory.summary_content)} (kw: ${memory.trigger_keywords.join(', ')})`;
           }
-          
           systemPrompt += '\n[/MEMORY BANK]';
-          systemPrompt += '\nReference these memories naturally when relevant keywords appear in the conversation.';
         });
-        
-        console.log('✅ Character memories added to system prompt');
-      } else {
-        logger.debug('memory.noneRelevant');
-      }
-    } else {
-      logger.trace('memory.skipped', { enabled: addonSettings.enhancedMemory, total: characterMemories?.length || 0 });
-    }
+      } else { logger.debug('memory.noneRelevant'); }
+    } else { logger.trace('memory.skipped', { enabled: addonSettings.enhancedMemory, total: characterMemories?.length || 0 }); }
   }
 
-  // Add most recent auto-summary for context continuity
+  // Conversation summary (compressed)
   try {
-    console.log('🤖 About to retrieve most recent auto-summary - character details:', {
-      characterExists: !!character,
-      characterName: character?.name,
-      characterId: character?.id,
-      characterIdType: typeof character?.id,
-      characterIdValue: character?.id
-    });
-    
-    // Validate character.id before calling
-    if (!character?.id || character.id === 'undefined') {
-      logger.warn('summary.skip.invalidCharacter');
-    } else if (!chatId) {
-      logger.warn('summary.skip.noChatId');
-    } else {
+    if (!character?.id || character.id === 'undefined') { logger.warn('summary.skip.invalidCharacter'); }
+    else if (!chatId) { logger.warn('summary.skip.noChatId'); }
+    else {
       logger.debug('summary.fetch.latest', { characterId: character.id, chatId });
       const latestSummary = userId ? await getMostRecentAutoSummary(chatId, character.id, userId, supabase) : await getMostRecentAutoSummary(chatId, character.id, supabase as any);
       if (latestSummary) {
         withTokenDelta('summary', () => {
-          systemPrompt += '\n\n[CONVERSATION SUMMARY]';
-          systemPrompt += '\nMost recent conversation summary:';
-          systemPrompt += `\n${replaceTemplatesFn(latestSummary.summary_content)}`; // template replacement applied
-          systemPrompt += '\n[/CONVERSATION SUMMARY]';
-          systemPrompt += '\nUse this summary to maintain continuity with previous conversations.';
+          systemPrompt += '\n\n[CONVERSATION SUMMARY]\n' + replaceTemplatesFn(latestSummary.summary_content) + '\n[/CONVERSATION SUMMARY]';
         });
-        
         logger.debug('summary.added', { id: latestSummary.id, len: latestSummary.summary_content.length });
-      } else {
-        logger.debug('summary.none');
-      }
+      } else { logger.debug('summary.none'); }
     }
-  } catch (error) {
-    console.error('⚠️ Error retrieving most recent auto-summary:', error);
-    // Continue without auto-summary - this is non-critical
-  }
+  } catch (error) { console.error('⚠️ Error retrieving most recent auto-summary:', error); }
 
-  if (logger.isTrace()) {
-    logger.trace('prompt.full', { length: systemPrompt.length });
-  } else if (logger.isDebug()) {
-    logger.debug('prompt.truncated', { length: systemPrompt.length, head: systemPrompt.substring(0,300) });
-  }
+  if (logger.isTrace()) { logger.trace('prompt.full', { length: systemPrompt.length }); }
+  else if (logger.isDebug()) { logger.debug('prompt.truncated', { length: systemPrompt.length, head: systemPrompt.substring(0,300) }); }
   logger.debug('prompt.tokens.est', { est: estimateTokens(systemPrompt) });
-  if (metaCollector) {
-    try { metaCollector(meta); logger.debug('prompt.meta', meta); } catch (e) { logger.warn('prompt.meta.fail', String(e)); }
-  }
+  if (metaCollector) { try { metaCollector(meta); logger.debug('prompt.meta', meta); } catch (e) { logger.warn('prompt.meta.fail', String(e)); } }
 
-  if (canonicalOverrideBlock) {
-    systemPrompt += '\n[CANONICAL STATE REINFORCEMENT]\nFor ALL references to clothing, location, mood, relationship, position, time/weather, enchantment, inventory: obey CANONICAL_STATE_JSON over any card/greeting/example residue.\n[/CANONICAL STATE REINFORCEMENT]';
+  // Relationship progression (compressed)
+  if (currentContext && addonSettings.relationshipStatus && currentContext.relationshipStatus && currentContext.relationshipStatus !== 'No context') {
+    const relLine = currentContext.relationshipStatus;
+    let notReadyMatch = relLine.match(/not ready to move into (.+?)\./i);
+    let readyMatch = relLine.match(/ready to move into (.+?)\./i);
+    const nextStageLabel = (notReadyMatch || readyMatch)?.[1] || null;
+    const isReady = /ready to move into/i.test(relLine) && !/not ready/i.test(relLine);
+    let body = '';
+    if (nextStageLabel) {
+      if (isReady) {
+        body = `RP1 Ready for potential advance to "${nextStageLabel}" but requires explicit user proposal. RP2 You may (once) lightly invite if user has not proposed yet. RP3 Do not repeat invitations until status changes. RP4 Never advance without explicit user acceptance.`;
+      } else {
+        body = `RP1 Not ready to advance to "${nextStageLabel}". RP2 Politely decline proposals; encourage continued bonding. RP3 Do not roleplay being at next stage. RP4 Wait for future readiness update.`;
+      }
+    } else { body = 'RP Final stage reached; no further advancement. Reaffirm politely if pressed.'; }
+    systemPrompt += `\n\n[RELATIONSHIP PROGRESSION]\n${body}\n[/RELATIONSHIP PROGRESSION]`;
   }
 
   return systemPrompt;
@@ -787,5 +586,7 @@ Change Gating:
 - If ambiguity exists, ask a clarifying question instead of assuming change.
 Output Discipline:
 - Refer to canonical fields naturally but do not restate all every reply.
-- Never contradict canonical values. If a contradiction slips into prior AI text, self-correct in the next turn without rewriting history.
-- Keep responses concise and aligned with current mode (companion/storytelling).`;
+- Never contradict canonical values. If a contradiction slips into prior AI text, self-correct immediately by reaffirming canonical truth.
+- For any field that changes due to user request or narrative necessity, include a brief, non-repetitive micro-transition description ONCE to signal the shift.
+- Avoid verbose or repetitive reminders of canonical rules; trust the model to remember.
+- Prioritize fluent, natural conversation flow while adhering to canonical constraints.`;

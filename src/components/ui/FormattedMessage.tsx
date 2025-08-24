@@ -10,20 +10,23 @@ export interface FormattedMessageProps {
 }
 
 export function FormattedMessage({ content, className = '', settingsOverride }: FormattedMessageProps) {
-  const segments = parseMessageContent(content);
+  // Normalize line endings first
+  const normalized = content.replace(/\r\n?/g, '\n').trim();
+  // Split into paragraphs on 2+ newlines (blank line separation)
+  const paragraphStrings = normalized.split(/\n{2,}/).filter(p => p.length);
   const { data: settings } = useUserGlobalChatSettings();
   const effectiveSettings = settingsOverride || settings;
 
   const mode = effectiveSettings?.semantic_overrides_mode || 'default';
   const colors = {
-    speech: effectiveSettings?.speech_color || '#93C5FD', // blue-300 fallback
-    action: effectiveSettings?.action_color || '#D8B4FE', // purple-300 fallback
-    emphasis: effectiveSettings?.emphasis_color || '#FDE68A', // yellow-300 fallback
-    parenthetical: effectiveSettings?.parenthetical_color || '#9CA3AF', // gray-400 fallback
+    speech: effectiveSettings?.speech_color || '#93C5FD',
+    action: effectiveSettings?.action_color || '#D8B4FE',
+    emphasis: effectiveSettings?.emphasis_color || '#FDE68A',
+    parenthetical: effectiveSettings?.parenthetical_color || '#9CA3AF',
   };
 
   const segmentStyle = (type: string): React.CSSProperties | undefined => {
-    if (mode === 'disabled') return undefined; // use text-current everywhere
+    if (mode === 'disabled') return undefined;
     if (mode === 'custom') {
       switch (type) {
         case 'speech': return { color: colors.speech };
@@ -32,7 +35,6 @@ export function FormattedMessage({ content, className = '', settingsOverride }: 
         case 'parenthetical': return { color: colors.parenthetical, fontStyle: 'italic' };
       }
     }
-    // default: keep original Tailwind classes
     return undefined;
   };
 
@@ -48,16 +50,30 @@ export function FormattedMessage({ content, className = '', settingsOverride }: 
   };
   
   return (
-    <span className={className}>
-      {segments.map((segment, index) => {
+    <div className={`formatted-message space-y-3 whitespace-pre-line ${className}`}>
+      {paragraphStrings.map((para, pIdx) => {
+        const segments = parseMessageContent(para);
+        // Within a paragraph, preserve single newlines by splitting segment content and inserting <br />
         return (
-          <span key={index} className={segmentClass(segment.type)} style={segmentStyle(segment.type)}>
-            {segment.type === 'speech' ? '"' : segment.type === 'action' ? '*' : segment.type === 'emphasis' ? '_' : segment.type === 'parenthetical' ? '(' : ''}
-            {segment.content}
-            {segment.type === 'speech' ? '"' : segment.type === 'action' ? '*' : segment.type === 'emphasis' ? '_' : segment.type === 'parenthetical' ? ')' : ''}
-          </span>
+          <p key={pIdx} className="leading-relaxed break-words m-0">
+            {segments.map((segment, sIdx) => {
+              const parts = segment.content.split('\n');
+              return (
+                <React.Fragment key={sIdx}>
+                  {parts.map((part, i) => (
+                    <span key={i} className={segmentClass(segment.type)} style={segmentStyle(segment.type)}>
+                      {segment.type === 'speech' ? '"' : segment.type === 'action' ? '*' : segment.type === 'emphasis' ? '_' : segment.type === 'parenthetical' ? '(' : ''}
+                      {part}
+                      {segment.type === 'speech' ? '"' : segment.type === 'action' ? '*' : segment.type === 'emphasis' ? '_' : segment.type === 'parenthetical' ? ')' : ''}
+                      {i < parts.length - 1 && <br />}
+                    </span>
+                  ))}
+                </React.Fragment>
+              );
+            })}
+          </p>
         );
       })}
-    </span>
+    </div>
   );
 }

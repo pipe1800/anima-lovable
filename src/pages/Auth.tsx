@@ -9,6 +9,7 @@ import { preloadDashboardData } from '@/hooks/useDashboard';
 import { useQueryClient } from '@tanstack/react-query';
 import { PublicTopBar } from '@/components/ui/PublicTopBar';
 import { Auth as AuthQueries } from '@/data';
+import { useAuth } from '@/contexts/AuthContext';
 
 const AuthPage = () => {
   const [searchParams] = useSearchParams();
@@ -19,7 +20,6 @@ const AuthPage = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [user, setUser] = useState<User | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
@@ -27,6 +27,7 @@ const AuthPage = () => {
   const [successUsername, setSuccessUsername] = useState('');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { profile: authProfile, user: authUser, loading: authLoading } = useAuth();
 
   // Password validation state
   const [passwordValidation, setPasswordValidation] = useState({
@@ -43,50 +44,16 @@ const AuthPage = () => {
       setEmail(savedEmail);
       setRememberMe(true);
     }
+  }, []);
 
-    // Check if user is already logged in
-    const { data: { subscription } } = AuthQueries.onAuthStateChange((event, session) => {
-      console.log('Auth state change:', event, session?.user?.email);
-      setUser(session?.user ?? null);
-      if (session?.user && !showSuccess) {
-        // Check if user has completed onboarding
-        const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
-        if (isOnboardingCompleted) {
-          // User already completed onboarding, go to discover
-          navigate('/discover');
-          // Preload dashboard data in background
-          if (session.user?.id) {
-            setTimeout(() => {
-              preloadDashboardData(session.user.id, queryClient);
-            }, 1000);
-          }
-        } else {
-          // New user or incomplete onboarding, go to onboarding
-          navigate('/onboarding');
-        }
-      }
-    });
-
-    // Check for existing session
-    AuthQueries.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user && !showSuccess) {
-        const isOnboardingCompleted = session.user.user_metadata?.onboarding_completed;
-        if (isOnboardingCompleted) {
-          navigate('/discover');
-          // Preload dashboard data in background
-          if (session.user?.id) {
-            setTimeout(() => {
-              preloadDashboardData(session.user.id, queryClient);
-            }, 1000);
-          }
-        } else {
-          navigate('/onboarding');
-        }
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [navigate, showSuccess]);
+  // Redirect logic driven purely by AuthContext
+  useEffect(() => {
+    if (authLoading) return;
+    if (authUser) {
+      const completed = authProfile?.onboarding_completed;
+      if (completed) navigate('/dashboard'); else navigate('/onboarding');
+    }
+  }, [authUser, authProfile, authLoading, navigate]);
 
   // Real-time password validation
   useEffect(() => {
@@ -100,10 +67,11 @@ const AuthPage = () => {
     }
   }, [password, passwordValidation.touched]);
   const handleSocialAuth = async (provider: 'google' | 'discord') => {
-    const { error } = await AuthQueries.signInWithOAuth(provider, `${window.location.origin}/`);
-    if (error) {
-      setError(error.message);
-    }
+    const origin = window.location.origin;
+    const state = encodeURIComponent(JSON.stringify({ r: '/dashboard' }));
+    const redirect = `${origin}/auth#state=${state}`; // callback to Auth page to process
+    const { error } = await AuthQueries.signInWithOAuth(provider, redirect);
+    if (error) setError(error.message);
   };
   const showSuccessMessage = (username: string) => {
     setSuccessUsername(username);
@@ -130,7 +98,7 @@ const AuthPage = () => {
     const { data, error } = await AuthQueries.signUpWithEmail(
       email,
       password,
-      { username: username.trim(), onboarding_completed: false },
+      { username: username.trim() },
       `${window.location.origin}/onboarding`
     );
     if (error) {
@@ -165,6 +133,20 @@ const AuthPage = () => {
     }
     setLoading(false);
   };
+  useEffect(() => {
+    // Process hash state after OAuth callback
+    if (window.location.hash.startsWith('#state=')) {
+      try {
+        const raw = decodeURIComponent(window.location.hash.replace('#state=',''));
+        const parsed = JSON.parse(raw);
+        if (parsed?.r) navigate(parsed.r, { replace: true });
+      } catch {}
+      finally {
+        // Clean hash
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+  }, [navigate]);
   if (showSuccess) {
     return <div className="min-h-screen bg-[#121212] flex items-center justify-center relative overflow-hidden">
         <div className="text-center z-10">

@@ -9,7 +9,7 @@ export interface GlobalChatSettings {
   clothing_inventory: boolean;
   location_tracking: boolean;
   time_and_weather: boolean;
-  relationship_status: boolean;
+  relationship_status: boolean; // RESTORED
   character_position: boolean;
   god_mode: boolean; // NEW: when true, user statements override context immediately
   chain_of_thought: boolean;
@@ -25,7 +25,7 @@ export interface AddonSettings {
   clothingInventory?: boolean;
   locationTracking?: boolean;
   timeAndWeather?: boolean;
-  relationshipStatus?: boolean;
+  relationshipStatus?: boolean; // RESTORED (ignored when template enabled)
   characterPosition?: boolean;
   chainOfThought?: boolean;
   fewShotExamples?: boolean;
@@ -44,11 +44,11 @@ export function mapGlobalSettingsToAddonSettings(globalSettings: Partial<GlobalC
     clothingInventory: globalSettings.clothing_inventory,
     locationTracking: globalSettings.location_tracking,
     timeAndWeather: globalSettings.time_and_weather,
-    relationshipStatus: globalSettings.relationship_status,
+    relationshipStatus: globalSettings.relationship_status, // restored
     characterPosition: globalSettings.character_position,
-  godMode: globalSettings.god_mode,
-    chainOfThought: false, // Temporarily disabled - coming soon
-    fewShotExamples: false, // Temporarily disabled - coming soon
+    godMode: globalSettings.god_mode,
+    chainOfThought: false,
+    fewShotExamples: false,
   };
 }
 
@@ -63,11 +63,11 @@ export function mapAddonSettingsToGlobalSettings(addonSettings: AddonSettings): 
     clothing_inventory: addonSettings.clothingInventory,
     location_tracking: addonSettings.locationTracking,
     time_and_weather: addonSettings.timeAndWeather,
-    relationship_status: addonSettings.relationshipStatus,
+    relationship_status: addonSettings.relationshipStatus, // restored
     character_position: addonSettings.characterPosition,
-  god_mode: addonSettings.godMode,
-    chain_of_thought: false, // Temporarily disabled - coming soon
-    few_shot_examples: false, // Temporarily disabled - coming soon
+    god_mode: addonSettings.godMode,
+    chain_of_thought: false,
+    few_shot_examples: false,
   };
 }
 
@@ -78,7 +78,7 @@ export const ADDON_DB_KEYS = [
   'clothing_inventory',
   'location_tracking',
   'time_and_weather',
-  'relationship_status',
+  'relationship_status', // restored
   'character_position',
 ] as const;
 
@@ -89,7 +89,7 @@ export const ADDON_RUNTIME_KEYS = [
   'clothingInventory',
   'locationTracking',
   'timeAndWeather',
-  'relationshipStatus',
+  'relationshipStatus', // restored
   'characterPosition',
   'timeAwareness',
   'godMode',

@@ -3,7 +3,6 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription }
 import { Badge } from "@/components/ui/badge";
 import { Check, Crown } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { Billing } from '@/data';
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 
@@ -12,35 +11,20 @@ interface PricingTiersProps {
 }
 
 const PricingTiers = ({ isYearly = false }: PricingTiersProps) => {
-  const { user } = useAuth();
+  const { user, subscription } = useAuth();
   const [currentPlan, setCurrentPlan] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchUserSubscription = async () => {
-      if (!user) {
-        setCurrentPlan('Guest Pass');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const { data: subscription } = await Billing.getUserActiveSubscription(user.id);
-        if (subscription?.plan) {
-          setCurrentPlan(subscription.plan.name);
-        } else {
-          setCurrentPlan('Guest Pass');
-        }
-      } catch (error) {
-        console.error('Error fetching subscription:', error);
-        setCurrentPlan('Guest Pass');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUserSubscription();
-  }, [user]);
+    if (!user) {
+      setCurrentPlan('Guest Pass');
+      setLoading(false);
+      return;
+    }
+    // derive from context subscription (already fetched globally)
+    setCurrentPlan(subscription?.plan?.name || 'Guest Pass');
+    setLoading(false);
+  }, [user, subscription]);
 
   const getButtonConfig = (planName: string) => {
     if (loading) {

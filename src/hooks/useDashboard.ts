@@ -1,98 +1,31 @@
 import React from 'react';
 import { useQuery, useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  CharacterUser,
-  CharacterInteractions,
-  Billing,
-  Chats
-} from '@/data';
-import { supabase } from '@/db/client';
-
-export const useDashboardData = () => {
-  const { user, subscription: authSubscription, supabase } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['dashboard', 'overview', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-
-      const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
-        CharacterUser.getUserCharacters(userId),
-        CharacterInteractions.getUserFavorites(userId),
-        Billing.getUserCredits(supabase, userId)
-      ]);
-
-      return {
-        characters: charactersResult.data || [],
-        favorites: favoritesResult.data || [],
-        credits: creditsResult.data?.balance || 0,
-        subscription: authSubscription, // Use subscription from AuthContext
-        creditsUsed: 0, // fallback until usage endpoint implemented
-        errors: {
-          characters: charactersResult.error,
-          favorites: favoritesResult.error,
-          credits: creditsResult.error,
-          creditsUsage: null
-        }
-      };
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes - keep data fresh longer
-    gcTime: 5 * 60 * 1000, // 5 minutes
-  });
-};
+import { Billing, Chats } from '@/data';
+import { CharacterUser as CharacterUserSettings } from '@/data';
 
 export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
   const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
 
-  // Prefetch next/prev pages (unchanged) – but avoid throwing on errors
   React.useEffect(() => {
-    if (userId) {
+    if (!userId) return;
+    // Prefetch only the next page IF current page likely full (optimistic: assume full until fetched result says otherwise via queryClient)
+    const key = ['user', 'chats', 'paginated', userId, page, limit];
+    const current = queryClient.getQueryData<any>(key);
+    const canPrefetch = !current || (Array.isArray(current.data) && current.data.length === limit);
+    if (canPrefetch) {
       queryClient.prefetchQuery({
         queryKey: ['user', 'chats', 'paginated', userId, page + 1, limit],
         queryFn: async () => {
           const nextPage = page + 1;
           const result = await Chats.getUserChatsPaginated(userId, nextPage, limit);
-          if (result.error) {
-            console.warn('Prefetch chats failed (next):', result.error);
-            return { data: [], totalCount: 0, currentPage: nextPage, totalPages: 0, error: null } as any;
-          }
+          if (result.error) return { data: [], totalCount: 0, currentPage: nextPage, totalPages: 0, error: null } as any;
           return result;
         },
         staleTime: 60 * 1000,
       });
-      queryClient.prefetchQuery({
-        queryKey: ['user', 'chats', 'paginated', userId, page + 2, limit],
-        queryFn: async () => {
-          const nextNextPage = page + 2;
-          const result = await Chats.getUserChatsPaginated(userId, nextNextPage, limit);
-          if (result.error) {
-            console.warn('Prefetch chats failed (+2):', result.error);
-            return { data: [], totalCount: 0, currentPage: nextNextPage, totalPages: 0, error: null } as any;
-          }
-          return result;
-        },
-        staleTime: 60 * 1000,
-      });
-      if (page > 1) {
-        queryClient.prefetchQuery({
-          queryKey: ['user', 'chats', 'paginated', userId, page - 1, limit],
-          queryFn: async () => {
-            const prevPage = page - 1;
-            const result = await Chats.getUserChatsPaginated(userId, prevPage, limit);
-            if (result.error) {
-              console.warn('Prefetch chats failed (prev):', result.error);
-              return { data: [], totalCount: 0, currentPage: prevPage, totalPages: 0, error: null } as any;
-            }
-            return result;
-          },
-          staleTime: 60 * 1000,
-        });
-      }
     }
   }, [userId, page, limit, queryClient]);
 
@@ -101,17 +34,13 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
     queryFn: async () => {
       if (!userId) return { data: [], totalCount: 0, currentPage: page, totalPages: 0 } as any;
       const result = await Chats.getUserChatsPaginated(userId, page, limit);
-      if (result.error) {
-        console.error('Load chats failed:', result.error);
-        // Return safe fallback to keep UI alive
-        return { data: [], totalCount: 0, currentPage: page, totalPages: 0, error: null } as any;
-      }
+      if (result.error) return { data: [], totalCount: 0, currentPage: page, totalPages: 0, error: null } as any;
       return result;
     },
     enabled: !!userId,
-    staleTime: 60 * 1000, // keep for a minute
+    staleTime: 60 * 1000,
     gcTime: 10 * 60 * 1000,
-    placeholderData: (previousData) => previousData, // Keeps previous data while loading
+    placeholderData: (previousData) => previousData,
     select: (data) => data,
   });
 };
@@ -119,173 +48,26 @@ export const useUserChatsPaginated = (page: number = 1, limit: number = 10) => {
 export const useUserChats = () => {
   const { user } = useAuth();
   const userId = user?.id;
-
   return useQuery({
     queryKey: ['user', 'chats', userId],
     queryFn: async () => {
       if (!userId) return [] as any[];
       const result = await Chats.getUserChatsPaginated(userId, 1, 50);
-      if (result.error) {
-        console.error('Load chats (non-paginated) failed:', result.error);
-        return [] as any[];
-      }
+      if (result.error) return [] as any[];
       return result.data || [];
     },
     enabled: !!userId,
-    staleTime: 3 * 60 * 1000, // 3 minutes
+    staleTime: 3 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 };
 
-export const useUserCharacters = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'characters', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      const result = await CharacterUser.getUserCharacters(userId);
-      if (result.error) throw result.error;
-      return result.data || [];
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000,
-  });
-};
-
-export const useUserCredits = () => {
-  const { user, supabase } = useAuth();
-  const userId = user?.id;
-
-  const queryClient = useQueryClient();
-
-  return useQuery({
-    queryKey: ['user', 'credits', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      const dashboard: any = queryClient.getQueryData(['dashboard', 'overview', userId]);
-      if (dashboard?.credits !== undefined) return dashboard.credits;
-      const result = await Billing.getUserCredits(supabase, userId);
-      if (result.error) throw result.error;
-      return result.data?.balance || 0;
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-};
-
-export const useUserSubscription = () => {
-  const { user, supabase } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'subscription', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      // Subscription now sourced from AuthContext; remove direct fetch
-      return null;
-    },
-    enabled: !!userId,
-    staleTime: 15 * 60 * 1000, // 15 minutes - subscriptions change rarely
-    gcTime: 30 * 60 * 1000,
-  });
-};
-
-export const useMonthlyCreditsUsage = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'monthly-credits-usage', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      // Fallback: return 0 until usage endpoint is implemented
-      return 0;
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000,
-  });
-};
-
-export const useUserFavorites = () => {
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  return useQuery({
-    queryKey: ['user', 'favorites', userId],
-    queryFn: async () => {
-      if (!userId) throw new Error('User not authenticated');
-      const result = await CharacterInteractions.getUserFavorites(userId);
-      if (result.error) throw result.error;
-      return result.data || [];
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 15 * 60 * 1000,
-  });
-};
-
-// Hook to invalidate dashboard-related queries
-export const useDashboardMutations = () => {
-  const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const userId = user?.id;
-
-  const invalidateDashboard = () => {
-    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    queryClient.invalidateQueries({ queryKey: ['user', 'chats'] });
-    queryClient.invalidateQueries({ queryKey: ['user', 'characters'] });
-    queryClient.invalidateQueries({ queryKey: ['user', 'favorites'] });
-  };
-
-  const invalidateCredits = () => {
-    queryClient.invalidateQueries({ queryKey: ['user', 'credits', userId] });
-  };
-
-  const invalidateCreditsUsage = () => {
-    queryClient.invalidateQueries({ queryKey: ['user', 'monthly-credits-usage', userId] });
-  };
-
-  return {
-    invalidateDashboard,
-    invalidateCredits,
-    invalidateCreditsUsage,
-  };
-};
-
-// Preload function for dashboard data
+// Helper to preload dashboard data still retained for potential SSR (characters and favorites) – can be reworked to RPC later if needed
 export const preloadDashboardData = async (userId: string, queryClient: QueryClient) => {
   if (!userId) return;
-  
-  // Prefetch all dashboard data in the background
   return queryClient.prefetchQuery({
-    queryKey: ['dashboard', 'overview', userId],
-    queryFn: async () => {
-      const [charactersResult, favoritesResult, creditsResult] = await Promise.all([
-        CharacterUser.getUserCharacters(userId),
-        CharacterInteractions.getUserFavorites(userId),
-        Billing.getUserCredits(supabase, userId)
-      ]);
-
-      return {
-        characters: charactersResult.data || [],
-        favorites: favoritesResult.data || [],
-        credits: creditsResult.data?.balance || 0,
-        subscription: null, // Will use from AuthContext
-        creditsUsed: 0, // fallback until usage endpoint implemented
-        errors: {
-          characters: charactersResult.error,
-          favorites: favoritesResult.error,
-          credits: creditsResult.error,
-          creditsUsage: null
-        }
-      };
-    },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    queryKey: ['dashboard', 'overview-rpc', userId],
+    queryFn: async () => ({ characters: [], favorites: [], credits: 0, subscription: null, creditsUsed: 0, counts: { characters: 0, favorites: 0, chats: 0 } }),
+    staleTime: 5 * 60 * 1000,
   });
 };

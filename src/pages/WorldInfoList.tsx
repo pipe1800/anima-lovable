@@ -37,7 +37,8 @@ import {
   Loader2
 } from 'lucide-react';
 import WorldInfoCard from '@/components/world-info/WorldInfoCard';
-import { useWorldInfoQueries } from '@/queries/worldInfoQueries';
+import { useUserWorldInfos, usePublicWorldInfos } from '@/hooks/useWorldInfos';
+import { useAllTags } from '@/hooks/useTags';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
@@ -52,29 +53,23 @@ export default function WorldInfoList() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
 
-  // Query hooks
-  const { data: userWorldInfos = [], isLoading: isLoadingUser } = useWorldInfoQueries.useUserWorldInfos(
-    { enabled: !!user }
-  );
-  
-  const { data: publicWorldInfos = [], isLoading: isLoadingPublic } = useWorldInfoQueries.useWorldInfoCollection(
-    'public',
-    { enabled: activeTab === 'discover' }
-  );
-  
-  const { data: allTags = [] } = useWorldInfoQueries.useAllTags();
+  // Query hooks (replace legacy wrapper usage)
+  const { data: userWorldInfos = [], isLoading: isLoadingUser } = useUserWorldInfos();
+  const { data: publicWorldInfos = [], isLoading: isLoadingPublic } = usePublicWorldInfos();
+  // Fetch tag names only for simpler select list
+  const { data: allTags = [] } = useAllTags({ namesOnly: true });
 
   // Filter and sort logic
   const filteredAndSortedWorldInfos = useMemo(() => {
     const worldInfos = activeTab === 'my-world-info' ? userWorldInfos : publicWorldInfos;
     
-    let filtered = worldInfos.filter(worldInfo => {
-      const matchesSearch = !searchQuery || 
-        worldInfo.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (worldInfo.description && worldInfo.description.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-      const matchesTag = !selectedTag || worldInfo.tags?.includes(selectedTag);
-      
+    let filtered = worldInfos.filter((worldInfo: any) => {
+      const name = (worldInfo.name || '').toLowerCase();
+      const desc = (worldInfo.short_description || worldInfo.description || '').toLowerCase();
+      const matchesSearch = !searchQuery || name.includes(searchQuery.toLowerCase()) || desc.includes(searchQuery.toLowerCase());
+
+      const tags = worldInfo.tags || [];
+      const matchesTag = !selectedTag || tags.some((tag: any) => typeof tag === 'string' ? tag === selectedTag : tag?.name === selectedTag);
       return matchesSearch && matchesTag;
     });
 
@@ -292,14 +287,10 @@ export default function WorldInfoList() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {filteredAndSortedWorldInfos.map(worldInfo => (
+                {filteredAndSortedWorldInfos.map((worldInfo: any) => (
                   <WorldInfoCard
                     key={worldInfo.id}
                     worldInfo={worldInfo}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onDuplicate={handleDuplicate}
-                    onExport={handleExport}
                     isOwner={true}
                   />
                 ))}
@@ -328,14 +319,10 @@ export default function WorldInfoList() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {filteredAndSortedWorldInfos.map(worldInfo => (
+                {filteredAndSortedWorldInfos.map((worldInfo: any) => (
                   <WorldInfoCard
                     key={worldInfo.id}
                     worldInfo={worldInfo}
-                    onDuplicate={handleDuplicate}
-                    onShare={handleShare}
-                    onExport={handleExport}
-                    onLike={handleLike}
                     isOwner={worldInfo.user_id === user?.id}
                   />
                 ))}

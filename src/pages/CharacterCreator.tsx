@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCharacterCreation } from '@/hooks/useCharacterCreation';
 import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
-import { Billing } from '@/data';
+import { Billing, Tags } from '@/data'; // added Tags for tag utilities
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -47,7 +47,7 @@ const StepIcon = ({ icon, className }: { icon: string; className?: string }) => 
 
 const CharacterCreator = () => {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { user, profile, supabase } = useAuth();
   const { toast } = useToast();
   const {
     currentStep,
@@ -60,7 +60,9 @@ const CharacterCreator = () => {
     isEditing,
     isDirty,
     saveCharacter,
-    validateStep
+    validateStep,
+    editingCharacterId,
+    hydrated
   } = useCharacterCreation();
 
   const [userCredits, setUserCredits] = useState(0);
@@ -75,8 +77,8 @@ const CharacterCreator = () => {
     const fetchCredits = async () => {
       if (!user) return;
       try {
-        const creditsResult = await Billing.getUserCreditsForUser(user.id);
-        if (creditsResult.data?.balance) {
+        const creditsResult = await Billing.getUserCredits(supabase as any, user.id);
+        if (typeof creditsResult.data?.balance === 'number') {
           setUserCredits(creditsResult.data.balance);
         }
       } catch (error) {
@@ -135,27 +137,32 @@ const CharacterCreator = () => {
 
     setIsParsingCard(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('store_avatar', 'true');
-      fd.append('bypass_cache', 'true'); // ensure fresh parse during testing to avoid stale cache
-
+      // NOTE: Previous implementation built a FormData with store_avatar/bypass_cache but never used it.
+      // parseCharacterCardEdge constructs its own FormData; we must pass flags via options.
       const { data: session } = await AuthQueries.getSession();
       const token = session.session?.access_token;
       if (!token) throw new Error('Not authenticated');
 
-      const payload = await parseCharacterCard(file, { token });
-      const { formData: parsed, meta } = payload || {} as any;
+      const payload = await parseCharacterCard(file, { token, storeAvatar: true, bypassCache: true });
+      const { formData: parsed, meta } = (payload || {}) as any;
       if (!parsed) throw new Error('No data returned from parser');
 
-      updateCharacterData({ ...parsed, version: payload?.version || '', nsfw_enabled: !!meta?.flags?.nsfwDetected });
+      // Some responses may put avatar in parsed.avatar, others only in meta.avatar_url
+      const avatarUrl = parsed.avatar || parsed.avatar_url || meta?.avatar_url || '';
+
+      updateCharacterData({
+        ...parsed,
+        ...(avatarUrl ? { avatar: avatarUrl } : {}),
+        version: payload?.version || '',
+        nsfw_enabled: !!meta?.flags?.nsfwDetected
+      });
       setNsfwDetected(!!meta?.flags?.nsfwDetected);
       setNsfwWarnings(Array.isArray(meta?.warnings) ? meta.warnings : []);
 
       // Seed selectedTags from parsed tags for UI chips
       const parsedTagNames: string[] = Array.isArray(parsed?.personality?.tags) ? parsed.personality.tags : [];
       if (parsedTagNames.length > 0) {
-        const { data: tagRows } = await CharacterQueries.getTagsByNames(parsedTagNames);
+        const { data: tagRows } = await Tags.getTagsByNames(parsedTagNames);
         if (Array.isArray(tagRows)) {
           setSelectedTags(tagRows as Tag[]);
         }
@@ -166,7 +173,7 @@ const CharacterCreator = () => {
       if (meta?.flags?.nsfwDetected) {
         toast({ title: 'NSFW content detected', description: 'This character may contain NSFW content. Review and adjust visibility if needed.' });
         try {
-          const { data: nsfwTagRow } = await CharacterQueries.getTagByNameInsensitive('nsfw');
+          const { data: nsfwTagRow } = await Tags.getTagByNameInsensitive('nsfw');
           if (nsfwTagRow) {
             setSelectedTags(prev => prev.some(t => t.name.toLowerCase() === 'nsfw') ? prev : [...prev, nsfwTagRow as Tag]);
           }
@@ -185,19 +192,24 @@ const CharacterCreator = () => {
     } catch (err) {
       console.error('Error invoking parse-character-card, attempting fallback...', err);
       try {
-        const payload = await parseCharacterCard(file).catch(() => null);
+        const payload = await parseCharacterCard(file, { storeAvatar: true, bypassCache: true }).catch(() => null);
         if (payload) {
           const { formData: localForm, meta } = payload as any;
           const localFormData = localForm || (payload as any);
           if (localFormData) {
-            updateCharacterData(localFormData);
+            const avatarUrl = localFormData.avatar || localFormData.avatar_url || meta?.avatar_url || '';
+            updateCharacterData({
+              ...localFormData,
+              ...(avatarUrl ? { avatar: avatarUrl } : {}),
+              nsfw_enabled: !!meta?.flags?.nsfwDetected
+            });
             setNsfwDetected(!!meta?.flags?.nsfwDetected);
             setNsfwWarnings(Array.isArray(meta?.warnings) ? meta.warnings : []);
 
             // Seed tags from fallback as well
-            const parsedTagNames: string[] = Array.isArray(localForm?.personality?.tags) ? localForm.personality.tags : [];
+            const parsedTagNames: string[] = Array.isArray(localFormData?.personality?.tags) ? localFormData.personality.tags : [];
             if (parsedTagNames.length > 0) {
-              const { data: tagRows } = await CharacterQueries.getTagsByNames(parsedTagNames);
+              const { data: tagRows } = await Tags.getTagsByNames(parsedTagNames);
               if (Array.isArray(tagRows)) {
                 setSelectedTags(tagRows as Tag[]);
               }
@@ -302,6 +314,14 @@ const CharacterCreator = () => {
       case 3:
         return <DialogueStep {...stepProps} />;
       case 4:
+        if (isEditing && !hydrated) {
+          return (
+            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+              <Loader2 className="w-8 h-8 mb-4 animate-spin text-[#FF7A00]" />
+              <p>Loading relationship goals & settings…</p>
+            </div>
+          );
+        }
         return (
           <FinalizeStep
             {...stepProps}
@@ -310,6 +330,7 @@ const CharacterCreator = () => {
             isEditing={isEditing}
             selectedTags={selectedTags}
             setSelectedTags={setSelectedTags}
+            editingCharacterId={editingCharacterId}
           />
         );
       default:

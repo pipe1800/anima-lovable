@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CharacterGrid } from './CharacterGrid';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDashboardData, preloadDashboardData } from '@/hooks/useDashboard';
+import { preloadDashboardData } from '@/hooks/useDashboard';
+import { useDashboardOverview } from '@/hooks/useDashboardProgressive';
 import { useQueryClient } from '@tanstack/react-query';
 import { NSFWToggle } from '@/components/NSFWToggle';
 import { useNSFW } from '@/contexts/NSFWContext';
@@ -30,7 +31,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 export function DiscoverContent() {
   const { user, profile } = useAuth();
   const { nsfwEnabled } = useNSFW();
-  const { data: dashboardData } = useDashboardData();
+  const { data: dashboardData } = useDashboardOverview();
   const queryClient = useQueryClient();
   const { startChat, isCreating } = useChatCreation();
   const navigate = useNavigate();

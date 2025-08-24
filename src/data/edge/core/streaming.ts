@@ -44,7 +44,11 @@ export async function callStreamingEdgeFunction(
       const mode = opts.mode || 'smooth';
       const scheduleAppend = async (text: string) => {
         if (!text) return;
-        if (mode !== 'smooth') { full += text; opts.onToken?.(text, full); return; }
+        if (mode !== 'smooth') {
+          full += text;
+          opts.onToken?.(text, full);
+          return;
+        }
         const chunk = 24;
         for (let i = 0; i < text.length; i += chunk) {
           const part = text.slice(i, i + chunk);
@@ -64,9 +68,14 @@ export async function callStreamingEdgeFunction(
             opts.onDone?.(full);
             return full;
           }
-          if (typeof obj?.content === 'string') await scheduleAppend(obj.content);
-          else if (obj?.choices?.[0]?.delta?.content) await scheduleAppend(obj.choices[0].delta.content as string);
-          else opts.onEvent?.(obj);
+          if (typeof obj?.content === 'string') {
+            await scheduleAppend(obj.content);
+          } else if (obj?.choices?.[0]?.delta?.content) {
+            const delta = obj.choices[0].delta.content as string;
+            await scheduleAppend(delta);
+          } else {
+            opts.onEvent?.(obj);
+          }
         }
       }
       opts.onDone?.(full);

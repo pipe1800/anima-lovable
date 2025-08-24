@@ -4,7 +4,7 @@ import { supabase } from '@/db/client';
 import { Auth as AuthQueries } from '@/data';
 import { Billing, Profile as ProfileQueries, Uploads } from '@/data';
 import { getBrowserTimezone, updateUserTimezone } from '@/utils/timezone';
-import type { Profile, Subscription, Plan } from '@/types/database';
+import type { Profile } from '@/types/database';
 import { TutorialProvider } from './TutorialContext';
 
 interface AuthContextType {
@@ -13,13 +13,19 @@ interface AuthContextType {
   session: Session | null;
   subscription: any | null; // Using any for flexibility with the query result
   loading: boolean;
+  authReady: boolean; // added flag
+  profileReady: boolean; // new flag indicating profile has been fetched/attempted
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshSubscription: () => Promise<void>;
   supabase: typeof supabase;
 }
 
+// Live Credits Context -------------------------------------------------------
+interface CreditsContextType { balance: number; refresh: () => Promise<void>; loading: boolean; }
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const BillingCreditsContext = createContext<CreditsContextType | undefined>(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -29,11 +35,18 @@ export const useAuth = () => {
   return context;
 };
 
+export const useBillingCredits = () => {
+  const ctx = useContext(BillingCreditsContext);
+  if (!ctx) throw new Error('useBillingCredits must be used within AuthProvider');
+  return ctx;
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [subscription, setSubscription] = useState<any | null>(null); // Using any for flexibility
+  const [creditsBalance, setCreditsBalance] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   // Dedup helpers
@@ -42,7 +55,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const subInFlightRef = useRef<Promise<void> | null>(null);
   const lastSubFetchAtRef = useRef<number>(0);
   const profileInFlightRef = useRef<Promise<void> | null>(null);
+  const creditsFetchInFlightRef = useRef<Promise<void> | null>(null);
   const timezoneLoggedRef = useRef<boolean>(false);
+  const bootstrapSucceededRef = useRef(false);
+  const profileAttemptedRef = useRef(false); // track that at least one profile fetch/ bootstrap attempt occurred
 
   const ensureProfileAvatar = async (current: Profile | null) => {
     if (!user?.id || !current || current.avatar_url) return current;
@@ -70,10 +86,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const p = (async () => {
       try {
         const { data } = await ProfileQueries.getPrivateProfile(user.id);
+        profileAttemptedRef.current = true;
         let current = data || null;
         current = await ensureProfileAvatar(current);
         setProfile(current);
       } catch (error) {
+        profileAttemptedRef.current = true;
         console.error('Profile fetch failed:', error);
         setProfile(null);
       } finally {
@@ -156,6 +174,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await p;
   };
 
+  const refreshCredits = async () => {
+    if (!user?.id) { setCreditsBalance(0); return; }
+    if (creditsFetchInFlightRef.current) return creditsFetchInFlightRef.current;
+    const p = (async () => {
+      try {
+        const { data, error } = await Billing.getUserCredits(supabase as any, user.id);
+        if (!error && data) setCreditsBalance(data.balance || 0);
+      } catch (e) { /* silent */ }
+      finally { creditsFetchInFlightRef.current = null; }
+    })();
+    creditsFetchInFlightRef.current = p;
+    await p;
+  };
+
+  // Subscribe to realtime credits changes
+  useEffect(() => {
+    if (!user?.id) return;
+    // Only subscribe; skip initial refresh if we already have bootstrap credits
+    const needInitialCreditsFetch = !bootstrapSucceededRef.current || creditsBalance === 0;
+    if (needInitialCreditsFetch) refreshCredits();
+    const channel = supabase.channel(`credits-live-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'billing', table: 'credits', filter: `user_id=eq.${user.id}` }, () => {
+        refreshCredits();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
+
   const signOut = async () => {
     try {
       // Clear local state first
@@ -179,6 +225,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const bootstrapUser = async (uid: string, attempt = 0) => {
+    try {
+      const { data, error } = await ProfileQueries.getUserBootstrap(uid);
+      profileAttemptedRef.current = true;
+      if (error || !data) {
+        if (attempt < 2) {
+          const backoff = (attempt + 1) * 400;
+          console.warn('Bootstrap RPC failed (attempt', attempt + 1, ') retrying in', backoff, 'ms', error);
+          await new Promise(r => setTimeout(r, backoff));
+          return bootstrapUser(uid, attempt + 1);
+        }
+        console.error('Bootstrap RPC ultimately failed, falling back to discrete fetches', error);
+        await refreshProfile();
+        await refreshSubscription();
+        return;
+      }
+      const profileData = (data as any)?.profile || null;
+      const subscriptionData = (data as any)?.subscription || null;
+      const creditsData = (data as any)?.credits;
+      setProfile(profileData);
+      setSubscription(subscriptionData);
+      if (typeof creditsData === 'number') {
+        setCreditsBalance(creditsData);
+      }
+      bootstrapSucceededRef.current = true;
+    } catch (e) {
+      profileAttemptedRef.current = true;
+      if (attempt < 2) {
+        const backoff = (attempt + 1) * 400;
+        console.warn('Bootstrap exception (attempt', attempt + 1, ') retrying in', backoff, 'ms', e);
+        await new Promise(r => setTimeout(r, backoff));
+        return bootstrapUser(uid, attempt + 1);
+      }
+      console.error('Bootstrap error after retries, falling back', e);
+      await refreshProfile();
+      await refreshSubscription();
+    }
+  };
+
   useEffect(() => {
     AuthQueries.getSession().then(({ data: { session } }) => {
       const newUser = session?.user ?? null;
@@ -186,6 +271,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSession(session);
         setUser(newUser);
         currentUserIdRef.current = newUser?.id || null;
+        if (newUser?.id) bootstrapUser(newUser.id); // initiate bootstrap immediately
       }
       setLoading(false);
     });
@@ -202,6 +288,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(newUser);
       currentUserIdRef.current = newUser?.id || null;
       setLoading(false);
+      if (newUser?.id) bootstrapUser(newUser.id);
     });
 
     const refreshInterval = setInterval(async () => {
@@ -238,6 +325,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (prevUserIdEffectRef.current === id) return;
     prevUserIdEffectRef.current = id;
     (async () => {
+      if (bootstrapSucceededRef.current && profile && subscription) {
+        // Already primed by bootstrap; avoid duplicate discrete fetches
+        return;
+      }
       await refreshProfile();
       await refreshSubscription();
     })();
@@ -255,15 +346,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     session,
     subscription,
     loading,
+    authReady: (!loading && (user == null || profile !== null)),
+    profileReady: (!loading && (user == null || profile !== null || profileAttemptedRef.current || bootstrapSucceededRef.current)),
     signOut,
     refreshProfile,
     refreshSubscription,
     supabase,
   };
+  const creditsCtxValue: CreditsContextType = { balance: creditsBalance, refresh: refreshCredits, loading: false };
 
   return (
     <AuthContext.Provider value={value}>
-      <TutorialProvider>{children}</TutorialProvider>
+      <BillingCreditsContext.Provider value={creditsCtxValue}>
+        <TutorialProvider>{children}</TutorialProvider>
+      </BillingCreditsContext.Provider>
     </AuthContext.Provider>
   );
 };

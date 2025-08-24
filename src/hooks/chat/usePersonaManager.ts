@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getUserPersonas, createPersona, deletePersona, type Persona } from '@/data/personas/mutations';
-import { getChatSelectedPersona } from '@/lib/chat-persona-operations';
-import { getBestPersonaForNewChat } from '@/lib/user-preferences';
-import { supabase } from '@/db/client';
+import { useCallback, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { createPersona, deletePersona, type Persona } from '@/data/personas/mutations';
+import { Personas } from '@/data';
 import logger from '@/utils/logger';
 
 export const personaKeys = {
-  all: (userId?: string) => ['personas', userId] as const,
-  chatSelected: (chatId?: string) => ['chat', 'persona', chatId] as const,
+  context: (userId?: string, chatId?: string | null, includeList?: boolean) => ['personas','context', userId, chatId, includeList] as const,
 };
+
+interface UsePersonaManagerOptions {
+  userId?: string;
+  chatId?: string;
+}
 
 export function usePersonaManager(userId?: string, chatId?: string) {
   const queryClient = useQueryClient();
@@ -20,46 +22,20 @@ export function usePersonaManager(userId?: string, chatId?: string) {
     name: '', bio: '', lore: '', avatar_url: null
   });
 
-  // Personas list
-  const personasQuery = useQuery<Persona[]>({
-    queryKey: personaKeys.all(userId),
-    queryFn: async () => {
-      if (!userId) return [];
-      return getUserPersonas(userId);
-    },
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    retry: 1,
-  });
-
-  // Selected persona for current chat (or best default for new chat)
-  const selectedPersonaQuery = useQuery<Persona | null>({
-    queryKey: personaKeys.chatSelected(chatId || 'new'),
-    queryFn: async () => {
-      if (chatId) {
-        const data = await getChatSelectedPersona(chatId);
-        return (data.personas as Persona) || null;
-      }
-      if (!userId) return null;
-      const bestPersonaId = await getBestPersonaForNewChat(userId);
-      const list = personasQuery.data || [];
-      return list.find(p => p.id === bestPersonaId) || null;
-    },
-    enabled: (!!chatId && !!userId) || (!!userId && personasQuery.status === 'success'),
-  });
-
-  const selectedPersona = selectedPersonaQuery.data || null;
-  const personas = personasQuery.data || [];
+  // Read persona context (should be pre-fetched by outer component via usePersonaContext, but fallback to cache)
+  const ctx = (queryClient.getQueryData(personaKeys.context(userId, chatId || null, true)) as any) || null;
+  const personas: Persona[] = ctx?.personas || [];
+  const selectedPersona: Persona | null = ctx?.chat_selected_persona || (ctx && ctx.default_persona_id ? personas.find(p => p.id === ctx.default_persona_id) : null) || null;
 
   // Create persona
   const createMutation = useMutation({
-    mutationFn: async (payload: { name: string; bio: string | null; lore: string | null; avatar_url: string | null }) => {
-      return createPersona(payload);
-    },
+    mutationFn: async (payload: { name: string; bio: string | null; lore: string | null; avatar_url: string | null }) => createPersona(payload),
     onSuccess: (newPersona) => {
-      queryClient.setQueryData(personaKeys.all(userId), (old: Persona[] = []) => [newPersona, ...old]);
+      // Optimistically update context cache
+      queryClient.setQueryData(personaKeys.context(userId, chatId || null, true), (old: any) => {
+        if (!old) return old;
+        return { ...old, personas: [newPersona, ...(old.personas || [])] };
+      });
       setShowCreateModal(false);
       setCurrentPersonaDraft({ name: '', bio: '', lore: '', avatar_url: null });
       logger.info('Persona created', newPersona);
@@ -71,33 +47,32 @@ export function usePersonaManager(userId?: string, chatId?: string) {
   const deleteMutation = useMutation({
     mutationFn: async (personaId: string) => deletePersona(personaId),
     onSuccess: (_res, id) => {
-      queryClient.setQueryData(personaKeys.all(userId), (old: Persona[] = []) => old.filter(p => p.id !== id));
-      if (selectedPersona?.id === id) {
-        // Clear or pick another
-        const next = (queryClient.getQueryData(personaKeys.all(userId)) as Persona[] | undefined)?.[0] || null;
-        queryClient.setQueryData(personaKeys.chatSelected(chatId || 'new'), next);
-      }
+      queryClient.setQueryData(personaKeys.context(userId, chatId || null, true), (old: any) => {
+        if (!old) return old;
+        const filtered = (old.personas || []).filter((p: Persona) => p.id !== id);
+        return { ...old, personas: filtered, chat_selected_persona: old.chat_selected_persona?.id === id ? null : old.chat_selected_persona };
+      });
     }
   });
 
   const setSelectedPersona = useCallback((persona: Persona | null) => {
-    queryClient.setQueryData(personaKeys.chatSelected(chatId || 'new'), persona);
-  }, [queryClient, chatId]);
+    queryClient.setQueryData(personaKeys.context(userId, chatId || null, true), (old: any) => {
+      if (!old) return old;
+      return { ...old, chat_selected_persona: persona };
+    });
+  }, [queryClient, userId, chatId]);
 
   return {
     personas,
     selectedPersona,
-    // modal state
     showCreateModal,
     setShowCreateModal,
     showEditModal,
     setShowEditModal,
     personaToEdit,
     setPersonaToEdit,
-    // draft
     currentPersonaDraft,
     setCurrentPersonaDraft,
-    // actions
     createPersona: (payload: { name: string; bio: string | null; lore: string | null; avatar_url: string | null }) => createMutation.mutateAsync(payload),
     deletePersona: (id: string) => deleteMutation.mutateAsync(id),
     setSelectedPersona,

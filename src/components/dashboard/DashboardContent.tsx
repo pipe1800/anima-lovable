@@ -22,7 +22,7 @@ import { TopBar } from '@/components/ui/TopBar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useUserChatsPaginated } from '@/hooks/useDashboard';
-import { useDashboardData } from '@/hooks/useDashboardProgressive';
+import { useDashboardOverview } from '@/hooks/useDashboardProgressive';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { 
   StatsCardSkeleton, 
@@ -95,7 +95,7 @@ export function DashboardContent() {
     isLoading: dashboardLoading,
     error: dashboardError,
     refetch: refetchDashboard
-  } = useDashboardData();
+  } = useDashboardOverview();
 
   // Use separate hook for paginated chats
   const {

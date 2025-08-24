@@ -78,7 +78,7 @@ export default function PublicWorldInfoProfile() {
       if (!id) return;
       try {
         setLoading(true);
-        const { data, error } = await WorldInfo.getPublicWorldInfoDetailsFull(id, user?.id );
+        const { data, error } = await WorldInfo.fetchWorldInfoFull(id);
         if (error || !data) throw error || new Error('Failed to load world info');
         setWorldInfo(data as any);
         if (data.tags && data.tags.length > 0) {

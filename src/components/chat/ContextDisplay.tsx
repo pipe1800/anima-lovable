@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -141,7 +141,33 @@ const contextAddonConfig = [
 
 export const ContextDisplay = ({ context, contextUpdates, currentContext, addonSettings, className = '', rightActions }: ContextDisplayProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  
+  const [relationshipProgress, setRelationshipProgress] = useState<{ percent: number; ready: boolean } | null>(null);
+  const [relationshipMeta, setRelationshipMeta] = useState<any>(null);
+
+  // Listen for relationship meta events (both new & legacy)
+  useEffect(() => {
+    const applyMeta = (incoming: any, source: string) => {
+      const meta = incoming?.relationshipMeta ? incoming.relationshipMeta : incoming; // unify shape
+      if (!meta || typeof meta !== 'object') return;
+      try { console.debug('[ContextDisplay] relationship meta received', { source, meta }); } catch {}
+      setRelationshipMeta(meta);
+      const pct = typeof meta.stage_progress_percent === 'number'
+        ? meta.stage_progress_percent
+        : (typeof meta.percent_to_next === 'number' ? meta.percent_to_next : undefined);
+      if (typeof pct === 'number') {
+        setRelationshipProgress({ percent: Math.max(0, Math.min(1, pct)), ready: !!meta.ready_for_next });
+      }
+    };
+    const handlerNew = (e: any) => applyMeta(e.detail, 'new-event');
+    const handlerLegacy = (e: any) => applyMeta(e.detail, 'legacy-event');
+    window.addEventListener('relationship-meta-updated', handlerNew);
+    window.addEventListener('relationship-meta-updated-legacy', handlerLegacy);
+    return () => {
+      window.removeEventListener('relationship-meta-updated', handlerNew);
+      window.removeEventListener('relationship-meta-updated-legacy', handlerLegacy);
+    };
+  }, []);
+
   // Use the most relevant context source
   const effectiveContext = currentContext || context;
 
@@ -306,6 +332,14 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
     }).filter(Boolean) as ContextItem[];
   }
 
+  // Augment contextItems to include progress bar marker for relationshipStatus
+  contextItems = contextItems.map(ci => {
+    if (ci.key === 'relationshipStatus') {
+      return { ...ci, __relationship: true } as any;
+    }
+    return ci;
+  });
+
   // Check if any stateful addons are enabled (default to true if settings not loaded yet)
   const hasEnabledAddons = !addonSettings || (addonSettings && (
     addonSettings.moodTracking || 
@@ -330,6 +364,35 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
   // Count enabled context items
   const enabledContextCount = contextItems.filter(item => item.isEnabled && item.value !== 'No context yet').length;
   const totalEnabledAddons = contextItems.filter(item => item.isEnabled).length;
+
+  const renderRelationshipProgress = React.useCallback(() => {
+    const pctBase = relationshipMeta && typeof relationshipMeta.stage_progress_percent === 'number'
+      ? relationshipMeta.stage_progress_percent
+      : (relationshipMeta && typeof relationshipMeta.percent_to_next === 'number'
+        ? relationshipMeta.percent_to_next
+        : (relationshipProgress ? relationshipProgress.percent : null));
+    const ready = relationshipMeta ? !!relationshipMeta.ready_for_next : (relationshipProgress?.ready || false);
+    // Show placeholder bar if we have meta but no computed percent yet
+    if ((pctBase === null || pctBase === undefined) && !relationshipMeta) return null;
+    const pctDisplay = pctBase === null || pctBase === undefined ? 0 : Math.round(Math.max(0, Math.min(1, pctBase)) * 100);
+    const barColor = pctDisplay >= 100 ? 'bg-green-500' : 'bg-gradient-to-r from-red-500 via-yellow-500 to-green-500';
+    return (
+      <div className="mt-2">
+        <div className="flex justify-between text-[10px] uppercase tracking-wide mb-1 text-slate-400">
+          <span>Stage Progress</span>
+          <span className={ready ? 'text-green-400' : 'text-slate-400'}>{pctDisplay}%{ready ? ' Ready' : ''}</span>
+        </div>
+        <div className="h-2 rounded bg-slate-700/60 overflow-hidden relative">
+          <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${pctDisplay}%` }} />
+          {pctDisplay === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center text-[9px] text-slate-500 tracking-wide">
+              {relationshipMeta ? 'Initializing' : '—'}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }, [relationshipProgress, relationshipMeta]);
 
   return (
     <div className={`${className}`}>
@@ -387,113 +450,31 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
           {/* Expanded Context Items */}
           {isExpanded && (
             <div className="mt-4 space-y-3">
-              {contextItems.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {contextItems.map((item) => {
-                    const IconComponent = item.icon;
-                    const hasContext = item.value !== 'No context yet';
-                    
-                    return (
-                      <div
-                        key={item.key}
-                        className={`relative overflow-hidden rounded-lg border transition-all duration-200 hover:scale-[1.02] ${
-                          hasContext 
-                            ? `${item.bgColor} hover:shadow-lg` 
-                            : 'bg-slate-900/50 border-slate-700/50 hover:border-slate-600/50'
-                        }`}
-                      >
-                        <div className="p-3">
-                          <div className="flex items-start gap-3">
-                            <div className={`relative w-8 h-8 rounded-lg flex items-center justify-center ${
-                              hasContext 
-                                ? `bg-gradient-to-r ${item.gradient}` 
-                                : 'bg-slate-700'
-                            }`}>
-                              <IconComponent className={`w-4 h-4 ${hasContext ? 'text-white' : 'text-slate-400'}`} />
-                              {hasContext && (
-                                <div className="absolute inset-0 bg-gradient-to-r ${item.gradient} opacity-20 rounded-lg" />
-                              )}
-                            </div>
-                            
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={`text-sm font-medium ${
-                                  hasContext ? 'text-white' : 'text-slate-400'
-                                }`}>
-                                  {item.label}
-                                </span>
-                                {hasContext && (
-                                  <div className="w-1.5 h-1.5 bg-green-400 rounded-full" />
-                                )}
-                              </div>
-                              
-                              <p className={`text-sm break-words ${
-                                hasContext 
-                                  ? 'text-slate-200 font-medium' 
-                                  : 'text-slate-500 italic'
-                              }`}>
-                                {item.value}
-                              </p>
-                              
-                              {item.isHistorical && (
-                                <Badge variant="outline" className="mt-1 text-xs bg-orange-500/20 border-orange-500/30 text-orange-300">
-                                  Historical
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Subtle gradient overlay for active items */}
-                        {hasContext && (
-                          <div className={`absolute inset-0 bg-gradient-to-r ${item.gradient} opacity-5 pointer-events-none`} />
+              {contextItems.map(item => (
+                <div key={item.key} className={`p-3 rounded-lg border ${item.bgColor} relative transition-all group`}> 
+                  <div className="flex items-start gap-3">
+                    <div className={`w-8 h-8 rounded-md bg-gradient-to-br ${item.gradient} flex items-center justify-center text-white shadow-inner`}>
+                      <item.icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-white truncate" title={item.label}>{item.label}</span>
+                        {item.isHistorical && (
+                          <Badge variant="outline" className="h-4 text-[10px] px-1 py-0 bg-slate-700/40 border-slate-600 text-slate-300">Past</Badge>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-6">
-                  <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-slate-800 flex items-center justify-center">
-                    <Eye className="w-6 h-6 text-slate-500" />
-                  </div>
-                  <p className="text-sm text-slate-400 mb-1">No Context Tracking Enabled</p>
-                  <p className="text-xs text-slate-500">Enable addons in settings to start tracking character details</p>
-                </div>
-              )}
-              
-              {/* Context Statistics */}
-              {contextItems.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-slate-700/50">
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-1">
-                        <Sparkles className="w-3 h-3 text-blue-400" />
-                        <span className="text-slate-400">
-                          {enabledContextCount} tracked
-                        </span>
+                      <div className="mt-0.5 text-xs text-slate-300 leading-relaxed whitespace-pre-line break-words">
+                        {item.value}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Activity className="w-3 h-3 text-green-400" />
-                        <span className="text-slate-400">
-                          {totalEnabledAddons} enabled
-                        </span>
-                      </div>
+                      {item.key === 'relationshipStatus' && renderRelationshipProgress()}
                     </div>
-                    
-                    {enabledContextCount > 0 && (
-                      <Badge variant="outline" className="bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
-                        <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1.5 animate-pulse" />
-                        Active Tracking
-                      </Badge>
-                    )}
                   </div>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </CardContent>
       </Card>
     </div>
   );
-};
+}

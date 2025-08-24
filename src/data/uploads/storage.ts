@@ -1,8 +1,54 @@
 import { supabase } from '@/db/client';
 
-/**
- * Upload a file to a storage bucket and return its public URL.
- */
+// Unified media upload kinds
+export type MediaKind =
+  | 'character-avatar'
+  | 'character-banner'
+  | 'world-info-avatar'
+  | 'profile-avatar'
+  | 'profile-banner'
+  | 'chat-background';
+
+interface MediaConfig {
+  bucket: string;
+  upsert: boolean;
+  pattern: (userId: string, ext: string) => string;
+}
+
+const MEDIA_CONFIG: Record<MediaKind, MediaConfig> = {
+  'character-avatar': {
+    bucket: 'character-avatars',
+    upsert: false,
+    pattern: (u, ext) => `${u}/avatar-${Date.now()}.${ext}`
+  },
+  'character-banner': {
+    bucket: 'character-avatars',
+    upsert: false,
+    pattern: (u, ext) => `${u}/banner-${Date.now()}.${ext}`
+  },
+  'world-info-avatar': {
+    bucket: 'character-avatars',
+    upsert: false,
+    pattern: (u, ext) => `${u}/world-info-${Date.now()}.${ext}`
+  },
+  'profile-avatar': {
+    bucket: 'profile-images',
+    upsert: false,
+    pattern: (u, ext) => `${u}/avatar-${Date.now()}.${ext}`
+  },
+  'profile-banner': {
+    bucket: 'profile-images',
+    upsert: false,
+    pattern: (u, ext) => `${u}/banner-${Date.now()}.${ext}`
+  },
+  'chat-background': {
+    bucket: 'user-style',
+    upsert: true, // stable deterministic path
+    pattern: (u, ext) => `backgrounds/${u}.${ext}`
+  }
+};
+
+/** Low-level generic bucket upload (still exported for rare custom cases). */
 export async function uploadToBucket(params: {
   bucket: string;
   path: string;
@@ -19,25 +65,38 @@ export async function uploadToBucket(params: {
   return { publicUrl: pub.publicUrl, error: null, path: data.path };
 }
 
-export async function uploadAvatar(userId: string, file: File) {
-  const fileExt = file.name.split('.').pop();
-  const path = `${userId}/avatar-${Date.now()}.${fileExt}`;
-  return uploadToBucket({ bucket: 'character-avatars', path, file });
+/** Unified high-level media uploader */
+export async function uploadMedia(params: {
+  kind: MediaKind;
+  userId: string;
+  file: File | Blob;
+  overwrite?: boolean; // overrides config upsert
+  cacheControlSeconds?: number;
+  pathOverride?: string; // deterministic custom path
+}): Promise<{ publicUrl: string | null; error: Error | null; path?: string }> {
+  const { kind, userId, file, overwrite, cacheControlSeconds, pathOverride } = params;
+  const cfg = MEDIA_CONFIG[kind];
+  const name = (file instanceof File && file.name) ? file.name : 'upload.bin';
+  const ext = name.includes('.') ? name.split('.').pop() || 'bin' : 'bin';
+  const path = pathOverride || cfg.pattern(userId, ext);
+  return uploadToBucket({ bucket: cfg.bucket, path, file, upsert: overwrite ?? cfg.upsert, cacheControlSeconds });
 }
 
-export async function uploadBanner(userId: string, file: File) {
-  const fileExt = file.name.split('.').pop();
-  const path = `${userId}/banner-${Date.now()}.${fileExt}`;
-  return uploadToBucket({ bucket: 'character-avatars', path, file });
-}
-
-/**
- * Canonical default avatar provisioning helper (used by auth data layer).
- */
+/** Provision a default avatar (idempotent: always upserts same path) */
 export async function ensureDefaultAvatar(userId: string) {
-  const response = await fetch('/default_avatar.jpg');
-  const blob = await response.blob();
-  const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
-  const { publicUrl } = await uploadToBucket({ bucket: 'character-avatars', path: `${userId}/avatar-default.jpg`, file });
-  return publicUrl || '/default_avatar.jpg';
+  try {
+    const response = await fetch('/default_avatar.jpg');
+    const blob = await response.blob();
+    const file = new File([blob], 'default_avatar.jpg', { type: blob.type });
+    const { publicUrl } = await uploadMedia({
+      kind: 'profile-avatar',
+      userId,
+      file,
+      overwrite: true,
+      pathOverride: `${userId}/avatar-default.jpg`
+    });
+    return publicUrl || '/default_avatar.jpg';
+  } catch (e) {
+    return '/default_avatar.jpg';
+  }
 }

@@ -7,7 +7,6 @@ import { ChevronDown, Bug, RefreshCw, AlertTriangle, MessageCircle } from 'lucid
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserGlobalChatSettings } from '@/data/chats/settings';
 import { Chats } from '@/data';
-import { getLatestAutoSummary } from '@/data/chats/queries';
 
 interface AddonDebugPanelProps {
   characterId?: string;
@@ -38,63 +37,28 @@ export const AddonDebugPanel = ({ characterId, userId, chatId }: AddonDebugPanel
         setMessageStats(null);
         return;
       }
-
       try {
-        // Get total message count and AI message count (excluding placeholders)
-        const { data: messages, error: messagesError } = await Chats.getChatMessagesForStats(chatId);
-
-        if (messagesError) {
-          console.error('Debug: Failed to fetch messages:', messagesError);
+        const { data: snap, error } = await Chats.getChatSnapshot(chatId, effectiveUserId, characterId || '');
+        if (error || !snap) {
+          console.error('Debug: Snapshot fetch failed:', error);
           return;
         }
-
-        const totalMessages = messages?.length || 0;
-        
-        // FIXED: Match system logic - exclude placeholders and count correctly
-        const realAiMessages = messages?.filter(m => 
-          m.is_ai_message === true && 
-          !m.content.includes('[PLACEHOLDER]')
-        ) || [];
-
-        // Get the most recent auto-summary
-        const { data: summaries, error: summariesError } = await getLatestAutoSummary(chatId);
-
-        if (summariesError) {
-          console.error('Debug: Failed to fetch summaries:', summariesError);
-        }
-
-        const lastSummaryAt = summaries?.[0]?.message_count || 0;
-        
-        // Count AI messages after last summary (matching system logic)
-        const aiMessagesAfterSummary = realAiMessages.filter(m => 
-          m.message_order > lastSummaryAt
-        );
-        
-        const currentAiCount = aiMessagesAfterSummary.length;
-        const nextSummaryAt = lastSummaryAt + 15; // Next 15 AI messages after last summary
-
-        console.log('🔧 Debug Panel - FIXED Counter:', {
-          totalMessages,
-          totalAiMessages: realAiMessages.length,
-          lastSummaryAt,
-          aiMessagesAfterSummary: currentAiCount,
-          nextSummaryAt,
-          messagesUntilSummary: 15 - currentAiCount
-        });
-
+        const totalMessages = snap.messages?.length || 0;
+        const lastSummaryAt = snap.last_summary_at || 0;
+        const aiMessagesAfterSummary = snap.ai_messages_after_summary || 0;
+        const nextSummaryAt = lastSummaryAt + 15;
         setMessageStats({
           totalMessages,
-          aiMessages: currentAiCount, // Show unsummarized AI messages
+          aiMessages: aiMessagesAfterSummary,
           lastSummaryAt,
           nextSummaryAt
         });
-      } catch (error) {
-        console.error('Debug: Error fetching message stats:', error);
+      } catch (err) {
+        console.error('Debug: Error fetching snapshot stats:', err);
       }
     };
-
     fetchMessageStats();
-  }, [chatId, debugEnabled]);
+  }, [chatId, debugEnabled, effectiveUserId, characterId]);
 
   // Check for subscription issues
   const hasSubscriptionIssue = user && !subscription;

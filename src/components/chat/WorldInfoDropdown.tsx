@@ -7,7 +7,6 @@ import { useTutorial } from '@/contexts/TutorialContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { WorldInfo } from '@/data';
 import { useNavigate } from 'react-router-dom';
-import { getUserOwnedWorldInfos, getUserWorldInfoCollection } from '@/data/worldInfo/queries';
 
 interface WorldInfo {
   id: string;
@@ -42,19 +41,8 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
       if (!user) return;
       
       try {
-        // Get user's own world infos
-        const { data: owned } = await getUserOwnedWorldInfos(user.id);
-        // Get user's world info collection (only these, no public world infos)
-        const { data: collection } = await getUserWorldInfoCollection(user.id);
-        const allWorldInfos = [...(owned || []), ...(collection || [])] as any[];
-
-        // Remove duplicates
-        const uniqueWorldInfos = allWorldInfos.filter(
-          (worldInfo, index, self) => 
-            index === self.findIndex(w => w.id === worldInfo.id)
-        );
-
-        setWorldInfos(uniqueWorldInfos);
+        const { data, error } = await WorldInfo.listUserWorldInfos(user.id);
+        if (!error && data) setWorldInfos(data as any);
       } catch (error) {
         console.error('Error loading world infos:', error);
       } finally {
@@ -235,6 +223,18 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
               <DropdownMenuSeparator className="bg-gray-700/50" />
               
               <DropdownMenuItem
+                onClick={handleCreateWorldInfo}
+                className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create New World Info</span>
+              </DropdownMenuItem>
+              
+              <DropdownMenuItem
+                onClick={handleDiscoverWorldInfos}
+                className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
+              >
+                <Globe className="w-4 h-4" />
                 onClick={handleCreateWorldInfo}
                 className="flex items-center space-x-2 p-3 hover:bg-[#FF7A00]/20 cursor-pointer text-[#FF7A00]"
               >

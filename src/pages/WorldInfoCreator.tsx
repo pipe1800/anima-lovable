@@ -23,21 +23,20 @@ import {
   cascadeDeleteWorldInfo,
   addWorldInfoEntry as addWorldInfoEntryRaw,
   updateWorldInfoEntry as updateWorldInfoEntryRaw,
-  deleteWorldInfoEntry as deleteWorldInfoEntryRaw,
-  addWorldInfoTag as addWorldInfoTagRaw,
-  removeWorldInfoTag as removeWorldInfoTagRaw
+  deleteWorldInfoEntry as deleteWorldInfoEntryRaw
 } from '@/data/worldInfo/mutations';
 import {
   toggleWorldInfoLike as toggleWorldInfoLikeRaw,
   addWorldInfoToCollection as addWorldInfoToCollectionRaw,
-  removeWorldInfoFromCollection as removeWorldInfoFromCollectionRaw
+  removeWorldInfoFromCollection as removeWorldInfoFromCollectionRaw,
+  addWorldInfoTag as addWorldInfoTagRaw,
+  removeWorldInfoTag as removeWorldInfoTagRaw
 } from '@/data/worldInfo/interactions';
-import { uploadAvatar } from '@/data/uploads/storage';
+import { uploadMedia } from '@/data/uploads/storage';
 import { 
   useUserWorldInfos, 
   useUserWorldInfoCollection, 
   useWorldInfoWithEntries, 
-  useAllTags, 
   useWorldInfoTags,
   type WorldInfoWithDetails
 } from '@/hooks/useWorldInfos';
@@ -129,7 +128,6 @@ const WorldInfoCreator = () => {
   // React Query hooks for optimized data fetching
   const { data: worldInfos = [], isLoading: worldInfosLoading, refetch: refetchWorldInfos } = useUserWorldInfos();
   const { data: collectedWorldInfos = [], isLoading: collectionLoading, refetch: refetchCollection } = useUserWorldInfoCollection();
-  const { data: availableTags = [] } = useAllTags();
   
   const [selectedWorldInfo, setSelectedWorldInfo] = useState<WorldInfo | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -222,7 +220,7 @@ const WorldInfoCreator = () => {
       let avatarUrl = '';
       if (editAvatarFile && user) {
         setUploadingAvatar(true);
-        const { publicUrl } = await uploadAvatar(user.id, editAvatarFile as any);
+        const { publicUrl } = await uploadMedia({ kind: 'world-info-avatar', userId: user.id, file: editAvatarFile as any });
         if (publicUrl) {
           avatarUrl = publicUrl;
         }
@@ -317,7 +315,7 @@ const WorldInfoCreator = () => {
       let avatarUrl = selectedWorldInfo.avatar_url || '';
       if (editAvatarFile && user) {
         setUploadingAvatar(true);
-        const { publicUrl } = await uploadAvatar(user.id, editAvatarFile as any);
+        const { publicUrl } = await uploadMedia({ kind: 'world-info-avatar', userId: user.id, file: editAvatarFile as any });
         if (publicUrl) {
           avatarUrl = publicUrl;
         }

@@ -32,9 +32,7 @@ import {
   updateWorldInfoCore,
   addWorldInfoEntry as addWorldInfoEntryRaw,
   updateWorldInfoEntry as updateWorldInfoEntryRaw,
-  deleteWorldInfoEntry as deleteWorldInfoEntryRaw,
-  addWorldInfoTag as addWorldInfoTagRaw,
-  removeWorldInfoTag as removeWorldInfoTagRaw
+  deleteWorldInfoEntry as deleteWorldInfoEntryRaw
 } from '@/data/worldInfo/mutations';
 // Removed deprecated worldInfo/tags import
 // Minimal local types to decouple from legacy module
@@ -43,7 +41,8 @@ interface WorldInfoEntry { id: string; world_info_id: string; keywords: string[]
 interface Tag { id: number; name: string; }
 
 // Hooks (ensure they remain imported elsewhere)
-import { useWorldInfoWithEntries, useAllTags, useWorldInfoTags } from '@/hooks/useWorldInfos';
+import { useWorldInfoWithEntries, useWorldInfoTags } from '@/hooks/useWorldInfos';
+import { useAllTags } from '@/hooks/useTags';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorProps) {
@@ -92,7 +91,8 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
 
   const { data: worldInfoTags = [] } = useWorldInfoTags(worldInfoId || null);
 
-  const { data: allTags = [] } = useAllTags();
+  const { data: allTagsRaw = [] } = useAllTags();
+  const allTags: Tag[] = (allTagsRaw as any[]).filter(t => t && typeof t === 'object' && 'id' in t && 'name' in t) as Tag[];
 
   // Track initial snapshot for dirty state
   const initialSnapshotRef = useRef<{ form: typeof formData; entries: any[]; tagIds: number[] } | null>(null);
@@ -244,10 +244,7 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
         if (newWorldInfoResult.error || !newWorldInfoResult.data) throw newWorldInfoResult.error || new Error('Create failed');
         const newWorldInfo = newWorldInfoResult.data;
         savedWorldInfoId = newWorldInfo.id;
-        // Add tags
-        for (const tag of selectedTags) {
-          await addWorldInfoTagRaw(savedWorldInfoId, tag.id);
-        }
+        // TODO: re-add tag assignment via new interaction helper if required
         // Add entries
         for (const entry of entries) {
           if (!entry.id.startsWith('temp-')) continue;

@@ -12,9 +12,11 @@ import logger from '@/utils/logger';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { useUserGlobalChatSettings } from '@/data/chats/settings';
+import { useBillingCredits } from '@/contexts/AuthContext';
 
 const Chat = () => {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, profile } = useAuth();
+  const { balance: creditsBalance } = useBillingCredits();
   // Define routing hooks and derived values BEFORE state that depends on them
   const location = useLocation();
   const navigate = useNavigate();
@@ -37,12 +39,49 @@ const Chat = () => {
     clothingInventory: 'No context',
     locationTracking: 'No context',
     timeAndWeather: 'No context',
-    relationshipStatus: 'No context',
+    relationshipStatus: 'No context', // ADD
     characterPosition: 'No context',
     enchantmentStatus: 'No context',
     itemInventory: 'No context'
   } as any);
-  
+  const [relationshipStage, setRelationshipStage] = useState<string | null>(null);
+  // Sync relationshipStage into trackedContext (handles relationship goals canonical string)
+  useEffect(() => {
+    if (relationshipStage) {
+      setTrackedContext(prev => prev.relationshipStatus === relationshipStage ? prev : { ...prev, relationshipStatus: relationshipStage });
+    }
+  }, [relationshipStage]);
+
+  useEffect(() => {
+    if (!currentChatId || !characterId) return;
+    let cancelled = false;
+    const fetchCtx = async () => {
+      try {
+        const { supabase } = await import('@/db/client');
+        const { data, error } = await (supabase as any)
+          .from('chat_context')
+          .select('current_context')
+          .eq('chat_id', currentChatId)
+          .maybeSingle();
+        if (!cancelled && data?.current_context?.relationship) {
+          setRelationshipStage(data.current_context.relationship as string);
+        }
+      } catch {}
+    };
+    fetchCtx();
+    const id = setInterval(fetchCtx, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [currentChatId, characterId]);
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (e?.detail?.chatId === currentChatId && e.detail?.context?.relationship) {
+        setRelationshipStage(e.detail.context.relationship);
+      }
+    };
+    window.addEventListener('chat-context-updated', handler);
+    return () => window.removeEventListener('chat-context-updated', handler);
+  }, [currentChatId]);
+
   const log = logger.scoped('ChatPage');
   const initialExtractionAttemptedRef = useRef(false);
 
@@ -54,7 +93,7 @@ const Chat = () => {
         log.debug('🎓 Chat: Setting fromOnboarding flag for tutorial');
         localStorage.setItem('fromOnboarding', 'true');
       }
-      const isCompleted = (currentUser as any).user_metadata?.onboarding_completed;
+      const isCompleted = profile?.onboarding_completed;
       setOnboardingCompleted(!!isCompleted);
       setShowOnboarding(false);
       setLoading(false);
@@ -63,7 +102,7 @@ const Chat = () => {
       setLoading(false);
       navigate('/auth');
     }
-  }, [currentUser, fromOnboarding, navigate, log]);
+  }, [currentUser, fromOnboarding, navigate, log, profile]);
 
   // Load context from database and sync with local state
   // Context now sourced from unified chat hook via ChatInterface; disabling dedicated context polling to avoid duplicate GET /chat_context
@@ -71,18 +110,6 @@ const Chat = () => {
 
   // Single authoritative global settings fetch; children receive as override and skip their own queries
   const { data: globalSettings } = useUserGlobalChatSettings();
-  // Fetch user credits once here to avoid duplicate fetch in ChatLayout & ChatInterface
-  const { data: creditsBalance = 0 } = useQuery({
-    ...(currentUser?.id ? {
-      queryKey: chatQueryKeys.user.credits(currentUser.id),
-      queryFn: async () => {
-        const res = await Billing.getUserCredits(undefined as any, currentUser.id); // client param ignored internally
-        if (res.error) throw res.error;
-        return res.data?.balance || 0;
-      }
-    } : { queryKey: chatQueryKeys.user.credits('none'), queryFn: async () => 0 }),
-    enabled: !!currentUser?.id,
-  });
 
   // NOTE: Backend now auto-triggers initial extraction during chat creation.
   // Frontend trigger retained behind feature flag (disabled) to avoid duplicate extraction & UI flicker.
@@ -141,7 +168,7 @@ const Chat = () => {
 
   // Dedupe: Prefer react-query for character details, avoid manual fetch
   const characterDetailsQuery = useQuery({
-    ...(characterId ? chatQueryConfigs.characterDetails(characterId) : { queryKey: ['character', 'details', 'none'], queryFn: async () => null }),
+    ...(characterId ? chatQueryConfigs.greetingSummary(characterId) : { queryKey: ['character', 'greeting-summary', 'none'], queryFn: async () => null }),
     enabled: !!characterId && !selectedCharacter,
   });
 
@@ -165,17 +192,34 @@ const Chat = () => {
     // Use character details from react-query when available
     setCharacterLoading(true);
     const d: any = characterDetailsQuery.data;
-    if (d && (d.data || d.name)) {
-      const details = d.data || d; // handle either wrapped or direct
+    if (d) {
+      const details = d as any; // minimal greeting summary
       setCharacterData({
         id: details.id,
         name: details.name,
         tagline: details.tagline,
         avatar_url: details.avatar_url,
+        character_definitions: details.character_definitions || (details.definition ? details.definition.character_definitions : undefined)
       });
       setCharacterLoading(false);
     }
   }, [currentUser, loading, selectedCharacter, characterId, navigate, characterDetailsQuery.data]);
+
+  // Ensure selectedCharacter includes character_definitions for greetings
+  useEffect(() => {
+    if (selectedCharacter && !selectedCharacter.character_definitions && characterId) {
+      // Attempt lightweight fetch
+      (async () => {
+        try {
+          const { getCharacterGreetingSummary } = await import('@/data/characters/profileView');
+            const { data } = await getCharacterGreetingSummary(characterId);
+            if (data) {
+              setCharacterData({ ...selectedCharacter, character_definitions: data.character_definitions });
+            }
+        } catch (e) { /* silent */ }
+      })();
+    }
+  }, [selectedCharacter, characterId]);
 
   const handleFirstMessage = () => {
     setIsFirstMessage(false);
@@ -241,7 +285,7 @@ const Chat = () => {
   };
 
   // Provide preloaded details to ChatLayout to avoid duplicate fetching
-  const preloadedDetails: any = (characterDetailsQuery.data as any)?.data || null;
+  const preloadedDetails: any = (characterDetailsQuery.data as any) || characterData || null;
 
   return (
     <SidebarProvider>
@@ -249,16 +293,7 @@ const Chat = () => {
         {/* Main Chat Layout */}
         <div className="flex-1 flex flex-col h-full">
           <ChatLayout 
-            character={character} 
-            currentChatId={currentChatId}
-            trackedContext={trackedContext}
-            onContextUpdate={setTrackedContext}
-            onPersonaChange={handlePersonaChange}
-            onWorldInfoChange={handleWorldInfoChange}
-            characterDetails={preloadedDetails}
-            creditsBalanceOverride={creditsBalance}
-            globalSettingsOverride={globalSettings}
-          >
+            relationshipStage={relationshipStage} character={characterData} currentChatId={currentChatId || ''} trackedContext={trackedContext} onContextUpdate={setTrackedContext} onPersonaChange={handlePersonaChange} onWorldInfoChange={handleWorldInfoChange} characterDetails={characterData} creditsBalanceOverride={creditsBalance} globalSettingsOverride={relationshipStage && /^Stage \d+\/\d+:/i.test(relationshipStage) ? { ...(globalSettings || {}), relationship_status: true } : globalSettings}>
             <ChatInterface
               character={character}
               onFirstMessage={handleFirstMessage}

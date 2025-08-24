@@ -36,79 +36,40 @@ const BillingSettings = () => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const fetchBillingData = async () => {
-      if (user) {
-        setLoading(true);
-        try {
-          const [subData, creditsData, purchasesData] = await Promise.all([
-            Billing.getUserSubscription(supabase, user.id),
-            Billing.getUserCredits(supabase, user.id),
-            Billing.getUserCreditPurchases(supabase, user.id),
-          ]);
-
-          if (subData.error) throw subData.error;
-          if (creditsData.error) throw creditsData.error;
-          if (purchasesData.error) throw purchasesData.error;
-
-          setSubscription(subData.data as SubscriptionWithPlan | null);
-          setCredits(creditsData.data?.balance ?? 0);
-          setPurchases((purchasesData.data as PurchaseWithPack[]) || []);
-        } catch (err) {
-          console.error('Error fetching billing data:', err);
-          toast({
-            title: 'Error',
-            description: 'Could not load billing data. Please try again later.',
-            variant: 'destructive',
-          });
-        } finally {
-          setLoading(false);
+    const fetchBillingOverview = async () => {
+      if (!user) return;
+      setLoading(true);
+      try {
+        const { data, error } = await Billing.getUserBillingOverview(supabase, user.id, 50);
+        if (error) throw error;
+        if (data) {
+          // Normalize subscription shape to match previous state (plan nested already)
+            setSubscription((data.subscription as any) || null);
+            setCredits(data.credits || 0);
+            setPurchases((data.purchases as any) || []);
+            setPlans((data.plans as any) || []);
+            setCreditPacks((data.credit_packs as any) || []);
         }
-      }
-    };
-
-    const fetchPlans = async () => {
-      try {
-        const { data, error } = await Billing.getSubscriptionPlans(supabase);
-        if (error) throw error;
-        setPlans(data || []);
       } catch (err) {
-        console.error('Error fetching subscription plans:', err);
+        console.error('Error fetching billing overview:', err);
         toast({
           title: 'Error',
-          description: 'Could not load subscription plans. Please try again later.',
+          description: 'Could not load billing data. Please try again later.',
           variant: 'destructive',
         });
+      } finally {
+        setLoading(false);
       }
     };
 
-    const fetchCreditPacks = async () => {
-      try {
-        const { data, error } = await Billing.getCreditPacks(supabase);
-        if (error) throw error;
-        setCreditPacks(data || []);
-      } catch (err) {
-        console.error('Error fetching credit packs:', err);
-        toast({
-          title: 'Error',
-          description: 'Could not load credit packs. Please try again later.',
-          variant: 'destructive',
-        });
-      }
-    };
+    fetchBillingOverview();
 
-    fetchBillingData();
-    fetchPlans();
-    fetchCreditPacks();
-
-    // Realtime subscription moved to data layer helper
+    // Realtime subscription: re-fetch overview on change
     let unsubscribe: (() => void) | undefined;
     if (user && supabase) {
-      unsubscribe = Billing.subscribeToUserBillingChanges(supabase, user.id, fetchBillingData);
+      unsubscribe = Billing.subscribeToUserBillingChanges(supabase, user.id, fetchBillingOverview);
     }
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
+    return () => { if (unsubscribe) unsubscribe(); };
   }, [user, supabase, toast]);
 
   const handleManageSubscription = async () => {

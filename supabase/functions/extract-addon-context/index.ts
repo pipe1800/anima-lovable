@@ -104,6 +104,43 @@ async function callModel(prompt: string, signal: AbortSignal): Promise<string|nu
   return typeof content === 'string' ? content : null;
 }
 
+// Relationship signal heuristic
+function deriveRelationshipSignals(userMsg: string): Array<{ kind: string; weight: number; polarity: 1 | -1 }> {
+  const signals: Array<{ kind: string; weight: number; polarity: 1 | -1 }> = [];
+  const m = userMsg.toLowerCase();
+  const pos: Array<[RegExp,string,number]> = [
+    [/\b(i love you|love you|i care about you|i adore you|marry|engage|commit)\b/i,'commitment',0.25],
+    [/\b(i (really )?like you|affection|hug|kiss|cuddle)\b/i,'affection',0.15],
+    [/\b(intimate|together forever|soulmate)\b/i,'intimacy',0.2]
+  ];
+  const neg: Array<[RegExp,string,number]> = [
+    [/\b(distance|need space|back off|cool down)\b/i,'distancing',0.18],
+    [/\b(not working|break up|separate|end this)\b/i,'breakup',0.4],
+    [/\b(i (don'?t|no longer) love you|stop this)\b/i,'rejection',0.25]
+  ];
+  for (const [r,k,w] of pos) { if (r.test(userMsg)) signals.push({ kind: k, weight: w, polarity: 1 }); }
+  for (const [r,k,w] of neg) { if (r.test(userMsg)) signals.push({ kind: k, weight: w, polarity: -1 }); }
+  return signals;
+}
+
+// Build canonical relationship status string
+function buildCanonicalRelationship(template: any, progress: any): { display: string|null; meta: any } {
+  if (!template || !template.enabled || !Array.isArray(template.path) || !progress) return { display: null, meta: null };
+  const active = progress.active_order || progress.activeOrder || 1;
+  const total = template.path.length;
+  const goal = template.path.find((g: any)=> (g.order === active));
+  if (!goal) return { display: null, meta: null };
+  const base = `Stage ${active}/${total}: ${goal.label}`;
+  const withDesc = goal.description ? `${base} - ${goal.description}` : base;
+  // Compute next threshold %
+  let nextThreshold: number|null = null;
+  const nextGoal = template.path.find((g:any)=> g.order === active+1);
+  if (nextGoal) nextThreshold = nextGoal.threshold;
+  const currentScore = Number(progress.current_score ?? 0);
+  const percentToNext = nextThreshold ? Math.max(0, Math.min(1, currentScore / nextThreshold)) : null;
+  return { display: withDesc, meta: { active_order: active, total_stages: total, current_score: currentScore, next_threshold: nextThreshold, percent_to_next: percentToNext, pending_regression: !!progress.pending_regression, regression_candidate_order: progress.regression_candidate_order ?? null } };
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -152,41 +189,69 @@ Deno.serve(async (req) => {
       // Replaced direct table query with existing RPC get_chat_context to enforce RLS via auth.uid()
       supabase.rpc('get_chat_context', { p_chat_id: chat_id, p_user_id: user.id, p_character_id: character_id })
     ]);
-    const priorContext = Array.isArray(priorCtxRow?.data) && priorCtxRow.data[0]?.current_context ? priorCtxRow.data[0].current_context : null;
+    let priorContext = Array.isArray(priorCtxRow?.data) && priorCtxRow.data[0]?.current_context ? priorCtxRow.data[0].current_context : null;
 
-    // If injected initial context is provided, merge & persist it BEFORE any extraction and suppress extraction for its fields
-    if (injectedInitialContext && Object.keys(injectedInitialContext).length) {
-      const baseObj = (priorContext && typeof priorContext === 'object') ? priorContext : {};
-      const merged = { ...(baseObj as Record<string,any>), ...(injectedInitialContext as Record<string,any>) };
-      try {
-        await supabaseAdmin.from('chat_context').upsert({
-          user_id: user.id,
-          chat_id,
-          character_id,
-          current_context: merged,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'chat_id' });
-        console.log('✅ Injected initial context persisted (server)');
-      } catch (injErr) {
-        console.warn('⚠️ Failed to persist injected initial context (continuing):', injErr);
+    // Relationship template & progress (initialize lazily)
+    let relationshipTemplate: any = null;
+    let relationshipProgress: any = null;
+    let canonicalRelationship: string | null = null;
+    let relationshipMeta: any = null;
+    try {
+      const tmplResp = await supabase.from('character_latent_profiles').select('relationship_goals').eq('character_id', character_id).maybeSingle();
+      relationshipTemplate = tmplResp.data?.relationship_goals || null;
+      const templateEnabled = !!relationshipTemplate?.enabled;
+      if (templateEnabled) {
+        // Evaluate progression ALWAYS (time awareness gate removed in updated function)
+        try {
+          const evalResp = await supabase.rpc('evaluate_relationship_progress', { p_user_id: user.id, p_character_id: character_id });
+          relationshipProgress = evalResp.data || null;
+        } catch (e) { console.warn('rel.eval.fail', e); }
+        const built = buildCanonicalRelationship(relationshipTemplate, relationshipProgress);
+        canonicalRelationship = built.display;
+        relationshipMeta = built.meta;
       }
+    } catch (e) { console.warn('rel.template.load.fail', e); }
+
+    // If canonical relationship present, ensure priorContext overridden (or seeded)
+    if (canonicalRelationship) {
+      if (!priorContext || typeof priorContext !== 'object') {
+        priorContext = {} as any; // ensure mutable object for downstream usage
+      }
+      (priorContext as any).relationship = canonicalRelationship;
     }
 
-    // Backend guard: if initial mode and any pre-seeded non-empty field exists, skip extraction entirely
+    // Determine if relationship field should be extracted via model (template disabled + user addon enabled)
+    const templateEnabled = !!relationshipTemplate?.enabled;
+    const addonRelEnabled = !!normalizedAddonSettings.relationshipStatus;
+
+    // If canonical template is active we force addon considered active for persistence decisions
+    const effectiveRelationshipCanonical = templateEnabled && canonicalRelationship;
+
+    // INITIAL MODE: Persist greeting + optionally canonical relationship then exit early (no model extraction)
     if (mode === 'initial') {
-      const baseObj2 = (priorContext && typeof priorContext === 'object') ? priorContext : {};
-      const effectivePrior = injectedInitialContext ? { ...(baseObj2 as Record<string,any>), ...(injectedInitialContext as Record<string,any>) } : priorContext;
-      if (effectivePrior && typeof effectivePrior === 'object') {
-        const hasManual = Object.values(effectivePrior as any).some(v => typeof v === 'string' && v.trim());
-        if (hasManual) {
-          return createCorsResponse({ success: true, chat_id, message: 'Initial addon context provided/skipped extraction', context_summary: null, timings: { totalMs: ms(tStart) } });
-        }
+      if (canonicalRelationship) {
+        try {
+          const baseObj = (priorContext && typeof priorContext === 'object') ? priorContext : {};
+          // Prefer full progress state if available; fallback to derived relationshipMeta
+          const fullMeta = relationshipProgress ? { ...relationshipProgress, percent_to_next: relationshipMeta?.percent_to_next ?? null } : relationshipMeta;
+          console.log('🔍 Saving initial context with relationship_meta(full):', { hasRelationship: !!canonicalRelationship, hasMeta: !!fullMeta, metaKeys: fullMeta && Object.keys(fullMeta) });
+          await supabaseAdmin.from('chat_context').upsert({
+            user_id: user.id,
+            chat_id,
+            character_id,
+            current_context: { ...baseObj, relationship: canonicalRelationship, relationship_meta: fullMeta || null }
+          }, { onConflict: 'chat_id' });
+        } catch (e) { console.warn('rel.initial.persist.fail', e); }
       }
+      return createCorsResponse({ success: true, chat_id, message: 'Greeting updated (initial stage persisted)', relationship_status: canonicalRelationship, relationship_progress: relationshipProgress || relationshipMeta, context_summary: null, timings: { totalMs: ms(tStart) } });
     }
+
+    // Early exit condition now only applies if no model fields AND no canonical relationship
+    // Recompute enabled fields later; cannot early exit yet.
+
     let greetingUsed: string | null = null;
     let templateReplacer: ((s:string)=>string) | null = null;
     if (!priorContext) {
-      // First extraction: need persona/profile for template replacement
       const userData = await fetchUserData(user.id, supabase);
       templateReplacer = createTemplateReplacer(userData.persona, userData.profile, character || {});
       try {
@@ -202,21 +267,12 @@ Deno.serve(async (req) => {
     }
     logPhase(requestId, 'fetch', fetchStart, { hasCharacter: !!character, prior: !!priorContext, greetIncluded: !!greetingUsed });
 
-    // INITIAL MODE: only update greeting (no extraction)
-    if (mode === 'initial') {
-      const greetStart = performance.now();
-      const enhancedGreeting = generateEnhancedGreeting(character, null, null, {}, (s: string)=>s);
-      await updateMessageWithGreeting(supabase, chat_id, enhancedGreeting, {});
-      logPhase(requestId, 'greeting', greetStart);
-      return createCorsResponse({ success: true, chat_id, message: 'Greeting updated (extraction deferred)', context_summary: null, timings: { totalMs: ms(tStart) } });
-    }
-
     // DETERMINE enabled fields (skip those already present via injected initial context)
     const skipFields = new Set<string>();
     if (injectedInitialContext) {
       for (const k of Object.keys(injectedInitialContext)) {
         if (injectedInitialContext[k] && typeof injectedInitialContext[k] === 'string') {
-          skipFields.add(k); // database key form (mood, clothing, location...)
+          skipFields.add(k);
         }
       }
     }
@@ -225,58 +281,67 @@ Deno.serve(async (req) => {
       clothingInventory: 'clothing',
       locationTracking: 'location',
       timeAndWeather: 'time_weather',
-      relationshipStatus: 'relationship',
       characterPosition: 'character_position',
-      timeAwareness: 'conversation_tone' // urgency_level also under timeAwareness
+      timeAwareness: 'conversation_tone'
     };
+    if (!templateEnabled && addonRelEnabled) {
+      fieldMap.relationshipStatus = 'relationship';
+    }
     const enabledFields: string[] = [];
     if (normalizedAddonSettings.moodTracking && !skipFields.has('mood')) enabledFields.push('mood');
     if (normalizedAddonSettings.clothingInventory && !skipFields.has('clothing')) enabledFields.push('clothing');
     if (normalizedAddonSettings.locationTracking && !skipFields.has('location')) enabledFields.push('location');
     if (normalizedAddonSettings.timeAndWeather && !skipFields.has('time_weather')) enabledFields.push('time_weather');
-    if (normalizedAddonSettings.relationshipStatus && !skipFields.has('relationship')) enabledFields.push('relationship');
+    if (!templateEnabled && addonRelEnabled && !skipFields.has('relationship')) enabledFields.push('relationship');
     if (normalizedAddonSettings.characterPosition && !skipFields.has('character_position')) enabledFields.push('character_position');
     if (normalizedAddonSettings.timeAwareness) { enabledFields.push('conversation_tone', 'urgency_level'); }
-    logPhase(requestId, 'fields', performance.now(), { enabled: enabledFields });
-    if (!enabledFields.length) return createCorsResponse({ success: true, chat_id, message: 'No enabled fields (all satisfied by initial context or disabled)', context_summary: null, timings: { totalMs: ms(tStart) } });
+
+    const anyModelFields = enabledFields.length > 0;
+    if (!anyModelFields && !effectiveRelationshipCanonical) {
+      return createCorsResponse({ success: true, chat_id, message: 'No enabled extractable fields', context_summary: null, relationship_status: canonicalRelationship, relationship_progress: relationshipMeta, timings: { totalMs: ms(tStart) } });
+    }
 
     // PROMPT
-    const promptStart = performance.now();
-    const prompt = buildPrompt({
-      character: getCharacterForContext(character),
-      prior: priorContext as Record<string,string> | null,
-      enabled: enabledFields,
-      userMessage: templateReplacer ? templateReplacer(userMsg) : userMsg,
-      aiResponse: templateReplacer ? templateReplacer(aiMsg) : aiMsg,
-      greetingUsed: templateReplacer && greetingUsed ? templateReplacer(greetingUsed) : greetingUsed
-    });
-    logPhase(requestId, 'prompt', promptStart, { est_tokens: Math.ceil(prompt.length/4) });
-
-    // MODEL CALL (timeout 6000ms)
-    const modelStart = performance.now();
-    const controller = new AbortController();
-    const to = setTimeout(()=>controller.abort(), 20000);
-    let raw = null;
-    try { raw = await callModel(prompt, controller.signal); } catch (e) { console.warn(`[${requestId}] model error`, e); }
-    clearTimeout(to);
-    logPhase(requestId, 'model', modelStart, { got: !!raw });
-
-    // PARSE
-    const parse2Start = performance.now();
-    const parsed = parseModelJSON(raw, enabledFields);
-    logPhase(requestId, 'parse-json', parse2Start, { parsed: !!parsed });
+    let parsed: any = null;
+    if (anyModelFields) {
+      const promptStart = performance.now();
+      let prompt = buildPrompt({
+        character: getCharacterForContext(character),
+        prior: priorContext as Record<string,string> | null,
+        enabled: enabledFields,
+        userMessage: templateReplacer ? templateReplacer(userMsg) : userMsg,
+        aiResponse: templateReplacer ? templateReplacer(aiMsg) : aiMsg,
+        greetingUsed: templateReplacer && greetingUsed ? templateReplacer(greetingUsed) : greetingUsed
+      });
+      if (enabledFields.includes('relationship')) {
+        prompt += '\nRELATIONSHIP FIELD RULES: Output ≤3 words summarizing relationship (e.g., "casual friends", "close allies"). Do NOT speculate; omit if unclear.';
+      }
+      logPhase(requestId, 'prompt', promptStart, { est_tokens: Math.ceil(prompt.length/4) });
+      const modelStart = performance.now();
+      const controller = new AbortController();
+      const to = setTimeout(()=>controller.abort(), 20000);
+      let raw = null;
+      try { raw = await callModel(prompt, controller.signal); } catch (e) { console.warn(`[${requestId}] model error`, e); }
+      clearTimeout(to);
+      logPhase(requestId, 'model', modelStart, { got: !!raw });
+      const parse2Start = performance.now();
+      parsed = parseModelJSON(raw, enabledFields);
+      logPhase(requestId, 'parse-json', parse2Start, { parsed: !!parsed });
+    }
 
     // PERSIST
     const persistStart = performance.now();
-    if (parsed) {
-      const allNo = Object.values(parsed).every(v => v === 'No context');
-      await saveContextUpdates(parsed, normalizedAddonSettings, user.id, chat_id, character_id, supabaseAdmin, { forcePersist: allNo || !priorContext });
+    if (parsed || canonicalRelationship) {
+      const toPersist: any = parsed ? { ...parsed } : {};
+      if (canonicalRelationship) toPersist.relationship = canonicalRelationship;
+      const allNo = Object.values(toPersist).every((v: any) => v === 'No context');
+      await saveContextUpdates(toPersist, normalizedAddonSettings, user.id, chat_id, character_id, supabaseAdmin, { forcePersist: allNo || !priorContext });
     }
-    logPhase(requestId, 'persist', persistStart, { persisted: !!parsed });
+    logPhase(requestId, 'persist', persistStart, { persisted: !!(parsed || canonicalRelationship) });
 
     const totalMs = ms(tStart);
     console.log(`✅ [${requestId}] complete ${totalMs}ms`);
-    return createCorsResponse({ success: true, chat_id, message: 'Context processed', context_summary: parsed || null, timings: { totalMs } });
+    return createCorsResponse({ success: true, chat_id, message: 'Context processed', context_summary: parsed || null, relationship_status: canonicalRelationship, relationship_progress: relationshipMeta, timings: { totalMs } });
   } catch (error) {
     console.error(`❌ [${requestId}] failure:`, error);
     return createCorsResponse({ success: false, chat_id: '', message: 'Context extraction failed', error: (error as any)?.message || String(error) }, 500);

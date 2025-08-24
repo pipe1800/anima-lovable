@@ -1,35 +1,45 @@
 import { supabase } from '@/db/client';
+import { Tags } from '@/data';
 
 export const getRecommendedCharacters = async (tags: string[], limit = 4) => {
   try {
-    let charactersQuery = supabase
-      .from('characters')
-      .select('id, name, short_description, avatar_url, interaction_count, created_at, likes_count, favorites_count, chats_count, character_definitions!inner(greeting)')
-      .eq('visibility', 'public');
+    let tagIds: number[] | null = null;
     if (tags.length) {
-      const { data: tagIds } = await supabase.from('tags').select('id').in('name', tags);
-      if (tagIds?.length) {
-        const { data: characterIds } = await supabase.from('character_tags').select('character_id').in('tag_id', tagIds.map(t => t.id));
-        if (characterIds?.length) charactersQuery = charactersQuery.in('id', characterIds.map(ct => ct.character_id));
+      const { data: resolved, error } = await Tags.resolveTagNamesRPC(tags);
+      if (!error && resolved.length) {
+        tagIds = resolved.map(r => r.id);
+      } else {
+        const { data: fallback } = await Tags.resolveTagIds(tags);
+        if (fallback.length) tagIds = fallback;
       }
     }
-    const { data: characters, error } = await charactersQuery.order('interaction_count', { ascending: false }).limit(limit);
+    const { data, error } = await (supabase as any).rpc('get_public_character_cards', {
+      p_search: null,
+      p_sort: 'popular',
+      p_tag_ids: tagIds && tagIds.length ? tagIds : null,
+      p_creator_username: null,
+      p_include_nsfw: true,
+      p_limit: limit,
+      p_offset: 0
+    });
     if (error) throw error;
-    let finalCharacters = [...(characters || [])];
-    if (!characters || characters.length < limit) {
-      const remaining = limit - finalCharacters.length;
-      if (remaining > 0) {
-        const { data: popularCharacters } = await supabase
-          .from('characters')
-          .select('id, name, short_description, avatar_url, interaction_count, created_at, likes_count, favorites_count, chats_count, character_definitions!inner(greeting)')
-          .eq('visibility', 'public')
-          .order('interaction_count', { ascending: false })
-          .limit(limit);
-        const existing = new Set(finalCharacters.map(c => c.id));
-        (popularCharacters || []).forEach(pc => { if (finalCharacters.length < limit && !existing.has(pc.id)) finalCharacters.push(pc); });
-      }
+    let rows = (data as any[]) || [];
+    // If insufficient results with tag filter, fallback to popular (no tags) to fill
+    if (rows.length < limit) {
+      const remaining = limit - rows.length;
+      const { data: fallback } = await (supabase as any).rpc('get_public_character_cards', {
+        p_search: null,
+        p_sort: 'popular',
+        p_tag_ids: null,
+        p_creator_username: null,
+        p_include_nsfw: true,
+        p_limit: limit,
+        p_offset: 0
+      });
+      const existing = new Set(rows.map(r => r.id));
+      (fallback as any[] | null)?.forEach(r => { if (rows.length < limit && !existing.has(r.id)) rows.push(r); });
     }
-    return { data: finalCharacters.slice(0, limit), error: null };
+    return { data: rows.slice(0, limit), error: null };
   } catch (error) {
     return { data: [], error };
   }

@@ -114,3 +114,34 @@ export async function getPublicCharacterProfile(characterId: string): Promise<Ch
   if (error || !viewData) throw error || new Error('Character not found or not public');
   return normalizeViewRow(viewData);
 }
+
+// Lightweight public summary (Phase 7/9) – avoids full view for simple displays
+export async function getPublicCharacterSummary(characterId: string) {
+  const { data, error } = await supabase
+    .from('characters')
+    .select('id, name, avatar_url, visibility, likes_count, chats_count, tagline, short_description, creator_id')
+    .eq('id', characterId)
+    .eq('visibility', 'public')
+    .maybeSingle();
+  if (error || !data) return { data: null, error: error || new Error('Not found') };
+  return { data, error: null };
+}
+
+// Minimal payload to power pre-chat greeting picker
+export async function getCharacterGreetingSummary(characterId: string) {
+  const { data, error } = await (supabase as any)
+    .from('characters')
+    .select(`
+      id,
+      name,
+      avatar_url,
+      visibility,
+      creator_id,
+      character_definitions ( greeting, personality_summary )
+    `)
+    .eq('id', characterId)
+    .maybeSingle();
+  if (error) return { data: null, error };
+  if (!data) return { data: null, error: new Error('Character not found') };
+  return { data, error: null };
+}

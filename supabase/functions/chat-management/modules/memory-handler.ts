@@ -235,7 +235,7 @@ export async function handleCreateMemory(
     };
 
     // Check and consume credits
-    const hasCredits = await consumeCredits(user.id, creditInfo, supabaseAdmin);
+    const hasCredits = await consumeCredits(user.id, creditInfo, supabase, supabaseAdmin);
     
     if (!hasCredits) {
       return {

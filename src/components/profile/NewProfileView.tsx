@@ -16,51 +16,61 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Profile as ProfileQueries, Billing } from '@/data';
-import { ProfileHeader } from './NewProfileHeader';
-import { StatsBar } from './StatsBar';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
 import BillingSettings from '@/components/settings/categories/BillingSettings';
+import { ProfileHeader } from '@/components/profile/NewProfileHeader';
+import { StatsBar } from '@/components/profile/StatsBar';
 
-// Consolidated data fetching hook
-const useUserProfileData = (userId: string, isOwnProfile: boolean) => {
+// Consolidated data fetching hook (refactored to unified RPC)
+const useUserProfileData = (userId: string, isOwnProfile: boolean, subscriptionFromContext: any) => {
   return useQuery({
     queryKey: ['user-profile-complete', userId],
     queryFn: async () => {
-      // Use private profile for own profile, public for others
-      const profileQuery = isOwnProfile ? ProfileQueries.getPrivateProfile(userId) : ProfileQueries.getPublicProfile(userId);
-      
-      // Parallel fetch profile data and subscription
-      const [profileResult, subscriptionResult, chatCountResult] = await Promise.allSettled([
-        profileQuery,
-        Billing.getUserActiveSubscription(userId),
-        ProfileQueries.getProfileCounts(userId, isOwnProfile)
-      ]);
-
-      const profile = profileResult.status === 'fulfilled' ? profileResult.value.data : null;
-      const subscription = subscriptionResult.status === 'fulfilled' ? subscriptionResult.value.data : null;
-      const counts = chatCountResult.status === 'fulfilled' ? chatCountResult.value : { chats: 0, characters: 0, favorites: 0, personas: 0 };
-
-      return {
-        profile,
-        subscription,
-        stats: {
-          totalChats: counts.chats,
-          totalCharacters: counts.characters,
-          totalFavorites: counts.favorites,
-          totalPersonas: counts.personas,
-          memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
-        }
-      };
+      if (isOwnProfile) {
+        const { data, error } = await ProfileQueries.getUserBootstrap(userId);
+        if (error) throw error;
+        const bootstrap = data || ({} as any);
+        const profile = bootstrap.profile || null;
+        const counts = bootstrap.counts || { chats: 0, characters: 0, favorites: 0, personas: 0 };
+        return {
+          profile,
+          subscription: subscriptionFromContext || bootstrap.subscription,
+          stats: {
+            totalChats: counts.chats,
+            totalCharacters: counts.characters,
+            totalFavorites: counts.favorites,
+            totalPersonas: counts.personas,
+            memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
+          }
+        };
+      } else {
+        const { data, error } = await ProfileQueries.getPublicProfileOverview(userId);
+        if (error) throw error;
+        const overview = data || ({} as any);
+        const profile = overview.profile || null;
+        const counts = overview.counts || { chats: 0, characters: 0, favorites: 0, personas: 0 };
+        return {
+          profile,
+            subscription: undefined,
+            stats: {
+              totalChats: counts.chats,
+              totalCharacters: counts.characters,
+              totalFavorites: counts.favorites,
+              totalPersonas: counts.personas,
+              memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
+            }
+        };
+      }
     },
     enabled: !!userId,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 5,
   });
 };
 
 export const NewProfileView = () => {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, subscription } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('account');
@@ -72,7 +82,7 @@ export const NewProfileView = () => {
   // For public profile access, don't redirect to auth if no user is logged in
   const shouldRedirectToAuth = !profileUserId && !userId;
 
-  const { data, isLoading, error } = useUserProfileData(profileUserId!, isOwnProfile);
+  const { data, isLoading, error } = useUserProfileData(profileUserId!, isOwnProfile, subscription);
 
   // Profile update mutation
   const updateProfileMutation = useMutation({

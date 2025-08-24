@@ -260,7 +260,6 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- Map incoming label to existing enum set
   v_type := CASE v_raw_type
               WHEN 'trial_grant' THEN 'initial_grant'
               WHEN 'ai_operation' THEN 'message_cost'
@@ -269,7 +268,6 @@ BEGIN
               ELSE v_raw_type
             END;
 
-  -- Enum validation (only if enum exists)
   SELECT EXISTS (
     SELECT 1 FROM pg_type WHERE typname = 'credit_transaction_type'
   ) INTO v_enum_exists;
@@ -297,7 +295,6 @@ BEGIN
   WHERE user_id = p_user_id
   FOR UPDATE;
 
-  -- Only cap recurring allowance (subscription) & initial_grant (trial)
   IF v_type IN ('subscription_allowance','initial_grant') THEN
     SELECT p.monthly_credits_allowance
       INTO v_allowance
@@ -341,7 +338,7 @@ BEGIN
     VALUES (
       p_user_id,
       v_effective_amount,
-      v_type,
+      v_type::credit_transaction_type,
       CASE v_type
         WHEN 'subscription_allowance' THEN 'Subscription allowance'
         WHEN 'initial_grant' THEN 'Initial / trial grant'
@@ -364,8 +361,77 @@ $$;
 ALTER FUNCTION "public"."add_user_credits"("p_user_id" "uuid", "p_amount" integer, "p_transaction_type" "text", "p_reference_id" "uuid") OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."add_user_credits"("p_user_id" "uuid", "p_amount" integer, "p_transaction_type" "text", "p_reference_id" "uuid") IS 'Grant credits; maps unsupported labels to existing enum, caps only subscription_allowance/initial_grant, inserts ledger.';
+COMMENT ON FUNCTION "public"."add_user_credits"("p_user_id" "uuid", "p_amount" integer, "p_transaction_type" "text", "p_reference_id" "uuid") IS 'Grant credits with enum-safe casting; maps labels and caps only subscription_allowance/initial_grant.';
 
+
+
+CREATE OR REPLACE FUNCTION "public"."advance_relationship_stage"("p_user_id" "uuid", "p_character_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_template jsonb;
+  v_state jsonb;
+  v_now timestamptz := now();
+  v_active_order int;
+  v_ready boolean;
+  v_path jsonb;
+  v_next_order int;
+  v_next_exists boolean := false;
+BEGIN
+  -- Load template
+  SELECT relationship_goals INTO v_template FROM public.character_latent_profiles WHERE character_id = p_character_id;
+  IF v_template IS NULL OR jsonb_typeof(v_template) <> 'object' OR COALESCE((v_template->>'enabled')::boolean,false) = false THEN
+    RETURN jsonb_build_object('error','template_missing_or_disabled');
+  END IF;
+  v_path := v_template->'path';
+  IF jsonb_typeof(v_path) <> 'array' THEN
+    RETURN jsonb_build_object('error','invalid_path');
+  END IF;
+
+  -- Lock state
+  SELECT state INTO v_state FROM public.user_character_relationship_progress
+    WHERE user_id = p_user_id AND character_id = p_character_id FOR UPDATE;
+  IF v_state IS NULL THEN
+    RETURN jsonb_build_object('error','no_state');
+  END IF;
+
+  v_active_order := COALESCE( (v_state->>'active_order')::int, 1 );
+  v_ready := COALESCE( (v_state->>'ready_for_next')::boolean, false );
+  v_next_order := v_active_order + 1;
+
+  -- Check next stage exists
+  SELECT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(v_path) elem
+    WHERE (elem->>'order')::int = v_next_order
+  ) INTO v_next_exists;
+
+  IF NOT v_next_exists THEN
+    RETURN jsonb_build_object('error','already_final_stage');
+  END IF;
+  IF NOT v_ready THEN
+    RETURN jsonb_build_object('error','not_ready');
+  END IF;
+
+  -- Advance
+  v_state := jsonb_set(v_state, '{active_order}', to_jsonb(v_next_order), true);
+  v_state := jsonb_set(v_state, '{current_score}', to_jsonb(0), true); -- reset score
+  v_state := jsonb_set(v_state, '{ready_for_next}', to_jsonb(false), true);
+  -- track reached timestamp
+  v_state := jsonb_set(v_state, '{reached}', (v_state->'reached') || jsonb_build_object(v_next_order::text, to_jsonb(v_now)), true);
+  -- Clear regression artifacts
+  v_state := v_state - 'regression_candidate_order';
+  v_state := jsonb_set(v_state, '{pending_regression}', to_jsonb(false), true);
+
+  UPDATE public.user_character_relationship_progress
+    SET state = v_state
+    WHERE user_id = p_user_id AND character_id = p_character_id;
+
+  RETURN v_state;
+END;$$;
+
+
+ALTER FUNCTION "public"."advance_relationship_stage"("p_user_id" "uuid", "p_character_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."array_all_item_length_lte"("arr" "text"[], "max_len" integer) RETURNS boolean
@@ -473,6 +539,39 @@ $$;
 ALTER FUNCTION "public"."cleanup_disabled_addon_context"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."confirm_relationship_regression"("p_user_id" "uuid", "p_character_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE v_state jsonb; v_active int; v_candidate int; BEGIN
+  SELECT state INTO v_state FROM public.user_character_relationship_progress
+    WHERE user_id = p_user_id AND character_id = p_character_id FOR UPDATE;
+  IF v_state IS NULL THEN
+    RETURN jsonb_build_object('error','no_progress');
+  END IF;
+  IF COALESCE( (v_state->>'pending_regression')::boolean, false) = false THEN
+    RETURN jsonb_build_object('skipped', true, 'reason','no_pending_regression');
+  END IF;
+  v_active := (v_state->>'active_order')::int;
+  v_candidate := (v_state->>'regression_candidate_order')::int;
+  IF v_candidate IS NULL OR v_candidate >= v_active THEN
+    RETURN jsonb_build_object('error','invalid_candidate');
+  END IF;
+  v_state := jsonb_set(v_state, '{active_order}', to_jsonb(v_candidate), true);
+  v_state := jsonb_set(v_state, '{current_score}', to_jsonb(0), true);
+  v_state := jsonb_set(v_state, '{pending_regression}', 'false', true);
+  v_state := v_state - 'regression_candidate_order';
+  v_state := jsonb_set(v_state, '{negative_streak}', to_jsonb(0), true);
+  v_state := jsonb_set(v_state, '{last_eval_at}', to_jsonb(now()), true);
+  UPDATE public.user_character_relationship_progress SET state = v_state
+    WHERE user_id = p_user_id AND character_id = p_character_id;
+  RETURN v_state;
+END;$$;
+
+
+ALTER FUNCTION "public"."confirm_relationship_regression"("p_user_id" "uuid", "p_character_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."create_chat_with_greeting"("p_character_id" "uuid", "p_user_id" "uuid", "p_user_message" "text") RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public', 'auth'
@@ -569,7 +668,6 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- Map to existing enum labels
   v_type := CASE v_raw_type
               WHEN 'ai_operation' THEN 'message_cost'
               WHEN 'credit_grant' THEN 'admin_adjustment'
@@ -604,7 +702,7 @@ BEGIN
   FOR UPDATE;
 
   IF v_current < p_amount THEN
-    RETURN NULL;
+    RETURN NULL; -- insufficient credits
   END IF;
 
   v_new := v_current - p_amount;
@@ -622,7 +720,7 @@ BEGIN
   VALUES (
     p_user_id,
     -p_amount,
-    v_type,
+    v_type::credit_transaction_type,
     coalesce(p_description,
       CASE v_type
         WHEN 'message_cost' THEN 'Message usage'
@@ -640,7 +738,7 @@ $$;
 ALTER FUNCTION "public"."deduct_user_credits"("p_user_id" "uuid", "p_amount" integer, "p_operation_type" "text", "p_description" "text") OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."deduct_user_credits"("p_user_id" "uuid", "p_amount" integer, "p_operation_type" "text", "p_description" "text") IS 'Deduct credits; maps unsupported labels to existing enum; returns new balance or NULL if insufficient.';
+COMMENT ON FUNCTION "public"."deduct_user_credits"("p_user_id" "uuid", "p_amount" integer, "p_operation_type" "text", "p_description" "text") IS 'Deduct credits with enum-safe casting; returns new balance or NULL if insufficient.';
 
 
 
@@ -793,6 +891,367 @@ $$;
 
 
 ALTER FUNCTION "public"."enforce_credit_pack_purchase_status"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."evaluate_relationship_progress"("p_user_id" "uuid", "p_character_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_template jsonb;
+  v_enabled boolean;
+  v_state jsonb;
+  v_now timestamptz := now();
+  v_active_order int;
+  v_next_threshold numeric;
+  v_path jsonb;
+  v_next_order int;
+  v_decay_rate numeric := 0.01;
+  v_last_eval timestamptz;
+  v_elapsed_hours numeric := 0;
+  v_score numeric := 0;
+  v_positive_sum numeric := 0;
+  v_negative_cnt int := 0;
+  v_negative_streak int := 0;
+  v_pending boolean := false;
+  v_reg_candidate int := NULL;
+  v_time_enabled boolean := false;
+  v_ready_for_next boolean := false;
+  v_current_stage_threshold numeric := 0;
+  v_prev_order int;
+  v_stage_span numeric := NULL;
+  v_stage_progress_percent numeric := NULL;
+BEGIN
+  SELECT COALESCE(time_awareness_enabled,false) INTO v_time_enabled
+  FROM public.user_character_settings
+  WHERE user_id = p_user_id AND character_id = p_character_id;
+
+  SELECT relationship_goals INTO v_template
+  FROM public.character_latent_profiles
+  WHERE character_id = p_character_id;
+
+  IF v_template IS NULL OR jsonb_typeof(v_template) <> 'object' THEN
+    RETURN jsonb_build_object('skipped', true, 'reason','no_template');
+  END IF;
+  v_enabled := COALESCE((v_template->>'enabled')::boolean,false);
+  IF NOT v_enabled THEN
+    RETURN jsonb_build_object('skipped', true, 'reason','template_disabled');
+  END IF;
+
+  v_path := v_template->'path';
+  IF jsonb_typeof(v_path) <> 'array' THEN
+    RETURN jsonb_build_object('skipped', true, 'reason','invalid_path');
+  END IF;
+
+  SELECT state INTO v_state
+  FROM public.user_character_relationship_progress
+  WHERE user_id = p_user_id AND character_id = p_character_id
+  FOR UPDATE;
+
+  IF v_state IS NULL THEN
+    v_state := jsonb_build_object(
+      'active_order', 1,
+      'current_score', 0,
+      'reached', jsonb_build_object('1', to_jsonb(v_now)),
+      'decay_per_hour', v_decay_rate,
+      'pending_regression', false,
+      'regression_candidate_order', NULL,
+      'negative_streak', 0,
+      'last_eval_at', v_now,
+      'ready_for_next', false
+    );
+    INSERT INTO public.user_character_relationship_progress(user_id, character_id, state)
+    VALUES (p_user_id, p_character_id, v_state)
+    ON CONFLICT (user_id, character_id) DO NOTHING;
+    -- Seed extra fields (no next yet)
+    v_state := jsonb_set(v_state,'{current_stage_threshold}',to_jsonb(0), true);
+    v_state := jsonb_set(v_state,'{stage_progress_span}', 'null', true);
+    v_state := jsonb_set(v_state,'{stage_progress_percent}','0', true);
+    RETURN v_state;
+  END IF;
+
+  v_active_order := COALESCE((v_state->>'active_order')::int,1);
+  v_score := COALESCE((v_state->>'current_score')::numeric,0);
+  v_last_eval := COALESCE((v_state->>'last_eval_at')::timestamptz, v_now);
+  v_negative_streak := COALESCE((v_state->>'negative_streak')::int,0);
+  v_pending := COALESCE((v_state->>'pending_regression')::boolean,false);
+  v_reg_candidate := CASE WHEN (v_state ? 'regression_candidate_order')
+                      THEN (v_state->>'regression_candidate_order')::int ELSE NULL END;
+  v_decay_rate := COALESCE((v_state->>'decay_per_hour')::numeric, v_decay_rate);
+  v_ready_for_next := COALESCE((v_state->>'ready_for_next')::boolean,false);
+  v_elapsed_hours := EXTRACT(EPOCH FROM (v_now - v_last_eval))/3600.0;
+
+  IF v_time_enabled AND v_elapsed_hours > 0 THEN
+    v_score := GREATEST(0, v_score - (v_decay_rate * v_elapsed_hours));
+  END IF;
+
+  SELECT COALESCE(SUM(CASE WHEN polarity = 1 THEN weight ELSE 0 END),0),
+         COALESCE(SUM(CASE WHEN polarity = -1 THEN 1 ELSE 0 END),0)
+    INTO v_positive_sum, v_negative_cnt
+  FROM public.user_character_relationship_signals
+  WHERE user_id = p_user_id AND character_id = p_character_id AND created_at > v_last_eval;
+
+  v_score := v_score + v_positive_sum;
+  v_negative_streak := v_negative_streak + v_negative_cnt;
+
+  -- Determine thresholds (current & next)
+  -- current stage threshold (cumulative target that was needed to ENTER this stage)
+  -- For stage 1 treat baseline = 0 unless a threshold is explicitly defined
+  IF v_active_order > 1 THEN
+    SELECT (elem->>'threshold')::numeric INTO v_current_stage_threshold
+    FROM jsonb_array_elements(v_path) elem
+    WHERE (elem->>'order')::int = v_active_order;
+    -- fallback if null
+    IF v_current_stage_threshold IS NULL THEN
+      v_current_stage_threshold := 0;
+    END IF;
+  ELSE
+    -- Stage 1: baseline 0 even if path[order=1] has threshold (that threshold is to *enter* stage 1; already satisfied)
+    v_current_stage_threshold := 0;
+  END IF;
+
+  v_next_order := v_active_order + 1;
+  SELECT (elem->>'threshold')::numeric INTO v_next_threshold
+  FROM jsonb_array_elements(v_path) elem
+  WHERE (elem->>'order')::int = v_next_order;
+
+  IF v_next_threshold IS NOT NULL THEN
+    v_ready_for_next := (v_score + v_current_stage_threshold >= v_next_threshold);
+    v_stage_span := v_next_threshold - v_current_stage_threshold;
+    IF v_stage_span > 0 THEN
+      v_stage_progress_percent := LEAST(1, v_score / v_stage_span);
+    ELSE
+      v_stage_progress_percent := NULL;
+    END IF;
+  ELSE
+    -- Final stage: no next threshold; treat progress as 1 (complete) and span null
+    v_ready_for_next := false;
+    v_stage_span := NULL;
+    v_stage_progress_percent := 1;
+  END IF;
+
+  IF v_active_order > 1 AND NOT v_pending THEN
+    IF v_negative_streak >= 5 THEN
+      v_pending := true;
+      v_reg_candidate := v_active_order - 1;
+    END IF;
+  END IF;
+
+  -- Persist
+  v_state := jsonb_set(v_state,'{active_order}', to_jsonb(v_active_order), true);
+  v_state := jsonb_set(v_state,'{current_score}', to_jsonb(v_score), true);
+  v_state := jsonb_set(v_state,'{negative_streak}', to_jsonb(v_negative_streak), true);
+  v_state := jsonb_set(v_state,'{pending_regression}', to_jsonb(v_pending), true);
+  IF v_reg_candidate IS NULL THEN
+    v_state := v_state - 'regression_candidate_order';
+  ELSE
+    v_state := jsonb_set(v_state,'{regression_candidate_order}', to_jsonb(v_reg_candidate), true);
+  END IF;
+  v_state := jsonb_set(v_state,'{last_eval_at}', to_jsonb(v_now), true);
+  v_state := jsonb_set(v_state,'{ready_for_next}', to_jsonb(v_ready_for_next), true);
+
+  IF v_next_threshold IS NOT NULL THEN
+    v_state := jsonb_set(v_state,'{next_threshold}', to_jsonb(v_next_threshold), true);
+  ELSE
+    v_state := v_state - 'next_threshold';
+  END IF;
+
+  v_state := jsonb_set(v_state,'{current_stage_threshold}', to_jsonb(v_current_stage_threshold), true);
+  IF v_stage_span IS NOT NULL THEN
+    v_state := jsonb_set(v_state,'{stage_progress_span}', to_jsonb(v_stage_span), true);
+  ELSE
+    v_state := v_state - 'stage_progress_span';
+  END IF;
+  IF v_stage_progress_percent IS NOT NULL THEN
+    v_state := jsonb_set(v_state,'{stage_progress_percent}', to_jsonb(v_stage_progress_percent), true);
+  ELSE
+    v_state := v_state - 'stage_progress_percent';
+  END IF;
+
+  UPDATE public.user_character_relationship_progress
+    SET state = v_state
+  WHERE user_id = p_user_id AND character_id = p_character_id;
+
+  RETURN v_state;
+END;$$;
+
+
+ALTER FUNCTION "public"."evaluate_relationship_progress"("p_user_id" "uuid", "p_character_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_user_id uuid := auth.uid();
+  v_result jsonb;
+BEGIN
+  SELECT jsonb_build_object(
+    'id', wi.id,
+    'name', wi.name,
+    'short_description', wi.short_description,
+    'visibility', wi.visibility,
+    'creator_id', wi.creator_id,
+    'likes_count', wi.likes_count,
+    'interaction_count', wi.interaction_count,
+    'created_at', wi.created_at,
+    'updated_at', wi.updated_at,
+    'creator', to_jsonb(pr) - 'id',
+    'entries', COALESCE(e.entries, '[]'::jsonb),
+    'tags', COALESCE(t.tags, '[]'::jsonb),
+    'is_liked', CASE WHEN v_user_id IS NOT NULL AND EXISTS(
+        SELECT 1 FROM world_info_user_likes l 
+        WHERE l.world_info_id = wi.id AND l.user_id = v_user_id
+      ) THEN true ELSE false END,
+    -- is_used deprecated (table world_info_users absent); returning false placeholder
+    'is_used', false
+  ) INTO v_result
+  FROM world_infos wi
+  LEFT JOIN profiles pr ON pr.id = wi.creator_id
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', we.id,
+      'keywords', we.keywords,
+      'entry_text', we.entry_text,
+      'created_at', we.created_at
+    ) ORDER BY we.created_at DESC) AS entries
+    FROM world_info_entries we
+    WHERE we.world_info_id = wi.id
+  ) e ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(jsonb_build_object('id', tg.id, 'name', tg.name) ORDER BY tg.name) AS tags
+    FROM world_info_tags wit
+    JOIN tags tg ON tg.id = wit.tag_id
+    WHERE wit.world_info_id = wi.id
+  ) t ON TRUE
+  WHERE wi.id = p_world_info_id
+    AND (
+      wi.visibility = 'public'
+      OR (v_user_id IS NOT NULL AND wi.creator_id = v_user_id)
+      OR (v_user_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM world_info_user_likes l 
+          WHERE l.world_info_id = wi.id AND l.user_id = v_user_id
+        ))
+    );
+
+  IF v_result IS NULL THEN
+    RETURN NULL; -- Access denied or not found
+  END IF;
+
+  RETURN v_result;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") IS 'Fetch full world info with entries, tags, creator and interaction flags; enforces access rules.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."force_relationship_ready"("p_user_id" "uuid", "p_character_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_state jsonb;
+  v_template jsonb;
+  v_path jsonb;
+  v_active int;
+  v_next_order int;
+  v_next_threshold numeric;
+  v_current_stage_threshold numeric := 0;
+  v_score numeric := 0;
+  v_span numeric;
+  v_needed numeric;
+BEGIN
+  PERFORM public._assert_self(p_user_id);
+
+  SELECT relationship_goals INTO v_template
+  FROM public.character_latent_profiles
+  WHERE character_id = p_character_id;
+
+  IF v_template IS NULL
+     OR jsonb_typeof(v_template) <> 'object'
+     OR COALESCE((v_template->>'enabled')::boolean,false) = false THEN
+    RETURN jsonb_build_object('error','template_missing_or_disabled');
+  END IF;
+
+  v_path := v_template->'path';
+  IF jsonb_typeof(v_path) <> 'array' THEN
+    RETURN jsonb_build_object('error','invalid_path');
+  END IF;
+
+  SELECT public.evaluate_relationship_progress(p_user_id, p_character_id)
+    INTO v_state;
+
+  IF (v_state ? 'skipped') THEN
+    RETURN jsonb_build_object('error','evaluation_skipped');
+  END IF;
+
+  v_active := COALESCE((v_state->>'active_order')::int,1);
+  v_score  := COALESCE((v_state->>'current_score')::numeric,0);
+  v_next_order := v_active + 1;
+
+  SELECT (elem->>'threshold')::numeric
+    INTO v_next_threshold
+  FROM jsonb_array_elements(v_path) elem
+  WHERE (elem->>'order')::int = v_next_order;
+
+  IF v_next_threshold IS NULL THEN
+    RETURN jsonb_build_object('error','already_final_stage','state',v_state);
+  END IF;
+
+  IF v_active > 1 THEN
+    SELECT (elem->>'threshold')::numeric
+      INTO v_current_stage_threshold
+    FROM jsonb_array_elements(v_path) elem
+    WHERE (elem->>'order')::int = v_active;
+    IF v_current_stage_threshold IS NULL THEN
+      v_current_stage_threshold := 0;
+    END IF;
+  END IF;
+
+  v_span := v_next_threshold - v_current_stage_threshold;
+  IF v_span <= 0 THEN
+    RETURN jsonb_build_object('error','invalid_threshold_span','state',v_state);
+  END IF;
+
+  IF COALESCE((v_state->>'ready_for_next')::boolean,false) = true THEN
+    RETURN v_state;
+  END IF;
+
+  v_needed := (v_next_threshold - v_current_stage_threshold) - v_score;
+
+  IF v_needed <= 0 THEN
+    v_state := jsonb_set(v_state,'{ready_for_next}','true'::jsonb,true);
+    UPDATE public.user_character_relationship_progress
+      SET state = v_state
+    WHERE user_id = p_user_id AND character_id = p_character_id;
+    RETURN v_state;
+  END IF;
+
+  -- Fill score
+  v_score := v_score + v_needed;
+
+  v_state := jsonb_set(v_state,'{current_score}', to_jsonb(v_score), true);
+  v_state := jsonb_set(v_state,'{ready_for_next}','true'::jsonb, true);
+  v_state := jsonb_set(v_state,'{stage_progress_percent}','1'::jsonb, true);
+  v_state := jsonb_set(v_state,'{stage_progress_span}', to_jsonb(v_span), true);
+  v_state := jsonb_set(v_state,'{current_stage_threshold}', to_jsonb(v_current_stage_threshold), true);
+
+  UPDATE public.user_character_relationship_progress
+    SET state = v_state
+  WHERE user_id = p_user_id AND character_id = p_character_id;
+
+  RETURN v_state;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."force_relationship_ready"("p_user_id" "uuid", "p_character_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."gentle_addon_context_cleanup"() RETURNS "trigger"
@@ -997,6 +1456,103 @@ $$;
 ALTER FUNCTION "public"."get_chat_messages"("p_chat_id" "uuid", "p_limit" integer, "p_before_order" bigint) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."get_chat_snapshot"("p_chat_id" "uuid", "p_user_id" "uuid", "p_character_id" "uuid", "p_limit" integer DEFAULT 25, "p_before_order" integer DEFAULT NULL::integer) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_context jsonb;
+  v_mode text;
+  v_last_summary int;
+  v_ai_after int;
+  v_messages jsonb := '[]'::jsonb;
+  v_has_more boolean := false;
+  v_effective_limit int;
+BEGIN
+  -- Ownership / RLS guard
+  PERFORM public._assert_self(p_user_id);
+
+  IF p_chat_id IS NULL OR p_user_id IS NULL OR p_character_id IS NULL THEN
+    RAISE EXCEPTION 'Missing required parameters';
+  END IF;
+
+  v_effective_limit := LEAST(GREATEST(coalesce(p_limit,25),1),100);
+
+  -- Verify chat belongs to user (prevents leakage even if RLS misconfigured)
+  IF NOT EXISTS (SELECT 1 FROM chats WHERE id = p_chat_id AND user_id = p_user_id) THEN
+    RAISE EXCEPTION 'Chat not found or access denied';
+  END IF;
+
+  -- Chat mode
+  SELECT chat_mode INTO v_mode FROM chats WHERE id = p_chat_id;
+
+  -- Context row (already filtered by user & character)
+  SELECT current_context::jsonb INTO v_context
+    FROM chat_context
+   WHERE chat_id = p_chat_id
+     AND user_id = p_user_id
+     AND character_id = p_character_id;
+
+  -- Latest auto summary message_count
+  SELECT message_count INTO v_last_summary
+    FROM character_memories
+   WHERE chat_id = p_chat_id
+     AND is_auto_summary = true
+   ORDER BY message_count DESC
+   LIMIT 1;
+
+  -- Messages page (DESC by message_order for infinite backward pagination)
+  WITH ordered AS (
+    SELECT id,
+           content,
+           is_ai_message,
+           created_at,
+           message_order,
+           current_context
+      FROM messages
+     WHERE chat_id = p_chat_id
+       AND (p_before_order IS NULL OR message_order < p_before_order)
+     ORDER BY message_order DESC
+     LIMIT v_effective_limit + 1
+  ), limited AS (
+    SELECT * FROM ordered LIMIT v_effective_limit
+  )
+  SELECT jsonb_agg(to_jsonb(limited) ORDER BY message_order DESC) INTO v_messages FROM limited;
+
+  -- Has more (if we fetched > limit)
+  SELECT (COUNT(*) > v_effective_limit) INTO v_has_more FROM ordered;
+
+  -- AI messages after last summary (excluding placeholders)
+  SELECT COUNT(*) INTO v_ai_after
+    FROM messages m
+   WHERE m.chat_id = p_chat_id
+     AND m.is_ai_message IS TRUE
+     AND (v_last_summary IS NULL OR m.message_order > v_last_summary)
+     AND m.content IS NOT NULL
+     AND m.content NOT LIKE '%[PLACEHOLDER]%';
+
+  RETURN jsonb_build_object(
+    'chat_id', p_chat_id,
+    'chat_mode', v_mode,
+    'current_context', coalesce(v_context, '{}'::jsonb),
+    'messages', coalesce(v_messages, '[]'::jsonb),
+    'has_more', coalesce(v_has_more,false),
+    'last_summary_at', coalesce(v_last_summary,0),
+    'ai_messages_after_summary', coalesce(v_ai_after,0),
+    'page_limit', v_effective_limit,
+    'before_order', p_before_order
+  );
+END;
+$$;
+
+
+ALTER FUNCTION "public"."get_chat_snapshot"("p_chat_id" "uuid", "p_user_id" "uuid", "p_character_id" "uuid", "p_limit" integer, "p_before_order" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."get_chat_snapshot"("p_chat_id" "uuid", "p_user_id" "uuid", "p_character_id" "uuid", "p_limit" integer, "p_before_order" integer) IS 'Return consolidated chat snapshot (messages page, context, mode, summary stats) enforcing ownership.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer DEFAULT 50, "p_offset" integer DEFAULT 0) RETURNS TABLE("id" bigint, "change_amount" integer, "balance_after" integer, "transaction_type" "text", "description" "text", "created_at" timestamp with time zone)
     LANGUAGE "plpgsql"
     SET "search_path" TO 'public', 'billing', 'auth'
@@ -1026,7 +1582,314 @@ $$;
 ALTER FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer, "p_offset" integer) OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."get_user_chats"("p_limit" integer DEFAULT 20, "p_offset" integer DEFAULT 0) RETURNS TABLE("chat_id" "uuid", "character_id" "uuid", "chat_created_at" timestamp with time zone, "chat_updated_at" timestamp with time zone, "character_name" "text", "character_avatar_url" "text", "last_message_id" "uuid", "last_message_created_at" timestamp with time zone, "last_message_is_ai" boolean, "last_message_content" "text", "total_count" bigint)
+CREATE OR REPLACE FUNCTION "public"."get_public_character_cards"("p_search" "text" DEFAULT NULL::"text", "p_sort" "text" DEFAULT 'popular'::"text", "p_tag_ids" integer[] DEFAULT NULL::integer[], "p_creator_username" "text" DEFAULT NULL::"text", "p_include_nsfw" boolean DEFAULT true, "p_limit" integer DEFAULT 20, "p_offset" integer DEFAULT 0) RETURNS TABLE("id" "uuid", "name" "text", "short_description" "text", "avatar_url" "text", "interaction_count" integer, "created_at" timestamp with time zone, "creator_id" "uuid", "likes_count" integer, "favorites_count" integer, "chats_count" integer, "creator" "jsonb", "tags" "jsonb"[], "total_count" bigint)
+    LANGUAGE "sql" STABLE
+    AS $$
+  with params as (
+    select 
+      nullif(trim(p_search), '') as q,
+      case when p_limit between 1 and 100 then p_limit else 20 end as q_limit,
+      case when p_offset >= 0 then p_offset else 0 end as q_offset,
+      lower(p_sort) as sort_key
+  ), base as (
+    select c.id,
+           c.name,
+           c.short_description,
+           c.avatar_url,
+           c.interaction_count,
+           c.created_at,
+           c.creator_id,
+           c.likes_count,
+           c.favorites_count,
+           c.chats_count,
+           jsonb_build_object(
+             'id', prof.id,
+             'username', prof.username,
+             'avatar_url', prof.avatar_url
+           ) as creator,
+           (
+             select coalesce(array_agg(distinct jsonb_build_object('id', t.id, 'name', t.name)) filter (where t.id is not null), '{}')
+             from character_tags ct
+             join tags t on t.id = ct.tag_id
+             where ct.character_id = c.id
+           ) as tags
+    from characters c
+    join public_profiles prof on prof.id = c.creator_id
+    cross join params p
+    where c.visibility = 'public'
+      and (
+        p.q is null
+        or (c.name ilike '%' || p.q || '%'
+            or c.short_description ilike '%' || p.q || '%')
+      )
+      and (
+        p_creator_username is null
+        or prof.username ilike '%' || p_creator_username || '%'
+      )
+      and (
+        p_include_nsfw
+        or not exists (
+          select 1 from character_tags nsfw
+          where nsfw.character_id = c.id and nsfw.tag_id = 24
+        )
+      )
+      and (
+        p_tag_ids is null
+        or exists (
+          select 1 from character_tags f
+          where f.character_id = c.id and f.tag_id = any(p_tag_ids)
+        )
+      )
+  ), ordered as (
+    select b.*, count(*) over() as total_count,
+      row_number() over(
+        order by
+          case when (select sort_key from params) = 'newest' then b.created_at end desc,
+          case when (select sort_key from params) = 'conversations' then b.chats_count end desc,
+          case when (select sort_key from params) not in ('newest','conversations') then b.interaction_count end desc,
+          b.id
+      ) as rn
+    from base b
+  )
+  select id, name, short_description, avatar_url, interaction_count, created_at, creator_id,
+         likes_count, favorites_count, chats_count, creator, tags, total_count
+  from ordered o
+  cross join params p
+  where o.rn > p.q_offset and o.rn <= p.q_offset + p.q_limit
+  order by o.rn;
+$$;
+
+
+ALTER FUNCTION "public"."get_public_character_cards"("p_search" "text", "p_sort" "text", "p_tag_ids" integer[], "p_creator_username" "text", "p_include_nsfw" boolean, "p_limit" integer, "p_offset" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."get_public_character_cards"("p_search" "text", "p_sort" "text", "p_tag_ids" integer[], "p_creator_username" "text", "p_include_nsfw" boolean, "p_limit" integer, "p_offset" integer) IS 'Unified public character listing/search with sorting, tag filter, creator filter, NSFW exclusion, pagination.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."get_public_profile_overview"("p_target_user_id" "uuid") RETURNS json
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_profile jsonb;
+  v_counts jsonb;
+BEGIN
+  SELECT to_jsonb(sub) INTO v_profile FROM (
+    SELECT id, username, avatar_url, bio, created_at
+      FROM public_profiles
+     WHERE id = p_target_user_id
+  ) sub;
+
+  SELECT jsonb_build_object(
+           'chats',      COALESCE((SELECT count(*) FROM chats WHERE user_id = p_target_user_id),0),
+           'characters', COALESCE((SELECT count(*) FROM characters WHERE creator_id = p_target_user_id),0),
+           'favorites',  COALESCE((SELECT count(*) FROM character_favorites WHERE user_id = p_target_user_id),0),
+           'personas',   0
+         )
+    INTO v_counts;
+
+  RETURN json_build_object(
+    'profile', v_profile,
+    'counts',  v_counts
+  );
+END;
+$$;
+
+
+ALTER FUNCTION "public"."get_public_profile_overview"("p_target_user_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "p_purchases_limit" integer DEFAULT 25) RETURNS json
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_subscription json;
+  v_balance integer;
+  v_purchases json;
+  v_plans json;
+  v_credit_packs json;
+  v_models json;
+BEGIN
+  PERFORM public._assert_self(p_user_id);
+
+  -- Latest active/non-cancelled subscription (if any)
+  SELECT json_build_object(
+           'id', s.id,
+           'status', s.status,
+           'current_period_end', s.current_period_end,
+           'paypal_subscription_id', s.paypal_subscription_id,
+           'plan', json_build_object(
+             'id', p.id,
+             'name', p.name,
+             'monthly_credits_allowance', p.monthly_credits_allowance,
+             'price_monthly', p.price_monthly,
+             'price_yearly', p.price_yearly
+           )
+         )
+    INTO v_subscription
+  FROM billing.subscriptions s
+  JOIN billing.plans p ON p.id = s.plan_id
+  WHERE s.user_id = p_user_id
+  ORDER BY s.created_at DESC
+  LIMIT 1;
+
+  -- Credit balance
+  SELECT balance INTO v_balance FROM billing.credits WHERE user_id = p_user_id;
+  v_balance := COALESCE(v_balance, 0);
+
+  -- Recent credit pack purchases (limit)
+  SELECT json_agg(
+           json_build_object(
+             'id', cpp.id,
+             'created_at', cpp.created_at,
+             'status', cpp.status,
+             'credits_granted', cpp.credits_granted,
+             'amount_paid_cents', cpp.amount_paid_cents,
+             'paypal_order_id', cpp.paypal_order_id,
+             'credit_pack', json_build_object(
+               'id', cp.id,
+               'name', cp.name,
+               'credits_granted', cp.credits_granted,
+               'price_cents', cp.price_cents,
+               'description', cp.description
+             )
+           ) ORDER BY cpp.created_at DESC
+         )
+    INTO v_purchases
+  FROM (
+    SELECT *
+    FROM billing.credit_pack_purchases
+    WHERE user_id = p_user_id
+    ORDER BY created_at DESC
+    LIMIT GREATEST(p_purchases_limit,1)
+  ) cpp
+  JOIN billing.credit_packs cp ON cp.id = cpp.credit_pack_id;
+
+  -- Active subscription plans
+  SELECT json_agg(row_to_json(t) ORDER BY t.price_monthly NULLS FIRST)
+    INTO v_plans
+  FROM (
+    SELECT p.id,
+           p.name,
+           p.price_monthly,
+           p.price_yearly,
+           p.monthly_credits_allowance,
+           p.features,
+           p.paypal_subscription_id
+    FROM billing.plans p
+    WHERE p.is_active
+    ORDER BY p.price_monthly NULLS FIRST
+  ) t;
+
+  -- Active credit packs
+  SELECT json_agg(row_to_json(t) ORDER BY t.price_cents)
+    INTO v_credit_packs
+  FROM (
+    SELECT c.id,
+           c.name,
+           c.price_cents,
+           c.credits_granted,
+           c.description
+    FROM billing.credit_packs c
+    WHERE c.is_active
+    ORDER BY c.price_cents
+  ) t;
+
+  -- Models with their minimum-priced active plan (if any)
+  SELECT json_agg(
+           json_build_object(
+             'id', m.id,
+             'name', m.name,
+             'provider_model_id', m.provider_model_id,
+             'min_plan', (
+               SELECT row_to_json(p2) FROM (
+                 SELECT p3.id,
+                        p3.name,
+                        p3.price_monthly,
+                        p3.price_yearly,
+                        p3.monthly_credits_allowance
+                 FROM billing.plans p3
+                 WHERE p3.model_id = m.id AND p3.is_active
+                 ORDER BY p3.price_monthly ASC NULLS LAST
+                 LIMIT 1
+               ) p2
+             )
+           )
+         )
+    INTO v_models
+  FROM billing.models m;
+
+  RETURN json_build_object(
+    'subscription', v_subscription,
+    'credits', v_balance,
+    'purchases', COALESCE(v_purchases, '[]'::json),
+    'plans', COALESCE(v_plans, '[]'::json),
+    'credit_packs', COALESCE(v_credit_packs, '[]'::json),
+    'models', COALESCE(v_models, '[]'::json)
+  );
+END;$$;
+
+
+ALTER FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "p_purchases_limit" integer) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "p_purchases_limit" integer) IS 'Consolidated user billing overview (subscription, credits, purchases, active plans, credit packs, models w/ min plan). Enforces ownership via public._assert_self.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") RETURNS json
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_profile record;
+  v_subscription record;
+  v_credits integer := 0;
+  v_counts jsonb;
+BEGIN
+  PERFORM public._assert_self(p_user_id);
+
+  SELECT id, username, avatar_url, banner_url, bio, onboarding_completed, created_at, timezone, default_persona_id
+    INTO v_profile
+  FROM profiles
+  WHERE id = p_user_id;
+
+  SELECT s.id, s.plan_id, s.status, s.created_at, s.current_period_end,
+         p.name AS plan_name, p.monthly_credits_allowance
+    INTO v_subscription
+  FROM billing.subscriptions s
+  JOIN billing.plans p ON p.id = s.plan_id
+  WHERE s.user_id = p_user_id
+    AND s.status = 'active'
+  ORDER BY s.created_at DESC
+  LIMIT 1;
+
+  SELECT balance INTO v_credits FROM billing.credits WHERE user_id = p_user_id;
+
+  SELECT jsonb_build_object(
+           'chats',      COALESCE((SELECT count(*) FROM chats WHERE user_id = p_user_id),0),
+           'characters', COALESCE((SELECT count(*) FROM characters WHERE creator_id = p_user_id),0),
+           'favorites',  COALESCE((SELECT count(*) FROM character_favorites WHERE user_id = p_user_id),0),
+           'personas',   COALESCE((SELECT count(*) FROM personas WHERE user_id = p_user_id),0)
+         )
+    INTO v_counts;
+
+  RETURN json_build_object(
+    'profile',      CASE WHEN v_profile IS NOT NULL THEN to_jsonb(v_profile) ELSE NULL END,
+    'subscription', CASE WHEN v_subscription IS NOT NULL THEN to_jsonb(v_subscription) ELSE NULL END,
+    'credits',      COALESCE(v_credits,0),
+    'counts',       v_counts
+  );
+END;
+$$;
+
+
+ALTER FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_user_chats"("p_limit" integer DEFAULT 20, "p_offset" integer DEFAULT 0) RETURNS TABLE("chat_id" "uuid", "character_id" "uuid", "chat_created_at" timestamp with time zone, "chat_updated_at" timestamp with time zone, "character_name" "text", "character_avatar_url" "text", "last_message_id" "uuid", "last_message_created_at" timestamp with time zone, "last_message_is_ai" boolean, "last_message_content" "text", "message_count" bigint, "total_count" bigint)
     LANGUAGE "sql"
     AS $$
   select
@@ -1040,6 +1903,7 @@ CREATE OR REPLACE FUNCTION "public"."get_user_chats"("p_limit" integer DEFAULT 2
     lm.created_at as last_message_created_at,
     lm.is_ai_message as last_message_is_ai,
     lm.content as last_message_content,
+    mc.message_count,
     count(*) over() as total_count
   from public.chats c
   left join public.characters ch on ch.id = c.character_id
@@ -1050,6 +1914,11 @@ CREATE OR REPLACE FUNCTION "public"."get_user_chats"("p_limit" integer DEFAULT 2
     order by m.created_at desc
     limit 1
   ) lm on true
+  left join lateral (
+    select count(*)::bigint as message_count
+    from public.messages m2
+    where m2.chat_id = c.id
+  ) mc on true
   where c.user_id = auth.uid()
   order by c.updated_at desc
   limit greatest(p_limit,0) offset greatest(p_offset,0);
@@ -1112,6 +1981,154 @@ $$;
 
 
 ALTER FUNCTION "public"."get_user_credits"("p_user_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_user_dashboard_overview"("p_user_id" "uuid", "p_chars_limit" integer DEFAULT 30, "p_favs_limit" integer DEFAULT 30) RETURNS json
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_chars jsonb := '[]'::jsonb;
+  v_favs jsonb := '[]'::jsonb;
+  v_liked_ids jsonb := '[]'::jsonb;
+  v_counts jsonb;
+BEGIN
+  PERFORM public._assert_self(p_user_id);
+
+  WITH user_chars AS (
+    SELECT c.id, c.name, c.avatar_url, c.visibility, c.likes_count, c.chats_count, c.tagline, c.updated_at
+    FROM characters c
+    WHERE c.creator_id = p_user_id
+    ORDER BY c.updated_at DESC NULLS LAST
+    LIMIT GREATEST(p_chars_limit, 0)
+  ), fav_ids AS (
+    SELECT cf.character_id, cf.created_at
+    FROM character_favorites cf
+    WHERE cf.user_id = p_user_id
+    ORDER BY cf.created_at DESC
+    LIMIT GREATEST(p_favs_limit, 0)
+  ), fav_chars AS (
+    SELECT c.id, c.name, c.avatar_url, c.visibility, c.likes_count, c.chats_count, c.tagline, f.created_at AS favorited_at
+    FROM characters c
+    JOIN fav_ids f ON f.character_id = c.id
+    WHERE c.visibility = 'public'
+  ), liked AS (
+    SELECT cl.character_id
+    FROM character_likes cl
+    WHERE cl.user_id = p_user_id
+      AND cl.character_id IN (
+        SELECT id FROM user_chars
+        UNION
+        SELECT id FROM fav_chars
+      )
+  )
+  SELECT
+    COALESCE((SELECT jsonb_agg(to_jsonb(u.*)) FROM user_chars u), '[]'::jsonb),
+    COALESCE((SELECT jsonb_agg(to_jsonb(f.*)) FROM fav_chars f), '[]'::jsonb),
+    COALESCE((SELECT jsonb_agg(to_jsonb(l.character_id)) FROM liked l), '[]'::jsonb)
+  INTO v_chars, v_favs, v_liked_ids;
+
+  SELECT jsonb_build_object(
+           'characters', (SELECT count(*) FROM characters WHERE creator_id = p_user_id),
+           'favorites',  (SELECT count(*) FROM character_favorites WHERE user_id = p_user_id),
+           'chats',      (SELECT count(*) FROM chats WHERE user_id = p_user_id)
+         ) INTO v_counts;
+
+  RETURN json_build_object(
+    'characters', v_chars,
+    'favorites', v_favs,
+    'liked_ids', v_liked_ids,
+    'counts', v_counts
+  );
+END;
+$$;
+
+
+ALTER FUNCTION "public"."get_user_dashboard_overview"("p_user_id" "uuid", "p_chars_limit" integer, "p_favs_limit" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."get_user_persona_context"("p_user_id" "uuid" DEFAULT "auth"."uid"(), "p_chat_id" "uuid" DEFAULT NULL::"uuid", "p_include_list" boolean DEFAULT false) RETURNS json
+    LANGUAGE "plpgsql" STABLE
+    AS $$
+declare
+  v_default_persona uuid;
+  v_last_used_persona uuid;
+  v_first_persona uuid;
+  v_chat_persona_row record;
+  v_chat_persona jsonb := null;
+  v_personas jsonb := null; -- remain null unless requested
+begin
+  -- Explicit ownership check (defense-in-depth beyond RLS)
+  if p_user_id is null or p_user_id <> auth.uid() then
+    raise exception 'PERMISSION_DENIED: cannot access persona context for another user';
+  end if;
+
+  -- Default persona from profile
+  select default_persona_id into v_default_persona
+  from public.profiles
+  where id = p_user_id;
+
+  -- Last used persona: most recently updated chat with a non-null selected_persona_id
+  select c.selected_persona_id into v_last_used_persona
+  from public.chats c
+  where c.user_id = p_user_id
+    and c.selected_persona_id is not null
+  order by c.updated_at desc
+  limit 1;
+
+  -- First persona created (chronological)
+  select p.id into v_first_persona
+  from public.personas p
+  where p.user_id = p_user_id
+  order by p.created_at asc
+  limit 1;
+
+  -- Chat selected persona (if chat provided & belongs to user)
+  if p_chat_id is not null then
+    select pr.id, pr.name, pr.bio, pr.lore, pr.avatar_url
+    into v_chat_persona_row
+    from public.chats c
+    left join public.personas pr on pr.id = c.selected_persona_id
+    where c.id = p_chat_id
+      and c.user_id = p_user_id
+    limit 1;
+
+    if found and v_chat_persona_row.id is not null then
+      v_chat_persona := to_jsonb(v_chat_persona_row);
+    end if;
+  end if;
+
+  -- Personas list (optional, ordered newest first for UI convenience)
+  if p_include_list then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id', p.id,
+      'name', p.name,
+      'bio', p.bio,
+      'lore', p.lore,
+      'avatar_url', p.avatar_url,
+      'created_at', p.created_at,
+      'updated_at', p.updated_at
+    ) order by p.created_at desc), '[]'::jsonb)
+    into v_personas
+    from public.personas p
+    where p.user_id = p_user_id;
+  end if;
+
+  return json_build_object(
+    'default_persona_id', v_default_persona,
+    'last_used_persona_id', v_last_used_persona,
+    'first_persona_id', v_first_persona,
+    'chat_selected_persona', v_chat_persona,
+    'personas', v_personas
+  );
+end;$$;
+
+
+ALTER FUNCTION "public"."get_user_persona_context"("p_user_id" "uuid", "p_chat_id" "uuid", "p_include_list" boolean) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."get_user_persona_context"("p_user_id" "uuid", "p_chat_id" "uuid", "p_include_list" boolean) IS 'Consolidated persona context for the authenticated user: default, last used, first, optional chat selection, optional full list.';
+
 
 
 CREATE OR REPLACE FUNCTION "public"."get_user_subscription_with_plan"("p_user_id" "uuid") RETURNS json
@@ -1226,6 +2243,242 @@ $$;
 ALTER FUNCTION "public"."increment_world_info_interaction_count"("world_info_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."list_public_world_infos"("p_search" "text" DEFAULT NULL::"text", "p_sort" "text" DEFAULT 'interactions'::"text", "p_offset" integer DEFAULT 0, "p_limit" integer DEFAULT 20, "p_exclude_nsfw" boolean DEFAULT false, "p_tag_ids" integer[] DEFAULT NULL::integer[]) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_items jsonb;
+  v_total int;
+BEGIN
+  WITH base AS (
+    SELECT wi.*
+    FROM world_infos wi
+    WHERE wi.visibility = 'public'
+      AND (p_search IS NULL OR trim(p_search) = '' OR (
+        wi.name ILIKE '%' || replace(p_search, '%','') || '%' OR
+        wi.short_description ILIKE '%' || replace(p_search, '%','') || '%'
+      ))
+  ), nsfw_filtered AS (
+    SELECT b.* FROM base b
+    WHERE NOT p_exclude_nsfw OR NOT EXISTS (
+      SELECT 1 FROM world_info_tags wit
+      WHERE wit.world_info_id = b.id AND wit.tag_id = 24 -- NSFW tag id
+    )
+  ), tag_filtered AS (
+    SELECT n.* FROM nsfw_filtered n
+    WHERE p_tag_ids IS NULL OR NOT EXISTS (
+      -- ensure every tag in p_tag_ids is present
+      SELECT 1 FROM (
+        SELECT UNNEST(p_tag_ids) AS tid
+      ) req
+      WHERE NOT EXISTS (
+        SELECT 1 FROM world_info_tags wit
+        WHERE wit.world_info_id = n.id AND wit.tag_id = req.tid
+      )
+    )
+  ), ranked AS (
+    SELECT
+      tf.id,
+      tf.name,
+      tf.short_description,
+      tf.creator_id,
+      tf.likes_count,
+      tf.interaction_count,
+      tf.created_at,
+      tf.updated_at,
+      tf.visibility,
+      (SELECT jsonb_build_object('username', p.username, 'avatar_url', p.avatar_url)
+         FROM profiles p WHERE p.id = tf.creator_id) AS creator,
+      (SELECT COALESCE(jsonb_agg(jsonb_build_object('id', tg.id, 'name', tg.name) ORDER BY tg.name), '[]'::jsonb)
+         FROM world_info_tags wit JOIN tags tg ON tg.id = wit.tag_id
+         WHERE wit.world_info_id = tf.id) AS tags
+    FROM tag_filtered tf
+  ), ordered AS (
+    SELECT * FROM ranked
+    ORDER BY CASE WHEN p_sort = 'newest' THEN created_at END DESC,
+             CASE WHEN p_sort <> 'newest' THEN interaction_count END DESC,
+             id
+    OFFSET GREATEST(p_offset,0) LIMIT LEAST(p_limit,100)
+  ), agg AS (
+    SELECT
+      jsonb_agg(jsonb_build_object(
+         'id', o.id,
+         'name', o.name,
+         'short_description', o.short_description,
+         'creator_id', o.creator_id,
+         'likes_count', o.likes_count,
+         'interaction_count', o.interaction_count,
+         'created_at', o.created_at,
+         'updated_at', o.updated_at,
+         'visibility', o.visibility,
+         'creator', o.creator,
+         'tags', o.tags
+       )) AS items,
+      (SELECT COUNT(*) FROM tag_filtered) AS total
+    FROM ordered o
+  )
+  SELECT items, total INTO v_items, v_total FROM agg;
+
+  RETURN jsonb_build_object(
+    'items', COALESCE(v_items, '[]'::jsonb),
+    'total', v_total
+  );
+END;
+$$;
+
+
+ALTER FUNCTION "public"."list_public_world_infos"("p_search" "text", "p_sort" "text", "p_offset" integer, "p_limit" integer, "p_exclude_nsfw" boolean, "p_tag_ids" integer[]) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."list_public_world_infos"("p_search" "text", "p_sort" "text", "p_offset" integer, "p_limit" integer, "p_exclude_nsfw" boolean, "p_tag_ids" integer[]) IS 'List public world infos with filtering, sorting, pagination, and tag/NSFW filters.';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."list_user_world_infos"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_auth uuid := auth.uid();
+  v_items jsonb;
+BEGIN
+  IF v_auth IS NULL THEN
+    RAISE EXCEPTION 'Not authorized';
+  END IF;
+
+  WITH owned AS (
+    SELECT wi.* FROM world_infos wi WHERE wi.creator_id = v_auth
+  ),
+  collected AS (
+    SELECT wi.*
+    FROM world_info_users wu
+    JOIN world_infos wi ON wi.id = wu.world_info_id
+    WHERE wu.user_id = v_auth
+  ),
+  unioned AS (
+    SELECT * FROM owned
+    UNION
+    SELECT * FROM collected
+  ),
+  enriched AS (
+    SELECT
+      u.id,
+      u.name,
+      u.short_description,
+      u.creator_id,
+      u.visibility,
+      u.likes_count,
+      u.interaction_count,
+      u.created_at,
+      u.updated_at,
+      (SELECT COUNT(*) FROM world_info_entries we WHERE we.world_info_id = u.id) AS entries_count,
+      (
+        SELECT COALESCE(
+                 jsonb_agg(jsonb_build_object('id', tg.id, 'name', tg.name) ORDER BY tg.name),
+                 '[]'::jsonb
+               )
+        FROM world_info_tags wit
+        JOIN tags tg ON tg.id = wit.tag_id
+        WHERE wit.world_info_id = u.id
+      ) AS tags,
+      (
+        SELECT jsonb_build_object('username', p.username, 'avatar_url', p.avatar_url)
+        FROM profiles p
+        WHERE p.id = u.creator_id
+      ) AS creator
+    FROM unioned u
+  ),
+  ordered AS (
+    SELECT * FROM enriched
+    ORDER BY updated_at DESC, id
+  )
+  SELECT jsonb_agg(jsonb_build_object(
+           'id', o.id,
+           'name', o.name,
+           'short_description', o.short_description,
+           'creator_id', o.creator_id,
+           'visibility', o.visibility,
+           'likes_count', o.likes_count,
+           'interaction_count', o.interaction_count,
+           'entriesCount', COALESCE(o.entries_count,0),
+           'created_at', o.created_at,
+           'updated_at', o.updated_at,
+           'tags', COALESCE(o.tags,'[]'::jsonb),
+           'creator', o.creator
+         ))
+    INTO v_items
+  FROM ordered o;
+
+  RETURN COALESCE(v_items, '[]'::jsonb);
+END;
+$$;
+
+
+ALTER FUNCTION "public"."list_user_world_infos"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."list_user_world_infos"("p_user_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_auth uuid := auth.uid();
+  v_items jsonb;
+BEGIN
+  IF v_auth IS NULL OR v_auth <> p_user_id THEN
+    RAISE EXCEPTION 'Not authorized';
+  END IF;
+
+  WITH owned AS (
+    SELECT wi.* FROM world_infos wi WHERE wi.creator_id = p_user_id
+  ), liked AS (
+    SELECT wi.*
+    FROM world_info_user_likes wul
+    JOIN world_infos wi ON wi.id = wul.world_info_id
+    WHERE wul.user_id = p_user_id AND wi.creator_id <> p_user_id
+  ), unioned AS (
+    SELECT * FROM owned
+    UNION
+    SELECT * FROM liked
+  ), enriched AS (
+    SELECT u.id, u.name, u.short_description, u.creator_id, u.visibility,
+           u.likes_count, u.interaction_count, u.created_at, u.updated_at,
+           (SELECT COUNT(*) FROM world_info_entries we WHERE we.world_info_id = u.id) AS entries_count,
+           (SELECT jsonb_agg(jsonb_build_object('id', tg.id, 'name', tg.name) ORDER BY tg.name)
+              FROM world_info_tags wit JOIN tags tg ON tg.id = wit.tag_id
+              WHERE wit.world_info_id = u.id) AS tags,
+           (SELECT jsonb_build_object('username', p.username, 'avatar_url', p.avatar_url) FROM profiles p WHERE p.id = u.creator_id) AS creator
+    FROM unioned u
+  )
+  SELECT jsonb_agg(jsonb_build_object(
+      'id', e.id,
+      'name', e.name,
+      'short_description', e.short_description,
+      'creator_id', e.creator_id,
+      'visibility', e.visibility,
+      'likes_count', e.likes_count,
+      'interaction_count', e.interaction_count,
+      'entriesCount', COALESCE(e.entries_count,0),
+      'created_at', e.created_at,
+      'updated_at', e.updated_at,
+      'tags', COALESCE(e.tags, '[]'::jsonb),
+      'creator', e.creator
+    )) INTO v_items
+  FROM enriched e;
+
+  RETURN COALESCE(v_items, '[]'::jsonb);
+END;
+$$;
+
+
+ALTER FUNCTION "public"."list_user_world_infos"("p_user_id" "uuid") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."list_user_world_infos"("p_user_id" "uuid") IS 'List world infos owned or collected by the authenticated user.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."mark_memories_injected"("mem_ids" "uuid"[]) RETURNS "void"
     LANGUAGE "sql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -1324,6 +2577,25 @@ end;$$;
 ALTER FUNCTION "public"."prune_stale_subscription_nonces"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."record_relationship_signal"("p_user_id" "uuid", "p_character_id" "uuid", "p_kind" "text", "p_weight" numeric, "p_polarity" smallint, "p_source_message_id" "uuid" DEFAULT NULL::"uuid") RETURNS "uuid"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE v_id uuid; BEGIN
+  IF p_user_id <> auth.uid() AND auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+  IF p_weight <= 0 THEN RAISE EXCEPTION 'weight must be > 0'; END IF;
+  INSERT INTO public.user_character_relationship_signals(user_id, character_id, kind, weight, polarity, source_message_id)
+  VALUES (p_user_id, p_character_id, lower(p_kind), p_weight, p_polarity, p_source_message_id)
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;$$;
+
+
+ALTER FUNCTION "public"."record_relationship_signal"("p_user_id" "uuid", "p_character_id" "uuid", "p_kind" "text", "p_weight" numeric, "p_polarity" smallint, "p_source_message_id" "uuid") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) RETURNS TABLE("id" "uuid", "name" "text", "avatar_url" "text", "short_description" "text", "likes_count" integer, "chats_count" integer, "creator" "jsonb", "tags" "jsonb")
     LANGUAGE "plpgsql"
     AS $$
@@ -1394,6 +2666,25 @@ end;$$;
 ALTER FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."resolve_tag_names"("p_names" "text"[]) RETURNS TABLE("id" integer, "name" "text")
+    LANGUAGE "sql" STABLE
+    AS $$
+  SELECT t.id, t.name
+  FROM public.tags t
+  JOIN LATERAL (
+    SELECT unnest(p_names) AS qn
+  ) q ON lower(t.name) = lower(q.qn)
+  ORDER BY t.name;
+$$;
+
+
+ALTER FUNCTION "public"."resolve_tag_names"("p_names" "text"[]) OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."resolve_tag_names"("p_names" "text"[]) IS 'Bulk resolve tag names (case-insensitive) to ids. Uses existing RLS on tags.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."set_ai_sequence_number"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -1416,8 +2707,7 @@ CREATE OR REPLACE FUNCTION "public"."set_updated_at"() RETURNS "trigger"
 BEGIN
   NEW.updated_at = now();
   RETURN NEW;
-END;
-$$;
+END;$$;
 
 
 ALTER FUNCTION "public"."set_updated_at"() OWNER TO "postgres";
@@ -1425,6 +2715,18 @@ ALTER FUNCTION "public"."set_updated_at"() OWNER TO "postgres";
 
 COMMENT ON FUNCTION "public"."set_updated_at"() IS 'Unified updated_at trigger function.';
 
+
+
+CREATE OR REPLACE FUNCTION "public"."set_updated_at_rel_progress"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;$$;
+
+
+ALTER FUNCTION "public"."set_updated_at_rel_progress"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."set_was_public_on_visibility_change"() RETURNS "trigger"
@@ -1622,6 +2924,158 @@ $$;
 ALTER FUNCTION "public"."update_banner_updated_at"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."upsert_character_latent_profile"("p_character_id" "uuid", "p_profile" "jsonb", "p_source_card_hash" "text", "p_extraction_version" "text", "p_confidence_avg" numeric, "p_populated_domains" smallint, "p_token_cost" integer DEFAULT NULL::integer) RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+BEGIN
+  -- Insert history first (append-only)
+  INSERT INTO public.character_latent_profile_history(
+    character_id, profile, source_card_hash, extraction_version, confidence_avg, populated_domains, token_cost
+  ) VALUES (
+    p_character_id, p_profile, p_source_card_hash, p_extraction_version, p_confidence_avg, p_populated_domains, p_token_cost
+  );
+
+  -- Upsert current state
+  INSERT INTO public.character_latent_profiles AS clp(
+    character_id, profile, source_card_hash, extraction_version, confidence_avg, populated_domains, token_cost
+  ) VALUES (
+    p_character_id, p_profile, p_source_card_hash, p_extraction_version, p_confidence_avg, p_populated_domains, p_token_cost
+  )
+  ON CONFLICT (character_id) DO UPDATE SET
+    profile = EXCLUDED.profile,
+    source_card_hash = EXCLUDED.source_card_hash,
+    extraction_version = EXCLUDED.extraction_version,
+    confidence_avg = EXCLUDED.confidence_avg,
+    populated_domains = EXCLUDED.populated_domains,
+    token_cost = EXCLUDED.token_cost,
+    updated_at = now();
+END;$$;
+
+
+ALTER FUNCTION "public"."upsert_character_latent_profile"("p_character_id" "uuid", "p_profile" "jsonb", "p_source_card_hash" "text", "p_extraction_version" "text", "p_confidence_avg" numeric, "p_populated_domains" smallint, "p_token_cost" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."upsert_relationship_goals"("p_character_id" "uuid", "p_relationship_goals" "jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_creator uuid;
+  v_count int;
+  v_path jsonb;
+  v_orders int[];
+  v_max int;
+  v_min int;
+  v_existing jsonb;       -- existing relationship_goals (may be null)
+  v_version int;
+  v_rowcount int;
+BEGIN
+  IF p_relationship_goals IS NULL THEN
+    RAISE EXCEPTION 'relationship_goals payload required';
+  END IF;
+
+  SELECT creator_id INTO v_creator FROM public.characters WHERE id = p_character_id;
+  IF v_creator IS NULL THEN
+    RAISE EXCEPTION 'character not found';
+  END IF;
+  IF v_creator <> auth.uid() AND auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+
+  v_path := p_relationship_goals->'path';
+  IF jsonb_typeof(v_path) <> 'array' THEN
+    RAISE EXCEPTION 'path must be array';
+  END IF;
+  v_count := jsonb_array_length(v_path);
+  IF v_count < 2 THEN
+    RAISE EXCEPTION 'at least 2 goals required';
+  END IF;
+  IF v_count > 10 THEN
+    RAISE EXCEPTION 'max 10 goals exceeded';
+  END IF;
+
+  SELECT array_agg((elem->>'order')::int ORDER BY (elem->>'order')::int)
+    INTO v_orders
+  FROM jsonb_array_elements(v_path) elem;
+
+  v_max := (SELECT max(o) FROM unnest(v_orders) o);
+  v_min := (SELECT min(o) FROM unnest(v_orders) o);
+  IF v_min <> 1 OR v_max <> v_count THEN
+    RAISE EXCEPTION 'orders must be contiguous starting at 1';
+  END IF;
+
+  -- Lock / check for existing latent profile row
+  SELECT relationship_goals INTO v_existing
+  FROM public.character_latent_profiles
+  WHERE character_id = p_character_id
+  FOR UPDATE;  -- if present, lock row
+  GET DIAGNOSTICS v_rowcount = ROW_COUNT;
+
+  -- Determine version
+  IF v_rowcount = 0 THEN
+    -- No latent profile row yet – initial version baseline
+    v_version := COALESCE( (p_relationship_goals->>'version')::int, 1 );
+  ELSE
+    IF v_existing ? 'version' THEN
+      v_version := COALESCE( (p_relationship_goals->>'version')::int, (v_existing->>'version')::int + 1 );
+    ELSE
+      v_version := COALESCE( (p_relationship_goals->>'version')::int, 1 );
+    END IF;
+  END IF;
+
+  p_relationship_goals := jsonb_set(p_relationship_goals, '{version}', to_jsonb(v_version), true);
+  p_relationship_goals := jsonb_set(p_relationship_goals, '{metadata,updated_at}', to_jsonb(now()), true);
+  IF NOT (p_relationship_goals ? 'metadata') THEN
+    p_relationship_goals := jsonb_set(p_relationship_goals, '{metadata}', jsonb_build_object('created_at', now(), 'updated_at', now()), true);
+  ELSE
+    IF NOT (p_relationship_goals #> '{metadata,created_at}' IS NOT NULL) THEN
+      p_relationship_goals := jsonb_set(p_relationship_goals, '{metadata,created_at}', to_jsonb(now()), true);
+    END IF;
+  END IF;
+
+  IF v_rowcount = 0 THEN
+    -- Insert stub latent profile row with template
+    INSERT INTO public.character_latent_profiles(
+      character_id, profile, source_card_hash, extraction_version, confidence_avg, populated_domains, token_cost, relationship_goals, created_at, updated_at
+    ) VALUES (
+      p_character_id, '{}'::jsonb, 'rel_goals_only', 'rel_goals_init', NULL, 0, NULL, p_relationship_goals, now(), now()
+    );
+
+    -- History snapshot (initial)
+    INSERT INTO public.character_latent_profile_history(
+      character_id, profile, source_card_hash, extraction_version, confidence_avg, populated_domains, token_cost, relationship_goals, created_at
+    ) VALUES (
+      p_character_id, '{}'::jsonb, 'rel_goals_only', 'rel_goals_init', NULL, 0, NULL, p_relationship_goals, now()
+    );
+
+    RETURN p_relationship_goals;
+  END IF;
+
+  -- Existing row: update & snapshot
+  UPDATE public.character_latent_profiles
+    SET relationship_goals = p_relationship_goals,
+        updated_at = now()
+    WHERE character_id = p_character_id;
+
+  INSERT INTO public.character_latent_profile_history(
+    character_id, profile, source_card_hash, extraction_version, confidence_avg, populated_domains, token_cost, relationship_goals
+  )
+  SELECT clp.character_id, clp.profile, clp.source_card_hash, clp.extraction_version, clp.confidence_avg, clp.populated_domains, clp.token_cost, p_relationship_goals
+  FROM public.character_latent_profiles clp
+  WHERE clp.character_id = p_character_id;
+
+  RETURN p_relationship_goals;
+END;$$;
+
+
+ALTER FUNCTION "public"."upsert_relationship_goals"("p_character_id" "uuid", "p_relationship_goals" "jsonb") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."upsert_relationship_goals"("p_character_id" "uuid", "p_relationship_goals" "jsonb") IS 'Upserts relationship goals template; inserts latent profile stub if missing.';
+
+
+
 CREATE OR REPLACE FUNCTION "public"."upsert_subscription"("p_user_id" "uuid", "p_plan_id" "uuid", "p_paypal_subscription_id" "text" DEFAULT NULL::"text", "p_stripe_subscription_id" "text" DEFAULT NULL::"text", "p_status" "text" DEFAULT 'active'::"text", "p_current_period_end" timestamp with time zone DEFAULT NULL::timestamp with time zone) RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public', 'billing', 'auth'
@@ -1704,6 +3158,82 @@ END;$$;
 
 
 ALTER FUNCTION "public"."user_daily_usage_touch"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."user_world_infos_list"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_auth uuid := auth.uid();
+  v_items jsonb;
+BEGIN
+  IF v_auth IS NULL THEN
+    RAISE EXCEPTION 'Not authorized';
+  END IF;
+
+  WITH owned AS (
+    SELECT wi.id, wi.name, wi.short_description, wi.creator_id, wi.visibility,
+           wi.likes_count, wi.interaction_count, wi.created_at, wi.updated_at
+    FROM world_infos wi
+    WHERE wi.creator_id = v_auth
+  ),
+  collected AS (
+    SELECT wi.id, wi.name, wi.short_description, wi.creator_id, wi.visibility,
+           wi.likes_count, wi.interaction_count, wi.created_at, wi.updated_at
+    FROM world_info_users wu
+    JOIN world_infos wi ON wi.id = wu.world_info_id
+    WHERE wu.user_id = v_auth
+  ),
+  unioned AS (
+    SELECT * FROM owned
+    UNION
+    SELECT * FROM collected
+  )
+  SELECT jsonb_agg(jsonb_build_object(
+           'id', u.id,
+           'name', u.name,
+           'short_description', u.short_description,
+           'creator_id', u.creator_id,
+           'visibility', u.visibility,
+           'likes_count', u.likes_count,
+           'interaction_count', u.interaction_count,
+           'created_at', u.created_at,
+           'updated_at', u.updated_at
+         ))
+    INTO v_items
+  FROM unioned u;
+
+  RETURN COALESCE(v_items,'[]'::jsonb);
+END;
+$$;
+
+
+ALTER FUNCTION "public"."user_world_infos_list"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."zz_jsonb_noarg"() RETURNS "jsonb"
+    LANGUAGE "sql" SECURITY DEFINER
+    AS $$ SELECT jsonb_build_object('ok', true) $$;
+
+
+ALTER FUNCTION "public"."zz_jsonb_noarg"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."zz_list_user_world_infos"() RETURNS "jsonb"
+    LANGUAGE "sql" SECURITY DEFINER
+    AS $$ SELECT '[]'::jsonb $$;
+
+
+ALTER FUNCTION "public"."zz_list_user_world_infos"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."zz_test_rpc"() RETURNS "text"
+    LANGUAGE "sql"
+    AS $$ select 'ok'::text $$;
+
+
+ALTER FUNCTION "public"."zz_test_rpc"() OWNER TO "postgres";
 
 SET default_tablespace = '';
 
@@ -2251,7 +3781,6 @@ CREATE TABLE IF NOT EXISTS "public"."character_definitions" (
     "description" "text",
     "personality_summary" "text" NOT NULL,
     "scenario" "jsonb",
-    "model_id" "text",
     "initial_addon_context_enabled" boolean DEFAULT false NOT NULL,
     "initial_addon_context" "jsonb"
 );
@@ -2277,6 +3806,46 @@ CREATE TABLE IF NOT EXISTS "public"."character_favorites" (
 
 
 ALTER TABLE "public"."character_favorites" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."character_latent_profile_history" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "profile" "jsonb" NOT NULL,
+    "source_card_hash" "text" NOT NULL,
+    "extraction_version" "text" NOT NULL,
+    "confidence_avg" numeric(4,3),
+    "populated_domains" smallint NOT NULL,
+    "token_cost" integer,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "relationship_goals" "jsonb",
+    CONSTRAINT "character_latent_profile_history_populated_domains_check" CHECK ((("populated_domains" >= 0) AND ("populated_domains" <= 20))),
+    CONSTRAINT "character_latent_profile_history_profile_shape" CHECK (("jsonb_typeof"("profile") = 'object'::"text")),
+    CONSTRAINT "character_latent_profile_history_relationship_goals_shape" CHECK ((("relationship_goals" IS NULL) OR ("jsonb_typeof"("relationship_goals") = 'object'::"text")))
+);
+
+
+ALTER TABLE "public"."character_latent_profile_history" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."character_latent_profiles" (
+    "character_id" "uuid" NOT NULL,
+    "profile" "jsonb" NOT NULL,
+    "source_card_hash" "text" NOT NULL,
+    "extraction_version" "text" NOT NULL,
+    "confidence_avg" numeric(4,3),
+    "populated_domains" smallint NOT NULL,
+    "token_cost" integer,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "relationship_goals" "jsonb",
+    CONSTRAINT "character_latent_profiles_populated_domains_check" CHECK ((("populated_domains" >= 0) AND ("populated_domains" <= 20))),
+    CONSTRAINT "character_latent_profiles_profile_shape" CHECK (("jsonb_typeof"("profile") = 'object'::"text")),
+    CONSTRAINT "character_latent_profiles_relationship_goals_shape" CHECK ((("relationship_goals" IS NULL) OR ("jsonb_typeof"("relationship_goals") = 'object'::"text")))
+);
+
+
+ALTER TABLE "public"."character_latent_profiles" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."character_likes" (
@@ -2363,6 +3932,90 @@ ALTER TABLE "public"."characters" OWNER TO "postgres";
 
 COMMENT ON COLUMN "public"."characters"."tagline" IS 'Character tagline/title from character creation foundation step';
 
+
+
+CREATE TABLE IF NOT EXISTS "public"."profiles" (
+    "id" "uuid" NOT NULL,
+    "username" "text" NOT NULL,
+    "avatar_url" "text",
+    "bio" "text",
+    "onboarding_completed" boolean DEFAULT false NOT NULL,
+    "onboarding_survey_data" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "default_persona_id" "uuid",
+    "timezone" "text" DEFAULT 'UTC'::"text",
+    "banner_url" "text",
+    "banner_updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."profiles" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."tags" (
+    "id" integer NOT NULL,
+    "name" "text" NOT NULL
+);
+
+
+ALTER TABLE "public"."tags" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."world_infos" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "creator_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "short_description" "text",
+    "visibility" "text" DEFAULT 'private'::"text" NOT NULL,
+    "interaction_count" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "likes_count" integer DEFAULT 0 NOT NULL,
+    CONSTRAINT "world_infos_visibility_check" CHECK (("visibility" = ANY (ARRAY['public'::"text", 'unlisted'::"text", 'private'::"text"])))
+);
+
+
+ALTER TABLE "public"."world_infos" OWNER TO "postgres";
+
+
+CREATE OR REPLACE VIEW "public"."character_profile_view" WITH ("security_invoker"='true') AS
+ SELECT "c"."id",
+    "c"."name",
+    "c"."short_description",
+    "c"."avatar_url",
+    "c"."visibility",
+    "c"."was_public",
+    "c"."interaction_count",
+    "c"."created_at",
+    "c"."updated_at",
+    "c"."tagline",
+    "c"."creator_id",
+    "c"."likes_count",
+    "c"."favorites_count",
+    "c"."chats_count",
+    "c"."messages_count",
+    "jsonb_build_object"('greeting', "cd"."greeting", 'description', "cd"."description", 'personality_summary', "cd"."personality_summary", 'scenario', "cd"."scenario") AS "character_definitions",
+    "jsonb_build_object"('id', "p"."id", 'username', "p"."username", 'avatar_url', "p"."avatar_url") AS "creator",
+    COALESCE(( SELECT "jsonb_agg"("jsonb_build_object"('id', "s"."id", 'name', "s"."name") ORDER BY "s"."name") AS "jsonb_agg"
+           FROM ( SELECT DISTINCT "t"."id",
+                    "t"."name"
+                   FROM ("public"."character_tags" "ct"
+                     JOIN "public"."tags" "t" ON (("t"."id" = "ct"."tag_id")))
+                  WHERE ("ct"."character_id" = "c"."id")) "s"), '[]'::"jsonb") AS "tags",
+    COALESCE(( SELECT "jsonb_agg"("jsonb_build_object"('id', "s"."id", 'name', "s"."name", 'short_description', "s"."short_description") ORDER BY "s"."name") AS "jsonb_agg"
+           FROM ( SELECT DISTINCT "w"."id",
+                    "w"."name",
+                    "w"."short_description"
+                   FROM ("public"."character_world_info_link" "cwil"
+                     JOIN "public"."world_infos" "w" ON (("w"."id" = "cwil"."world_info_id")))
+                  WHERE ("cwil"."character_id" = "c"."id")) "s"), '[]'::"jsonb") AS "world_infos"
+   FROM (("public"."characters" "c"
+     LEFT JOIN "public"."character_definitions" "cd" ON (("cd"."character_id" = "c"."id")))
+     LEFT JOIN "public"."profiles" "p" ON (("p"."id" = "c"."creator_id")));
+
+
+ALTER VIEW "public"."character_profile_view" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."chat_context" (
@@ -2479,25 +4132,6 @@ CREATE TABLE IF NOT EXISTS "public"."personas" (
 ALTER TABLE "public"."personas" OWNER TO "postgres";
 
 
-CREATE TABLE IF NOT EXISTS "public"."profiles" (
-    "id" "uuid" NOT NULL,
-    "username" "text" NOT NULL,
-    "avatar_url" "text",
-    "bio" "text",
-    "onboarding_completed" boolean DEFAULT false NOT NULL,
-    "onboarding_survey_data" "jsonb",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "default_persona_id" "uuid",
-    "timezone" "text" DEFAULT 'UTC'::"text",
-    "banner_url" "text",
-    "banner_updated_at" timestamp with time zone DEFAULT "now"()
-);
-
-
-ALTER TABLE "public"."profiles" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."public_app_settings" (
     "setting_key" "text" NOT NULL,
     "setting_value" "text" NOT NULL
@@ -2534,15 +4168,6 @@ CREATE TABLE IF NOT EXISTS "public"."subscription_nonces" (
 ALTER TABLE "public"."subscription_nonces" OWNER TO "postgres";
 
 
-CREATE TABLE IF NOT EXISTS "public"."tags" (
-    "id" integer NOT NULL,
-    "name" "text" NOT NULL
-);
-
-
-ALTER TABLE "public"."tags" OWNER TO "postgres";
-
-
 CREATE SEQUENCE IF NOT EXISTS "public"."tags_id_seq"
     AS integer
     START WITH 1
@@ -2568,6 +4193,35 @@ CREATE TABLE IF NOT EXISTS "public"."user_age_verification" (
 
 
 ALTER TABLE "public"."user_age_verification" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."user_character_relationship_progress" (
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "state" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_character_relationship_progress_state_shape" CHECK (("jsonb_typeof"("state") = 'object'::"text"))
+);
+
+
+ALTER TABLE "public"."user_character_relationship_progress" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."user_character_relationship_signals" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "kind" "text" NOT NULL,
+    "weight" numeric(5,3) NOT NULL,
+    "polarity" smallint NOT NULL,
+    "source_message_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_character_relationship_signals_polarity_check" CHECK (("polarity" = ANY (ARRAY[1, '-1'::integer])))
+);
+
+
+ALTER TABLE "public"."user_character_relationship_signals" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."user_character_settings" (
@@ -2749,23 +4403,6 @@ CREATE TABLE IF NOT EXISTS "public"."world_info_user_likes" (
 
 
 ALTER TABLE "public"."world_info_user_likes" OWNER TO "postgres";
-
-
-CREATE TABLE IF NOT EXISTS "public"."world_infos" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "creator_id" "uuid" NOT NULL,
-    "name" "text" NOT NULL,
-    "short_description" "text",
-    "visibility" "text" DEFAULT 'private'::"text" NOT NULL,
-    "interaction_count" integer DEFAULT 0 NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "likes_count" integer DEFAULT 0 NOT NULL,
-    CONSTRAINT "world_infos_visibility_check" CHECK (("visibility" = ANY (ARRAY['public'::"text", 'unlisted'::"text", 'private'::"text"])))
-);
-
-
-ALTER TABLE "public"."world_infos" OWNER TO "postgres";
 
 
 ALTER TABLE ONLY "auth"."refresh_tokens" ALTER COLUMN "id" SET DEFAULT "nextval"('"auth"."refresh_tokens_id_seq"'::"regclass");
@@ -2974,6 +4611,16 @@ ALTER TABLE ONLY "public"."character_favorites"
 
 
 
+ALTER TABLE ONLY "public"."character_latent_profile_history"
+    ADD CONSTRAINT "character_latent_profile_history_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."character_latent_profiles"
+    ADD CONSTRAINT "character_latent_profiles_pkey" PRIMARY KEY ("character_id");
+
+
+
 ALTER TABLE ONLY "public"."character_likes"
     ADD CONSTRAINT "character_likes_character_id_user_id_key" UNIQUE ("character_id", "user_id");
 
@@ -3086,6 +4733,16 @@ ALTER TABLE ONLY "public"."user_age_verification"
 
 ALTER TABLE ONLY "public"."user_age_verification"
     ADD CONSTRAINT "user_age_verification_user_id_key" UNIQUE ("user_id");
+
+
+
+ALTER TABLE ONLY "public"."user_character_relationship_progress"
+    ADD CONSTRAINT "user_character_relationship_progress_pkey" PRIMARY KEY ("user_id", "character_id");
+
+
+
+ALTER TABLE ONLY "public"."user_character_relationship_signals"
+    ADD CONSTRAINT "user_character_relationship_signals_pkey" PRIMARY KEY ("id");
 
 
 
@@ -3351,6 +5008,18 @@ CREATE INDEX "idx_character_favorites_character_id" ON "public"."character_favor
 
 
 
+CREATE INDEX "idx_character_latent_profile_history_char" ON "public"."character_latent_profile_history" USING "btree" ("character_id");
+
+
+
+CREATE INDEX "idx_character_latent_profile_history_hash" ON "public"."character_latent_profile_history" USING "btree" ("source_card_hash");
+
+
+
+CREATE INDEX "idx_character_latent_profiles_hash" ON "public"."character_latent_profiles" USING "btree" ("source_card_hash");
+
+
+
 CREATE INDEX "idx_character_likes_character_id" ON "public"."character_likes" USING "btree" ("character_id");
 
 
@@ -3475,6 +5144,22 @@ CREATE INDEX "idx_subscription_nonces_user" ON "public"."subscription_nonces" US
 
 
 
+CREATE INDEX "idx_ucrp_character" ON "public"."user_character_relationship_progress" USING "btree" ("character_id");
+
+
+
+CREATE INDEX "idx_ucrp_updated_at" ON "public"."user_character_relationship_progress" USING "btree" ("updated_at" DESC);
+
+
+
+CREATE INDEX "idx_ucrs_char" ON "public"."user_character_relationship_signals" USING "btree" ("character_id");
+
+
+
+CREATE INDEX "idx_ucrs_user_char_time" ON "public"."user_character_relationship_signals" USING "btree" ("user_id", "character_id", "created_at" DESC);
+
+
+
 CREATE INDEX "idx_user_character_settings_lookup" ON "public"."user_character_settings" USING "btree" ("user_id", "character_id");
 
 
@@ -3539,6 +5224,10 @@ CREATE OR REPLACE TRIGGER "tr_set_was_public" BEFORE INSERT OR UPDATE ON "public
 
 
 
+CREATE OR REPLACE TRIGGER "trg_character_latent_profiles_updated_at" BEFORE UPDATE ON "public"."character_latent_profiles" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
 CREATE OR REPLACE TRIGGER "trg_characters_chats_count" AFTER INSERT OR DELETE ON "public"."chats" FOR EACH ROW EXECUTE FUNCTION "public"."tg_characters_chats_count"();
 
 
@@ -3596,6 +5285,10 @@ CREATE OR REPLACE TRIGGER "trg_set_updated_at_world_info_entries" BEFORE UPDATE 
 
 
 CREATE OR REPLACE TRIGGER "trg_set_updated_at_world_infos" BEFORE UPDATE ON "public"."world_infos" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "trg_ucrp_updated_at" BEFORE UPDATE ON "public"."user_character_relationship_progress" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at_rel_progress"();
 
 
 
@@ -3725,6 +5418,16 @@ ALTER TABLE ONLY "public"."character_definitions"
 
 ALTER TABLE ONLY "public"."character_favorites"
     ADD CONSTRAINT "character_favorites_character_id_fkey" FOREIGN KEY ("character_id") REFERENCES "public"."characters"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."character_latent_profile_history"
+    ADD CONSTRAINT "character_latent_profile_history_character_id_fkey" FOREIGN KEY ("character_id") REFERENCES "public"."characters"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."character_latent_profiles"
+    ADD CONSTRAINT "character_latent_profiles_character_id_fkey" FOREIGN KEY ("character_id") REFERENCES "public"."characters"("id") ON DELETE CASCADE;
 
 
 
@@ -4018,6 +5721,10 @@ ALTER TABLE "billing"."subscriptions" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "billing"."transactions" ENABLE ROW LEVEL SECURITY;
 
 
+CREATE POLICY "authenticated_users_read_latent_profiles" ON "public"."character_latent_profiles" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
+
+
+
 CREATE POLICY "character_def_select" ON "public"."character_definitions" FOR SELECT USING ((EXISTS ( SELECT 1
    FROM "public"."characters" "c"
   WHERE (("c"."id" = "character_definitions"."character_id") AND (("c"."visibility" = 'public'::"text") OR ("c"."creator_id" = "auth"."uid"()))))));
@@ -4044,6 +5751,12 @@ CREATE POLICY "character_favorites_select" ON "public"."character_favorites" FOR
 
 CREATE POLICY "character_favorites_write" ON "public"."character_favorites" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
 
+
+
+ALTER TABLE "public"."character_latent_profile_history" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."character_latent_profiles" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."character_likes" ENABLE ROW LEVEL SECURITY;
@@ -4227,6 +5940,26 @@ CREATE POLICY "public_app_settings_select" ON "public"."public_app_settings" FOR
 
 
 
+CREATE POLICY "service role insert history" ON "public"."character_latent_profile_history" FOR INSERT WITH CHECK (("auth"."role"() = 'service_role'::"text"));
+
+
+
+CREATE POLICY "service role manage latent profiles" ON "public"."character_latent_profiles" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));
+
+
+
+CREATE POLICY "service role manage relationship progress" ON "public"."user_character_relationship_progress" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));
+
+
+
+CREATE POLICY "service role manage relationship signals" ON "public"."user_character_relationship_signals" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));
+
+
+
+CREATE POLICY "service role select history" ON "public"."character_latent_profile_history" FOR SELECT USING (("auth"."role"() = 'service_role'::"text"));
+
+
+
 ALTER TABLE "public"."subscription_nonces" ENABLE ROW LEVEL SECURITY;
 
 
@@ -4249,7 +5982,21 @@ CREATE POLICY "uav_self_write" ON "public"."user_age_verification" USING (("user
 
 
 
+CREATE POLICY "user manage own relationship progress" ON "public"."user_character_relationship_progress" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
+
+
+
+CREATE POLICY "user manage own relationship signals" ON "public"."user_character_relationship_signals" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
+
+
+
 ALTER TABLE "public"."user_age_verification" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."user_character_relationship_progress" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."user_character_relationship_signals" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."user_character_settings" ENABLE ROW LEVEL SECURITY;
@@ -4364,6 +6111,11 @@ GRANT ALL ON FUNCTION "public"."add_user_credits"("p_user_id" "uuid", "p_amount"
 
 
 
+GRANT ALL ON FUNCTION "public"."advance_relationship_stage"("p_user_id" "uuid", "p_character_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."advance_relationship_stage"("p_user_id" "uuid", "p_character_id" "uuid") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."array_all_item_length_lte"("arr" "text"[], "max_len" integer) TO "anon";
 GRANT ALL ON FUNCTION "public"."array_all_item_length_lte"("arr" "text"[], "max_len" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."array_all_item_length_lte"("arr" "text"[], "max_len" integer) TO "service_role";
@@ -4376,6 +6128,11 @@ GRANT ALL ON FUNCTION "public"."cancel_subscription"("p_user_id" "uuid", "p_subs
 
 
 GRANT ALL ON FUNCTION "public"."cleanup_disabled_addon_context"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."confirm_relationship_regression"("p_user_id" "uuid", "p_character_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."confirm_relationship_regression"("p_user_id" "uuid", "p_character_id" "uuid") TO "service_role";
 
 
 
@@ -4419,6 +6176,23 @@ GRANT ALL ON FUNCTION "public"."enforce_credit_pack_purchase_status"() TO "servi
 
 
 
+GRANT ALL ON FUNCTION "public"."evaluate_relationship_progress"("p_user_id" "uuid", "p_character_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."evaluate_relationship_progress"("p_user_id" "uuid", "p_character_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") TO "service_role";
+GRANT ALL ON FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") TO "anon";
+
+
+
+GRANT ALL ON FUNCTION "public"."force_relationship_ready"("p_user_id" "uuid", "p_character_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."force_relationship_ready"("p_user_id" "uuid", "p_character_id" "uuid") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."gentle_addon_context_cleanup"() TO "service_role";
 
 
@@ -4444,8 +6218,39 @@ GRANT ALL ON FUNCTION "public"."get_chat_messages"("p_chat_id" "uuid", "p_limit"
 
 
 
+GRANT ALL ON FUNCTION "public"."get_chat_snapshot"("p_chat_id" "uuid", "p_user_id" "uuid", "p_character_id" "uuid", "p_limit" integer, "p_before_order" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_chat_snapshot"("p_chat_id" "uuid", "p_user_id" "uuid", "p_character_id" "uuid", "p_limit" integer, "p_before_order" integer) TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer, "p_offset" integer) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer, "p_offset" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."get_public_character_cards"("p_search" "text", "p_sort" "text", "p_tag_ids" integer[], "p_creator_username" "text", "p_include_nsfw" boolean, "p_limit" integer, "p_offset" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."get_public_character_cards"("p_search" "text", "p_sort" "text", "p_tag_ids" integer[], "p_creator_username" "text", "p_include_nsfw" boolean, "p_limit" integer, "p_offset" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_public_character_cards"("p_search" "text", "p_sort" "text", "p_tag_ids" integer[], "p_creator_username" "text", "p_include_nsfw" boolean, "p_limit" integer, "p_offset" integer) TO "service_role";
+GRANT ALL ON FUNCTION "public"."get_public_character_cards"("p_search" "text", "p_sort" "text", "p_tag_ids" integer[], "p_creator_username" "text", "p_include_nsfw" boolean, "p_limit" integer, "p_offset" integer) TO "anon";
+
+
+
+REVOKE ALL ON FUNCTION "public"."get_public_profile_overview"("p_target_user_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."get_public_profile_overview"("p_target_user_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_public_profile_overview"("p_target_user_id" "uuid") TO "service_role";
+GRANT ALL ON FUNCTION "public"."get_public_profile_overview"("p_target_user_id" "uuid") TO "anon";
+
+
+
+REVOKE ALL ON FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "p_purchases_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "p_purchases_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "p_purchases_limit" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") TO "service_role";
 
 
 
@@ -4464,6 +6269,18 @@ GRANT ALL ON FUNCTION "public"."get_user_credits"("p_user_id" "uuid") TO "servic
 
 
 
+REVOKE ALL ON FUNCTION "public"."get_user_dashboard_overview"("p_user_id" "uuid", "p_chars_limit" integer, "p_favs_limit" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."get_user_dashboard_overview"("p_user_id" "uuid", "p_chars_limit" integer, "p_favs_limit" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_user_dashboard_overview"("p_user_id" "uuid", "p_chars_limit" integer, "p_favs_limit" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."get_user_persona_context"("p_user_id" "uuid", "p_chat_id" "uuid", "p_include_list" boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."get_user_persona_context"("p_user_id" "uuid", "p_chat_id" "uuid", "p_include_list" boolean) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."get_user_persona_context"("p_user_id" "uuid", "p_chat_id" "uuid", "p_include_list" boolean) TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."get_user_subscription_with_plan"("p_user_id" "uuid") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."get_user_subscription_with_plan"("p_user_id" "uuid") TO "service_role";
 
@@ -4478,6 +6295,24 @@ GRANT ALL ON FUNCTION "public"."handle_new_user_global_settings"() TO "service_r
 
 
 GRANT ALL ON FUNCTION "public"."increment_world_info_interaction_count"("world_info_id" "uuid") TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."list_public_world_infos"("p_search" "text", "p_sort" "text", "p_offset" integer, "p_limit" integer, "p_exclude_nsfw" boolean, "p_tag_ids" integer[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."list_public_world_infos"("p_search" "text", "p_sort" "text", "p_offset" integer, "p_limit" integer, "p_exclude_nsfw" boolean, "p_tag_ids" integer[]) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."list_public_world_infos"("p_search" "text", "p_sort" "text", "p_offset" integer, "p_limit" integer, "p_exclude_nsfw" boolean, "p_tag_ids" integer[]) TO "service_role";
+GRANT ALL ON FUNCTION "public"."list_public_world_infos"("p_search" "text", "p_sort" "text", "p_offset" integer, "p_limit" integer, "p_exclude_nsfw" boolean, "p_tag_ids" integer[]) TO "anon";
+
+
+
+GRANT ALL ON FUNCTION "public"."list_user_world_infos"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."list_user_world_infos"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."list_user_world_infos"("p_user_id" "uuid") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."list_user_world_infos"("p_user_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."list_user_world_infos"("p_user_id" "uuid") TO "service_role";
 
 
 
@@ -4502,9 +6337,19 @@ GRANT ALL ON FUNCTION "public"."prune_stale_subscription_nonces"() TO "service_r
 
 
 
+GRANT ALL ON FUNCTION "public"."record_relationship_signal"("p_user_id" "uuid", "p_character_id" "uuid", "p_kind" "text", "p_weight" numeric, "p_polarity" smallint, "p_source_message_id" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."record_relationship_signal"("p_user_id" "uuid", "p_character_id" "uuid", "p_kind" "text", "p_weight" numeric, "p_polarity" smallint, "p_source_message_id" "uuid") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) TO "anon";
 GRANT ALL ON FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."resolve_tag_names"("p_names" "text"[]) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."resolve_tag_names"("p_names" "text"[]) TO "service_role";
 
 
 
@@ -4513,6 +6358,11 @@ GRANT ALL ON FUNCTION "public"."set_ai_sequence_number"() TO "service_role";
 
 
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."set_updated_at_rel_progress"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_updated_at_rel_progress"() TO "service_role";
 
 
 
@@ -4549,12 +6399,43 @@ GRANT ALL ON FUNCTION "public"."update_banner_updated_at"() TO "service_role";
 
 
 
+REVOKE ALL ON FUNCTION "public"."upsert_character_latent_profile"("p_character_id" "uuid", "p_profile" "jsonb", "p_source_card_hash" "text", "p_extraction_version" "text", "p_confidence_avg" numeric, "p_populated_domains" smallint, "p_token_cost" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."upsert_character_latent_profile"("p_character_id" "uuid", "p_profile" "jsonb", "p_source_card_hash" "text", "p_extraction_version" "text", "p_confidence_avg" numeric, "p_populated_domains" smallint, "p_token_cost" integer) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."upsert_character_latent_profile"("p_character_id" "uuid", "p_profile" "jsonb", "p_source_card_hash" "text", "p_extraction_version" "text", "p_confidence_avg" numeric, "p_populated_domains" smallint, "p_token_cost" integer) TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."upsert_relationship_goals"("p_character_id" "uuid", "p_relationship_goals" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."upsert_relationship_goals"("p_character_id" "uuid", "p_relationship_goals" "jsonb") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."upsert_subscription"("p_user_id" "uuid", "p_plan_id" "uuid", "p_paypal_subscription_id" "text", "p_stripe_subscription_id" "text", "p_status" "text", "p_current_period_end" timestamp with time zone) TO "authenticated";
 GRANT ALL ON FUNCTION "public"."upsert_subscription"("p_user_id" "uuid", "p_plan_id" "uuid", "p_paypal_subscription_id" "text", "p_stripe_subscription_id" "text", "p_status" "text", "p_current_period_end" timestamp with time zone) TO "service_role";
 
 
 
 GRANT ALL ON FUNCTION "public"."user_daily_usage_touch"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."user_world_infos_list"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."user_world_infos_list"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."zz_jsonb_noarg"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."zz_jsonb_noarg"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."zz_list_user_world_infos"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."zz_list_user_world_infos"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."zz_test_rpc"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."zz_test_rpc"() TO "service_role";
 
 
 
@@ -4698,6 +6579,16 @@ GRANT ALL ON TABLE "public"."character_favorites" TO "service_role";
 
 
 
+GRANT SELECT ON TABLE "public"."character_latent_profile_history" TO "authenticated";
+GRANT ALL ON TABLE "public"."character_latent_profile_history" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."character_latent_profiles" TO "authenticated";
+GRANT ALL ON TABLE "public"."character_latent_profiles" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."character_likes" TO "authenticated";
 GRANT ALL ON TABLE "public"."character_likes" TO "service_role";
 
@@ -4721,6 +6612,32 @@ GRANT ALL ON TABLE "public"."character_world_info_link" TO "service_role";
 GRANT ALL ON TABLE "public"."characters" TO "authenticated";
 GRANT ALL ON TABLE "public"."characters" TO "service_role";
 GRANT SELECT ON TABLE "public"."characters" TO "anon";
+
+
+
+GRANT ALL ON TABLE "public"."profiles" TO "authenticated";
+GRANT ALL ON TABLE "public"."profiles" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."tags" TO "anon";
+GRANT ALL ON TABLE "public"."tags" TO "authenticated";
+GRANT ALL ON TABLE "public"."tags" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."world_infos" TO "authenticated";
+GRANT ALL ON TABLE "public"."world_infos" TO "service_role";
+
+
+
+GRANT UPDATE("interaction_count") ON TABLE "public"."world_infos" TO "authenticated";
+
+
+
+GRANT SELECT ON TABLE "public"."character_profile_view" TO "authenticated";
+GRANT ALL ON TABLE "public"."character_profile_view" TO "service_role";
+GRANT SELECT ON TABLE "public"."character_profile_view" TO "anon";
 
 
 
@@ -4759,11 +6676,6 @@ GRANT ALL ON TABLE "public"."personas" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."profiles" TO "authenticated";
-GRANT ALL ON TABLE "public"."profiles" TO "service_role";
-
-
-
 GRANT ALL ON TABLE "public"."public_app_settings" TO "anon";
 GRANT ALL ON TABLE "public"."public_app_settings" TO "authenticated";
 GRANT ALL ON TABLE "public"."public_app_settings" TO "service_role";
@@ -4780,12 +6692,6 @@ GRANT ALL ON TABLE "public"."subscription_nonces" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."tags" TO "anon";
-GRANT ALL ON TABLE "public"."tags" TO "authenticated";
-GRANT ALL ON TABLE "public"."tags" TO "service_role";
-
-
-
 GRANT ALL ON SEQUENCE "public"."tags_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."tags_id_seq" TO "service_role";
 
@@ -4793,6 +6699,16 @@ GRANT ALL ON SEQUENCE "public"."tags_id_seq" TO "service_role";
 
 GRANT ALL ON TABLE "public"."user_age_verification" TO "authenticated";
 GRANT ALL ON TABLE "public"."user_age_verification" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."user_character_relationship_progress" TO "authenticated";
+GRANT ALL ON TABLE "public"."user_character_relationship_progress" TO "service_role";
+
+
+
+GRANT SELECT ON TABLE "public"."user_character_relationship_signals" TO "authenticated";
+GRANT ALL ON TABLE "public"."user_character_relationship_signals" TO "service_role";
 
 
 
@@ -4823,15 +6739,6 @@ GRANT ALL ON TABLE "public"."world_info_tags" TO "service_role";
 
 GRANT ALL ON TABLE "public"."world_info_user_likes" TO "authenticated";
 GRANT ALL ON TABLE "public"."world_info_user_likes" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."world_infos" TO "authenticated";
-GRANT ALL ON TABLE "public"."world_infos" TO "service_role";
-
-
-
-GRANT UPDATE("interaction_count") ON TABLE "public"."world_infos" TO "authenticated";
 
 
 

@@ -40,8 +40,8 @@ export const ChatManagement = {
   ) => {
     const { done } = await callStreamingEdgeFunction(FN_NAME, { operation: 'send-message', ...payload }, {
       mode: opts.streamingMode,
-      onToken: opts.onToken,
-      onDone: opts.onDone
+      onToken: (t, agg) => opts.onToken?.(t, agg),
+      onDone: (final) => opts.onDone?.(final)
     });
     const content = await done;
     return { content } as ChatManagementStreamingResult;
@@ -52,8 +52,8 @@ export const ChatManagement = {
   ) => {
     const { done } = await callStreamingEdgeFunction(FN_NAME, { operation: 'regenerate-message', ...payload }, {
       mode: opts.streamingMode,
-      onToken: opts.onToken,
-      onDone: opts.onDone
+      onToken: (t, agg) => opts.onToken?.(t, agg),
+      onDone: (final) => opts.onDone?.(final)
     });
     const content = await done;
     return { content } as ChatManagementStreamingResult;

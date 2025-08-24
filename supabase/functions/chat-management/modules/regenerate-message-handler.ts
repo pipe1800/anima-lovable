@@ -1,5 +1,5 @@
 import { createErrorResponse } from '../../_shared/auth.ts';
-import { createStreamingErrorResponse, processStreamBuffer, parseStreamChunk, streamAIResponse } from './streaming.ts';
+import { createStreamingErrorResponse, streamAIResponse } from './streaming.ts';
 import type { RegenerateMessageRequest } from '../types/index.ts';
 import { 
   fetchCharacterData,
@@ -13,8 +13,6 @@ import {
   fetchCurrentContext,
   fetchCharacterMemories,
   getNextMessageOrder,
-  createPlaceholderMessage,
-  updateMessageContent,
   saveCharacterMessage,
   updateChatLastActivity,
   buildTemplateReplacer
@@ -45,16 +43,6 @@ export async function handleRegenerateMessage(
       .single();
     if (fetchErr || !aiMsg || !aiMsg.is_ai_message) {
       return createErrorResponse('Message not found or not AI', 404);
-    }
-
-    // Mark existing message as placeholder and clear content (preserve id and position)
-    const { error: updErr } = await supabaseAdmin
-      .from('messages')
-      .update({ content: '', is_placeholder: true, updated_at: new Date().toISOString() })
-      .eq('id', aiMessageId);
-    if (updErr) {
-      console.error('Failed to mark message as placeholder:', updErr);
-      return createErrorResponse('Failed to prepare regeneration', 500);
     }
 
     // Fetch required data (similar to send-message)
@@ -107,7 +95,7 @@ export async function handleRegenerateMessage(
 
     const currentContext = await fetchCurrentContext(user.id, chatId, characterId, supabase);
 
-    // Filter out the AI message being regenerated from history
+    // Filter out the AI message being regenerated from history (keep original in place until new saved)
     const filteredHistory = (messageHistory || []).filter((m: any) => m.message_order !== aiMsg.message_order);
 
     // Use the last user message content as the prompt (no new user message record will be created)
@@ -145,13 +133,23 @@ export async function handleRegenerateMessage(
       aiResponse,
       async onComplete(final) {
         if (final) {
-          await updateMessageContent(supabaseAdmin, aiMessageId, final);
-          const basicContext = { moodTracking: 'No context', clothingInventory: 'No context', locationTracking: 'No context', timeAndWeather: 'No context', relationshipStatus: 'No context', characterPosition: 'No context' } as any;
-          await saveCharacterMessage(supabase, supabaseAdmin, user.id, chatId, final, basicContext, aiMessageId, aiMsg.message_order);
+          try {
+            // Save regenerated message using saveCharacterMessage
+            const finalMessage = await saveCharacterMessage(
+              supabaseAdmin,
+              user.id,
+              characterId,
+              chatId,
+              final,
+              currentContext || {},
+              aiMsg.message_order
+            );
+          } catch (e) {
+            console.error('regen.insert.error', e);
+          }
           await updateChatLastActivity(supabase, chatId, characterId);
           try {
-            const addonsActive = anyAddonEnabled(effectiveAddonSettings);
-            if (addonsActive) {
+            if (anyAddonEnabled(effectiveAddonSettings)) {
               const supabaseUrl = getEnv('SUPABASE_URL', { required: false });
               const authHeader = req.headers.get('authorization');
               await fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {

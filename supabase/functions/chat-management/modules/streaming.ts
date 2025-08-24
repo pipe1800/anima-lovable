@@ -139,7 +139,7 @@ export function streamAIResponse(opts: StreamPipelineOptions): Response {
         let buffer = '';
         while (true) {
           const { done, value } = await reader.read();
-            if (done) break;
+          if (done) break;
           buffer += new TextDecoder().decode(value, { stream: true });
           const { lines, remainingBuffer } = processStreamBuffer(buffer);
           buffer = remainingBuffer;
@@ -147,8 +147,11 @@ export function streamAIResponse(opts: StreamPipelineOptions): Response {
             if (!line.trim()) continue;
             const { content, isDone } = parseStreamChunk(line);
             if (isDone) {
+              if (includeDoneEnvelope) {
+                const donePayload = JSON.stringify({ done: true });
+                controller.enqueue(encoder.encode(`data: ${donePayload}\n\n`));
+              }
               if (onComplete) await onComplete(full.trim());
-              if (includeDoneEnvelope) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
               controller.close();
               return;
             }
@@ -159,9 +162,8 @@ export function streamAIResponse(opts: StreamPipelineOptions): Response {
             }
           }
         }
-        // If upstream does not send [DONE]
-        if (onComplete) await onComplete(full.trim());
         if (includeDoneEnvelope) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+        if (onComplete) await onComplete(full.trim());
         controller.close();
       } catch (e) {
         logger.error('stream.pipeline.error', { message: (e as Error)?.message });

@@ -34,7 +34,6 @@ Based on the character description, scenario, and greeting, extract initial cont
   "location": "current location or setting based on scenario", 
   "clothing": "character's clothing description if mentioned",
   "time_weather": "time and weather if mentioned in scenario",
-  "relationship": "relationship status or dynamic with user",
   "character_position": "character's physical position, posture, or stance if described"
 }
 
@@ -76,7 +75,7 @@ Return only the JSON object with no additional text. If a field is not mentioned
         return null;
       }
 
-      const allowedKeys = ['mood','location','clothing','time_weather','relationship','character_position'];
+      const allowedKeys = ['mood','location','clothing','time_weather','character_position'];
       if (!parsed || typeof parsed !== 'object') return null;
       // Normalize to allowed keys and enforce defaults/limits
       const result: Record<string, string> = {};
@@ -123,10 +122,6 @@ export async function extractContextFromResponse(character, conversationContext,
   if (addonSettings.timeAndWeather) {
     enabledFields.push('"time_weather": "current time and weather"');
     contextFields.time_weather = 'time_weather';
-  }
-  if (addonSettings.relationshipStatus) {
-    enabledFields.push('"relationship": "relationship status/dynamic"');
-    contextFields.relationship = 'relationship';
   }
   if (addonSettings.characterPosition) {
     enabledFields.push('"character_position": "character\'s physical position, posture, or stance"');
@@ -324,7 +319,7 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
         const intentRegex = /(change|put on|take off|remove|switch|swap|go to|move to|head to|walk to|enter|leave|travel to|pick up|drop|equip|unequip|wear|put .* on|move over to|step into|steps into|heads toward|heads to)/i;
         const userShowsIntent = intentRegex.test(message || '');
         if (!userShowsIntent) {
-          const gateFields = ['mood','clothing','location','relationship','time_weather','character_position'];
+          const gateFields = ['mood','clothing','location','time_weather','character_position'];
           let gatedCount = 0;
           for (const f of gateFields) {
             const priorVal = (prior as any)[f];
@@ -370,7 +365,6 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
     { setting: 'clothingInventory', field: 'clothing', type: 'clothing' },
     { setting: 'locationTracking', field: 'location', type: 'location' },
     { setting: 'timeAndWeather', field: 'time_weather', type: 'time_weather' },
-    { setting: 'relationshipStatus', field: 'relationship', type: 'relationship' },
     { setting: 'characterPosition', field: 'character_position', type: 'character_position' },
     { setting: 'timeAwareness', field: 'conversation_tone', type: 'conversation_tone' },
     { setting: 'timeAwareness', field: 'urgency_level', type: 'urgency_level' }

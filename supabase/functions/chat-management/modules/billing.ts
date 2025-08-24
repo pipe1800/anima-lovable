@@ -121,17 +121,31 @@ export function calculateCreditCost(
 export async function consumeCredits(
   userId: string,
   creditInfo: CreditInfo,
-  supabaseAdmin: SupabaseClient
+  supabaseClient: SupabaseClient,
+  supabaseAdminFallback?: SupabaseClient
 ): Promise<boolean> {
   console.log(`💰 Attempting credit deduction (atomic RPC) user=${userId} required=${creditInfo.totalCost}`);
 
-  try {
-    const { data: newBalance, error } = await supabaseAdmin.rpc('deduct_user_credits', {
+  async function attempt(client: SupabaseClient, label: string) {
+    return await (client as any).rpc('deduct_user_credits', {
       p_user_id: userId,
       p_amount: creditInfo.totalCost,
       p_operation_type: 'ai_operation',
       p_description: 'Chat message generation'
     });
+  }
+
+  try {
+    // First try with provided (user-scoped) client to satisfy auth.uid() ownership check.
+    let { data: newBalance, error } = await attempt(supabaseClient, 'user');
+
+    // If ownership check failed and we have an admin fallback, retry once.
+    if (error && /ownership|assert_self|access denied/i.test(error.message || '') && supabaseAdminFallback) {
+      console.warn('⚠️ Ownership check failed with user client; retrying with admin fallback');
+      const retry = await attempt(supabaseAdminFallback, 'admin');
+      newBalance = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       console.error('❌ deduct_user_credits RPC error:', error);

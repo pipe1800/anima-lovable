@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/db/client'
-import { Profile as ProfileQueries, Billing as BillingQueries, ProfileStats } from '@/data'
+import { Profile as ProfileQueries, Billing as BillingQueries, Auth } from '@/data'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Profile } from '@/types/database'
 
@@ -21,9 +21,26 @@ export const useProfile = (userId?: string) => {
           return
         }
 
-        // Get current user to determine if this is their own profile
-        const { data: { user } } = await supabase.auth.getUser()
+        // Get current auth user (non-throwing)
+        const { user } = await Auth.getAuthUser();
         const isOwnProfile = user?.id === userId
+
+        // Prefer unified overview RPC to minimize calls
+        try {
+          if (isOwnProfile) {
+            const { data: bootstrap, error: bootErr } = await ProfileQueries.getUserBootstrap(userId);
+            if (!bootErr && bootstrap?.profile) {
+              setProfile(bootstrap.profile as Profile);
+              return;
+            }
+          } else {
+            const { data: pub, error: pubErr } = await ProfileQueries.getPublicProfileOverview(userId);
+            if (!pubErr && pub?.profile) {
+              setProfile(pub.profile as Profile);
+              return;
+            }
+          }
+        } catch { /* fallback below */ }
 
         // Use appropriate query based on whether it's the user's own profile
         const { data, error } = isOwnProfile 
@@ -51,8 +68,18 @@ export const useProfile = (userId?: string) => {
       setLoading(true)
       setError(null)
 
-      const { data: { user } } = await supabase.auth.getUser()
+      const { user } = await Auth.getAuthUser();
       const isOwnProfile = user?.id === userId
+
+      try {
+        if (isOwnProfile) {
+          const { data: bootstrap, error: bootErr } = await ProfileQueries.getUserBootstrap(userId);
+          if (!bootErr && bootstrap?.profile) { setProfile(bootstrap.profile as Profile); return }
+        } else {
+          const { data: pub, error: pubErr } = await ProfileQueries.getPublicProfileOverview(userId);
+          if (!pubErr && pub?.profile) { setProfile(pub.profile as Profile); return }
+        }
+      } catch { /* fallback */ }
 
       const { data, error } = isOwnProfile 
         ? await ProfileQueries.getPrivateProfile(userId)
@@ -107,13 +134,21 @@ export const useCurrentUserOptimized = () => {
 
 // Profile stats query
 export const useProfileStats = () => {
+  // Uses unified user bootstrap RPC now
   const { user } = useAuth();
-  
   return useQuery({
     queryKey: ['profile-stats', user?.id],
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
-      return ProfileStats.getProfileStats(user.id);
+      const { data, error } = await ProfileQueries.getUserBootstrap(user.id);
+      if (error) throw error;
+      const counts = (data as any)?.counts || { chats:0, characters:0, favorites:0, personas:0 };
+      return {
+        characterCount: counts.characters,
+        chatCount: counts.chats,
+        creditsBalance: (data as any)?.credits ?? 0,
+        followersCount: 0,
+      };
     },
     enabled: !!user,
     staleTime: 1000 * 60 * 2,
@@ -141,12 +176,11 @@ export const useUpdateProfile = () => {
 // Settings-related queries
 export const useUserSubscription = () => {
   const { user } = useAuth();
-  
   return useQuery({
     queryKey: ['user-subscription', user?.id],
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
-      const { data, error } = await BillingQueries.getUserActiveSubscription(user.id);
+      const { data, error } = await BillingQueries.getUserSubscription(supabase as any, user.id);
       if (error) throw new Error('Failed to fetch subscription');
       return data;
     },
@@ -160,7 +194,7 @@ export const useAvailablePlans = () => {
   return useQuery({
     queryKey: ['available-plans'],
     queryFn: async () => {
-      const { data, error } = await BillingQueries.getActivePlans();
+      const { data, error } = await BillingQueries.getSubscriptionPlans(supabase as any);
       if (error) {
         throw new Error('Failed to fetch plans');
       }

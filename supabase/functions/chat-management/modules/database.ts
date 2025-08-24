@@ -648,108 +648,34 @@ export async function saveUserMessage(
   return coerceMessage(userMessage);
 }
 
-export async function createPlaceholderMessage(
-  supabase: SupabaseClient,
-  chatId: string,
-  messageOrder: number
-): Promise<Message | null> {
-  // Use crypto.randomUUID() to generate a proper UUID for the placeholder
-  const placeholderId = crypto.randomUUID();
-  
-  const { data: placeholder, error } = await supabase
-    .from('messages')
-    .insert({
-      id: placeholderId,
-      chat_id: chatId,
-      author_id: null,
-      content: '',
-      is_ai_message: true,
-      is_placeholder: true,
-      message_order: messageOrder,
-      created_at: new Date().toISOString()
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating placeholder message:', error);
-    return null;
-  }
-
-  return placeholder ? coerceMessage(placeholder) : null;
-}
-
-export async function updateMessageContent(
-  supabaseAdmin: SupabaseClient,
-  messageId: string,
-  content: string
-): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from('messages')
-    .update({
-      content: content,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', messageId);
-
-  if (error) {
-    console.error('Error updating message content:', error);
-  }
-}
-
 export async function saveCharacterMessage(
   supabase: SupabaseClient,
-  supabaseAdmin: SupabaseClient,
   userId: string,
+  characterId: string,
   chatId: string,
   message: string,
   currentContext: CurrentContext,
-  placeholderId: string,
-  messageOrder: number
+  messageOrder?: number
 ): Promise<Message> {
-  if (placeholderId) {
-    // Update existing placeholder using admin client (placeholders have author_id: null)
-    const { data: messageData, error: messageError } = await supabaseAdmin
-      .from('messages')
-      .update({
-        content: message,
-        is_placeholder: false,
-        current_context: currentContext,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', placeholderId)
-  .select('*')
-      .single();
-
-    if (messageError) {
-      console.error('Error updating placeholder message:', messageError);
-      throw new Error('Failed to update character message');
-    }
-
-  return coerceMessage(messageData);
-  } else {
-    // Create new message (fallback)
-    const { data: messageData, error: messageError } = await supabase
-      .from('messages')
-      .insert({
-        chat_id: chatId,
-        author_id: null,
-        content: message,
-        is_ai_message: true,
-        current_context: currentContext,
-        message_order: messageOrder || 1,
-        created_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (messageError) {
-      console.error('Error saving character message:', messageError);
-      throw new Error('Failed to save character message');
-    }
-
-  return coerceMessage(messageData);
+  // Simplified: always insert new AI message (placeholder flow removed)
+  const { data: messageData, error: messageError } = await supabase
+    .from('messages')
+    .insert({
+      chat_id: chatId,
+      author_id: null,
+      content: message,
+      is_ai_message: true,
+      current_context: currentContext,
+      message_order: messageOrder || 1,
+      created_at: new Date().toISOString()
+    })
+    .select('*')
+    .single();
+  if (messageError) {
+    console.error('Error saving character message:', messageError);
+    throw new Error('Failed to save character message');
   }
+  return coerceMessage(messageData);
 }
 
 export async function updateChatLastActivity(
