@@ -293,7 +293,7 @@ const Chat = () => {
         {/* Main Chat Layout */}
         <div className="flex-1 flex flex-col h-full">
           <ChatLayout 
-            relationshipStage={relationshipStage} character={characterData} currentChatId={currentChatId || ''} trackedContext={trackedContext} onContextUpdate={setTrackedContext} onPersonaChange={handlePersonaChange} onWorldInfoChange={handleWorldInfoChange} characterDetails={characterData} creditsBalanceOverride={creditsBalance} globalSettingsOverride={relationshipStage && /^Stage \d+\/\d+:/i.test(relationshipStage) ? { ...(globalSettings || {}), relationship_status: true } : globalSettings}>
+            relationshipStage={relationshipStage} character={characterData} currentChatId={currentChatId || ''} trackedContext={trackedContext} onContextUpdate={setTrackedContext} onPersonaChange={handlePersonaChange} onWorldInfoChange={handleWorldInfoChange} characterDetails={characterData} creditsBalanceOverride={creditsBalance} globalSettingsOverride={relationshipStage ? { ...(globalSettings || {}), relationship_status: true } : globalSettings}>
             <ChatInterface
               character={character}
               onFirstMessage={handleFirstMessage}

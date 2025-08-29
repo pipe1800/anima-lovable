@@ -476,7 +476,7 @@ export async function buildSystemPrompt(
   if (metaCollector) { try { metaCollector(meta); logger.debug('prompt.meta', meta); } catch (e) { logger.warn('prompt.meta.fail', String(e)); } }
 
   // Relationship progression (consolidated helper)
-  systemPrompt += buildRelationshipProgressionBlock(currentContext, addonSettings);
+  systemPrompt += buildRelationshipProgressionBlock(currentContext, addonSettings, (currentContext as any)._relationshipProgress);
 
   return systemPrompt;
 }

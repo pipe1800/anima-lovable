@@ -286,16 +286,7 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
         dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
         logger.debug('Context updated in UI immediately!');
 
-        // Dispatch relationship meta update (new format: detail = meta). Keep legacy nested for backward compatibility.
-        try {
-          if (rawContext?.relationship_meta && typeof rawContext.relationship_meta === 'object') {
-            const meta = rawContext.relationship_meta;
-            logger.debug('Dispatching relationship meta update (fetch)', meta);
-            window.dispatchEvent(new CustomEvent('relationship-meta-updated', { detail: meta }));
-            // legacy wrapper
-            window.dispatchEvent(new CustomEvent('relationship-meta-updated-legacy', { detail: { relationshipMeta: meta } }));
-          }
-        } catch (e) { logger.warn('relationshipMeta.dispatch.fail', e); }
+        // Dispatch relationship meta update removed (meta no longer persisted in chat_context)
       }
     } catch (err) {
       logger.error('Failed to fetch fresh context:', err);
@@ -408,13 +399,6 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
           logger.debug('Realtime chat_context applied', { rel: updated.relationshipStatus });
           // Fire custom event for existing listeners (Chat.tsx)
           try { window.dispatchEvent(new CustomEvent('chat-context-updated', { detail: { chatId, context: { relationship: updated.relationshipStatus } } })); } catch {}
-          try {
-            if (raw.relationship_meta) {
-              logger.debug('Dispatching relationship meta update (realtime)', raw.relationship_meta);
-              window.dispatchEvent(new CustomEvent('relationship-meta-updated', { detail: raw.relationship_meta }));
-              window.dispatchEvent(new CustomEvent('relationship-meta-updated-legacy', { detail: { relationshipMeta: raw.relationship_meta } }));
-            }
-          } catch {}
         } catch (e) {
           logger.error('chat_context.realtime.apply.error', e);
         }

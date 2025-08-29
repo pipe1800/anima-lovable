@@ -154,87 +154,132 @@ export const ContextSidebar = ({
   onOpenSettings
 }: ContextSidebarProps) => {
   const { user, supabase: authSupabase } = useAuth();
+  // Restore missing state & helper component
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showHistorical, setShowHistorical] = useState(false);
-  // NEW: relationship meta & progress
-  const [relationshipMeta, setRelationshipMeta] = useState<any>(null);
-  const [relationshipProgress, setRelationshipProgress] = useState<{ percent: number; ready: boolean } | null>(null);
+  const ForceReadyAction: React.FC<{ meta: any }> = () => null; // no-op placeholder (real action handled elsewhere)
 
-  // Define here (moved earlier so it's hoisted before usage)
-  const ForceReadyAction: React.FC<{ meta: any }> = ({ meta }) => {
-    const [forcing, setForcing] = React.useState(false);
-    const [error, setError] = React.useState<string | null>(null);
-    const userId = user?.id || (window as any).currentUserId || (window as any).supabaseUserId || null;
-    const characterId = character?.id || (window as any).currentCharacterId || (window as any).characterId || null;
-    const supabaseClient = authSupabase || (window as any).supabase || (window as any).supabaseClient;
-    const relState = meta || {};
-    const finalStage = relState?.total_stages && relState?.active_order && relState.active_order >= relState.total_stages;
-    const disabled = forcing || relState?.ready_for_next || finalStage;
-    const handleForce = async () => {
-      if (disabled) return;
-      if (!userId || !characterId || !supabaseClient) { setError('Missing user or character id'); return; }
-      setForcing(true); setError(null);
+  // NEW: pre-chat relationship stage label (visual only)
+  const [preChatRelationshipLabel, setPreChatRelationshipLabel] = useState<string | null>(() => {
+    if (typeof window !== 'undefined' && character?.id) {
+      try { return sessionStorage.getItem(`relLabel:${character.id}`) || null; } catch { return null; }
+    }
+    return null;
+  });
+  const [relationshipReady, setRelationshipReady] = useState<boolean | null>(() => {
+    if (typeof window !== 'undefined' && character?.id) {
       try {
-        const { data, error: rpcErr } = await supabaseClient.rpc('force_relationship_ready', { p_user_id: userId, p_character_id: characterId });
-        if (rpcErr) throw rpcErr;
-        if (data?.error) {
-          setError(data.error);
+        const v = sessionStorage.getItem(`relReady:${character.id}`);
+        if (v === '1') return true; if (v === '0') return false; return null;
+      } catch { return null; }
+    }
+    return null;
+  });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (preChatRelationshipLabel && relationshipReady !== null) return; // already cached
+      if (!character?.id || !user?.id) return;
+      try {
+        const supa = authSupabase;
+        if (!supa) return;
+        const { data: tmplRow, error: tmplErr } = await (supa as any)
+          .from('character_latent_profiles')
+          .select('relationship_goals')
+          .eq('character_id', character.id)
+          .maybeSingle();
+        if (tmplErr) return;
+        const template = tmplRow?.relationship_goals;
+        if (!template || typeof template !== 'object' || !Array.isArray(template.path) || template.path.length === 0) return;
+        const { data: progRow } = await (supa as any)
+          .from('user_character_relationship_progress')
+          .select('state')
+          .eq('user_id', user.id)
+          .eq('character_id', character.id)
+          .maybeSingle();
+        let label: string | null = preChatRelationshipLabel;
+        let readyFlag: boolean | null = relationshipReady;
+        if (progRow?.state) {
+          const state = progRow.state;
+          const activeOrder = Number(state.active_order || state.activeOrder || 1);
+          const goal = template.path.find((g: any)=> (g.order||g.order===0) && g.order === activeOrder);
+          if (!label && goal?.label) label = goal.label;
+          if (readyFlag === null && typeof state.ready_for_next === 'boolean') readyFlag = state.ready_for_next;
         } else {
-          setRelationshipMeta(data);
-          let pct: number | undefined;
-          if (typeof data.stage_progress_percent === 'number') pct = data.stage_progress_percent;
-          else if (typeof data.current_score === 'number' && typeof data.next_threshold === 'number' && data.next_threshold > 0) pct = data.current_score / data.next_threshold;
-          if (typeof pct === 'number') setRelationshipProgress({ percent: Math.min(1, Math.max(0, pct)), ready: !!data.ready_for_next });
+          if (!label) {
+            const first = template.path.slice().sort((a:any,b:any)=> (a.order||0)-(b.order||0))[0];
+            if (first?.label) label = first.label;
+          }
+          if (readyFlag === null) readyFlag = false; // default before any progress
         }
-      } catch (e:any) {
-        setError(e.message || 'Failed');
-      } finally {
-        setForcing(false);
-      }
-    };
-    return (
-      <div className="space-y-1">
-        <button
-          onClick={(e) => { e.stopPropagation(); handleForce(); }}
-          disabled={disabled}
-          className={`w-full px-2 py-1 text-[10px] rounded-md font-medium transition-colors border ${disabled ? 'bg-slate-700/40 text-slate-500 border-slate-600 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400/40 shadow cursor-pointer'} `}
-          title={finalStage ? 'Already at final stage' : (!userId || !characterId ? 'Missing ids' : 'Instantly fill remaining progress to make next stage eligible')}
-        >
-          {forcing ? 'Forcing...' : relState?.ready_for_next ? 'Ready' : 'Force Ready'}
-        </button>
-        {error && <div className="text-[9px] text-red-400">{error}</div>}
-      </div>
-    );
-  };
+        if (!cancelled) {
+          if (label && !preChatRelationshipLabel) {
+            setPreChatRelationshipLabel(label);
+            try { sessionStorage.setItem(`relLabel:${character.id}`, label); } catch {}
+          }
+          if (readyFlag !== null && relationshipReady === null) {
+            setRelationshipReady(readyFlag);
+            try { sessionStorage.setItem(`relReady:${character.id}`, readyFlag ? '1':'0'); } catch {}
+          }
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [character?.id, user?.id, authSupabase, preChatRelationshipLabel, relationshipReady]);
 
   // Listen for relationship meta events (mirrors ContextDisplay)
   useEffect(() => {
-    const applyMeta = (incoming: any, source: string) => {
-      const meta = incoming?.relationshipMeta ? incoming.relationshipMeta : incoming;
-      if (!meta || typeof meta !== 'object') return;
-      try { /* debug */ } catch {}
-      setRelationshipMeta(meta);
-      // Derive percent: prefer explicit fields, else compute from score/threshold
-      let pct: number | undefined = undefined;
-      if (typeof meta.stage_progress_percent === 'number') pct = meta.stage_progress_percent;
-      else if (typeof meta.percent_to_next === 'number') pct = meta.percent_to_next;
-      else if (typeof meta.current_score === 'number' && typeof meta.next_threshold === 'number' && meta.next_threshold > 0) {
-        pct = meta.current_score / meta.next_threshold;
-      }
-      if (typeof pct === 'number') {
-        pct = Math.max(0, Math.min(1, pct));
-        setRelationshipProgress({ percent: pct, ready: !!meta.ready_for_next });
-      }
-    };
-    const handlerNew = (e: any) => applyMeta(e.detail, 'new');
-    const handlerLegacy = (e: any) => applyMeta(e.detail, 'legacy');
-    window.addEventListener('relationship-meta-updated', handlerNew);
-    window.addEventListener('relationship-meta-updated-legacy', handlerLegacy);
-    return () => {
-      window.removeEventListener('relationship-meta-updated', handlerNew);
-      window.removeEventListener('relationship-meta-updated-legacy', handlerLegacy);
-    };
-  }, []);
+    if (!character?.id || !user?.id || !authSupabase) return;
+    // Subscribe to live changes on progress row for this user/character
+    const channel = (authSupabase as any)
+      .channel(`rel_progress_${user.id}_${character.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'user_character_relationship_progress',
+        filter: `user_id=eq.${user.id},character_id=eq.${character.id}`
+      }, (payload: any) => {
+        const newState = payload?.new?.state;
+        if (newState) {
+          // Update readiness
+            if (typeof newState.ready_for_next === 'boolean') {
+              setRelationshipReady(prev => {
+                if (prev === newState.ready_for_next) return prev;
+                try { sessionStorage.setItem(`relReady:${character.id}`, newState.ready_for_next ? '1':'0'); } catch {}
+                return newState.ready_for_next;
+              });
+            }
+            // Update label if active stage changed
+            const activeOrder = Number(newState.active_order || newState.activeOrder || 1);
+            // Only update label if we can resolve template from cached session value (store template path length?)
+            // Simpler: if label absent or stage changed, refetch template once.
+            const cachedStage = sessionStorage.getItem(`relStageOrder:${character.id}`);
+            if (String(activeOrder) !== cachedStage) {
+              // minimal refetch of template goals (no progress refetch to avoid loop)
+              (async () => {
+                try {
+                  const { data: tmplRow } = await (authSupabase as any)
+                    .from('character_latent_profiles')
+                    .select('relationship_goals')
+                    .eq('character_id', character.id)
+                    .maybeSingle();
+                  const template = tmplRow?.relationship_goals;
+                  if (template && Array.isArray(template.path)) {
+                    const goal = template.path.find((g:any)=> (g.order||g.order===0) && g.order === activeOrder);
+                    if (goal?.label) {
+                      setPreChatRelationshipLabel(goal.label);
+                      try { sessionStorage.setItem(`relLabel:${character.id}`, goal.label); } catch {}
+                      try { sessionStorage.setItem(`relStageOrder:${character.id}`, String(activeOrder)); } catch {}
+                    }
+                  }
+                } catch {}
+              })();
+            }
+        }
+      })
+      .subscribe();
+    return () => { try { (authSupabase as any).removeChannel(channel); } catch {} };
+  }, [authSupabase, user?.id, character?.id]);
 
   // Use the most relevant context source
   const effectiveContext = currentContext || context;
@@ -288,9 +333,11 @@ export const ContextSidebar = ({
       const isEnabled = resolveEnabled(item.addonKey);
       const contextValue = (workingContext as any)[item.key];
       let displayValue = contextValue;
-      if (item.key === 'relationshipStatus' && typeof contextValue === 'string' && /^(Stage \d+\/\d+:)/i.test(contextValue)) {
-        // Keep full string but allow styling later; could parse label if needed
-        displayValue = contextValue.trim();
+      if (item.key === 'relationshipStatus') {
+        // Remove stage regex check; just use value or fallback
+        if ((!displayValue || displayValue === 'No context' || (typeof displayValue === 'string' && displayValue.trim() === '')) && preChatRelationshipLabel) {
+          displayValue = preChatRelationshipLabel;
+        }
       }
       const isEmpty = !displayValue || displayValue === 'No context' || (typeof displayValue === 'string' && displayValue.trim() === '');
       return {
@@ -329,14 +376,14 @@ export const ContextSidebar = ({
       const isEnabled = resolveEnabled(item.addonKey);
       return {
         label: item.label,
-        value: 'No context yet',
+        value: item.key === 'relationshipStatus' && preChatRelationshipLabel ? preChatRelationshipLabel : 'No context yet',
         key: item.key,
         isEnabled,
         isHistorical: false,
         icon: item.icon,
         gradient: item.gradient,
         bgColor: item.bgColor,
-        isEmpty: true,
+        isEmpty: !preChatRelationshipLabel || item.key !== 'relationshipStatus',
         addonKey: item.addonKey
       } as ContextItem;
     });
@@ -412,6 +459,12 @@ export const ContextSidebar = ({
   enabledItems.sort((a,b) => { const ac = a.isEmpty ? 1 : 0; const bc = b.isEmpty ? 1 : 0; return ac - bc; });
   // Final list for rendering
   const orderedItems = [...enabledItems, ...disabledItems];
+  // Force relationship card first
+  const relIdx = orderedItems.findIndex(i => i.key === 'relationshipStatus');
+  if (relIdx > 0) {
+    const [relItem] = orderedItems.splice(relIdx, 1);
+    orderedItems.unshift(relItem);
+  }
 
   return (
     <div className={`bg-[#1a1a2e] h-full text-white flex flex-col transition-all duration-300 select-none relative z-40 ${
@@ -552,30 +605,13 @@ export const ContextSidebar = ({
                             )}
                             {/* Relationship progress bar & Force Ready button */}
                             {item.key === 'relationshipStatus' && (
-                              <div className={`mt-2 space-y-2`} onClick={(e) => e.stopPropagation()}>
-                                {(() => {
-                                  const pct = relationshipProgress ? Math.round(relationshipProgress.percent * 100) : (relationshipMeta ? 0 : 0);
-                                  const ready = relationshipProgress ? relationshipProgress.ready : !!relationshipMeta?.ready_for_next;
-                                  const barPct = pct ?? 0;
-                                  const barColor = barPct >= 100 ? 'bg-green-500' : 'bg-gradient-to-r from-red-500 via-yellow-500 to-green-500';
-                                  return (
-                                    <div className="text-[10px]">
-                                      <div className="flex justify-between mb-1 text-[9px] uppercase tracking-wide text-slate-500">
-                                        <span>Stage Progress</span>
-                                        <span className={ready ? 'text-green-400' : 'text-slate-400'}>{barPct}%{ready ? ' Ready' : ''}</span>
-                                      </div>
-                                      <div className="h-1.5 rounded bg-slate-700/60 overflow-hidden relative">
-                                        <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${Math.min(100, Math.max(0, barPct))}%` }} />
-                                        {barPct === 0 && (
-                                          <div className="absolute inset-0 flex items-center justify-center text-[8px] text-slate-500 tracking-wide">
-                                            {relationshipMeta ? 'Initializing' : 'Waiting'}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-                                <ForceReadyAction meta={relationshipMeta} />
+                              <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                                {relationshipReady === true && (
+                                  <div className="text-[11px] font-semibold text-green-400 tracking-wide">Ready for next goal</div>
+                                )}
+                                {relationshipReady === false && (
+                                  <div className="text-[11px] font-semibold text-red-400 tracking-wide">Not ready to advance</div>
+                                )}
                               </div>
                             )}
                           </div>

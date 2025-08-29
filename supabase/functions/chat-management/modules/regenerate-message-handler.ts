@@ -102,6 +102,22 @@ export async function handleRegenerateMessage(
     const lastUserInHistory = [...filteredHistory].reverse().find((m: any) => !m.is_ai_message);
     const userMessage = lastUserInHistory?.content || '';
 
+    // Fetch relationship progress for regeneration prompt (no meta persistence)
+    let relationshipProgress: any = null;
+    try {
+      const { data: relRow } = await supabaseAdmin
+        .from('user_character_relationship_progress')
+        .select('state')
+        .eq('user_id', user.id)
+        .eq('character_id', characterId)
+        .maybeSingle();
+      relationshipProgress = relRow?.state || null;
+    } catch {}
+    if (relationshipProgress) {
+      // Attach transiently so assembler can pick it up if it uses currentContext
+      try { (currentContext as any)._relationshipProgress = relationshipProgress; } catch {}
+    }
+
     const { conversationResult } = await assembleConversation({
       character,
       addonSettings: effectiveAddonSettings,

@@ -127,18 +127,18 @@ function deriveRelationshipSignals(userMsg: string): Array<{ kind: string; weigh
 function buildCanonicalRelationship(template: any, progress: any): { display: string|null; meta: any } {
   if (!template || !template.enabled || !Array.isArray(template.path) || !progress) return { display: null, meta: null };
   const active = progress.active_order || progress.activeOrder || 1;
-  const total = template.path.length;
+  const total = template.path.length; // still used in meta
   const goal = template.path.find((g: any)=> (g.order === active));
   if (!goal) return { display: null, meta: null };
-  const base = `Stage ${active}/${total}: ${goal.label}`;
-  const withDesc = goal.description ? `${base} - ${goal.description}` : base;
-  // Compute next threshold %
+  const base = goal.label || null; // label only (remove "Stage x/x:" prefix and description)
+  if (!base) return { display: null, meta: null };
+  // Compute next threshold % (unchanged)
   let nextThreshold: number|null = null;
   const nextGoal = template.path.find((g:any)=> g.order === active+1);
   if (nextGoal) nextThreshold = nextGoal.threshold;
   const currentScore = Number(progress.current_score ?? 0);
   const percentToNext = nextThreshold ? Math.max(0, Math.min(1, currentScore / nextThreshold)) : null;
-  return { display: withDesc, meta: { active_order: active, total_stages: total, current_score: currentScore, next_threshold: nextThreshold, percent_to_next: percentToNext, pending_regression: !!progress.pending_regression, regression_candidate_order: progress.regression_candidate_order ?? null } };
+  return { display: base, meta: { active_order: active, total_stages: total, current_score: currentScore, next_threshold: nextThreshold, percent_to_next: percentToNext, pending_regression: !!progress.pending_regression, regression_candidate_order: progress.regression_candidate_order ?? null } };
 }
 
 Deno.serve(async (req) => {
@@ -232,14 +232,11 @@ Deno.serve(async (req) => {
       if (canonicalRelationship) {
         try {
           const baseObj = (priorContext && typeof priorContext === 'object') ? priorContext : {};
-          // Prefer full progress state if available; fallback to derived relationshipMeta
-          const fullMeta = relationshipProgress ? { ...relationshipProgress, percent_to_next: relationshipMeta?.percent_to_next ?? null } : relationshipMeta;
-          console.log('🔍 Saving initial context with relationship_meta(full):', { hasRelationship: !!canonicalRelationship, hasMeta: !!fullMeta, metaKeys: fullMeta && Object.keys(fullMeta) });
           await supabaseAdmin.from('chat_context').upsert({
             user_id: user.id,
             chat_id,
             character_id,
-            current_context: { ...baseObj, relationship: canonicalRelationship, relationship_meta: fullMeta || null }
+            current_context: { ...baseObj, relationship: canonicalRelationship }
           }, { onConflict: 'chat_id' });
         } catch (e) { console.warn('rel.initial.persist.fail', e); }
       }

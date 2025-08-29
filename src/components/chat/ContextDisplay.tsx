@@ -144,29 +144,8 @@ export const ContextDisplay = ({ context, contextUpdates, currentContext, addonS
   const [relationshipProgress, setRelationshipProgress] = useState<{ percent: number; ready: boolean } | null>(null);
   const [relationshipMeta, setRelationshipMeta] = useState<any>(null);
 
-  // Listen for relationship meta events (both new & legacy)
-  useEffect(() => {
-    const applyMeta = (incoming: any, source: string) => {
-      const meta = incoming?.relationshipMeta ? incoming.relationshipMeta : incoming; // unify shape
-      if (!meta || typeof meta !== 'object') return;
-      try { console.debug('[ContextDisplay] relationship meta received', { source, meta }); } catch {}
-      setRelationshipMeta(meta);
-      const pct = typeof meta.stage_progress_percent === 'number'
-        ? meta.stage_progress_percent
-        : (typeof meta.percent_to_next === 'number' ? meta.percent_to_next : undefined);
-      if (typeof pct === 'number') {
-        setRelationshipProgress({ percent: Math.max(0, Math.min(1, pct)), ready: !!meta.ready_for_next });
-      }
-    };
-    const handlerNew = (e: any) => applyMeta(e.detail, 'new-event');
-    const handlerLegacy = (e: any) => applyMeta(e.detail, 'legacy-event');
-    window.addEventListener('relationship-meta-updated', handlerNew);
-    window.addEventListener('relationship-meta-updated-legacy', handlerLegacy);
-    return () => {
-      window.removeEventListener('relationship-meta-updated', handlerNew);
-      window.removeEventListener('relationship-meta-updated-legacy', handlerLegacy);
-    };
-  }, []);
+  // Remove relationship meta event listeners (meta no longer emitted)
+  useEffect(() => { return () => {}; }, []);
 
   // Use the most relevant context source
   const effectiveContext = currentContext || context;
