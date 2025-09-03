@@ -1,0 +1,16 @@
+-- Schema: public
+
+-- Table: tags
+
+CREATE TABLE IF NOT EXISTS "public"."tags" (
+    "id" integer NOT NULL,
+    "name" "text" NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."tags" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "tags_select" ON "public"."tags" FOR SELECT USING (true);

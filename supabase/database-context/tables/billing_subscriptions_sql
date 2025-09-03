@@ -1,0 +1,22 @@
+-- Schema: billing
+
+-- Table: subscriptions
+
+CREATE TABLE IF NOT EXISTS "billing"."subscriptions" (
+    "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "plan_id" "uuid" NOT NULL,
+    "status" "billing"."subscription_status" NOT NULL,
+    "current_period_end" timestamp with time zone NOT NULL,
+    "stripe_subscription_id" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "paypal_subscription_id" "text"
+);
+
+-- RLS
+
+ALTER TABLE "billing"."subscriptions" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "Users can view own subscriptions" ON "billing"."subscriptions" FOR SELECT USING (("auth"."uid"() = "user_id"));

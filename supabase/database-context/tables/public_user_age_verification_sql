@@ -1,0 +1,20 @@
+-- Schema: public
+
+-- Table: user_age_verification
+
+CREATE TABLE IF NOT EXISTS "public"."user_age_verification" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "verified_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."user_age_verification" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "uav_self" ON "public"."user_age_verification" FOR SELECT USING (("user_id" = "auth"."uid"()));
+
+CREATE POLICY "uav_self_write" ON "public"."user_age_verification" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));

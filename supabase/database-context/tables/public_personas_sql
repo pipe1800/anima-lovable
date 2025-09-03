@@ -1,0 +1,24 @@
+-- Schema: public
+
+-- Table: personas
+
+CREATE TABLE IF NOT EXISTS "public"."personas" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "bio" "text",
+    "lore" "text",
+    "avatar_url" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."personas" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "personas_crud" ON "public"."personas" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+
+CREATE POLICY "personas_select" ON "public"."personas" FOR SELECT USING (("user_id" = "auth"."uid"()));

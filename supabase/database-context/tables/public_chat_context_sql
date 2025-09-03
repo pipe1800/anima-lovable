@@ -1,0 +1,28 @@
+-- Schema: public
+
+-- Table: chat_context
+
+CREATE TABLE IF NOT EXISTS "public"."chat_context" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "chat_id" "uuid" NOT NULL,
+    "current_context" "jsonb" DEFAULT '{"mood": null, "clothing": null, "location": null, "relationship": null, "time_weather": null, "urgency_level": null, "conversation_tone": null, "character_position": null}'::"jsonb" NOT NULL,
+    "last_updated_by_message_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "enchantment_status" "text",
+    "item_inventory" "text"
+);
+
+-- RLS
+
+ALTER TABLE "public"."chat_context" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "chat_context_all" ON "public"."chat_context" USING ((EXISTS ( SELECT 1
+   FROM "public"."chats" "c"
+  WHERE (("c"."id" = "chat_context"."chat_id") AND ("c"."user_id" = "auth"."uid"()))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM "public"."chats" "c"
+  WHERE (("c"."id" = "chat_context"."chat_id") AND ("c"."user_id" = "auth"."uid"())))));

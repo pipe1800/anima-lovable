@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION "public"."tg_characters_favorites_count"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if TG_OP = 'INSERT' then
+    update public.characters set favorites_count = favorites_count + 1
+    where id = NEW.character_id;

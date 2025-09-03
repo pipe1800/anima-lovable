@@ -1,0 +1,27 @@
+-- Schema: public
+
+-- Table: chats
+
+CREATE TABLE IF NOT EXISTS "public"."chats" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "title" "text",
+    "last_message_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "selected_persona_id" "uuid",
+    "context_ceiling_warned" boolean DEFAULT false,
+    "chat_mode" "text" DEFAULT 'storytelling'::"text" NOT NULL,
+    CONSTRAINT "chats_chat_mode_check" CHECK (("chat_mode" = ANY (ARRAY['storytelling'::"text", 'companion'::"text"])))
+);
+
+-- RLS
+
+ALTER TABLE "public"."chats" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "chats_crud" ON "public"."chats" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+
+CREATE POLICY "chats_select" ON "public"."chats" FOR SELECT USING (("user_id" = "auth"."uid"()));

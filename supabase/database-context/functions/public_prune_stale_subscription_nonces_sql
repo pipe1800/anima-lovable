@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION "public"."prune_stale_subscription_nonces"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+begin
+  delete from public.subscription_nonces where created_at < now() - interval '30 minutes';

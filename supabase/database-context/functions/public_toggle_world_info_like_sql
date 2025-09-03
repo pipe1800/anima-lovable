@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION "public"."toggle_world_info_like"("p_world_info_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+DECLARE
+  v_user_id UUID;

@@ -1,0 +1,20 @@
+-- Schema: public
+
+-- Table: user_character_world_info_settings
+
+CREATE TABLE IF NOT EXISTS "public"."user_character_world_info_settings" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "world_info_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."user_character_world_info_settings" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "user_character_world_info_settings_all" ON "public"."user_character_world_info_settings" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));

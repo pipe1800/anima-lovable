@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION "public"."handle_new_user_global_settings"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+BEGIN
+  -- Insert a row for the new user with default values (defaults enforce OFF)
+  INSERT INTO public.user_global_chat_settings (user_id)
+  VALUES (NEW.id)
+  ON CONFLICT (user_id) DO NOTHING;

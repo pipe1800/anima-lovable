@@ -1,0 +1,17 @@
+-- Schema: public
+
+-- Table: world_info_user_likes
+
+CREATE TABLE IF NOT EXISTS "public"."world_info_user_likes" (
+    "user_id" "uuid" NOT NULL,
+    "world_info_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+-- RLS
+
+ALTER TABLE "public"."world_info_user_likes" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "world_info_user_likes_all" ON "public"."world_info_user_likes" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));

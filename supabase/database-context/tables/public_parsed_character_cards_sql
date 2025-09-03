@@ -1,0 +1,26 @@
+-- Schema: public
+
+-- Table: parsed_character_cards
+
+CREATE TABLE IF NOT EXISTS "public"."parsed_character_cards" (
+    "hash" "text" NOT NULL,
+    "vendor" "text",
+    "version" "text",
+    "normalized" "jsonb" NOT NULL,
+    "avatar_public_url" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."parsed_character_cards" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "parsed_character_cards_block_delete" ON "public"."parsed_character_cards" FOR DELETE USING (false);
+
+CREATE POLICY "parsed_character_cards_block_insert" ON "public"."parsed_character_cards" FOR INSERT WITH CHECK (false);
+
+CREATE POLICY "parsed_character_cards_block_update" ON "public"."parsed_character_cards" FOR UPDATE USING (false) WITH CHECK (false);
+
+CREATE POLICY "parsed_character_cards_select" ON "public"."parsed_character_cards" FOR SELECT USING (false);

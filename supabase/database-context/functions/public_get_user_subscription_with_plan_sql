@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION "public"."get_user_subscription_with_plan"("p_user_id" "uuid") RETURNS json
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE v record;

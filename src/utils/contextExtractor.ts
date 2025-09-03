@@ -1,4 +1,6 @@
 import { supabase } from '@/db/client';
+import { ChatContextMaintenance } from '@/data';
+import { callEdgeFunction } from '@/data/edge/core/client';
 import type { TrackedContext } from '@/types/chat';
 import logger from '@/utils/logger';
 
@@ -48,11 +50,7 @@ function mergeWithPrev(partial: Partial<TrackedContext>): TrackedContext {
 
 async function dispatchFreshContextUpdate(chatId: string) {
   try {
-    const { data, error } = await supabase
-      .from('chat_context')
-      .select('current_context')
-      .eq('chat_id', chatId)
-      .maybeSingle();
+  const { data, error } = await ChatContextMaintenance.refetchContextCurrent(chatId);
     if (error) {
       logger.warn('⚠️ Failed to refetch chat_context after extraction', error);
       return;
@@ -109,18 +107,16 @@ export async function extractAndUpdateContext({
     logger.info('🔄 Calling extract-addon-context function...');
     
     // Call the extract-addon-context edge function
-    const { data, error } = await supabase.functions.invoke('extract-addon-context', {
-      body: {
-        chat_id: chatId,
-        character_id: characterId,
-        message_id: messageId,
-        user_message: userMessage,
-        ai_response: aiResponse,
-        addon_settings: addonSettings
-      }
+    const { ok, data, error } = await callEdgeFunction<any>('extract-addon-context', { // eslint-disable-line @typescript-eslint/no-explicit-any
+      chat_id: chatId,
+      character_id: characterId,
+      message_id: messageId,
+      user_message: userMessage,
+      ai_response: aiResponse,
+      addon_settings: addonSettings
     });
 
-    if (error) {
+    if (error || !ok) {
       logger.error('❌ Context extraction error:', error);
       return null;
     }
@@ -166,10 +162,7 @@ async function updateMessageWithContext(messageId: string, context: TrackedConte
   try {
     logger.info('💾 Updating message with context:', messageId);
     
-    const { error } = await supabase
-      .from('messages')
-      .update({ current_context: context as any }) // eslint-disable-line @typescript-eslint/no-explicit-any
-      .eq('id', messageId);
+  const { error } = await ChatContextMaintenance.updateMessageCurrentContext(messageId, context as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
     if (error) {
       logger.error('❌ Failed to update message with context:', error);
@@ -205,18 +198,16 @@ export async function extractContext(params: ExtractContextParams) {
   try {
     logger.info('🔄 Calling extract-addon-context function...');
     
-    const { data, error } = await supabase.functions.invoke('extract-addon-context', {
-      body: {
-        chat_id: params.chatId,
-        character_id: params.characterId,
-        message_id: params.messageId,
-        user_message: params.userMessage,
-        ai_response: params.aiResponse,
-        addon_settings: params.addonSettings
-      }
+    const { ok, data, error } = await callEdgeFunction<any>('extract-addon-context', { // eslint-disable-line @typescript-eslint/no-explicit-any
+      chat_id: params.chatId,
+      character_id: params.characterId,
+      message_id: params.messageId,
+      user_message: params.userMessage,
+      ai_response: params.aiResponse,
+      addon_settings: params.addonSettings
     });
 
-    if (error) {
+    if (error || !ok) {
       logger.error('❌ Context extraction error:', error);
       return null;
     }

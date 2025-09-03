@@ -1,0 +1,23 @@
+-- Schema: billing
+
+-- Table: credit_packs
+
+CREATE TABLE IF NOT EXISTS "billing"."credit_packs" (
+    "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
+    "name" "text" NOT NULL,
+    "price_cents" integer NOT NULL,
+    "credits_granted" integer NOT NULL,
+    "description" "text",
+    "is_active" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "credit_packs_credits_granted_check" CHECK (("credits_granted" > 0)),
+    CONSTRAINT "credit_packs_price_cents_check" CHECK (("price_cents" >= 0))
+);
+
+-- RLS
+
+ALTER TABLE "billing"."credit_packs" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "billing_credit_packs_select" ON "billing"."credit_packs" FOR SELECT USING (("is_active" = true));

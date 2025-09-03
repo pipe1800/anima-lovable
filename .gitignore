@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local env & bun lock (removed from repo)
+.env
+bun.lockb
+

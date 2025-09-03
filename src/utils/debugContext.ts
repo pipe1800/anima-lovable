@@ -1,4 +1,6 @@
 import { supabase } from '@/db/client';
+import { callEdgeFunction } from '@/data/edge/core/client';
+import { ChatContextMaintenance, DebugDiagnostics } from '@/data';
 
 // Lightweight local interfaces to avoid deep generic instantiation / codegen gaps
 interface ChatContextRow { id?: string; chat_id: string; user_id?: string; character_id?: string; created_at?: string; current_context?: Record<string, any> | null; }
@@ -9,12 +11,7 @@ export async function debugContextFlow(chatId: string, userId: string, character
   console.log('🔍 DEBUG: Starting context flow investigation for:', { chatId, userId, characterId });
   try {
     // 1. chat_context rows (limit 5)
-    const { data: chatContext, error: chatContextError } = await supabase
-      .from('chat_context')
-      .select('*')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: false })
-      .limit(5) as unknown as { data: ChatContextRow[]; error: any };
+  const { data: chatContext, error: chatContextError } = await ChatContextMaintenance.fetchRecentChatContext(chatId) as unknown as { data: ChatContextRow[]; error: any };
 
     const hasAnyContext = (chatContext || []).some(ctx => {
       const cc = ctx.current_context;
@@ -29,12 +26,7 @@ export async function debugContextFlow(chatId: string, userId: string, character
     });
 
     // 2. Recent messages (limit 10). Replace deprecated / wrong column `is_user` with `is_ai_message`.
-    const { data: messages, error: messagesError } = await supabase
-      .from('messages')
-      .select('id, content, current_context, created_at, is_ai_message')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: false })
-      .limit(10) as unknown as { data: MessageRow[]; error: any };
+  const { data: messages, error: messagesError } = await DebugDiagnostics.fetchChatMessagesForDebug(chatId) as unknown as { data: MessageRow[]; error: any };
 
     const recentMessages = (messages || []).slice(0, 3).map(m => ({
       id: m.id,
@@ -52,12 +44,7 @@ export async function debugContextFlow(chatId: string, userId: string, character
     });
 
     // 3. User addon settings (table may not be in generated types yet) - cast supabase to any
-    const { data: addonSettings, error: addonError } = await (supabase as any)
-      .from('user_character_addons')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('character_id', characterId)
-      .maybeSingle() as { data: AddonSettingsRow | null; error: any };
+  const { data: addonSettings, error: addonError } = await DebugDiagnostics.fetchAddonSettings(userId, characterId) as { data: AddonSettingsRow | null; error: any };
 
     console.log('⚙️ Addon settings:', {
       data: addonSettings,
@@ -67,11 +54,7 @@ export async function debugContextFlow(chatId: string, userId: string, character
     });
 
     // 4. Chat existence
-    const { data: chat, error: chatError } = await supabase
-      .from('chats')
-      .select('id, user_id, character_id, created_at')
-      .eq('id', chatId)
-      .maybeSingle();
+  const { data: chat, error: chatError } = await DebugDiagnostics.fetchChatInfo(chatId);
 
     console.log('💬 Chat info:', { data: chat, error: chatError, exists: !!chat });
 
@@ -85,44 +68,30 @@ export async function debugContextFlow(chatId: string, userId: string, character
 export async function repairContextForChat(chatId: string, userId: string, characterId: string) {
   console.log('🔧 Starting context repair for chat:', chatId);
   try {
-    const { data: existingContexts, error: fetchError } = await supabase
-      .from('chat_context')
-      .select('*')
-      .eq('chat_id', chatId)
-      .eq('user_id', userId)
-      .eq('character_id', characterId) as unknown as { data: ChatContextRow[]; error: any };
+  const { data: existingContexts, error: fetchError } = await DebugDiagnostics.fetchExistingChatContexts(chatId, userId, characterId) as unknown as { data: ChatContextRow[]; error: any };
 
     console.log('🔧 Existing contexts:', { existingContexts, fetchError, count: existingContexts?.length || 0 });
 
     if (existingContexts && existingContexts.length > 0) {
       console.log('🔧 Deleting existing broken contexts');
-      const { error: deleteError } = await supabase
-        .from('chat_context')
-        .delete()
-        .eq('chat_id', chatId)
-        .eq('user_id', userId)
-        .eq('character_id', characterId);
+  const { error: deleteError } = await DebugDiagnostics.deleteChatContexts(chatId, userId, characterId);
       if (deleteError) console.error('🔧 Error deleting contexts:', deleteError);
     }
 
     console.log('🔧 Creating new context record with correct format');
-    const { data: newContext, error: createError } = await supabase
-      .from('chat_context')
-      .insert({
-        user_id: userId,
-        character_id: characterId,
-        chat_id: chatId,
-        current_context: {
-          mood: 'happy and excited',
-          clothing: 'maid uniform',
-          location: 'bedroom',
-          time_weather: 'evening',
-          relationship: 'servant and master',
-          character_position: 'standing'
-        }
-      })
-      .select()
-      .single();
+    const { data: newContext, error: createError } = await ChatContextMaintenance.insertOrReplaceChatContext({
+      chatId,
+      userId,
+      characterId,
+      currentContext: {
+        mood: 'happy and excited',
+        clothing: 'maid uniform',
+        location: 'bedroom',
+        time_weather: 'evening',
+        relationship: 'servant and master',
+        character_position: 'standing'
+      }
+    }) as any;
 
     console.log('🔧 Created context:', { newContext, createError });
     if (createError) throw createError;
@@ -136,11 +105,11 @@ export async function repairContextForChat(chatId: string, userId: string, chara
 export async function testEdgeFunction(chatId: string, testMessage: string) {
   console.log('🧪 Testing edge function with message:', testMessage);
   try {
-    const { data, error } = await supabase.functions.invoke('chat-management', {
-      body: { action: 'send_message', chatId, message: testMessage, test: true }
+    const result = await callEdgeFunction<any>('chat-management', { // eslint-disable-line @typescript-eslint/no-explicit-any
+      action: 'send_message', chatId, message: testMessage, test: true
     });
-    console.log('🧪 Edge function response:', { data, error });
-    return { data, error };
+    console.log('🧪 Edge function response:', result);
+    return { data: result.data, error: result.error };
   } catch (error) {
     console.error('🧪 Edge function test error:', error);
     throw error;

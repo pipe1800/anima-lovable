@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."list_public_world_infos"("p_search" "text" DEFAULT NULL::"text", "p_sort" "text" DEFAULT 'interactions'::"text", "p_offset" integer DEFAULT 0, "p_limit" integer DEFAULT 20, "p_exclude_nsfw" boolean DEFAULT false, "p_tag_ids" integer[] DEFAULT NULL::integer[]) RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_items jsonb;

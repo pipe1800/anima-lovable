@@ -1,0 +1,29 @@
+-- Schema: public
+
+-- Table: character_latent_profile_history
+
+CREATE TABLE IF NOT EXISTS "public"."character_latent_profile_history" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "profile" "jsonb" NOT NULL,
+    "source_card_hash" "text" NOT NULL,
+    "extraction_version" "text" NOT NULL,
+    "confidence_avg" numeric(4,3),
+    "populated_domains" smallint NOT NULL,
+    "token_cost" integer,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "relationship_goals" "jsonb",
+    CONSTRAINT "character_latent_profile_history_populated_domains_check" CHECK ((("populated_domains" >= 0) AND ("populated_domains" <= 20))),
+    CONSTRAINT "character_latent_profile_history_profile_shape" CHECK (("jsonb_typeof"("profile") = 'object'::"text")),
+    CONSTRAINT "character_latent_profile_history_relationship_goals_shape" CHECK ((("relationship_goals" IS NULL) OR ("jsonb_typeof"("relationship_goals") = 'object'::"text")))
+);
+
+-- RLS
+
+ALTER TABLE "public"."character_latent_profile_history" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "service role insert history" ON "public"."character_latent_profile_history" FOR INSERT WITH CHECK (("auth"."role"() = 'service_role'::"text"));
+
+CREATE POLICY "service role select history" ON "public"."character_latent_profile_history" FOR SELECT USING (("auth"."role"() = 'service_role'::"text"));

@@ -1,0 +1,26 @@
+-- Schema: billing
+
+-- Table: transactions
+
+CREATE TABLE IF NOT EXISTS "billing"."transactions" (
+    "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "gateway" "billing"."gateway_type" NOT NULL,
+    "gateway_transaction_id" "text",
+    "amount" integer NOT NULL,
+    "currency" "text" NOT NULL,
+    "status" "billing"."transaction_status" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "purchase_type" "billing"."transaction_purchase_type",
+    "subscription_id" "uuid",
+    "credit_pack_purchase_id" "uuid",
+    CONSTRAINT "transactions_purchase_type_integrity" CHECK ((("purchase_type" IS NULL) OR ((("purchase_type" = 'subscription'::"billing"."transaction_purchase_type") AND ("subscription_id" IS NOT NULL) AND ("credit_pack_purchase_id" IS NULL)) OR (("purchase_type" = 'credit_pack'::"billing"."transaction_purchase_type") AND ("credit_pack_purchase_id" IS NOT NULL) AND ("subscription_id" IS NULL)))))
+);
+
+-- RLS
+
+ALTER TABLE "billing"."transactions" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "billing_transactions_select" ON "billing"."transactions" FOR SELECT USING (("user_id" = "auth"."uid"()));

@@ -1,0 +1,5 @@
+npx supabase gen types typescript --project-id rclpyipeytqbamiwcuih --schema public,billing,auth > src/integrations/supabase/types.ts
+
+npm run export:schema:dump -- --redump
+
+npx supabase functions deploy

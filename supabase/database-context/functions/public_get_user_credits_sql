@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION "public"."get_user_credits"("p_user_id" "uuid") RETURNS integer
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE v_balance integer;

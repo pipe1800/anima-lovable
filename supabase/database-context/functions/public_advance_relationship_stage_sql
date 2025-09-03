@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."advance_relationship_stage"("p_user_id" "uuid", "p_character_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_template jsonb;

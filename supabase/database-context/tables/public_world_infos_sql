@@ -1,0 +1,26 @@
+-- Schema: public
+
+-- Table: world_infos
+
+CREATE TABLE IF NOT EXISTS "public"."world_infos" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "creator_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "short_description" "text",
+    "visibility" "text" DEFAULT 'private'::"text" NOT NULL,
+    "interaction_count" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "likes_count" integer DEFAULT 0 NOT NULL,
+    CONSTRAINT "world_infos_visibility_check" CHECK (("visibility" = ANY (ARRAY['public'::"text", 'unlisted'::"text", 'private'::"text"])))
+);
+
+-- RLS
+
+ALTER TABLE "public"."world_infos" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "world_infos_crud" ON "public"."world_infos" USING (("creator_id" = "auth"."uid"())) WITH CHECK (("creator_id" = "auth"."uid"()));
+
+CREATE POLICY "world_infos_public_select" ON "public"."world_infos" FOR SELECT USING ((("visibility" = 'public'::"text") OR ("creator_id" = "auth"."uid"())));

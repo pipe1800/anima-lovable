@@ -1,0 +1,69 @@
+-- Schema: public
+
+-- Table: user_global_chat_settings
+
+CREATE TABLE IF NOT EXISTS "public"."user_global_chat_settings" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "dynamic_world_info" boolean DEFAULT false,
+    "enhanced_memory" boolean DEFAULT false,
+    "mood_tracking" boolean DEFAULT false,
+    "clothing_inventory" boolean DEFAULT false,
+    "location_tracking" boolean DEFAULT false,
+    "time_and_weather" boolean DEFAULT false,
+    "relationship_status" boolean DEFAULT false,
+    "character_position" boolean DEFAULT false,
+    "chain_of_thought" boolean DEFAULT false,
+    "few_shot_examples" boolean DEFAULT false,
+    "streaming_mode" character varying(20) DEFAULT 'smooth'::character varying,
+    "font_size" character varying(10) DEFAULT 'normal'::character varying,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "nsfw_enabled" boolean DEFAULT false,
+    "ai_text_color" "text" DEFAULT '#E5E7EB'::"text" NOT NULL,
+    "user_text_color" "text" DEFAULT '#FFFFFF'::"text" NOT NULL,
+    "show_character_avatar" boolean DEFAULT true NOT NULL,
+    "show_user_avatar" boolean DEFAULT false NOT NULL,
+    "avatar_shape" "text" DEFAULT 'circle'::"text" NOT NULL,
+    "avatar_size" "text" DEFAULT 'md'::"text" NOT NULL,
+    "background_image_url" "text",
+    "ai_bubble_color" "text" DEFAULT '#1f2937'::"text" NOT NULL,
+    "ai_bubble_opacity" numeric DEFAULT 0.9 NOT NULL,
+    "user_bubble_color" "text" DEFAULT '#FF7A00'::"text" NOT NULL,
+    "user_bubble_opacity" numeric DEFAULT 1 NOT NULL,
+    "semantic_overrides_mode" "text" DEFAULT 'default'::"text" NOT NULL,
+    "speech_color" "text",
+    "action_color" "text",
+    "emphasis_color" "text",
+    "parenthetical_color" "text",
+    "avatar_style" "text" DEFAULT 'classic'::"text" NOT NULL,
+    "avatar_overlay_opacity" numeric DEFAULT 0.6,
+    "avatar_overlay_color" "text" DEFAULT '#000000'::"text",
+    "avatar_blur_nsfw" boolean DEFAULT true,
+    "portrait_frame_style" "text" DEFAULT 'clean'::"text",
+    "portrait_frame_color" "text" DEFAULT '#4B5563'::"text",
+    "banner_width" "text" DEFAULT 'md'::"text",
+    "banner_tint_from_avatar" boolean DEFAULT false,
+    "god_mode" boolean DEFAULT false NOT NULL,
+    "enchantment_status" boolean DEFAULT false,
+    "item_inventory" boolean DEFAULT false,
+    CONSTRAINT "user_global_chat_settings_ai_bubble_opacity_check" CHECK ((("ai_bubble_opacity" >= (0)::numeric) AND ("ai_bubble_opacity" <= (1)::numeric))),
+    CONSTRAINT "user_global_chat_settings_avatar_overlay_opacity_check" CHECK ((("avatar_overlay_opacity" >= (0)::numeric) AND ("avatar_overlay_opacity" <= (1)::numeric))),
+    CONSTRAINT "user_global_chat_settings_avatar_shape_check" CHECK (("avatar_shape" = ANY (ARRAY['circle'::"text", 'rounded'::"text"]))),
+    CONSTRAINT "user_global_chat_settings_avatar_size_check" CHECK (("avatar_size" = ANY (ARRAY['sm'::"text", 'md'::"text", 'lg'::"text"]))),
+    CONSTRAINT "user_global_chat_settings_avatar_style_check" CHECK (("avatar_style" = ANY (ARRAY['classic'::"text", 'bubble-bg'::"text", 'portrait'::"text", 'side-banner'::"text"]))),
+    CONSTRAINT "user_global_chat_settings_banner_width_check" CHECK (("banner_width" = ANY (ARRAY['sm'::"text", 'md'::"text", 'lg'::"text"]))),
+    CONSTRAINT "user_global_chat_settings_font_size_check" CHECK ((("font_size")::"text" = ANY (ARRAY[('small'::character varying)::"text", ('normal'::character varying)::"text", ('large'::character varying)::"text"]))),
+    CONSTRAINT "user_global_chat_settings_portrait_frame_style_check" CHECK (("portrait_frame_style" = ANY (ARRAY['clean'::"text", 'polaroid'::"text", 'foil'::"text"]))),
+    CONSTRAINT "user_global_chat_settings_semantic_mode_check" CHECK (("semantic_overrides_mode" = ANY (ARRAY['default'::"text", 'custom'::"text", 'disabled'::"text"]))),
+    CONSTRAINT "user_global_chat_settings_streaming_mode_check" CHECK ((("streaming_mode")::"text" = ANY (ARRAY[('instant'::character varying)::"text", ('smooth'::character varying)::"text"]))),
+    CONSTRAINT "user_global_chat_settings_user_bubble_opacity_check" CHECK ((("user_bubble_opacity" >= (0)::numeric) AND ("user_bubble_opacity" <= (1)::numeric)))
+);
+
+-- RLS
+
+ALTER TABLE "public"."user_global_chat_settings" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "user_global_chat_settings_owner" ON "public"."user_global_chat_settings" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));

@@ -1,0 +1,22 @@
+-- Schema: public
+
+-- Table: user_character_relationship_progress
+
+CREATE TABLE IF NOT EXISTS "public"."user_character_relationship_progress" (
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "state" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_character_relationship_progress_state_shape" CHECK (("jsonb_typeof"("state") = 'object'::"text"))
+);
+
+-- RLS
+
+ALTER TABLE "public"."user_character_relationship_progress" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "service role manage relationship progress" ON "public"."user_character_relationship_progress" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));
+
+CREATE POLICY "user manage own relationship progress" ON "public"."user_character_relationship_progress" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));

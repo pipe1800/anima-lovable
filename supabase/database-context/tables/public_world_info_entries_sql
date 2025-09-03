@@ -1,0 +1,27 @@
+-- Schema: public
+
+-- Table: world_info_entries
+
+CREATE TABLE IF NOT EXISTS "public"."world_info_entries" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "world_info_id" "uuid" NOT NULL,
+    "keywords" "text"[] NOT NULL,
+    "entry_text" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "world_info_entries_entry_text_length_chk" CHECK (("length"("entry_text") <= 6000)),
+    CONSTRAINT "world_info_entries_keywords_count_chk" CHECK ((("array_length"("keywords", 1) IS NOT NULL) AND ("array_length"("keywords", 1) <= 12))),
+    CONSTRAINT "world_info_entries_keywords_item_length_chk" CHECK ("public"."array_all_item_length_lte"("keywords", 40))
+);
+
+-- RLS
+
+ALTER TABLE "public"."world_info_entries" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "world_info_entries_all" ON "public"."world_info_entries" USING ((EXISTS ( SELECT 1
+   FROM "public"."world_infos" "w"
+  WHERE (("w"."id" = "world_info_entries"."world_info_id") AND ("w"."creator_id" = "auth"."uid"()))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM "public"."world_infos" "w"
+  WHERE (("w"."id" = "world_info_entries"."world_info_id") AND ("w"."creator_id" = "auth"."uid"())))));

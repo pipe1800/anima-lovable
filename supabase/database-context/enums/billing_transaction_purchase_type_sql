@@ -1,0 +1,4 @@
+CREATE TYPE "billing"."transaction_purchase_type" AS ENUM (
+    'subscription',
+    'credit_pack'
+);

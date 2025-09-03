@@ -1,0 +1,25 @@
+-- Schema: billing
+
+-- Table: plans
+
+CREATE TABLE IF NOT EXISTS "billing"."plans" (
+    "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
+    "name" "text" NOT NULL,
+    "price_monthly" integer,
+    "price_yearly" integer,
+    "monthly_credits_allowance" integer DEFAULT 0 NOT NULL,
+    "features" "jsonb",
+    "stripe_price_id_monthly" "text",
+    "is_active" boolean DEFAULT true NOT NULL,
+    "paypal_subscription_id" "text",
+    "model_id" "uuid",
+    "stripe_price_id_yearly" "text"
+);
+
+-- RLS
+
+ALTER TABLE "billing"."plans" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "billing_plans_select" ON "billing"."plans" FOR SELECT USING (true);

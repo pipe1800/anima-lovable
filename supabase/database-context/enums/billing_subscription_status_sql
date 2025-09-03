@@ -1,0 +1,6 @@
+CREATE TYPE "billing"."subscription_status" AS ENUM (
+    'active',
+    'past_due',
+    'canceled',
+    'trialing'
+);

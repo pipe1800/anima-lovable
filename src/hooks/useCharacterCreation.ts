@@ -495,10 +495,11 @@ export function useCharacterCreation() {
           setIsLatentExtracting(true);
           // Removed AbortController (not supported in supabase.functions.invoke options)
           try {
-            const { error: lpError } = await (await import('@/db/client')).supabase.functions.invoke('extract-latent-profile', {
-              body: { character_id: character.id }
-            });
-            if (lpError) console.warn('latent profile invoke error', lpError);
+            const { CharacterFunctions } = await import('@/data');
+            const resp = await CharacterFunctions.extractLatentProfile(character.id);
+            if (!resp.ok) {
+              console.warn('latent profile invoke error', resp.error);
+            }
           } catch (invErr) {
             console.warn('latent profile invoke failed', invErr);
           }

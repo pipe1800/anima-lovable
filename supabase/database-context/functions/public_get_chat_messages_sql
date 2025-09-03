@@ -1,0 +1,38 @@
+CREATE OR REPLACE FUNCTION "public"."get_chat_messages"("p_chat_id" "uuid", "p_limit" integer DEFAULT 30, "p_before_order" bigint DEFAULT NULL::bigint) RETURNS TABLE("id" "uuid", "chat_id" "uuid", "author_id" "uuid", "is_ai_message" boolean, "content" "text", "created_at" timestamp with time zone, "message_order" bigint, "current_context" "jsonb", "context_updates" "jsonb", "has_more" boolean)
+    LANGUAGE "sql"
+    AS $$
+  with base as (
+    select m.id,
+           m.chat_id,
+           m.author_id,
+           m.is_ai_message,
+           m.content,
+           m.created_at,
+           m.message_order,
+           cc.current_context,
+           null::jsonb as context_updates
+    from public.messages m
+    join public.chats c on c.id = m.chat_id and c.user_id = auth.uid()
+    left join public.chat_context cc on cc.chat_id = m.chat_id
+    where m.chat_id = p_chat_id
+      and (p_before_order is null or m.message_order < p_before_order)
+    order by m.message_order desc
+    limit least(greatest(p_limit,1), 100)
+  )
+  select b.id,
+         b.chat_id,
+         b.author_id,
+         b.is_ai_message,
+         b.content,
+         b.created_at,
+         b.message_order,
+         b.current_context,
+         b.context_updates,
+         exists (
+           select 1 from public.messages m2
+           join public.chats c2 on c2.id = m2.chat_id and c2.user_id = auth.uid()
+           where m2.chat_id = p_chat_id
+             and m2.message_order < (select min(message_order) from base)
+         ) as has_more
+  from base b
+  order by b.message_order desc;

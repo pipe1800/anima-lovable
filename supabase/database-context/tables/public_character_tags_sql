@@ -1,0 +1,24 @@
+-- Schema: public
+
+-- Table: character_tags
+
+CREATE TABLE IF NOT EXISTS "public"."character_tags" (
+    "character_id" "uuid" NOT NULL,
+    "tag_id" integer NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."character_tags" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "character_tags_select" ON "public"."character_tags" FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_tags"."character_id") AND (("c"."visibility" = 'public'::"text") OR ("c"."creator_id" = "auth"."uid"()))))));
+
+CREATE POLICY "character_tags_write" ON "public"."character_tags" USING ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_tags"."character_id") AND ("c"."creator_id" = "auth"."uid"()))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_tags"."character_id") AND ("c"."creator_id" = "auth"."uid"())))));

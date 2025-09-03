@@ -1,0 +1,20 @@
+-- Schema: public
+
+-- Table: world_info_tags
+
+CREATE TABLE IF NOT EXISTS "public"."world_info_tags" (
+    "world_info_id" "uuid" NOT NULL,
+    "tag_id" integer NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."world_info_tags" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "world_info_tags_all" ON "public"."world_info_tags" USING ((EXISTS ( SELECT 1
+   FROM "public"."world_infos" "w"
+  WHERE (("w"."id" = "world_info_tags"."world_info_id") AND ("w"."creator_id" = "auth"."uid"()))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM "public"."world_infos" "w"
+  WHERE (("w"."id" = "world_info_tags"."world_info_id") AND ("w"."creator_id" = "auth"."uid"())))));

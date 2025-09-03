@@ -1,0 +1,5 @@
+CREATE TYPE "billing"."model_tier" AS ENUM (
+    'standard',
+    'premium',
+    'experimental'
+);

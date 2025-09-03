@@ -1,0 +1,29 @@
+-- Schema: public
+
+-- Table: character_latent_profiles
+
+CREATE TABLE IF NOT EXISTS "public"."character_latent_profiles" (
+    "character_id" "uuid" NOT NULL,
+    "profile" "jsonb" NOT NULL,
+    "source_card_hash" "text" NOT NULL,
+    "extraction_version" "text" NOT NULL,
+    "confidence_avg" numeric(4,3),
+    "populated_domains" smallint NOT NULL,
+    "token_cost" integer,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "relationship_goals" "jsonb",
+    CONSTRAINT "character_latent_profiles_populated_domains_check" CHECK ((("populated_domains" >= 0) AND ("populated_domains" <= 20))),
+    CONSTRAINT "character_latent_profiles_profile_shape" CHECK (("jsonb_typeof"("profile") = 'object'::"text")),
+    CONSTRAINT "character_latent_profiles_relationship_goals_shape" CHECK ((("relationship_goals" IS NULL) OR ("jsonb_typeof"("relationship_goals") = 'object'::"text")))
+);
+
+-- RLS
+
+ALTER TABLE "public"."character_latent_profiles" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "authenticated_users_read_latent_profiles" ON "public"."character_latent_profiles" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
+
+CREATE POLICY "service role manage latent profiles" ON "public"."character_latent_profiles" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));

@@ -1,0 +1,27 @@
+-- Schema: billing
+
+-- Table: credit_pack_purchases
+
+CREATE TABLE IF NOT EXISTS "billing"."credit_pack_purchases" (
+    "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "credit_pack_id" "uuid" NOT NULL,
+    "paypal_order_id" "text",
+    "amount_paid_cents" integer NOT NULL,
+    "credits_granted" integer NOT NULL,
+    "status" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "credit_pack_purchases_amount_paid_cents_check" CHECK (("amount_paid_cents" >= 0)),
+    CONSTRAINT "credit_pack_purchases_credits_granted_check" CHECK (("credits_granted" > 0)),
+    CONSTRAINT "credit_pack_purchases_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'completed'::"text", 'failed'::"text"])))
+);
+
+-- RLS
+
+ALTER TABLE "billing"."credit_pack_purchases" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "Users can view own purchases" ON "billing"."credit_pack_purchases" FOR SELECT USING (("auth"."uid"() = "user_id"));
+
+CREATE POLICY "billing_credit_pack_purchases_insert" ON "billing"."credit_pack_purchases" FOR INSERT WITH CHECK (("user_id" = "auth"."uid"()));

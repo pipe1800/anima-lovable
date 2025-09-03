@@ -1,0 +1,26 @@
+-- Schema: public
+
+-- Table: character_world_info_link
+
+CREATE TABLE IF NOT EXISTS "public"."character_world_info_link" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "world_info_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."character_world_info_link" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "cwil_modify" ON "public"."character_world_info_link" USING ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_world_info_link"."character_id") AND ("c"."creator_id" = "auth"."uid"()))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_world_info_link"."character_id") AND ("c"."creator_id" = "auth"."uid"())))));
+
+CREATE POLICY "cwil_select" ON "public"."character_world_info_link" FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_world_info_link"."character_id") AND ("c"."creator_id" = "auth"."uid"())))));

@@ -1,0 +1,17 @@
+-- Schema: billing
+
+-- Table: credits
+
+CREATE TABLE IF NOT EXISTS "billing"."credits" (
+    "user_id" "uuid" NOT NULL,
+    "balance" integer DEFAULT 0 NOT NULL,
+    CONSTRAINT "credits_balance_check" CHECK (("balance" >= 0))
+);
+
+-- RLS
+
+ALTER TABLE "billing"."credits" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "Users can view own credits" ON "billing"."credits" FOR SELECT USING (("auth"."uid"() = "user_id"));

@@ -1,0 +1,17 @@
+-- Schema: billing
+
+-- Table: models
+
+CREATE TABLE IF NOT EXISTS "billing"."models" (
+    "id" "uuid" DEFAULT "extensions"."uuid_generate_v4"() NOT NULL,
+    "name" "text" NOT NULL,
+    "provider_model_id" "text" NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "billing"."models" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "billing_models_select" ON "billing"."models" FOR SELECT USING (true);

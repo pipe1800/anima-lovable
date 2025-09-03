@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."get_billing_catalog"("p_user_id" "uuid") RETURNS json
+    LANGUAGE "plpgsql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_plans json;

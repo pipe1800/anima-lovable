@@ -1,0 +1,4 @@
+CREATE TYPE "billing"."gateway_type" AS ENUM (
+    'stripe',
+    'paypal'
+);

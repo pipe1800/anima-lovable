@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."user_world_infos_list"() RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_auth uuid := auth.uid();

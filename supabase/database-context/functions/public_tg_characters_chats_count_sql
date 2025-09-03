@@ -1,0 +1,8 @@
+CREATE OR REPLACE FUNCTION "public"."tg_characters_chats_count"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  if TG_OP = 'INSERT' then
+    update public.characters set chats_count = chats_count + 1
+    where id = NEW.character_id;

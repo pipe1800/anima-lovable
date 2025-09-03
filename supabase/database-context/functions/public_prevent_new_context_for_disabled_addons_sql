@@ -1,0 +1,11 @@
+CREATE OR REPLACE FUNCTION "public"."prevent_new_context_for_disabled_addons"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO ''
+    AS $$
+BEGIN
+  -- This trigger is informational only - it doesn't delete any data
+  -- The actual prevention of new context creation happens in the chat edge function
+  -- This ensures historical context is NEVER deleted
+  
+  IF OLD.addon_settings IS DISTINCT FROM NEW.addon_settings THEN
+    RAISE NOTICE 'Addon settings changed for user % character % - historical context preserved', NEW.user_id, NEW.character_id;

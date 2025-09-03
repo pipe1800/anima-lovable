@@ -1,0 +1,36 @@
+-- Schema: public
+
+-- Table: characters
+
+CREATE TABLE IF NOT EXISTS "public"."characters" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "creator_id" "uuid" NOT NULL,
+    "name" "text" NOT NULL,
+    "short_description" "text",
+    "avatar_url" "text",
+    "visibility" "text" DEFAULT 'private'::"text" NOT NULL,
+    "interaction_count" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "tagline" "text",
+    "likes_count" integer DEFAULT 0 NOT NULL,
+    "favorites_count" integer DEFAULT 0 NOT NULL,
+    "chats_count" integer DEFAULT 0 NOT NULL,
+    "messages_count" integer DEFAULT 0 NOT NULL,
+    "was_public" boolean DEFAULT false NOT NULL,
+    CONSTRAINT "characters_visibility_check" CHECK (("visibility" = ANY (ARRAY['public'::"text", 'unlisted'::"text", 'private'::"text"])))
+);
+
+-- RLS
+
+ALTER TABLE "public"."characters" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "characters_delete" ON "public"."characters" FOR DELETE USING (("creator_id" = "auth"."uid"()));
+
+CREATE POLICY "characters_insert" ON "public"."characters" FOR INSERT WITH CHECK (("creator_id" = "auth"."uid"()));
+
+CREATE POLICY "characters_select" ON "public"."characters" FOR SELECT USING ((("visibility" = 'public'::"text") OR ("creator_id" = "auth"."uid"())));
+
+CREATE POLICY "characters_update" ON "public"."characters" FOR UPDATE USING (("creator_id" = "auth"."uid"())) WITH CHECK (("creator_id" = "auth"."uid"()));

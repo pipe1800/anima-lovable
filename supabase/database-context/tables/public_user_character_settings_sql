@@ -1,0 +1,22 @@
+-- Schema: public
+
+-- Table: user_character_settings
+
+CREATE TABLE IF NOT EXISTS "public"."user_character_settings" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "chat_mode" "text" DEFAULT 'storytelling'::"text" NOT NULL,
+    "time_awareness_enabled" boolean DEFAULT false,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_character_settings_chat_mode_check" CHECK (("chat_mode" = ANY (ARRAY['storytelling'::"text", 'companion'::"text"])))
+);
+
+-- RLS
+
+ALTER TABLE "public"."user_character_settings" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "user_character_settings_all" ON "public"."user_character_settings" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));

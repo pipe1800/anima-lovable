@@ -1,0 +1,16 @@
+-- Schema: public
+
+-- Table: public_app_settings
+
+CREATE TABLE IF NOT EXISTS "public"."public_app_settings" (
+    "setting_key" "text" NOT NULL,
+    "setting_value" "text" NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."public_app_settings" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "public_app_settings_select" ON "public"."public_app_settings" FOR SELECT USING (true);

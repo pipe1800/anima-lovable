@@ -1,0 +1,9 @@
+CREATE TYPE "billing"."credit_transaction_type" AS ENUM (
+    'initial_grant',
+    'subscription_allowance',
+    'top_up_purchase',
+    'message_cost',
+    'image_gen_cost',
+    'admin_adjustment',
+    'onboarding_reward'
+);

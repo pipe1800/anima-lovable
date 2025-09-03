@@ -1,0 +1,19 @@
+-- Schema: public
+
+-- Table: onboarding_checklist_items
+
+CREATE TABLE IF NOT EXISTS "public"."onboarding_checklist_items" (
+    "id" integer NOT NULL,
+    "task_key" "text" NOT NULL,
+    "title" "text" NOT NULL,
+    "description" "text",
+    "reward_credits" integer DEFAULT 0 NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."onboarding_checklist_items" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "onboarding_items_ro" ON "public"."onboarding_checklist_items" FOR SELECT USING (true);

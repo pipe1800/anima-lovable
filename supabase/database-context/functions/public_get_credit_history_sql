@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integer DEFAULT 50, "p_offset" integer DEFAULT 0) RETURNS TABLE("id" bigint, "change_amount" integer, "balance_after" integer, "transaction_type" "text", "description" "text", "created_at" timestamp with time zone)
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+BEGIN
+  PERFORM public._assert_self(p_user_id);

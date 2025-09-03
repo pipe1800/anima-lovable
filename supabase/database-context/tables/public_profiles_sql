@@ -1,0 +1,28 @@
+-- Schema: public
+
+-- Table: profiles
+
+CREATE TABLE IF NOT EXISTS "public"."profiles" (
+    "id" "uuid" NOT NULL,
+    "username" "text" NOT NULL,
+    "avatar_url" "text",
+    "bio" "text",
+    "onboarding_completed" boolean DEFAULT false NOT NULL,
+    "onboarding_survey_data" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "default_persona_id" "uuid",
+    "timezone" "text" DEFAULT 'UTC'::"text",
+    "banner_url" "text",
+    "banner_updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+-- RLS
+
+ALTER TABLE "public"."profiles" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "profiles_owner_select" ON "public"."profiles" FOR SELECT USING (("id" = "auth"."uid"()));
+
+CREATE POLICY "profiles_update" ON "public"."profiles" FOR UPDATE USING (("id" = "auth"."uid"())) WITH CHECK (("id" = "auth"."uid"()));

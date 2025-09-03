@@ -1,0 +1,29 @@
+-- Schema: public
+
+-- Table: character_definitions
+
+CREATE TABLE IF NOT EXISTS "public"."character_definitions" (
+    "character_id" "uuid" NOT NULL,
+    "greeting" "text",
+    "description" "text",
+    "personality_summary" "text" NOT NULL,
+    "scenario" "jsonb",
+    "initial_addon_context_enabled" boolean DEFAULT false NOT NULL,
+    "initial_addon_context" "jsonb"
+);
+
+-- RLS
+
+ALTER TABLE "public"."character_definitions" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "character_def_select" ON "public"."character_definitions" FOR SELECT USING ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_definitions"."character_id") AND (("c"."visibility" = 'public'::"text") OR ("c"."creator_id" = "auth"."uid"()))))));
+
+CREATE POLICY "character_def_write" ON "public"."character_definitions" USING ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_definitions"."character_id") AND ("c"."creator_id" = "auth"."uid"()))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM "public"."characters" "c"
+  WHERE (("c"."id" = "character_definitions"."character_id") AND ("c"."creator_id" = "auth"."uid"())))));

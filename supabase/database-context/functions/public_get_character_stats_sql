@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."get_character_stats"("character_id" "uuid") RETURNS TABLE("total_chats" bigint, "total_messages" bigint, "unique_users" bigint, "average_rating" numeric, "total_favorites" bigint, "total_likes" bigint)
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
+    AS $$
+DECLARE
+  can_view boolean;

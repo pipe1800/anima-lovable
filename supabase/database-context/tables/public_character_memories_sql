@@ -1,0 +1,37 @@
+-- Schema: public
+
+-- Table: character_memories
+
+CREATE TABLE IF NOT EXISTS "public"."character_memories" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "chat_id" "uuid",
+    "summary_content" "text" NOT NULL,
+    "trigger_keywords" "text"[] NOT NULL,
+    "message_count" integer NOT NULL,
+    "input_token_cost" integer NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "is_auto_summary" boolean DEFAULT false,
+    "name" "text",
+    "last_injected_at" timestamp with time zone,
+    "injection_count" integer DEFAULT 0,
+    "content_hash" "text",
+    "ai_sequence_start" integer,
+    "ai_sequence_end" integer,
+    "embedding" "public"."vector"(1536),
+    CONSTRAINT "character_memories_summary_length_chk" CHECK ((("summary_content" IS NULL) OR ("length"("summary_content") <= 7000))),
+    CONSTRAINT "character_memories_trigger_keywords_count_chk" CHECK ((("trigger_keywords" IS NULL) OR ("array_length"("trigger_keywords", 1) <= 15))),
+    CONSTRAINT "character_memories_trigger_keywords_item_length_chk" CHECK ((("trigger_keywords" IS NULL) OR "public"."array_all_item_length_lte"("trigger_keywords", 40)))
+);
+
+-- RLS
+
+ALTER TABLE "public"."character_memories" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "character_memories_select" ON "public"."character_memories" FOR SELECT USING (("user_id" = "auth"."uid"()));
+
+CREATE POLICY "character_memories_write" ON "public"."character_memories" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));

@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION "public"."prune_expired_summary_locks"() RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    AS $$
+begin
+  delete from public.summary_locks where expires_at < now();

@@ -1,0 +1,30 @@
+CREATE OR REPLACE FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) RETURNS TABLE("id" "uuid", "name" "text", "avatar_url" "text", "short_description" "text", "likes_count" integer, "chats_count" integer, "creator" "jsonb", "tags" "jsonb")
+    LANGUAGE "plpgsql"
+    AS $$
+begin
+  if tag_ids is null or array_length(tag_ids, 1) is null then
+    return query
+    select
+      c.id,
+      c.name,
+      c.avatar_url,
+      c.short_description,
+      c.likes_count,
+      c.chats_count,
+      jsonb_build_object('username', p.username, 'avatar_url', p.avatar_url) as creator,
+      coalesce(
+        (
+          select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name) order by s.name)
+          from (
+            select distinct t.id, t.name
+            from public.character_tags ct
+            join public.tags t on t.id = ct.tag_id
+            where ct.character_id = c.id
+          ) s
+        ), '[]'::jsonb
+      ) as tags
+    from public.characters c
+    left join public.profiles p on p.id = c.creator_id
+    where c.visibility = 'public' and c.id <> current_character_id
+    order by c.chats_count desc, c.likes_count desc
+    limit 10;

@@ -1,0 +1,5 @@
+CREATE TYPE "billing"."transaction_status" AS ENUM (
+    'succeeded',
+    'pending',
+    'failed'
+);

@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."deduct_user_credits"("p_user_id" "uuid", "p_amount" integer, "p_operation_type" "text" DEFAULT 'message_cost'::"text", "p_description" "text" DEFAULT NULL::"text") RETURNS integer
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+DECLARE
+  v_current integer;

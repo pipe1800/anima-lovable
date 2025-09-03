@@ -1,0 +1,20 @@
+-- Schema: public
+
+-- Table: character_favorites
+
+CREATE TABLE IF NOT EXISTS "public"."character_favorites" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."character_favorites" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "character_favorites_select" ON "public"."character_favorites" FOR SELECT USING (("user_id" = "auth"."uid"()));
+
+CREATE POLICY "character_favorites_write" ON "public"."character_favorites" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));

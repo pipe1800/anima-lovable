@@ -1,0 +1,28 @@
+-- Schema: billing
+
+-- Table: credit_ledger
+
+CREATE TABLE IF NOT EXISTS "billing"."credit_ledger" (
+    "id" bigint NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "change_amount" integer NOT NULL,
+    "transaction_type" "billing"."credit_transaction_type" NOT NULL,
+    "description" "text",
+    "related_transaction_id" "uuid",
+    "related_message_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "billing"."credit_ledger" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "credit_ledger_block_delete" ON "billing"."credit_ledger" FOR DELETE USING (false);
+
+CREATE POLICY "credit_ledger_block_insert" ON "billing"."credit_ledger" FOR INSERT WITH CHECK (false);
+
+CREATE POLICY "credit_ledger_block_update" ON "billing"."credit_ledger" FOR UPDATE USING (false) WITH CHECK (false);
+
+CREATE POLICY "credit_ledger_select" ON "billing"."credit_ledger" FOR SELECT USING (("user_id" = "auth"."uid"()));

@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION "public"."get_user_persona_context"("p_user_id" "uuid" DEFAULT "auth"."uid"(), "p_chat_id" "uuid" DEFAULT NULL::"uuid", "p_include_list" boolean DEFAULT false) RETURNS json
+    LANGUAGE "plpgsql" STABLE
+    AS $$
+declare
+  v_default_persona uuid;

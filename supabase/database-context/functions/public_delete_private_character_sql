@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."delete_private_character"("p_character_id" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_creator uuid;

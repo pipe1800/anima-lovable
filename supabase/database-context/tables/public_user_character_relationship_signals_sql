@@ -1,0 +1,25 @@
+-- Schema: public
+
+-- Table: user_character_relationship_signals
+
+CREATE TABLE IF NOT EXISTS "public"."user_character_relationship_signals" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "character_id" "uuid" NOT NULL,
+    "kind" "text" NOT NULL,
+    "weight" numeric(5,3) NOT NULL,
+    "polarity" smallint NOT NULL,
+    "source_message_id" "uuid",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "user_character_relationship_signals_polarity_check" CHECK (("polarity" = ANY (ARRAY[1, '-1'::integer])))
+);
+
+-- RLS
+
+ALTER TABLE "public"."user_character_relationship_signals" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "service role manage relationship signals" ON "public"."user_character_relationship_signals" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));
+
+CREATE POLICY "user manage own relationship signals" ON "public"."user_character_relationship_signals" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));

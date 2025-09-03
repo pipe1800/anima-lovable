@@ -1,0 +1,5 @@
+CREATE OR REPLACE FUNCTION "public"."enforce_credit_pack_purchase_status"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  NEW.status := 'pending';

@@ -1,0 +1,18 @@
+-- Schema: public
+
+-- Table: subscription_nonces
+
+CREATE TABLE IF NOT EXISTS "public"."subscription_nonces" (
+    "id" "uuid" NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "provisional_subscription_id" "text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+-- RLS
+
+ALTER TABLE "public"."subscription_nonces" ENABLE ROW LEVEL SECURITY;
+
+-- POLICIES
+
+CREATE POLICY "subscription_nonces_service" ON "public"."subscription_nonces" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));

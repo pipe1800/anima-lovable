@@ -1,0 +1,6 @@
+CREATE OR REPLACE FUNCTION "public"."relationship_progress_action"("p_user_id" "uuid", "p_character_id" "uuid", "p_op" "text", "p_payload" "jsonb" DEFAULT '{}'::"jsonb") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_auth uuid := auth.uid();

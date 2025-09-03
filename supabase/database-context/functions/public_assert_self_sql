@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION "public"."_assert_self"("p_target" "uuid") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'billing', 'auth'
+    AS $$
+BEGIN
+  -- Allow service role to bypass
+  IF current_setting('request.jwt.claim.role', true) IS DISTINCT FROM 'service_role' THEN
+    IF auth.uid() IS DISTINCT FROM p_target THEN
+      RAISE EXCEPTION 'Access denied (ownership check failed)';
