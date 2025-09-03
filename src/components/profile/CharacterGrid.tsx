@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useChatCreation } from '@/hooks/useChatCreation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { MessageCircle, Heart, Edit, User } from 'lucide-react';
@@ -98,10 +99,14 @@ export const CharacterGrid = ({ type }: CharacterGridProps) => {
           className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-80 group"
         >
           <CardContent className="p-0 relative h-full">
-            <img 
+            <OptimizedImage 
               src={character.avatar_url || "/placeholder.svg"} 
               alt={character.name}
+              width={400}
+              height={320}
+              quality={80}
               className="absolute inset-0 w-full h-full object-cover"
+              objectPosition="top"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
             

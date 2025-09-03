@@ -5,7 +5,7 @@
  * and complete chat creation with greeting functionality.
  */
 
-import { fetchCharacterData } from './character-fetcher.ts';
+import { fetchCharacterData, getBestPersonaForNewChat } from './database.ts';
 import { mapGlobalSettingsToAddonSettings, sanitizeAddonSettings, anyAddonEnabled } from '../../_shared/settings-mapper.ts';
 import type { AddonSettings } from '../types/streaming-interfaces.ts';
 import type { CreateWithGreetingRequest, ChatResponse } from '../types/index.ts';
@@ -161,7 +161,6 @@ export async function fetchUserPersona(
 ): Promise<{ name: string } | null> {
   let userPersona: { name: string } | null = null;
   if (selectedPersonaId) {
-    // Get the selected persona details
     const { data: persona } = await supabase
       .from('personas')
       .select('name')
@@ -170,14 +169,12 @@ export async function fetchUserPersona(
       .single();
     if (persona) return persona;
   }
-  // If no selected persona, get user's default persona from profile
   const { data: profile } = await supabase
     .from('profiles')
     .select('default_persona_id')
     .eq('id', userId)
     .single();
   if (profile?.default_persona_id) {
-    // Get the default persona details
     const { data: defaultPersona } = await supabase
       .from('personas')
       .select('name')
@@ -186,7 +183,6 @@ export async function fetchUserPersona(
       .single();
     if (defaultPersona) return defaultPersona;
   }
-  // If still no persona, try to get user's first created persona as fallback
   const { data: firstPersona } = await supabase
     .from('personas')
     .select('name')
@@ -199,7 +195,7 @@ export async function fetchUserPersona(
 }
 
 /**
- * MAIN FUNCTION: Handle complete chat creation with greeting
+ * MAIN FUNCTION: Handle complete chat creation with greeting (strict RLS path)
  */
 export async function handleCreateWithGreeting(
   request: CreateWithGreetingRequest,
@@ -208,24 +204,68 @@ export async function handleCreateWithGreeting(
   supabaseAdmin: any,
   req?: Request
 ): Promise<ChatResponse> {
+  const requestId = (req?.headers.get('x-request-id') || crypto.randomUUID());
   try {
-    const { charactersData, worldInfos, greeting, selectedPersonaId, chatMode } = request;
-    if (!charactersData || charactersData.length === 0) {
-      throw new Error('No character data provided');
-    }
+    const { charactersData, greeting, selectedPersonaId, chatMode } = request;
+    if (!charactersData || charactersData.length === 0) throw new Error('No character data provided');
     const character = charactersData[0];
     const character_id = character.id;
     const character_name = character.name;
-    const [userProfileResult] = await Promise.allSettled([
-      supabase.from('profiles').select('username').eq('id', user.id).single()
-    ]);
-    const userProfile = userProfileResult.status === 'fulfilled' ? userProfileResult.value.data : null;
-    const userPersona = await fetchUserPersona(selectedPersonaId || null, user.id, supabase);
-    const characterData = await fetchCharacterData(character_id, supabase);
-    if (!characterData) {
-      throw new Error('Character not found or access denied');
+
+    // Profile fetch
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('username, default_persona_id')
+      .eq('id', user.id)
+      .single();
+
+    // Persona resolution
+    let effectivePersonaId: string | null = selectedPersonaId || null;
+    if (effectivePersonaId) {
+      const { data: owned } = await supabase
+        .from('personas')
+        .select('id')
+        .eq('id', effectivePersonaId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (!owned) {
+        console.warn('createWithGreeting.persona.unownedOrMissing', { requestId, userId: user.id, attemptedPersonaId: effectivePersonaId });
+        effectivePersonaId = null;
+      }
     }
-    // Parse personality_summary for manual initial addon context
+    if (!effectivePersonaId) {
+      try { effectivePersonaId = await getBestPersonaForNewChat(user.id, character_id, supabase); } catch (e) { console.warn('createWithGreeting.getBestPersona.fail', { requestId, userId: user.id, message: (e as Error)?.message }); }
+    }
+    const userPersona = await fetchUserPersona(effectivePersonaId, user.id, supabase);
+
+    // Strict two-step character fetch (no admin fallback)
+    const { data: baseChar, error: baseErr } = await supabase
+      .from('characters')
+      .select('id,name,creator_id,visibility')
+      .eq('id', character_id)
+      .maybeSingle();
+    if (baseErr) {
+      console.error('createWithGreeting.character.fetch.base.error', { requestId, character_id, code: (baseErr as any)?.code, message: baseErr.message });
+    }
+    if (!baseChar) throw new Error(`Character not found: ${character_id}`);
+    const allowedVis = ['public','unlisted','global'];
+    const isOwner = baseChar.creator_id === user.id;
+    const visibility = (baseChar as any).visibility || null;
+    if (!isOwner && visibility && !allowedVis.includes(visibility)) {
+      console.warn('createWithGreeting.character.visibility.block', { requestId, character_id, visibility, userId: user.id, creator_id: baseChar.creator_id });
+      throw new Error('Character access denied');
+    }
+    const { data: defs, error: defsErr } = await supabase
+      .from('character_definitions')
+      .select('personality_summary,greeting,scenario,example_dialogs')
+      .eq('character_id', character_id)
+      .maybeSingle();
+    if (defsErr) {
+      console.warn('createWithGreeting.character.defs.warn', { requestId, character_id, message: defsErr.message });
+    }
+    const characterData = { id: baseChar.id, name: baseChar.name, creator_id: baseChar.creator_id, character_definitions: defs || {} };
+
+    // Parse manual initial context flags
     let manualInitialEnabled = false; let manualInitialContext: any = null;
     try {
       const rawSummary = characterData?.character_definitions?.personality_summary;
@@ -235,20 +275,22 @@ export async function handleCreateWithGreeting(
         manualInitialContext = parsed?.initial_addon_context || null;
       }
     } catch {}
+
     const { data: userCharSettings } = await supabaseAdmin
       .from('user_character_settings')
       .select('chat_mode')
       .eq('user_id', user.id)
       .eq('character_id', character_id)
       .single();
-    let effectiveChatMode: 'storytelling' | 'companion' = userCharSettings?.chat_mode || chatMode || 'storytelling';
+    const effectiveChatMode: 'storytelling' | 'companion' = userCharSettings?.chat_mode || chatMode || 'storytelling';
+
     const { data: chat, error: chatError } = await supabase
       .from('chats')
       .insert({
         user_id: user.id,
         character_id: character_id,
         title: `Chat with ${character_name}`,
-        selected_persona_id: selectedPersonaId,
+        selected_persona_id: effectivePersonaId,
         chat_mode: effectiveChatMode,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -257,15 +299,14 @@ export async function handleCreateWithGreeting(
       .select()
       .single();
     if (chatError) {
-      throw new Error('Failed to create chat');
+      console.error('createWithGreeting.chat.insert.error', { requestId, userId: user.id, characterId: character_id, effectivePersonaId, chatMode: effectiveChatMode, code: (chatError as any)?.code, details: (chatError as any)?.details, hint: (chatError as any)?.hint, message: chatError.message });
+      const err = new Error('Failed to create chat'); (err as any).cause = chatError; throw err;
     }
-    const templateReplacer = createTemplateReplacer(userPersona, userProfile, character_name);
+
+    const templateReplacer = createTemplateReplacer(userPersona, profileData, character_name);
     const greetingText = greeting || generateGreeting(characterData, character_name, templateReplacer);
     let processedGreeting = greetingText;
-    // Sanitize (remove) conflicting clothing/location lines instead of injecting overrides
-    if (manualInitialEnabled && manualInitialContext) {
-      try { processedGreeting = sanitizeGreetingConflicts(processedGreeting, manualInitialContext); } catch (e) { console.warn('⚠️ Greeting sanitize failed', e); }
-    }
+    if (manualInitialEnabled && manualInitialContext) { try { processedGreeting = sanitizeGreetingConflicts(processedGreeting, manualInitialContext); } catch (e) { console.warn('greeting.sanitize.fail', { requestId, message: (e as Error)?.message }); } }
 
     const { error: messageError } = await supabase
       .from('messages')
@@ -278,66 +319,29 @@ export async function handleCreateWithGreeting(
         message_order: 1,
         created_at: new Date().toISOString()
       });
-    if (messageError) {
-      throw new Error('Failed to create greeting message');
-    }
-    // Seed manual initial addon context into chat_context if enabled
+    if (messageError) throw new Error('Failed to create greeting message');
+
     if (manualInitialEnabled && manualInitialContext && typeof manualInitialContext === 'object') {
       const cleaned = Object.fromEntries(Object.entries(manualInitialContext).filter(([_,v]) => typeof v === 'string' && v.trim()));
       if (Object.keys(cleaned).length) {
         try {
-          await supabase.from('chat_context').upsert({
-            chat_id: chat.id,
-            user_id: user.id,
-            character_id: character_id,
-            current_context: cleaned
-          }, { onConflict: 'chat_id' });
-          // Fire-and-forget initial extraction call with injected context so extractor skips those fields
+          await supabase.from('chat_context').upsert({ chat_id: chat.id, user_id: user.id, character_id: character_id, current_context: cleaned }, { onConflict: 'chat_id' });
           try {
             const supabaseUrl = (() => { try { return globalThis.Deno?.env?.get('SUPABASE_URL'); } catch { return (globalThis as any)?.process?.env?.SUPABASE_URL; } })();
             if (supabaseUrl) {
               const authHeader = req?.headers.get('authorization') || '';
-              fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, {
-                method: 'POST',
-                headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  chat_id: chat.id,
-                  character_id: character_id,
-                  mode: 'initial',
-                  initial_context: cleaned,
-                  addon_settings: {}
-                })
-              }).then(r => console.log('🔄 Initial extract-addon-context (seed) status', r.status)).catch(e => console.warn('⚠️ initial extract-addon-context call failed', e));
+              fetch(`${supabaseUrl}/functions/v1/extract-addon-context`, { method: 'POST', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chat.id, character_id, mode: 'initial', initial_context: cleaned, addon_settings: {} }) }).catch(() => {});
             }
-          } catch (callErr) {
-            console.warn('⚠️ Failed to invoke initial extract-addon-context function', callErr);
-          }
-        } catch (seedErr) {
-          console.log('⚠️ Failed to seed manual initial addon context (greeting path)', seedErr);
-        }
+          } catch {}
+        } catch (seedErr) { console.warn('addon.initial.seed.fail', { requestId, message: (seedErr as Error)?.message }); }
       }
     }
-    // Removed manual relationship stage seeding to rely solely on sync_relationship_context_for_chat
-    // This ensures a single authoritative update on chat creation.
 
-    // Canonical per-chat sync via RPC (single invocation)
-    try {
-      await supabase.rpc('sync_relationship_context_for_chat', {
-        p_user_id: user.id,
-        p_character_id: character_id,
-        p_chat_id: chat.id
-      });
-    } catch (e) {
-      console.warn('rel.sync.rpc.fail', e);
-    }
+    try { await supabase.rpc('sync_relationship_context_for_chat', { p_user_id: user.id, p_character_id: character_id, p_chat_id: chat.id }); } catch (e) { console.warn('rel.sync.rpc.fail', { requestId, message: (e as Error)?.message }); }
 
-    return {
-      success: true,
-      chat_id: chat.id,
-      greeting: processedGreeting,
-      data: { message: 'Chat with greeting created successfully', contextInfo: null }
-    };
+    return { success: true, chat_id: chat.id, greeting: processedGreeting, greeting_used: processedGreeting, persona_id: effectivePersonaId, data: { message: 'Chat with greeting created successfully' } };
   } catch (error: any) {
+    console.error('createWithGreeting.unhandled', { requestId, message: error?.message, cause: (error?.cause && (error.cause as any)?.message) || null });
     return { success: false, error: error.message };
   }
 }

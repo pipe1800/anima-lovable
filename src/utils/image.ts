@@ -47,3 +47,21 @@ export const getThumbUrl = (
     return url;
   }
 };
+
+// Preload optimized images
+export const preloadImage = (url: string, opts?: { width?: number; quality?: number; format?: 'webp' | 'jpg' | 'png' }) => {
+  const optimizedUrl = getThumbUrl(url, opts);
+  
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = optimizedUrl;
+  });
+};
+
+// Batch preload images
+export const preloadImages = async (urls: string[], opts?: { width?: number; quality?: number; format?: 'webp' | 'jpg' | 'png' }) => {
+  const promises = urls.map(url => preloadImage(url, opts).catch(() => null)); // Ignore errors
+  return Promise.allSettled(promises);
+};

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Button } from '@/components/ui/button';
 import { 
   MessageCircle, 
@@ -109,10 +110,14 @@ export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCha
             onClick={() => { if (window.innerWidth < 768) handleViewCharacter(character); }}
           >
             <CardContent className="p-0 relative h-full">
-              <img 
+              <OptimizedImage 
                 src={character.avatar_url || "/placeholder.svg"} 
                 alt={character.name}
+                width={400}
+                height={320}
+                quality={80}
                 className="absolute inset-0 w-full h-full object-cover"
+                objectPosition="top"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
               

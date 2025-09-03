@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Heart, MessageCircle } from 'lucide-react';
@@ -94,10 +95,14 @@ export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedC
         >
           <Card className="overflow-hidden hover:shadow-md transition-shadow">
             <div className="aspect-[3/4] relative overflow-hidden">
-              <img
+              <OptimizedImage
                 src={character.avatar_url || "/placeholder.svg"}
                 alt={character.name}
+                width={300}
+                height={240}
+                quality={80}
                 className="w-full h-full object-cover"
+                objectPosition="top"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
               

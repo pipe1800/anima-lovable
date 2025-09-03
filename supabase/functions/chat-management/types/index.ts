@@ -95,5 +95,7 @@ export interface ChatResponse {
   error?: string;
   chat_id?: string;
   greeting?: string;
+  greeting_used?: string;
+  persona_id?: string | null;
   context?: string;
 }

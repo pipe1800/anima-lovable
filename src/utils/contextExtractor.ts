@@ -48,9 +48,17 @@ function mergeWithPrev(partial: Partial<TrackedContext>): TrackedContext {
   };
 }
 
+let __lastContextRefetchAt = 0;
+const CONTEXT_REFETCH_DEBOUNCE_MS = 1000;
 async function dispatchFreshContextUpdate(chatId: string) {
+  const now = Date.now();
+  if (now - __lastContextRefetchAt < CONTEXT_REFETCH_DEBOUNCE_MS) {
+    logger.debug('⏱️ Skipping context refetch (debounced)');
+    return;
+  }
+  __lastContextRefetchAt = now;
   try {
-  const { data, error } = await ChatContextMaintenance.refetchContextCurrent(chatId);
+    const { data, error } = await ChatContextMaintenance.refetchContextCurrent(chatId);
     if (error) {
       logger.warn('⚠️ Failed to refetch chat_context after extraction', error);
       return;

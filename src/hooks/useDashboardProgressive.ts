@@ -12,8 +12,10 @@ export const useDashboardOverview = () => {
     queryKey: ['dashboard', 'overview-rpc', userId],
     // Enable as soon as we know the user id (profile not required). This avoids races where profile delays query start.
     enabled: !!userId,
-    staleTime: 60 * 1000,
-    gcTime: 5 * 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 minutes - data stays fresh longer
+    gcTime: 15 * 60 * 1000, // 15 minutes - keep in cache longer
+    refetchOnWindowFocus: false, // Prevent unnecessary refetches on tab switching
+    refetchOnMount: false, // Don't refetch if data is still fresh
     queryFn: async () => {
       if (!userId) throw new Error('User not authenticated');
 

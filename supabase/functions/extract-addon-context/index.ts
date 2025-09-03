@@ -185,7 +185,7 @@ Deno.serve(async (req) => {
     // FETCH character + prior context
     const fetchStart = performance.now();
     const [character, priorCtxRow] = await Promise.all([
-      fetchCharacterData(character_id, supabase),
+      fetchCharacterData(character_id, supabase, { full: false }),
       // Replaced direct table query with existing RPC get_chat_context to enforce RLS via auth.uid()
       supabase.rpc('get_chat_context', { p_chat_id: chat_id, p_user_id: user.id, p_character_id: character_id })
     ]);
@@ -201,8 +201,9 @@ Deno.serve(async (req) => {
       relationshipTemplate = tmplResp.data?.relationship_goals || null;
       const templateEnabled = !!relationshipTemplate?.enabled;
       if (templateEnabled) {
-        // Evaluate progression ALWAYS (time awareness gate removed in updated function)
+        // Defer evaluation slightly to allow chat creation + context sync to settle
         try {
+          await new Promise(r => setTimeout(r, 300));
           const evalResp = await supabase.rpc('evaluate_relationship_progress', { p_user_id: user.id, p_character_id: character_id });
           relationshipProgress = evalResp.data || null;
         } catch (e) { console.warn('rel.eval.fail', e); }

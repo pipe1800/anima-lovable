@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
+import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Button } from '@/components/ui/button';
 import { 
   MessageCircle, 
@@ -222,12 +223,14 @@ export function CharacterGrid({
             onMouseEnter={() => prefetchCharacterDetails(character.id)}
           >
             <CardContent className="p-0 relative h-full">
-              <img 
-                src={getThumbUrl(character.avatar_url, { width: 512, quality: 70, format: 'webp' })} 
+              <OptimizedImage 
+                src={character.avatar_url || "/placeholder.svg"} 
                 alt={character.name}
-                loading="lazy"
-                decoding="async"
+                width={400}
+                height={320}
+                quality={80}
                 className="absolute inset-0 w-full h-full object-cover"
+                objectPosition="top"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
               

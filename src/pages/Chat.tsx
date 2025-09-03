@@ -52,26 +52,8 @@ const Chat = () => {
     }
   }, [relationshipStage]);
 
-  useEffect(() => {
-    if (!currentChatId || !characterId) return;
-    let cancelled = false;
-    const fetchCtx = async () => {
-      try {
-        const { supabase } = await import('@/db/client');
-        const { data, error } = await (supabase as any)
-          .from('chat_context')
-          .select('current_context')
-          .eq('chat_id', currentChatId)
-          .maybeSingle();
-        if (!cancelled && data?.current_context?.relationship) {
-          setRelationshipStage(data.current_context.relationship as string);
-        }
-      } catch {}
-    };
-    fetchCtx();
-    const id = setInterval(fetchCtx, 15000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [currentChatId, characterId]);
+  // Removed legacy polling of chat_context (duplicate of realtime + unified hook)
+  // Relationship stage now updated via 'chat-context-updated' events only.
   useEffect(() => {
     const handler = (e: any) => {
       if (e?.detail?.chatId === currentChatId && e.detail?.context?.relationship) {

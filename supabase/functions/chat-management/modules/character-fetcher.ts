@@ -34,22 +34,17 @@ interface UserProfile {
  */
 export async function fetchCharacterData(
   characterId: string,
-  supabase: any
+  supabase: any,
+  options?: { full?: boolean }
 ): Promise<CharacterData> {
   try {
-    // Try to get character from characters table with all relations
+    const full = options?.full === true;
+    const baseSelect = `id, name, greeting, personality_summary, context_settings, character_definitions(*)`;
+    const fullExtras = `, personality, description, instructions, scenario, example_conversations, world_info:world_infos(id,name,description,world_id,worlds(id,name,description))`;
+    const selectClause = full ? baseSelect + fullExtras : baseSelect;
     const { data: character, error: characterError } = await supabase
       .from('characters')
-      .select(`
-        id, name, personality, description, instructions, scenario, example_conversations, greeting,
-        personality_summary,
-        context_settings,
-        character_definitions (*),
-        world_info:world_infos(
-          id, name, description, world_id,
-          worlds(id, name, description)
-        )
-      `)
+      .select(selectClause)
       .eq('id', characterId)
       .single();
 
@@ -60,7 +55,7 @@ export async function fetchCharacterData(
 
     // Fallback: Try character_definitions if not found in characters
     console.log('Character not found in characters table, trying character_definitions...');
-    const { data: def, error: defError } = await supabase
+  const { data: def, error: defError } = await supabase
       .from('character_definitions')
       .select('*')
       .eq('character_id', characterId)

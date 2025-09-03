@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -437,10 +438,14 @@ export default function CharacterProfile() {
                   <div className="flex-shrink-0 mx-auto md:mx-0">
                     <div className="relative w-84 h-105 md:w-67 md:h-84 rounded-lg overflow-hidden shadow-xl ring-4 ring-background">
                       {character.avatar_url ? (
-                        <img 
+                        <OptimizedImage 
                           src={character.avatar_url} 
                           alt={character.name}
+                          width={400}
+                          height={500}
+                          quality={85}
                           className="w-full h-full object-cover"
+                          objectPosition="top"
                         />
                       ) : (
                         <div className="w-full h-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">

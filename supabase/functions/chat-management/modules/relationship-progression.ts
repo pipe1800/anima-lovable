@@ -207,83 +207,23 @@ export interface ProcessRelationshipLifecycleParams {
 export async function processRelationshipLifecycle(params: ProcessRelationshipLifecycleParams): Promise<{ relationshipProgress: any; currentContext: any; }> {
   const { supabase, supabaseAdmin, user, chatId, characterId, message, messageHistory, currentContext, requestId } = params;
   let relationshipProgress: any = null;
-
-  // Fetch current relationship progress state
   try {
-    const { data: rawStateRow, error: rawStateErr } = await supabaseAdmin
-      .from('user_character_relationship_progress')
-      .select('state')
-      .eq('user_id', user.id)
-      .eq('character_id', characterId)
-      .maybeSingle();
-    if (rawStateErr) {
-      logger.warn('relationship.state.fetch.error', { requestId, chatId, msg: rawStateErr.message });
-    } else if (rawStateRow?.state) {
-      relationshipProgress = rawStateRow.state; // state column is jsonb
-    }
-  } catch (e) {
-    logger.warn('relationship.state.fetch.exception', { requestId, chatId, message: (e as Error)?.message });
-  }
-
-  // Evaluate progress conditionally
-  let performedEvaluation = false; // kept for parity (not used externally)
-  try {
-    const lastEvalAt = relationshipProgress?.last_eval_at ? new Date(relationshipProgress.last_eval_at).getTime() : 0;
-    const ageMs = Date.now() - lastEvalAt;
-    const missingThreshold = !!relationshipProgress && (
-      !('next_threshold' in relationshipProgress) ||
-      (relationshipProgress.active_order > 1 && (relationshipProgress.current_stage_threshold == null))
-    );
-    const needsEval = !relationshipProgress || missingThreshold || ageMs > 60_000 || relationshipProgress.ready_for_next || relationshipProgress.pending_regression;
-    if (needsEval) {
-      const { data: evalState, error: evalErr } = await supabaseAdmin.rpc('evaluate_relationship_progress', { p_user_id: user.id, p_character_id: characterId });
-      if (evalErr) {
-        logger.warn('relationship.eval.error', { requestId, chatId, msg: evalErr.message, ageMs, hadState: !!relationshipProgress });
-      } else {
-        relationshipProgress = evalState;
-        performedEvaluation = true;
-        logger.debug('relationship.eval.performed', { requestId, chatId, ageMs, ready: !!relationshipProgress?.ready_for_next });
-      }
+    const { data: snapshot, error: snapErr } = await supabaseAdmin.rpc('get_or_evaluate_relationship_snapshot', {
+      p_user_id: user.id,
+      p_character_id: characterId,
+      p_force_eval: false,
+      p_auto_promote: true
+    });
+    if (snapErr) {
+      logger.warn('relationship.snapshot.error', { requestId, chatId, msg: snapErr.message });
     } else {
-      logger.debug('relationship.eval.skipped', { requestId, chatId, ageMs, ready: !!relationshipProgress?.ready_for_next });
+      relationshipProgress = snapshot;
+      if (relationshipProgress?._invitationJustIssued) {
+        logger.debug('relationship.snapshot.invitationJustIssued', { requestId, chatId });
+      }
     }
   } catch (e) {
-    logger.warn('relationship.eval.exception', { requestId, chatId, message: (e as Error)?.message });
-  }
-
-  // IMMEDIATE PROMOTION: if ready & still unasked, flip to asked_pending BEFORE prompt assembly
-  if (relationshipProgress && relationshipProgress.ready_for_next && relationshipProgress.invitation_status === 'ready_unasked') {
-    logger.debug('relationship.invitation.prePrompt.promote.attempt', { requestId, chatId, active_order: relationshipProgress.active_order, current_score: relationshipProgress.current_score });
-    try {
-      const { data: promotedState, error: promoteErr } = await supabaseAdmin.rpc('set_relationship_invitation_status', { p_user_id: user.id, p_character_id: characterId, p_action: 'asked' });
-      if (promoteErr) {
-        logger.warn('relationship.invitation.prePrompt.promote.fail', { requestId, chatId, err: promoteErr.message });
-      } else {
-        // Some PostgREST drivers return the updated JSON; if null, re-fetch row
-        if (promotedState && !promotedState.error) {
-          relationshipProgress = promotedState;
-        } else {
-          const { data: refetchedRow, error: refetchErr } = await supabaseAdmin
-            .from('user_character_relationship_progress')
-            .select('state')
-            .eq('user_id', user.id)
-            .eq('character_id', characterId)
-            .maybeSingle();
-          if (!refetchErr && refetchedRow?.state) {
-            relationshipProgress = refetchedRow.state;
-          } else {
-            relationshipProgress.invitation_status = 'asked_pending';
-          }
-        }
-        (relationshipProgress as any)._invitationJustIssued = true;
-        (relationshipProgress as any).invitation_check_count = 0; // initialize counter
-        logger.info('relationship.invitation.prePrompt.promoted', { requestId, chatId, new_status: relationshipProgress.invitation_status });
-      }
-    } catch (e) {
-      logger.warn('relationship.invitation.prePrompt.promote.exception', { requestId, chatId, message: (e as Error)?.message });
-    }
-  } else if (relationshipProgress) {
-    logger.debug('relationship.invitation.prePrompt.noPromotionNeeded', { requestId, chatId, status: relationshipProgress.invitation_status, ready: relationshipProgress.ready_for_next });
+    logger.warn('relationship.snapshot.exception', { requestId, chatId, message: (e as Error)?.message });
   }
 
   // Decline detection

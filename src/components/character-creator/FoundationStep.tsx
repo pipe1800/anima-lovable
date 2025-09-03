@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -177,10 +178,14 @@ const FoundationStep = ({ data, onUpdate, onNext, onFileChange, isParsingCard = 
                 "flex items-center justify-center"
               )}>
                 {formData.avatar ? (
-                  <img 
+                  <OptimizedImage 
                     src={formData.avatar} 
                     alt="Character Avatar" 
+                    width={400}
+                    height={500}
+                    quality={85}
                     className="w-full h-full object-cover"
+                    objectPosition="top"
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center text-[#FF7A00]/60">

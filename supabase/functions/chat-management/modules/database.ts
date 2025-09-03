@@ -1,12 +1,13 @@
-import type { 
-  SupabaseClient, 
-  Message, 
-  Character, 
+import type {
+  SupabaseClient,
+  Message,
+  Character,
   CurrentContext,
-  TemplateContext 
+  TemplateContext
 } from '../types/streaming-interfaces.ts';
 import type { GlobalChatSettings } from '../../_shared/settings-mapper.ts';
-// Local runtime type guards / coercion helpers to safely map Supabase unknown rows
+
+// --- Utility coercion helpers ---
 function asString(u: any): string | undefined { return typeof u === 'string' ? u : u == null ? undefined : String(u); }
 function asBool(u: any): boolean { return Boolean(u); }
 function coerceMessage(row: any): Message {
@@ -24,89 +25,89 @@ function coerceMessage(row: any): Message {
   };
 }
 
-/**
- * Database operations and utilities
- * Handles message persistence, character data fetching, and chat updates
- */
+// In-memory per-request character cache
+const characterCache = new WeakMap<any, Map<string, any>>();
 
 export async function fetchCharacterData(
   characterId: string,
-  supabaseAdmin: SupabaseClient
-): Promise<Character> {
-  // First attempt: fetch from characters with joined character_definitions to get name + definition fields
-  const { data: characterWithDef, error: charError } = await supabaseAdmin
-    .from('characters')
-    .select(`
-      id,
-      name,
-      character_definitions ( personality_summary, description, scenario, greeting )
-    `)
-    .eq('id', characterId)
-    .single();
+  supabase: SupabaseClient,
+  options?: { full?: boolean }
+): Promise<Character & { greeting?: string | null; example_dialogs?: string | null; scenario?: string | null; personality_summary?: any }> {
+  const full = !!options?.full;
+  let cacheForClient = characterCache.get(supabase);
+  if (!cacheForClient) { cacheForClient = new Map(); characterCache.set(supabase, cacheForClient); }
+  const cacheKey = `${characterId}:${full ? 'full' : 'min'}`;
+  if (cacheForClient.has(cacheKey)) return cacheForClient.get(cacheKey);
 
-  if (characterWithDef && !charError) {
-    const root = characterWithDef as any;
-    const def = (root.character_definitions || undefined) as any | undefined;
-    return {
-      id: String(root.id),
-      name: root.name ? String(root.name) : undefined,
-      personality_summary: def?.personality_summary ?? undefined,
-      description: def?.description ?? undefined,
-      scenario: def?.scenario ?? undefined,
-      greeting: def?.greeting ?? undefined,
-      character_definitions: def
-    };
-  }
-
-  // Fallback: previous logic (definitions table only) BUT do not select nonexistent name column
-  const { data: definitionOnly, error: defError } = await supabaseAdmin
-    .from('character_definitions')
-    .select('character_id, personality_summary, description, scenario, greeting')
-    .eq('character_id', characterId)
-    .single();
-
-  if (definitionOnly && !defError) {
-    const defRow = definitionOnly as any;
-    // Need separate fetch for name from characters table
-    const { data: charRow } = await supabaseAdmin
+  // Prefer joined character_definitions (new canonical location for summary/greeting)
+  const defCols = full
+    ? 'id,name,creator_id,visibility,nsfw,tags,character_definitions(personality_summary,greeting,scenario,example_dialogs)'
+    : 'id,name,creator_id,character_definitions(personality_summary,greeting)';
+  let data: any = null; let error: any = null;
+  try {
+    const resp = await supabase
       .from('characters')
-      .select('name')
+      .select(defCols)
       .eq('id', characterId)
-      .single();
-
-    return {
-      id: String(defRow.character_id),
-      name: charRow?.name ? String(charRow.name) : undefined,
-      personality_summary: defRow.personality_summary ?? undefined,
-      description: defRow.description ?? undefined,
-      scenario: defRow.scenario ?? undefined,
-      greeting: defRow.greeting ?? undefined,
-      character_definitions: defRow
-    };
+      .maybeSingle();
+    data = resp.data; error = resp.error;
+  } catch (e) {
+    error = e;
   }
 
-  console.error('Character definition fetch errors:', { charError, defError });
-  throw new Error('Character definition not found');
+  // Legacy fallback (older schema with columns directly on characters)
+  if ((!data || error) && error?.message?.includes('column') ) {
+    try {
+      const legacyCols = full ? 'id,name,creator_id,personality_summary,greeting,scenario,example_dialogs' : 'id,name,creator_id,personality_summary,greeting';
+      const legacy = await supabase
+        .from('characters')
+        .select(legacyCols)
+        .eq('id', characterId)
+        .maybeSingle();
+      if (legacy.data) { data = legacy.data; error = null; }
+    } catch {}
+  }
+
+  if (!data) throw new Error(`Character not found: ${characterId}`);
+
+  // Normalize flattening
+  const parsed: any = { id: data.id, name: data.name, creator_id: data.creator_id };
+  const defs = (data as any).character_definitions || {};
+  const ps = (data as any).personality_summary ?? defs.personality_summary ?? null;
+  if (ps) {
+    if (typeof ps === 'string') { try { parsed.personality_summary = JSON.parse(ps); } catch { parsed.personality_summary = ps; } }
+    else parsed.personality_summary = ps;
+  }
+  parsed.greeting = (data as any).greeting ?? defs.greeting ?? null;
+  if (full) {
+    parsed.scenario = (data as any).scenario ?? defs.scenario ?? null;
+    parsed.example_dialogs = (data as any).example_dialogs ?? defs.example_dialogs ?? null;
+    parsed.visibility = (data as any).visibility ?? null;
+    parsed.nsfw = (data as any).nsfw ?? null;
+    parsed.tags = (data as any).tags ?? null;
+  }
+
+  cacheForClient.set(cacheKey, parsed);
+  return parsed;
 }
 
 export async function fetchConversationHistory(
   chatId: string,
   supabase: SupabaseClient,
-  limit: number = 100
-): Promise<any[]> {
-  const { data: messageHistory, error } = await supabase
+  options?: { limit?: number }
+): Promise<Message[]> {
+  const limit = options?.limit ?? 200;
+  const { data, error } = await supabase
     .from('messages')
-    .select('content, is_ai_message, created_at, message_order')
+    .select('id,chat_id,author_id,content,is_ai_message,is_placeholder,current_context,message_order,created_at,updated_at')
     .eq('chat_id', chatId)
     .order('message_order', { ascending: true })
     .limit(limit);
-
   if (error) {
     console.error('Failed to fetch conversation history:', error);
     return [];
   }
-
-  return messageHistory || [];
+  return (data || []).map(coerceMessage);
 }
 
 export async function fetchUserProfile(
@@ -118,12 +119,10 @@ export async function fetchUserProfile(
     .select('username, timezone')
     .eq('id', userId)
     .single();
-
   if (error) {
     console.error('Profile error:', error);
     return null;
   }
-
   return profile;
 }
 
@@ -544,6 +543,49 @@ export async function fetchChatSelectedPersona(
   };
 }
 
+// Consolidated persona + profile bootstrap accessor to reduce duplicate queries.
+// Precedence:
+// 1. Chat-selected persona (if chatId provided and persona exists)
+// 2. Explicit selectedPersonaId (validated against user)
+// 3. User profile's default_persona_id (if exists & valid)
+// 4. First created persona (fallback)
+// Returns { profile: { username, timezone }, persona: { name, bio, lore } | null }
+export async function getUserPersonaProfile(options: {
+  supabase: SupabaseClient;
+  userId: string;
+  chatId?: string;
+  explicitPersonaId?: string | null;
+}): Promise<{ profile: { username?: string; timezone?: string } | null; persona: { name?: string; bio?: string; lore?: string } | null }> {
+  const { supabase, userId, chatId, explicitPersonaId } = options;
+  // Run profile + chat persona + explicit persona lookup in parallel; fallback persona queries only if needed.
+  const [profileRes, chatPersonaRes, explicitPersonaRes] = await Promise.all([
+    supabase.from('profiles').select('username, timezone, default_persona_id').eq('id', userId).single(),
+    chatId ? supabase.from('chats').select(`selected_persona_id, personas:selected_persona_id(name,bio,lore)`).eq('id', chatId).eq('user_id', userId).maybeSingle() : Promise.resolve({ data: null }),
+    explicitPersonaId ? supabase.from('personas').select('name,bio,lore,id,user_id').eq('id', explicitPersonaId).eq('user_id', userId).maybeSingle() : Promise.resolve({ data: null })
+  ]);
+
+  const profileData: any = profileRes.data || null;
+  // Priority 1: chat-selected
+  let persona: any = chatPersonaRes?.data?.personas || null;
+  // Priority 2: explicit selection
+  if (!persona && explicitPersonaRes?.data) persona = explicitPersonaRes.data;
+  let defaultPersonaId: string | null = profileData?.default_persona_id || null;
+
+  // Priority 3: default persona id from profile
+  if (!persona && defaultPersonaId) {
+    const { data: defPersona } = await supabase.from('personas').select('name,bio,lore').eq('id', defaultPersonaId).eq('user_id', userId).maybeSingle();
+    if (defPersona) persona = defPersona;
+  }
+  // Priority 4: first created persona
+  if (!persona) {
+    const { data: firstPersona } = await supabase.from('personas').select('name,bio,lore').eq('user_id', userId).order('created_at',{ ascending: true }).limit(1).maybeSingle();
+    if (firstPersona) persona = firstPersona;
+  }
+  const personaOut = persona ? { name: persona.name, bio: persona.bio, lore: persona.lore } : null;
+  const profileOut = profileData ? { username: profileData.username, timezone: profileData.timezone } : null;
+  return { profile: profileOut, persona: personaOut };
+}
+
 export async function fetchCurrentContext(
   userId: string,
   chatId: string,
@@ -597,11 +639,68 @@ export async function fetchCurrentContext(
     enchantmentStatus: pick('enchantmentStatus') || pick('enchantment_status'),
     itemInventory: pick('itemInventory') || pick('item_inventory')
   };
-
   Object.keys(normalized).forEach(k => normalized[k] == null && delete normalized[k]);
-
   console.log('✅ Fetched & normalized context:', { raw, normalized });
   return normalized;
+}
+
+// Bootstrap snapshot accessor
+export async function fetchChatBootstrapSnapshot(options: {
+  supabase: SupabaseClient;
+  userId: string;
+  chatId: string;
+  characterId: string;
+  includeMemories?: boolean;
+  memoryLimit?: number;
+}): Promise<{
+  profile: { username?: string; timezone?: string } | null;
+  persona: { name?: string; bio?: string; lore?: string } | null;
+  character: { id: string; name: string; greeting?: string | null; personality_summary?: any } | null;
+  context: any;
+  relationship: any;
+  latest_ai_message: { id: string; content: string; message_order: number; created_at: string } | null;
+  memories?: Array<{ id: string; summary_content: string; trigger_keywords: string[]; created_at: string }> | null;
+}> {
+  const { supabase, userId, chatId, characterId, includeMemories, memoryLimit } = options;
+  try {
+    const { data, error } = await supabase.rpc('get_chat_bootstrap_snapshot', {
+      p_user_id: userId,
+      p_chat_id: chatId,
+      p_character_id: characterId,
+      p_include_memories: !!includeMemories,
+      p_memory_limit: memoryLimit ?? 20
+    });
+    if (error) {
+      console.warn('bootstrap.snapshot.rpc.error', error.message);
+      throw new Error('Failed bootstrap snapshot');
+    }
+    if (!data || typeof data !== 'object') throw new Error('Empty snapshot');
+    const rawCtx = (data as any).context?.current_context || null;
+    const pick2 = (k: string) => (typeof rawCtx?.[k] === 'string' && rawCtx[k].trim() && rawCtx[k] !== 'No context') ? rawCtx[k].trim() : null;
+    const normalizedContext: any = rawCtx ? {
+      moodTracking: pick2('moodTracking') || pick2('mood'),
+      clothingInventory: pick2('clothingInventory') || pick2('clothing'),
+      locationTracking: pick2('locationTracking') || pick2('location'),
+      timeAndWeather: pick2('timeAndWeather') || pick2('time_weather'),
+      relationshipStatus: pick2('relationshipStatus') || pick2('relationship'),
+      characterPosition: pick2('characterPosition') || pick2('character_position'),
+      enchantmentStatus: pick2('enchantmentStatus') || pick2('enchantment_status'),
+      itemInventory: pick2('itemInventory') || pick2('item_inventory')
+    } : {};
+    Object.keys(normalizedContext).forEach(k => normalizedContext[k] == null && delete normalizedContext[k]);
+    return {
+      profile: (data as any).profile || null,
+      persona: (data as any).persona || null,
+      character: (data as any).character || null,
+      context: normalizedContext,
+      relationship: (data as any).relationship || null,
+      latest_ai_message: (data as any).latest_ai_message || null,
+      memories: (data as any).memories || null
+    };
+  } catch (e) {
+    console.warn('bootstrap.snapshot.error', (e as Error).message);
+    return { profile: null, persona: null, character: null, context: {}, relationship: null, latest_ai_message: null, memories: null };
+  }
 }
 
 export async function getNextMessageOrder(

@@ -4,13 +4,9 @@ import type { SendMessageRequest } from '../types/index.ts';
 import type { TemplateContext, CurrentContext } from '../types/streaming-interfaces.ts';
 
 // Import from local modules (consolidated)
-import { 
-  extractCharacterContext
-} from './context-extractor.ts';
+// (extractCharacterContext removed: not used here after consolidation)
 import { 
   createStreamingErrorResponse,
-  processStreamBuffer,
-  parseStreamChunk,
   streamAIResponse
 } from './streaming.ts';
 import { getEnv } from '../../_shared/env.ts';
@@ -21,32 +17,29 @@ import {
   createInsufficientCreditsError 
 } from './billing.ts';
 import {
-  fetchCharacterData,
+  fetchCharacterData, // kept for potential fallback minimal fetch (already minimal when full:false)
   fetchConversationHistory,
-  fetchUserProfile,
   fetchUserGlobalSettings,
   fetchUserCharacterSettings,
   fetchUserSelectedWorldInfo,
-  fetchSelectedPersona,
-  fetchChatSelectedPersona,
-  fetchCurrentContext,
-  fetchCharacterMemories,
-  getNextMessageOrder,
+  fetchCurrentContext, // fallback only
+  fetchCharacterMemories, // supplemental memories when bootstrap omitted or disabled
+  fetchChatBootstrapSnapshot, // new consolidated bootstrap accessor
   saveUserMessage,
   saveCharacterMessage,
   updateChatLastActivity,
   buildTemplateReplacer
 } from './database.ts';
+// Removed getUserPersonaProfile direct usage (now via bootstrap snapshot)
 import { assembleConversation } from './conversation-assembler.ts';
 import type { ConversationKnobs } from './message-counter.ts';
-import { triggerMessageBasedSummary } from './auto-summary-new.ts';
+// (triggerMessageBasedSummary removed here – summaries handled elsewhere post message)
 import { generateAIResponse } from './message-handler.ts';
 import { logger } from '../../_shared/logger.ts';
 // Centralized relationship progression helpers
 import { processRelationshipLifecycle, postStreamDetectIssuedInvitation } from './relationship-progression.ts';
 
-// Pre-created encoder (avoid reallocation per request)
-const encoder = new TextEncoder();
+// (encoder constant removed – not used after refactors)
 
 // Default conversation knobs (immutable)
 const DEFAULT_KNOBS: ConversationKnobs = Object.freeze({
@@ -111,8 +104,8 @@ async function markContextCeilingWarned(supabase: any, chatId: string, truncated
   return { shouldWarnContextCeiling: Array.isArray(data) && data.length > 0 };
 }
 
-async function triggerAddonExtraction(options: { addonsActive: boolean; supabaseUrl?: string; authHeader?: string|null; chatId: string; characterId: string; effectiveAddonSettings: any; message: string; aiResponse: string; messageId: string; }) {
-  const { addonsActive, supabaseUrl, authHeader, chatId, characterId, effectiveAddonSettings, message, aiResponse, messageId } = options;
+async function triggerAddonExtraction(options: { addonsActive: boolean; supabaseUrl?: string; authHeader?: string|null; chatId: string; characterId: string; effectiveAddonSettings: any; message: string; aiResponse: string; messageId: string; characterGreeting?: string | null }) {
+  const { addonsActive, supabaseUrl, authHeader, chatId, characterId, effectiveAddonSettings, message, aiResponse, messageId, characterGreeting } = options;
   if (!addonsActive) {
     logger.debug('addons.skip.allDisabled', { chatId });
     return;
@@ -132,7 +125,8 @@ async function triggerAddonExtraction(options: { addonsActive: boolean; supabase
         mode: 'conversation',
         message_id: messageId,
         user_message: message,
-        ai_response: aiResponse
+        ai_response: aiResponse,
+        character_greeting: characterGreeting || undefined
       })
     });
     if (!resp.ok) {
@@ -169,34 +163,64 @@ export async function handleSendMessage(
     const trivialInput = message.trim().length < 4;
     logger.debug('send.init', { requestId, chatId, characterId, len: message.length, trivial: trivialInput, userId: redact(user?.id) });
 
-    // Parallel fetch
+    // Feature flag: include curated memories in bootstrap (manual summaries only) if enabled & not trivial
+    const includeBootstrapMemories = !trivialInput && (env('BOOTSTRAP_INCLUDE_MEMORIES') === 'true');
+
+    // Consolidated bootstrap snapshot (persona/profile/character/context/relationship/latest_ai/memories*)
+    const bootstrap = await fetchChatBootstrapSnapshot({
+      supabase,
+      userId: user.id,
+      chatId,
+      characterId,
+      includeMemories: includeBootstrapMemories,
+      memoryLimit: 20
+    });
+
+    // Independent parallel fetches still required (not part of snapshot): history, settings, plan/model, world info, user-character settings
     const [
-      character,
       messageHistory,
-      userProfile,
       globalSettings,
       userCharacterSettings,
-      chatSelectedPersona,
       planAndModel,
-      nextUserMessageOrder,
-      worldInfoEntries,
-      characterMemories
+      worldInfoEntries
     ] = await Promise.all([
-      fetchCharacterData(characterId, supabaseAdmin),
       fetchConversationHistory(chatId, supabase),
-      fetchUserProfile(user.id, supabase),
       fetchUserGlobalSettings(user.id, supabaseAdmin),
       fetchUserCharacterSettings(user.id, characterId, supabaseAdmin),
-      fetchChatSelectedPersona(chatId, user.id, supabase),
       getUserPlanAndModel(user.id, supabaseAdmin),
-      getNextMessageOrder(chatId, supabase),
-      fetchUserSelectedWorldInfo(user.id, characterId, selectedWorldInfoId || null, supabase),
-      fetchCharacterMemories(user.id, characterId, supabase, { chatId, includeAutoSummaries: true, limitNonAuto: 30, limitAuto: 5 })
+      fetchUserSelectedWorldInfo(user.id, characterId, selectedWorldInfoId || null, supabase)
     ]);
 
-    const selectedPersona = chatSelectedPersona || (selectedPersonaId ? await fetchSelectedPersona(selectedPersonaId, user.id, supabase) : null);
+    // Fallback logic: if bootstrap failed (character null) fetch minimal character directly
+    const character = bootstrap.character || await fetchCharacterData(characterId, supabaseAdmin, { full: false });
+    const userProfile = bootstrap.profile || { username: user?.email || 'User' };
+    const selectedPersona = bootstrap.persona || null;
+    let currentContext: any = bootstrap.context || {};
 
-    const effectiveAddonSettings = sanitizeAddonSettings(globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {}));
+    // Supplemental memories logic:
+    // If bootstrap memories disabled OR flag off -> fetch full memory strategy (manual + limited auto) like before
+    let characterMemories = bootstrap.memories as any[] | null;
+    if (!includeBootstrapMemories) {
+      characterMemories = await fetchCharacterMemories(user.id, characterId, supabase, { chatId, includeAutoSummaries: !trivialInput, limitNonAuto: 30, limitAuto: 5 });
+    } else if (includeBootstrapMemories && !trivialInput) {
+      // Optionally append a small set of auto summaries (not included in bootstrap RPC) for richer context
+      try {
+        const autoSubset = await fetchCharacterMemories(user.id, characterId, supabase, { chatId, includeAutoSummaries: true, limitNonAuto: 0, limitAuto: 5 });
+        if (Array.isArray(autoSubset) && autoSubset.length) {
+          const manual = Array.isArray(characterMemories) ? characterMemories : [];
+          // Filter to only auto summaries from the subset fetch
+          const autoOnly = autoSubset.filter(m => m.is_auto_summary);
+            // Deduplicate by id
+          const seen = new Set<string>();
+          const combined = [...manual, ...autoOnly].filter(m => { const k = m.id; if (seen.has(k)) return false; seen.add(k); return true; });
+          characterMemories = combined;
+        }
+      } catch (e) {
+        logger.warn('bootstrap.autoSummaries.append.error', { requestId, chatId, message: (e as Error)?.message });
+      }
+    }
+
+  const effectiveAddonSettings = sanitizeAddonSettings(globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {}));
     if (userCharacterSettings?.time_awareness_enabled) effectiveAddonSettings.timeAwareness = true;
 
     const addonsActive = anyAddonEnabled(effectiveAddonSettings);
@@ -215,11 +239,28 @@ export async function handleSendMessage(
     logger.info('billing.charge', { requestId, chatId, plan: planAndModel.plan, model: planAndModel.model });
 
     // Persist user message only
+    // Derive next message order locally (avoid extra DB round trip)
+    let lastOrder = 0;
+    if (Array.isArray(messageHistory) && messageHistory.length) {
+      const last = messageHistory[messageHistory.length - 1];
+      if (typeof last?.message_order === 'number') lastOrder = last.message_order;
+    }
+    const nextUserMessageOrder = lastOrder + 1;
     const aiMessageOrder = nextUserMessageOrder + 1;
     const userMessage = await saveUserMessage(supabase, chatId, user.id, message, nextUserMessageOrder);
 
-    const templateContext: TemplateContext = { userName: selectedPersona?.name || userProfile?.username || 'User', charName: character.name || 'Character' };
-    let currentContext = await fetchCurrentContext(user.id, chatId, characterId, supabase);
+    const templateContext: TemplateContext = { userName: selectedPersona?.name || userProfile?.username || 'User', charName: character?.name || 'Character' };
+    // currentContext already from bootstrap; fallback to legacy fetch if empty object and we expect some context keys
+    if (!currentContext || Object.keys(currentContext).length === 0) {
+      try {
+        const legacyCtx = await fetchCurrentContext(user.id, chatId, characterId, supabase);
+        if (legacyCtx && Object.keys(legacyCtx).length) {
+          currentContext = legacyCtx;
+        }
+      } catch (e) {
+        logger.warn('context.fallback.fetch.error', { requestId, chatId, message: (e as Error)?.message });
+      }
+    }
 
     // Centralized relationship lifecycle processing (replaces previous inline blocks)
     const relLifecycle = await processRelationshipLifecycle({
@@ -231,8 +272,10 @@ export async function handleSendMessage(
       message,
       messageHistory,
       currentContext,
-      requestId
-    });
+      requestId,
+      // Provide bootstrap snapshot relationship for potential short-circuit if module supports it
+      bootstrapRelationship: bootstrap.relationship || null
+    } as any);
     let relationshipProgress = relLifecycle.relationshipProgress;
     currentContext = relLifecycle.currentContext;
     if (relationshipProgress) {
@@ -321,7 +364,7 @@ export async function handleSendMessage(
         await updateChatLastActivity(supabase, chatId, characterId);
         await Promise.all([
           markContextCeilingWarned(supabase, chatId, false),
-          triggerAddonExtraction({ addonsActive, supabaseUrl: env('SUPABASE_URL'), authHeader: req.headers.get('Authorization'), chatId, characterId, effectiveAddonSettings, message, aiResponse: full, messageId: 'final' })
+          triggerAddonExtraction({ addonsActive, supabaseUrl: env('SUPABASE_URL'), authHeader: req.headers.get('Authorization'), chatId, characterId, effectiveAddonSettings, message, aiResponse: full, messageId: 'final', characterGreeting: character?.greeting || null })
         ]);
       },
       onError: (e) => {

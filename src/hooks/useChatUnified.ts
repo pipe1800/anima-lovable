@@ -9,7 +9,7 @@ import type { Message, TrackedContext, ChatState, ChatAction } from '@/types/cha
 import logger from '@/utils/logger';
 import { StreamingMessageParser, parseSSEMessage } from '@/lib/streaming-utils';
 import { ChatManagement } from '@/data/edge';
-import { getChatSnapshot, getChatContextEnhanced } from '@/data/chats/queries';
+import { getChatSnapshot, getChatContextEnhanced, getChatContext } from '@/data/chats/queries';
 
 /**
  * Unified Chat Hook - Replaces 4 separate hooks
@@ -130,6 +130,13 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     ...chatInfiniteQueryConfigs.chatMessages(chatId || ''),
     enabled: !!chatId
   });
+  // Track first successful hydration timestamp to suppress immediate redundant invalidations
+  const firstHydrationAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (messagesQuery.isSuccess && !firstHydrationAtRef.current) {
+      firstHydrationAtRef.current = Date.now();
+    }
+  }, [messagesQuery.isSuccess]);
 
   // Get credits balance unless provided externally to avoid duplicate network calls
   const { data: internalCreditsBalance = 0 } = useQuery({
@@ -205,7 +212,12 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
           lastInsertTsRef.current = Date.now();
           setTimeout(() => {
             // Real-time invalidation throttled
-            throttledInvalidateChatData(chatId);
+            // Suppress invalidation if within 800ms of initial hydration (data already fresh)
+            if (firstHydrationAtRef.current && Date.now() - firstHydrationAtRef.current < 800) {
+              addDebugInfo('Skip invalidation (recent initial hydration)');
+            } else {
+              throttledInvalidateChatData(chatId);
+            }
             addDebugInfo('Real-time chat data invalidated');
           }, 100);
         }
@@ -260,36 +272,24 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
   const fetchAndUpdateContext = useCallback(async (chatIdLocal: string) => {
     if (!user) return;
     try {
-      const { data: contextData, error } = await supabase
-        .from('chat_context')
-        .select('current_context')
-        .eq('chat_id', chatIdLocal)
-        .eq('user_id', user.id)
-        .eq('character_id', characterId)
-        .maybeSingle();
-
-      if (!error && contextData?.current_context) {
-        logger.debug('Fresh context fetched', contextData.current_context);
-
-        const rawContext = contextData.current_context as any;
-        const convertedContext = {
-          moodTracking: rawContext?.mood || 'No context',
-          clothingInventory: rawContext?.clothing || 'No context',
-            locationTracking: rawContext?.location || 'No context',
-          timeAndWeather: rawContext?.time_weather || 'No context',
-          relationshipStatus: rawContext?.relationship || 'No context',
-          characterPosition: rawContext?.character_position || 'No context',
-          enchantmentStatus: rawContext?.enchantment_status || 'No context', // NEW
-          itemInventory: rawContext?.item_inventory || 'No context' // NEW
-        } as TrackedContext;
-
-        dispatch({ type: 'UPDATE_CONTEXT', payload: convertedContext });
-        logger.debug('Context updated in UI immediately!');
-
-        // Dispatch relationship meta update removed (meta no longer persisted in chat_context)
+      const { data, error } = await getChatContext({ chatId: chatIdLocal, userId: user.id, characterId });
+      if (!error && data?.current_context) {
+        logger.debug('Fresh context fetched (data layer)', data.current_context);
+        const raw = data.current_context as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+        const updated: TrackedContext = {
+          moodTracking: raw?.mood || 'No context',
+          clothingInventory: raw?.clothing || 'No context',
+          locationTracking: raw?.location || 'No context',
+          timeAndWeather: raw?.time_weather || 'No context',
+          relationshipStatus: raw?.relationship || 'No context',
+          characterPosition: raw?.character_position || 'No context',
+          enchantmentStatus: raw?.enchantment_status || 'No context',
+          itemInventory: raw?.item_inventory || 'No context'
+        };
+        dispatch({ type: 'UPDATE_CONTEXT', payload: updated });
       }
     } catch (err) {
-      logger.error('Failed to fetch fresh context:', err);
+      logger.error('Failed to fetch fresh context (data layer):', err);
     }
   }, [user, characterId]);
 
@@ -303,7 +303,10 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     if (user?.id) {
       throttledInvalidate(chatQueryKeys.user.credits(user.id));
     }
-    setTimeout(() => fetchAndUpdateContext(chatIdParam), 500);
+    // Throttle context fetch: if an authoritative refresh just happened, skip
+    setTimeout(() => {
+      fetchAndUpdateContext(chatIdParam);
+    }, 600);
     try { window.dispatchEvent(new CustomEvent('chat-ai-response-finished')); } catch {}
   }, [throttledInvalidateChatData, throttledInvalidate, fetchAndUpdateContext, user?.id]);
 

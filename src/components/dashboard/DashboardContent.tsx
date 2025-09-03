@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +39,7 @@ import { StatsCard } from '@/components/ui/stats-card';
 import { ChatCard } from '@/components/ui/chat-card';
 import { DashboardErrorBoundary } from '@/components/ui/dashboard-error-boundary';
 import { formatNumberWithK } from '@/lib/utils/formatting';
+import { getThumbUrl, preloadImages } from '@/utils/image';
 import { 
   MessageCircle, 
   Trophy, 
@@ -66,7 +68,16 @@ export function DashboardContent() {
   const queryClient = useQueryClient();
   
   // Track active dashboard tab to conditionally render actions (e.g., Delete All on recent chats only)
-  const [activeTab, setActiveTab] = useState<string>('recent-chats');
+  // Persist active tab across renders
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const savedTab = sessionStorage.getItem('dashboard-active-tab');
+    return savedTab || 'recent-chats';
+  });
+
+  // Save active tab when it changes
+  useEffect(() => {
+    sessionStorage.setItem('dashboard-active-tab', activeTab);
+  }, [activeTab]);
   
   // IMPORTANT: Initialize currentPage from sessionStorage to persist across renders
   const [currentPage, setCurrentPage] = useState(() => {
@@ -209,13 +220,38 @@ export function DashboardContent() {
     })), [favoriteCharacters]
   );
 
-  // Refresh data on mount and when user changes
+  // Preload images when hovering over character tabs
+  const preloadCharacterImages = useCallback(async (characters: any[]) => {
+    const imageUrls = characters
+      .map(character => character.image)
+      .filter(url => url && url !== '/placeholder.svg');
+    
+    if (imageUrls.length > 0) {
+      preloadImages(imageUrls, {
+        width: 400,
+        quality: 80,
+        format: 'webp',
+      });
+    }
+  }, []);
+
+  // Preload images when hovering over tabs
+  const handleTabHover = useCallback((tabValue: string) => {
+    if (tabValue === 'my-characters' && formattedMyCharacters.length > 0) {
+      preloadCharacterImages(formattedMyCharacters);
+    } else if (tabValue === 'favorites' && formattedFavoriteCharacters.length > 0) {
+      preloadCharacterImages(formattedFavoriteCharacters);
+    }
+  }, [formattedMyCharacters, formattedFavoriteCharacters, preloadCharacterImages]);
+
+  // Refresh data on mount only, not on every user change
   useEffect(() => {
-    if (user) {
+    if (user && !dashboardData) {
+      // Only refetch if we don't have data yet
       refetchDashboard();
       refetchChats();
     }
-  }, [user, refetchDashboard, refetchChats]);
+  }, [user, dashboardData, refetchDashboard, refetchChats]);
 
   // Clear selections when page changes
   useEffect(() => {
@@ -536,6 +572,7 @@ export function DashboardContent() {
                   <TabsTrigger 
                     value="my-characters" 
                     className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
+                    onMouseEnter={() => handleTabHover('my-characters')}
                   >
                     <span className="hidden sm:inline">My Characters</span>
                     <span className="sm:hidden">Characters</span>
@@ -543,6 +580,7 @@ export function DashboardContent() {
                   <TabsTrigger 
                     value="favorites" 
                     className="data-[state=active]:bg-[#FF7A00] data-[state=active]:text-white text-gray-400 text-sm sm:text-base py-2"
+                    onMouseEnter={() => handleTabHover('favorites')}
                   >
                     Favorites
                   </TabsTrigger>
@@ -623,10 +661,17 @@ export function DashboardContent() {
                           onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
                         >
                           <CardContent className="p-0 relative h-full">
-                            <img 
-                              src={character.image} 
+                            <OptimizedImage
+                              src={character.image}
                               alt={character.name}
-                              className="absolute inset-0 w-full h-full object-cover"
+                              className="absolute inset-0 w-full h-full"
+                              width={400}
+                              height={320}
+                              quality={80}
+                              format="webp"
+                              lazy={true}
+                              fallback="/placeholder.svg"
+                              objectPosition="top"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
                             
@@ -721,10 +766,17 @@ export function DashboardContent() {
                           onClick={() => { if (window.innerWidth < 768) navigate(`/character/${character.id}`); }}
                         >
                           <CardContent className="p-0 relative h-full">
-                            <img 
-                              src={character.image} 
+                            <OptimizedImage
+                              src={character.image}
                               alt={character.name}
-                              className="absolute inset-0 w-full h-full object-cover"
+                              className="absolute inset-0 w-full h-full"
+                              width={400}
+                              height={320}
+                              quality={80}
+                              format="webp"
+                              lazy={true}
+                              fallback="/placeholder.svg"
+                              objectPosition="top"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
                             
