@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { WorldInfoGrid } from './WorldInfoGrid';
+import type { PublicWorldInfo, WorldInfoCreatorSummary } from './WorldInfoGrid';
 import { useAuth } from '@/contexts/AuthContext';
 import { preloadDashboardData } from '@/hooks/useDashboard';
 import { useDashboardOverview } from '@/hooks/useDashboardProgressive';
@@ -26,6 +27,74 @@ import {
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useNavigate } from 'react-router-dom';
+
+type WorldInfoSearchResult = {
+  data: PublicWorldInfo[];
+  total: number;
+  hasMore: boolean;
+};
+
+type WindowWithIdleCallback = Window & {
+  requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+const parseWorldInfoCreator = (raw: unknown): WorldInfoCreatorSummary | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  const username = typeof record.username === 'string' ? record.username : null;
+  const avatarUrl = typeof record.avatar_url === 'string' ? record.avatar_url : null;
+  if (!username && !avatarUrl) return null;
+  return { username, avatar_url: avatarUrl };
+};
+
+const parseWorldInfo = (raw: unknown): PublicWorldInfo | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  const id = typeof record.id === 'string' ? record.id : null;
+  const name = typeof record.name === 'string' ? record.name : null;
+  if (!id || !name) return null;
+
+  const tagsRaw = record.tags;
+  const tags = Array.isArray(tagsRaw)
+    ? tagsRaw.filter((tag): tag is { id?: number; name?: string } | string => {
+        if (typeof tag === 'string') return true;
+        if (!tag || typeof tag !== 'object') return false;
+        const tagRecord = tag as Record<string, unknown>;
+        return 'name' in tagRecord || 'id' in tagRecord;
+      })
+    : undefined;
+
+  return {
+    id,
+    name,
+    short_description: typeof record.short_description === 'string' ? record.short_description : null,
+    description: typeof record.description === 'string' ? record.description : null,
+    interaction_count: typeof record.interaction_count === 'number' ? record.interaction_count : null,
+    usage_count: typeof record.usage_count === 'number' ? record.usage_count : null,
+    likes_count: typeof record.likes_count === 'number' ? record.likes_count : null,
+    favorites_count: typeof record.favorites_count === 'number' ? record.favorites_count : null,
+    created_at: typeof record.created_at === 'string' ? record.created_at : '',
+    creator: parseWorldInfoCreator(record.creator ?? null),
+    tags,
+  };
+};
+
+const normalizeWorldInfoList = (raw: unknown): PublicWorldInfo[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => parseWorldInfo(item))
+    .filter((info): info is PublicWorldInfo => info !== null);
+};
+
+const normalizeSearchResult = (raw: unknown): WorldInfoSearchResult | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const data = normalizeWorldInfoList(record.data);
+  const total = typeof record.total === 'number' ? record.total : data.length;
+  const hasMore = typeof record.hasMore === 'boolean' ? record.hasMore : false;
+  return { data, total, hasMore };
+};
 
 export function WorldInfoDiscoverContent() {
   const { user, profile } = useAuth();
@@ -57,10 +126,16 @@ export function WorldInfoDiscoverContent() {
   }), [searchInput, sortBy, selectedTags, nsfwEnabled, currentPage]);
 
   // Use search hook with manual refetch
-  const { data: searchResults, refetch: executeSearch, isLoading: isSearching } = useSearchPublicWorldInfos(searchParams);
+  const searchQueryResult = useSearchPublicWorldInfos(searchParams);
+  const { data: searchResultsRaw, refetch: executeSearch, isLoading: isSearching } = searchQueryResult;
+  const searchResults = useMemo(() => normalizeSearchResult(searchResultsRaw), [searchResultsRaw]);
   
   // Fallback to initial load of popular world infos
-  const { data: initialWorldInfos = [] } = usePublicWorldInfos();
+  const publicWorldInfosQuery = usePublicWorldInfos();
+  const initialWorldInfos = useMemo(
+    () => normalizeWorldInfoList(publicWorldInfosQuery.data),
+    [publicWorldInfosQuery.data]
+  );
 
   // Available filter tags
   const availableTags = [
@@ -121,7 +196,9 @@ export function WorldInfoDiscoverContent() {
 
   // Handle surprise me - SPA navigation (no full reload)
   const handleSurpriseMe = async () => {
-    const worldInfosToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialWorldInfos;
+    const worldInfosToChooseFrom = hasSearched && searchResults?.data
+      ? searchResults.data
+      : initialWorldInfos;
     if (!worldInfosToChooseFrom || worldInfosToChooseFrom.length === 0) return;
     const randomIndex = Math.floor(Math.random() * worldInfosToChooseFrom.length);
     const randomWorldInfo = worldInfosToChooseFrom[randomIndex];
@@ -134,16 +211,24 @@ export function WorldInfoDiscoverContent() {
   useEffect(() => {
     if (!user?.id) return;
     const run = () => preloadDashboardData(user.id, queryClient);
-    const win: any = window as any;
-    const id = win.requestIdleCallback ? win.requestIdleCallback(run, { timeout: 1500 }) : setTimeout(run, 800);
+    const win = window as WindowWithIdleCallback;
+    const useIdleCallback = typeof win.requestIdleCallback === 'function';
+    const handle = useIdleCallback
+      ? win.requestIdleCallback!(run, { timeout: 1500 })
+      : window.setTimeout(run, 800);
     return () => {
-      if (win.cancelIdleCallback && id) win.cancelIdleCallback(id);
-      else clearTimeout(id);
+      if (useIdleCallback && typeof win.cancelIdleCallback === 'function') {
+        win.cancelIdleCallback(handle);
+      } else {
+        window.clearTimeout(handle);
+      }
     };
   }, [user?.id, queryClient]);
 
   // World infos to display and active filters
-  const displayWorldInfos = hasSearched && searchResults?.data ? searchResults.data : initialWorldInfos;
+  const displayWorldInfos: PublicWorldInfo[] = hasSearched && searchResults?.data
+    ? searchResults.data
+    : initialWorldInfos;
   const activeFilters = selectedTags.length > 0 || searchInput.length > 0;
 
   return (
@@ -250,7 +335,7 @@ export function WorldInfoDiscoverContent() {
           {/* Surprise Me Button */}
           <Button
             onClick={handleSurpriseMe}
-            disabled={hasSearched ? searchResults?.data?.length === 0 : initialWorldInfos.length === 0}
+            disabled={hasSearched ? (searchResults?.data.length ?? 0) === 0 : initialWorldInfos.length === 0}
             className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white font-medium"
           >
             <Sparkles className="w-4 h-4 mr-2" />

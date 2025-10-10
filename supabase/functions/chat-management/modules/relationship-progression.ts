@@ -202,31 +202,36 @@ export interface ProcessRelationshipLifecycleParams {
   messageHistory: any[];
   currentContext: any;
   requestId: string;
+  preloadedRelationship?: any;
 }
 
 export async function processRelationshipLifecycle(params: ProcessRelationshipLifecycleParams): Promise<{ relationshipProgress: any; currentContext: any; }> {
-  const { supabase, supabaseAdmin, user, chatId, characterId, message, messageHistory, currentContext, requestId } = params;
+  const { supabase, supabaseAdmin, user, chatId, characterId, message, messageHistory, currentContext, requestId, preloadedRelationship } = params;
   let relationshipProgress: any = null;
   try {
-    const { data: snapshot, error: snapErr } = await supabaseAdmin.rpc('get_or_evaluate_relationship_snapshot', {
-      p_user_id: user.id,
-      p_character_id: characterId,
-      p_force_eval: false,
-      p_auto_promote: true
-    });
-    if (snapErr) {
-      logger.warn('relationship.snapshot.error', { requestId, chatId, msg: snapErr.message });
+    if (preloadedRelationship) {
+      relationshipProgress = preloadedRelationship;
     } else {
-      relationshipProgress = snapshot;
-      if (relationshipProgress?._invitationJustIssued) {
-        logger.debug('relationship.snapshot.invitationJustIssued', { requestId, chatId });
+      const { data: snapshot, error: snapErr } = await supabaseAdmin.rpc('get_or_evaluate_relationship_snapshot', {
+        p_user_id: user.id,
+        p_character_id: characterId,
+        p_force_eval: false,
+        p_auto_promote: true
+      });
+      if (snapErr) {
+        logger.warn('relationship.snapshot.error', { requestId, chatId, msg: snapErr.message });
+      } else {
+        relationshipProgress = snapshot;
       }
+    }
+    if (relationshipProgress?._invitationJustIssued) {
+      logger.debug('relationship.snapshot.invitationJustIssued', { requestId, chatId });
     }
   } catch (e) {
     logger.warn('relationship.snapshot.exception', { requestId, chatId, message: (e as Error)?.message });
   }
 
-  // Decline detection
+// Decline detection
   try {
     if (relationshipProgress && relationshipProgress.invitation_status === 'asked_pending') {
       const lowerMsg = message.toLowerCase();
@@ -447,7 +452,9 @@ export async function processRelationshipLifecycle(params: ProcessRelationshipLi
         try {
           const { data: refreshed } = await supabaseAdmin.rpc('evaluate_relationship_progress', { p_user_id: user.id, p_character_id: characterId });
           if (refreshed) relationshipProgress = refreshed;
-        } catch {}
+        } catch (refreshError) {
+          logger.warn('relationship.regression.refresh.fail', { requestId, chatId: params.chatId, message: (refreshError as Error)?.message });
+        }
         logger.info('relationship.regression.cancelled', { requestId, chatId: params.chatId });
       } catch (e) {
         logger.warn('relationship.regression.cancel.fail', { requestId, chatId: params.chatId, message: (e as Error)?.message });
@@ -528,5 +535,6 @@ export async function processRelationshipLifecycle(params: ProcessRelationshipLi
 
 // Post-stream detection of issued invitation (now noop)
 export async function postStreamDetectIssuedInvitation(params: { supabaseAdmin: any; userId: string; characterId: string; chatId: string; full: string; relationshipProgress: any; requestId: string; }) {
-  try { logger.debug('relationship.invitation.postStream.noop', { requestId: params.requestId, chatId: params.chatId }); } catch {}
+  logger.debug('relationship.invitation.postStream.noop', { requestId: params.requestId, chatId: params.chatId });
 }
+

@@ -1,4 +1,5 @@
 import { supabase } from '@/db/client';
+import type { WorldInfoSummaryItem } from '@/types/world-info';
 
 export interface WorldInfoFullResult {
   id: string; name: string; short_description: string | null; visibility: string;
@@ -28,13 +29,22 @@ export const listPublicWorldInfos = async (p: ListPublicWorldInfosParams = {}) =
     p_exclude_nsfw: excludeNSFW,
     p_tag_ids: tagIds && tagIds.length ? tagIds : null
   });
-  if (error) return { data: [], total: 0, error };
-  const items = (data as any)?.items || [];
-  return { data: items, total: (data as any)?.total || 0, hasMore: offset + limit < ((data as any)?.total || 0) };
+  if (error) return { data: [] as WorldInfoSummaryItem[], total: 0, hasMore: false, error };
+
+  const payload = data as { items?: unknown; total?: unknown } | null;
+  const itemsRaw = Array.isArray(payload?.items) ? payload?.items : [];
+  const items = (itemsRaw as WorldInfoSummaryItem[]) ?? [];
+  const total = typeof payload?.total === 'number' ? payload.total : 0;
+  return {
+    data: items,
+    total,
+    hasMore: offset + limit < (total ?? 0),
+    error: null,
+  };
 };
 
 export const listUserWorldInfos = async (userId: string) => {
   const { data, error } = await supabase.rpc('list_user_world_infos', { p_user_id: userId });
-  if (error) return { data: [], error };
-  return { data: (data as any[]) || [], error: null };
+  if (error) return { data: [] as WorldInfoSummaryItem[], error };
+  return { data: (Array.isArray(data) ? (data as WorldInfoSummaryItem[]) : []), error: null };
 };

@@ -1,12 +1,13 @@
 import React from 'react';
 import { parseMessageContent } from '@/lib/utils/messageFormatting';
 import { useUserGlobalChatSettings } from '@/data/chats/settings';
+import type { UserGlobalChatSettings } from '@/types/chatSettings';
 
 export interface FormattedMessageProps {
   content: string;
   className?: string;
   // Optional optimization: reuse provided settings
-  settingsOverride?: any;
+  settingsOverride?: Partial<UserGlobalChatSettings> | null;
 }
 
 export function FormattedMessage({ content, className = '', settingsOverride }: FormattedMessageProps) {

@@ -1,16 +1,36 @@
-import type { PayPalAccessToken } from '../types/index.ts';
+import type {
+  PayPalAccessToken,
+  PayPalOrder,
+  PayPalOrderCaptureResponse,
+  PayPalSubscription,
+  DenoEnvGlobal,
+} from '../types/index.ts';
 // Declare Deno for type-checking in non-Deno environments
-declare const Deno: any;
+declare const Deno: DenoEnvGlobal;
 
 const PAYPAL_BASE_URL = 'https://api-m.sandbox.paypal.com'; // TODO: Switch to production URL
+
+interface PayPalAccessTokenResponse {
+  access_token: string;
+  token_type?: string;
+  app_id?: string;
+  expires_in?: number;
+  scope?: string;
+}
 
 /**
  * Get PayPal access token for API calls
  * This function is used across multiple PayPal operations
  */
 export async function getPayPalAccessToken(): Promise<string> {
-  const clientId = (globalThis as any).Deno?.env?.get('PAYPAL_CLIENT_ID') || (typeof process !== 'undefined' ? process.env.PAYPAL_CLIENT_ID : undefined);
-  const clientSecret = (globalThis as any).Deno?.env?.get('PAYPAL_CLIENT_SECRET') || (typeof process !== 'undefined' ? process.env.PAYPAL_CLIENT_SECRET : undefined);
+  const clientId =
+    (globalThis as { Deno?: { env?: { get(name: string): string | undefined } } }).Deno?.env?.get(
+      'PAYPAL_CLIENT_ID',
+    ) ?? (typeof process !== 'undefined' ? process.env.PAYPAL_CLIENT_ID : undefined);
+  const clientSecret =
+    (globalThis as { Deno?: { env?: { get(name: string): string | undefined } } }).Deno?.env?.get(
+      'PAYPAL_CLIENT_SECRET',
+    ) ?? (typeof process !== 'undefined' ? process.env.PAYPAL_CLIENT_SECRET : undefined);
   
   console.log('[PAYPAL-CLIENT] Checking credentials:', { 
     clientIdExists: !!clientId, 
@@ -46,17 +66,17 @@ export async function getPayPalAccessToken(): Promise<string> {
     throw new Error(`Failed to get PayPal access token: ${response.status} - ${errorText}`);
   }
 
-  const raw: any = await response.json();
+  const raw = (await response.json()) as PayPalAccessTokenResponse;
   // Minimal runtime validation before casting
   if (!raw || typeof raw.access_token !== 'string') {
     throw new Error('Malformed PayPal token response');
   }
   const tokenData: PayPalAccessToken = {
     access_token: raw.access_token,
-    token_type: raw.token_type || 'Bearer',
-    app_id: raw.app_id || '',
+    token_type: raw.token_type ?? 'Bearer',
+    app_id: raw.app_id ?? '',
     expires_in: typeof raw.expires_in === 'number' ? raw.expires_in : 0,
-    scope: raw.scope || ''
+    scope: raw.scope ?? ''
   };
   console.log('[PAYPAL-CLIENT] Token obtained successfully:', { 
     tokenType: tokenData.token_type,
@@ -70,12 +90,12 @@ export async function getPayPalAccessToken(): Promise<string> {
 /**
  * Make authenticated PayPal API request
  */
-export async function paypalApiRequest(
+export async function paypalApiRequest<T = unknown>(
   endpoint: string,
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
-  body?: any,
+  body?: unknown,
   accessToken?: string
-) {
+): Promise<T> {
   const token = accessToken || await getPayPalAccessToken();
   
   const headers: Record<string, string> = {
@@ -103,7 +123,7 @@ export async function paypalApiRequest(
   }
 
   // Return parsed JSON or empty object for empty responses
-  return responseText ? JSON.parse(responseText) : {};
+  return responseText ? (JSON.parse(responseText) as T) : ({} as T);
 }
 
 /**
@@ -134,14 +154,20 @@ export async function createPayPalSubscription(
     }
   };
 
-  return await paypalApiRequest('/v1/billing/subscriptions', 'POST', subscriptionData);
+  return await paypalApiRequest<PayPalSubscription>(
+    '/v1/billing/subscriptions',
+    'POST',
+    subscriptionData,
+  );
 }
 
 /**
  * Get PayPal subscription details
  */
 export async function getPayPalSubscription(subscriptionId: string) {
-  return await paypalApiRequest(`/v1/billing/subscriptions/${subscriptionId}`);
+  return await paypalApiRequest<PayPalSubscription>(
+    `/v1/billing/subscriptions/${subscriptionId}`,
+  );
 }
 
 /**
@@ -162,7 +188,10 @@ export async function cancelPayPalSubscription(subscriptionId: string, reason?: 
 /**
  * Revise PayPal subscription (change plan)
  */
-export async function revisePayPalSubscription(subscriptionId: string, newPlanId: string) {
+export async function revisePayPalSubscription(
+  subscriptionId: string,
+  newPlanId: string,
+) {
   const revisionData = {
     plan_id: newPlanId,
     application_context: {
@@ -173,10 +202,10 @@ export async function revisePayPalSubscription(subscriptionId: string, newPlanId
     }
   };
 
-  return await paypalApiRequest(
+  return await paypalApiRequest<PayPalSubscription>(
     `/v1/billing/subscriptions/${subscriptionId}/revise`,
     'POST',
-    revisionData
+    revisionData,
   );
 }
 
@@ -209,14 +238,17 @@ export async function createPayPalOrder(
     }
   };
 
-  return await paypalApiRequest('/v2/checkout/orders', 'POST', orderData);
+  return await paypalApiRequest<PayPalOrder>('/v2/checkout/orders', 'POST', orderData);
 }
 
 /**
  * Capture PayPal order payment
  */
 export async function capturePayPalOrder(orderId: string) {
-  return await paypalApiRequest(`/v2/checkout/orders/${orderId}/capture`, 'POST');
+  return await paypalApiRequest<PayPalOrderCaptureResponse>(
+    `/v2/checkout/orders/${orderId}/capture`,
+    'POST',
+  );
 }
 
 /**

@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useTutorial } from '@/contexts/TutorialContext';
 import { Button } from '@/components/ui/button';
@@ -6,8 +7,10 @@ import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import logger from '@/utils/logger';
 import { useIsMobile } from '@/hooks/use-mobile';
 
+type TooltipPosition = Pick<CSSProperties, 'top' | 'left' | 'right' | 'bottom' | 'transform' | 'maxHeight'>;
+
 export const TutorialOverlay: React.FC = () => {
-  const log = logger.scoped('TutorialOverlay');
+  const log = useMemo(() => logger.scoped('TutorialOverlay'), []);
   const { 
     isActive, 
     currentStepData, 
@@ -33,8 +36,6 @@ export const TutorialOverlay: React.FC = () => {
   const descId = 'tutorial-tooltip-desc';
   const isMobile = useIsMobile();
   const [waitingForTarget, setWaitingForTarget] = useState(false);
-  const highlightedDomRef = useRef<HTMLElement | null>(null);
-  const highlightClass = 'tutorial-highlight-target';
   // Allow programmatic UI automation (e.g., clicking sidebar trigger) to bypass interaction blocking
   const automationBypassRef = useRef(false);
 
@@ -90,24 +91,20 @@ export const TutorialOverlay: React.FC = () => {
     if (!isActive && prevFocusedElRef.current) {
       const el = prevFocusedElRef.current;
       if (document.contains(el)) {
-        try { el.focus(); } catch {}
+        try {
+          el.focus();
+        } catch (focusError) {
+          log.warn('🎓 Unable to restore focus after tutorial', focusError);
+        }
       }
       prevFocusedElRef.current = null;
     }
-  }, [isActive]);
+  }, [isActive, log]);
 
   useEffect(() => {
-    log.debug('🎓 TutorialOverlay: Rendering/updated', {/* redacted debug to avoid heavy objects */});
-  }, [/* deps causing re-render */]);
+    log.debug('🎓 TutorialOverlay: Rendering/updated');
+  }, [log]);
 
-  // MOVE THE isActive CHECK TO THE TOP OF THE COMPONENT
-  // This should be the FIRST check in the render
-  if (!isActive) {
-    log.debug('🎓 TutorialOverlay: Tutorial not active, unmounting');
-    return null;
-  }
-
-  // Add this after the console.log at line 27
   useEffect(() => {
     log.debug('🎓 ALL TUTORIAL STEPS (titles only):', tutorialSteps.map((step, idx) => ({
       step: idx,
@@ -119,7 +116,7 @@ export const TutorialOverlay: React.FC = () => {
 
   // FIX 1: PROPERLY clear highlight when step has no target
   useEffect(() => {
-    if (!currentStepData) return;
+    if (!isActive || !currentStepData) return;
 
     // Reset waiting flag on step change
     setWaitingForTarget(false);
@@ -260,7 +257,15 @@ export const TutorialOverlay: React.FC = () => {
     })();
 
     return () => { cancelled = true; };
-  }, [currentStepData, setHighlight, log]);
+  }, [currentStepData, isActive, isMobile, log, setHighlight]);
+
+  // Clear highlight when tutorial deactivates
+  useEffect(() => {
+    if (!isActive) {
+      setHighlight(null);
+      setHighlightedRect(null);
+    }
+  }, [isActive, setHighlight]);
 
   // Track rect of highlighted element and position tooltip
   useEffect(() => {
@@ -276,7 +281,11 @@ export const TutorialOverlay: React.FC = () => {
     const attachResizeObserver = (el: HTMLElement | null) => {
       // Disconnect previous
       if (resizeObserverRef.current) {
-        try { resizeObserverRef.current.disconnect(); } catch {}
+        try {
+          resizeObserverRef.current.disconnect();
+        } catch (disconnectError) {
+          log.warn('🎓 Failed to disconnect resize observer during tutorial highlight swap', disconnectError);
+        }
         resizeObserverRef.current = null;
       }
       if (el) {
@@ -323,7 +332,11 @@ export const TutorialOverlay: React.FC = () => {
       if (rafId) cancelAnimationFrame(rafId);
       // Cleanup observers
       if (resizeObserverRef.current) {
-        try { resizeObserverRef.current.disconnect(); } catch {}
+        try {
+          resizeObserverRef.current.disconnect();
+        } catch (cleanupError) {
+          log.warn('🎓 Failed to disconnect resize observer on tutorial cleanup', cleanupError);
+        }
         resizeObserverRef.current = null;
       }
       observedElRef.current = null;
@@ -331,7 +344,7 @@ export const TutorialOverlay: React.FC = () => {
       window.removeEventListener('resize', schedule);
       window.removeEventListener('scroll', schedule, true);
     };
-  }, [isActive, currentStepData]);
+  }, [currentStepData, isActive, log]);
 
   // Block interactions outside tooltip and highlighted target (only when requiredInteraction)
   useEffect(() => {
@@ -404,7 +417,11 @@ export const TutorialOverlay: React.FC = () => {
           if (!isActive) return;
           // Only advance if we are still on the same step and it still requires interaction
           if (currentStep === stepIndexAtBind && currentStepData?.requiredInteraction) {
-            try { nextStep(); } catch {}
+            try {
+              nextStep();
+            } catch (advanceError) {
+              log.error('🎓 Failed to auto-advance tutorial after interaction', advanceError);
+            }
           }
         }, 120);
       }
@@ -416,7 +433,7 @@ export const TutorialOverlay: React.FC = () => {
       document.removeEventListener('click', handleCaptureClick, true);
       document.removeEventListener('touchend', handleCaptureClick, true);
     };
-  }, [isActive, currentStepData, nextStep, currentStep]);
+  }, [currentStep, currentStepData, isActive, log, nextStep]);
 
   // Keyboard navigation: Esc to skip, ← to back, → to next (unless action required)
   useEffect(() => {
@@ -480,18 +497,17 @@ export const TutorialOverlay: React.FC = () => {
     };
   }, [isActive, isMobile, currentStepData?.target]);
 
-  const getTooltipPosition = () => {
-    const center = {
+  const getTooltipPosition = (): TooltipPosition => {
+    const centerPosition: TooltipPosition = {
       top: '50%',
       left: '50%',
       right: 'auto',
       bottom: 'auto',
       transform: 'translate(-50%, -50%)'
-    } as const;
+    };
 
-    // Force center when no target or no rect
-    if (!currentStepData.target || !highlightedRect) {
-      return center as any;
+    if (!currentStepData?.target || !highlightedRect) {
+      return centerPosition;
     }
 
     // Mobile-safe placement: avoid overlapping the highlighted element
@@ -514,7 +530,7 @@ export const TutorialOverlay: React.FC = () => {
           bottom: 'auto',
           transform: 'none',
           maxHeight: spaceBottom,
-        } as const;
+        };
       }
       if (spaceTop >= estTooltipHeight) {
         return {
@@ -524,7 +540,7 @@ export const TutorialOverlay: React.FC = () => {
           bottom: 'auto',
           transform: 'none',
           maxHeight: spaceTop,
-        } as const;
+        };
       }
       // Not enough space either side: choose the larger side and clamp height
       if (spaceBottom >= spaceTop) {
@@ -535,7 +551,7 @@ export const TutorialOverlay: React.FC = () => {
           bottom: 'auto',
           transform: 'none',
           maxHeight: Math.max(160, spaceBottom),
-        } as const;
+        };
       }
       return {
         top: Math.max(margin, highlightedRect.top - Math.max(160, Math.min(estTooltipHeight, spaceTop)) - margin),
@@ -544,11 +560,11 @@ export const TutorialOverlay: React.FC = () => {
         bottom: 'auto',
         transform: 'none',
         maxHeight: Math.max(160, spaceTop),
-      } as const;
+      };
     }
 
     if (!currentStepData.position) {
-      return center as any;
+      return centerPosition;
     }
 
     let top = 0;
@@ -580,26 +596,30 @@ export const TutorialOverlay: React.FC = () => {
 
     // Guard invalid numbers
     if (!Number.isFinite(top) || !Number.isFinite(left)) {
-      return center as any;
+      return centerPosition;
     }
 
     // Final clamp
     left = Math.max(margin, Math.min(left, viewportWidth - tooltipWidth - margin));
     top = Math.max(margin, Math.min(top, viewportHeight - estTooltipHeight - margin));
 
-    return { top, left, right: 'auto', bottom: 'auto', transform: 'none' } as const;
+    return { top, left, right: 'auto', bottom: 'auto', transform: 'none' };
   };
 
-  // Check if this is the final step
+  const isFinalStep = currentStep === tutorialSteps.length - 1;
+
+  if (!isActive) {
+    log.debug('🎓 TutorialOverlay: Tutorial not active, skipping render');
+    return null;
+  }
+
   log.debug('🎓 TutorialOverlay: Step check:', {
     currentStep,
     tutorialStepsLength: tutorialSteps.length,
-    isFinalStep: currentStep === tutorialSteps.length - 1,
-    // Avoid logging large currentStepData object in production
+    isFinalStep,
   });
-  
-  // THEN check for final step (without isActive check)
-  if (currentStep === tutorialSteps.length - 1) {
+
+  if (isFinalStep) {
     return createPortal(
       <div className="tutorial-overlay" ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 50000 }}>
         {/* Dark overlay */}

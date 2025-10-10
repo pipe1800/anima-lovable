@@ -1,4 +1,4 @@
-import React from 'react';
+import type { ChangeEvent } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -6,17 +6,25 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Upload } from 'lucide-react';
 
+interface EditablePersona {
+  id: string;
+  name: string | null;
+  bio: string | null;
+  lore: string | null;
+  avatar_url: string | null;
+}
+
 interface PersonaEditModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  personaToEdit: any | null;
-  setPersonaToEdit: (p: any | null) => void;
+  personaToEdit: EditablePersona | null;
+  setPersonaToEdit: (persona: EditablePersona | null) => void;
   isSaving: boolean;
   onSave: () => Promise<void> | void;
 }
 
 export default function PersonaEditModal({ open, onOpenChange, personaToEdit, setPersonaToEdit, isSaving, onSave }: PersonaEditModalProps) {
-  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -68,9 +76,9 @@ export default function PersonaEditModal({ open, onOpenChange, personaToEdit, se
                 {/* Fallback initials under the upload UI if no image yet (for a11y/SSR) */}
                 <div className="sr-only">
                   <Avatar className="w-20 h-20 mx-auto">
-                    <AvatarImage src={personaToEdit?.avatar_url || undefined} alt="Persona" className="object-cover" />
+                    <AvatarImage src={personaToEdit?.avatar_url ?? undefined} alt="Persona" className="object-cover" />
                     <AvatarFallback className="bg-[#FF7A00] text-white text-lg">
-                      {personaToEdit?.name?.split(' ').map((n: string) => n[0]).join('') || 'P'}
+                      {personaToEdit?.name?.split(' ')?.map((n) => n[0]).join('') || 'P'}
                     </AvatarFallback>
                   </Avatar>
                 </div>
@@ -82,7 +90,7 @@ export default function PersonaEditModal({ open, onOpenChange, personaToEdit, se
                 <label className="block text-sm font-medium text-gray-300 mb-2">Name</label>
                 <Input
                   placeholder="Enter persona name..."
-                  value={personaToEdit?.name || ''}
+                  value={personaToEdit?.name ?? ''}
                   onChange={(e) => setPersonaToEdit(personaToEdit ? { ...personaToEdit, name: e.target.value } : null)}
                   maxLength={50}
                   className="bg-[#121212] border-gray-600 text-white placeholder:text-gray-500 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20"
@@ -94,14 +102,14 @@ export default function PersonaEditModal({ open, onOpenChange, personaToEdit, se
                 <label className="block text-sm font-medium text-gray-300 mb-2">Bio</label>
                 <Textarea
                   placeholder="Brief description of this persona..."
-                  value={personaToEdit?.bio || ''}
+                  value={personaToEdit?.bio ?? ''}
                   onChange={(e) => setPersonaToEdit(personaToEdit ? { ...personaToEdit, bio: e.target.value } : null)}
                   maxLength={200}
                   className="bg-[#121212] border-gray-600 text-white placeholder:text-gray-500 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20 resize-none"
                   rows={3}
                   disabled={isSaving}
                 />
-                <p className="text-xs text-gray-500 mt-1 text-right">{(personaToEdit?.bio || '').length}/200 characters</p>
+                <p className="text-xs text-gray-500 mt-1 text-right">{(personaToEdit?.bio ?? '').length}/200 characters</p>
               </div>
             </div>
           </div>
@@ -110,14 +118,14 @@ export default function PersonaEditModal({ open, onOpenChange, personaToEdit, se
             <label className="block text-sm font-medium text-gray-300 mb-2">Background & Lore</label>
             <Textarea
               placeholder="Detailed background, personality traits, history..."
-              value={personaToEdit?.lore || ''}
+              value={personaToEdit?.lore ?? ''}
               onChange={(e) => setPersonaToEdit(personaToEdit ? { ...personaToEdit, lore: e.target.value } : null)}
               maxLength={500}
               className="bg-[#121212] border-gray-600 text-white placeholder:text-gray-500 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20 resize-none"
               rows={4}
               disabled={isSaving}
             />
-            <p className="text-xs text-gray-500 mt-1 text-right">{(personaToEdit?.lore || '').length}/500 characters</p>
+            <p className="text-xs text-gray-500 mt-1 text-right">{(personaToEdit?.lore ?? '').length}/500 characters</p>
           </div>
 
           <div className="flex space-x-3">

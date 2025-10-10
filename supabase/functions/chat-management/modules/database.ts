@@ -7,32 +7,152 @@ import type {
 } from '../types/streaming-interfaces.ts';
 import type { GlobalChatSettings } from '../../_shared/settings-mapper.ts';
 
+type UnknownRecord = Record<string, unknown>;
+
+interface CharacterDefinitionsRow {
+  personality_summary?: unknown;
+  greeting?: string | null;
+  scenario?: string | null;
+  example_dialogs?: string | null;
+}
+
+interface CharacterRow {
+  id: string;
+  name: string;
+  creator_id?: string;
+  visibility?: string | null;
+  nsfw?: boolean | null;
+  tags?: unknown;
+  personality_summary?: unknown;
+  greeting?: string | null;
+  scenario?: string | null;
+  example_dialogs?: string | null;
+  character_definitions?: CharacterDefinitionsRow | null;
+}
+
+interface CharacterWithExtras extends Character {
+  creator_id?: string;
+  visibility?: string | null;
+  nsfw?: boolean | null;
+  tags?: unknown;
+  personality_summary?: unknown;
+  example_dialogs?: string | null;
+}
+
+interface WorldInfoEntryRow {
+  keywords: unknown;
+  entry_text: unknown;
+}
+
+interface CharacterMemoryRow {
+  id: string;
+  summary_content: string;
+  trigger_keywords: string[] | null;
+  created_at: string;
+  updated_at: string;
+  last_injected_at: string | null;
+  injection_count: number | null;
+  content_hash: string | null;
+  is_auto_summary?: boolean;
+  embedding?: number[] | null;
+  chat_id?: string | null;
+}
+
+interface AutoSummaryRow {
+  id: string;
+  name: string;
+  summary_content: string;
+  created_at: string;
+}
+
+interface SummaryMessageRow {
+  content?: unknown;
+  is_ai_message?: unknown;
+  created_at?: unknown;
+}
+
+interface PersonaRow {
+  id?: string | null;
+  name?: string | null;
+  bio?: string | null;
+  lore?: string | null;
+}
+
+interface ChatPersonaRow {
+  personas?: PersonaRow | null;
+}
+
+interface ChatWithPersonasRow {
+  personas?: Array<PersonaRow | null> | null;
+}
+
+interface ChatSelectedPersonaRow {
+  selected_persona_id: string | null;
+}
+
+interface ProfileRow {
+  username: string | null;
+  timezone: string | null;
+}
+
+interface ProfileWithDefaultRow extends ProfileRow {
+  default_persona_id?: string | null;
+}
+
+interface UserCharacterSettingsRow {
+  chat_mode: 'storytelling' | 'companion' | null;
+  time_awareness_enabled: boolean | null;
+}
+
+interface ChatContextRow {
+  updated_at?: string | null;
+}
+
 // --- Utility coercion helpers ---
-function asString(u: any): string | undefined { return typeof u === 'string' ? u : u == null ? undefined : String(u); }
-function asBool(u: any): boolean { return Boolean(u); }
-function coerceMessage(row: any): Message {
+function asString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (value == null) return undefined;
+  return String(value);
+}
+function asBool(value: unknown): boolean { return Boolean(value); }
+function coerceMessage(row: UnknownRecord): Message {
+  const authorValue = row.author_id;
+  const author_id =
+    authorValue === null || typeof authorValue === 'string'
+      ? authorValue
+      : asString(authorValue) ?? null;
+
+  const currentContextValue = row.current_context;
+  const current_context =
+    currentContextValue && typeof currentContextValue === 'object'
+      ? (currentContextValue as CurrentContext)
+      : undefined;
+
+  const createdAt = asString(row.created_at) || new Date().toISOString();
+  const updatedAt = asString(row.updated_at);
+
   return {
     id: asString(row.id),
     chat_id: asString(row.chat_id) || '',
-    author_id: row.author_id === null || typeof row.author_id === 'string' ? row.author_id : asString(row.author_id) || null,
+    author_id,
     content: asString(row.content) || '',
     is_ai_message: asBool(row.is_ai_message),
     is_placeholder: asBool(row.is_placeholder),
-    current_context: row.current_context || undefined,
+    current_context,
     message_order: typeof row.message_order === 'number' ? row.message_order : 0,
-    created_at: asString(row.created_at) || new Date().toISOString(),
-    updated_at: asString(row.updated_at)
+    created_at: createdAt,
+    updated_at: updatedAt,
   };
 }
 
 // In-memory per-request character cache
-const characterCache = new WeakMap<any, Map<string, any>>();
+const characterCache = new WeakMap<SupabaseClient, Map<string, CharacterWithExtras>>();
 
 export async function fetchCharacterData(
   characterId: string,
   supabase: SupabaseClient,
   options?: { full?: boolean }
-): Promise<Character & { greeting?: string | null; example_dialogs?: string | null; scenario?: string | null; personality_summary?: any }> {
+): Promise<CharacterWithExtras> {
   const full = !!options?.full;
   let cacheForClient = characterCache.get(supabase);
   if (!cacheForClient) { cacheForClient = new Map(); characterCache.set(supabase, cacheForClient); }
@@ -43,10 +163,11 @@ export async function fetchCharacterData(
   const defCols = full
     ? 'id,name,creator_id,visibility,nsfw,tags,character_definitions(personality_summary,greeting,scenario,example_dialogs)'
     : 'id,name,creator_id,character_definitions(personality_summary,greeting)';
-  let data: any = null; let error: any = null;
+  let data: CharacterRow | null = null;
+  let error: unknown = null;
   try {
     const resp = await supabase
-      .from('characters')
+      .from<CharacterRow>('characters')
       .select(defCols)
       .eq('id', characterId)
       .maybeSingle();
@@ -56,35 +177,54 @@ export async function fetchCharacterData(
   }
 
   // Legacy fallback (older schema with columns directly on characters)
-  if ((!data || error) && error?.message?.includes('column') ) {
+  if ((!data || error) && typeof (error as { message?: string } | null)?.message === 'string' && (error as { message?: string }).message?.includes('column') ) {
     try {
       const legacyCols = full ? 'id,name,creator_id,personality_summary,greeting,scenario,example_dialogs' : 'id,name,creator_id,personality_summary,greeting';
       const legacy = await supabase
-        .from('characters')
+        .from<CharacterRow>('characters')
         .select(legacyCols)
         .eq('id', characterId)
         .maybeSingle();
       if (legacy.data) { data = legacy.data; error = null; }
-    } catch {}
+    } catch (legacyError) {
+      console.warn('Failed to fetch legacy character definition', legacyError);
+    }
   }
 
   if (!data) throw new Error(`Character not found: ${characterId}`);
 
   // Normalize flattening
-  const parsed: any = { id: data.id, name: data.name, creator_id: data.creator_id };
-  const defs = (data as any).character_definitions || {};
-  const ps = (data as any).personality_summary ?? defs.personality_summary ?? null;
+  const parsed: CharacterWithExtras = {
+    id: data.id,
+    name: data.name,
+    creator_id: data.creator_id,
+    personality_summary: undefined,
+    greeting: undefined,
+    scenario: undefined,
+    example_dialogs: undefined,
+    visibility: data.visibility ?? null,
+    nsfw: data.nsfw ?? null,
+    tags: data.tags,
+    description: undefined,
+    character_definitions: undefined,
+  };
+  const defs = data.character_definitions ?? {};
+  const ps = data.personality_summary ?? defs.personality_summary ?? null;
   if (ps) {
-    if (typeof ps === 'string') { try { parsed.personality_summary = JSON.parse(ps); } catch { parsed.personality_summary = ps; } }
-    else parsed.personality_summary = ps;
+    if (typeof ps === 'string') {
+      try {
+        parsed.personality_summary = JSON.parse(ps) as unknown;
+      } catch {
+        parsed.personality_summary = ps;
+      }
+    } else {
+      parsed.personality_summary = ps;
+    }
   }
-  parsed.greeting = (data as any).greeting ?? defs.greeting ?? null;
+  parsed.greeting = (data.greeting ?? defs.greeting) ?? null;
   if (full) {
-    parsed.scenario = (data as any).scenario ?? defs.scenario ?? null;
-    parsed.example_dialogs = (data as any).example_dialogs ?? defs.example_dialogs ?? null;
-    parsed.visibility = (data as any).visibility ?? null;
-    parsed.nsfw = (data as any).nsfw ?? null;
-    parsed.tags = (data as any).tags ?? null;
+    parsed.scenario = (data.scenario ?? defs.scenario) ?? null;
+    parsed.example_dialogs = (data.example_dialogs ?? defs.example_dialogs) ?? null;
   }
 
   cacheForClient.set(cacheKey, parsed);
@@ -113,9 +253,9 @@ export async function fetchConversationHistory(
 export async function fetchUserProfile(
   userId: string,
   supabase: SupabaseClient
-): Promise<any> {
+): Promise<ProfileRow | null> {
   const { data: profile, error } = await supabase
-    .from('profiles')
+    .from<ProfileRow>('profiles')
     .select('username, timezone')
     .eq('id', userId)
     .single();
@@ -163,7 +303,7 @@ export async function fetchUserCharacterSettings(
   supabaseAdmin: SupabaseClient
 ): Promise<{ chat_mode: 'storytelling' | 'companion'; time_awareness_enabled: boolean } | null> {
   const { data: settings, error } = await supabaseAdmin
-    .from('user_character_settings')
+    .from<UserCharacterSettingsRow>('user_character_settings')
     .select('chat_mode, time_awareness_enabled')
     .eq('user_id', userId)
     .eq('character_id', characterId)
@@ -176,10 +316,12 @@ export async function fetchUserCharacterSettings(
 
   // Return default values if no settings found
   if (!settings) return { chat_mode: 'storytelling', time_awareness_enabled: false };
-  const s = settings as any;
+  const chatMode: 'storytelling' | 'companion' =
+    settings.chat_mode === 'companion' ? 'companion' : 'storytelling';
+  const timeAwarenessEnabled = Boolean(settings.time_awareness_enabled);
   return {
-    chat_mode: (s.chat_mode === 'companion' ? 'companion' : 'storytelling') as 'storytelling' | 'companion',
-    time_awareness_enabled: Boolean(s.time_awareness_enabled)
+    chat_mode: chatMode,
+    time_awareness_enabled: timeAwarenessEnabled,
   };
 }
 
@@ -259,16 +401,25 @@ export async function fetchUserSelectedWorldInfo(
 
   // Fetch world info entries
   const { data: entries, error } = await supabase
-    .from('world_info_entries')
+    .from<WorldInfoEntryRow>('world_info_entries')
     .select('keywords, entry_text')
     .eq('world_info_id', worldInfoId);
+
+  const firstEntry = entries?.[0];
+  const firstEntryKeywords = Array.isArray(firstEntry?.keywords)
+    ? firstEntry.keywords.map(String)
+    : undefined;
+  const firstEntryText =
+    typeof firstEntry?.entry_text === 'string'
+      ? `${firstEntry.entry_text.substring(0, 100)}...`
+      : undefined;
 
   console.log('📝 World info entries query result:', { 
     entries, 
     error,
     entriesCount: entries?.length || 0,
-  firstEntryKeywords: entries?.[0] && Array.isArray((entries as any)[0].keywords) ? (entries as any)[0].keywords : undefined,
-  firstEntryText: typeof entries?.[0]?.entry_text === 'string' ? (entries as any)[0].entry_text.substring(0, 100) + '...' : undefined
+    firstEntryKeywords,
+    firstEntryText
   });
 
   if (error) {
@@ -279,7 +430,7 @@ export async function fetchUserSelectedWorldInfo(
   console.log(`✅ Fetched ${entries?.length || 0} world info entries`);
   
   // Log each entry for debugging
-  entries?.forEach((entry: any, index: number) => {
+  entries?.forEach((entry, index) => {
     console.log(`📋 Entry ${index + 1}:`, {
       keywords: entry.keywords,
       textLength: entry.entry_text?.length || 0,
@@ -287,9 +438,9 @@ export async function fetchUserSelectedWorldInfo(
     });
   });
   // Coerce to expected shape safely
-  return (entries || []).map((e: any) => ({
-    keywords: Array.isArray(e.keywords) ? e.keywords.map(String) : [],
-    entry_text: typeof e.entry_text === 'string' ? e.entry_text : ''
+  return (entries || []).map((entry) => ({
+    keywords: Array.isArray(entry.keywords) ? entry.keywords.map(String) : [],
+    entry_text: typeof entry.entry_text === 'string' ? entry.entry_text : ''
   }));
 }
 
@@ -308,32 +459,32 @@ export async function fetchCharacterMemories(
   const preferChatId = opts?.chatId || null;
 
   try {
-  const queries: Array<Promise<{ data: any[] }>> = [];
+  const queries: Array<Promise<{ data: CharacterMemoryRow[] }>> = [];
 
     // Non-auto summaries (curated/manual) across all chats for this user-character pair
     queries.push(
       (async () => {
         const r = await supabase
-          .from('character_memories')
+          .from<AutoSummaryRow>('character_memories')
           .select('id, summary_content, trigger_keywords, created_at, updated_at, last_injected_at, injection_count, content_hash, is_auto_summary, embedding')
           .eq('user_id', userId)
           .eq('character_id', characterId)
           .eq('is_auto_summary', false)
           .order('updated_at', { ascending: false })
           .limit(limitNonAuto);
-        return { data: r.data || [] };
+        return { data: r.data ?? [] };
       })()
     );
 
     // Auto summaries
     if (includeAuto) {
-      const autoQueries: Promise<any>[] = [];
+      const autoQueries: Array<Promise<{ data: CharacterMemoryRow[] }>> = [];
 
       // Prefer a few from the current chat if provided
       if (preferChatId) {
         autoQueries.push((async () => {
           const r = await supabase
-            .from('character_memories')
+            .from<AutoSummaryRow>('character_memories')
             .select('id, summary_content, trigger_keywords, created_at, updated_at, last_injected_at, injection_count, content_hash, is_auto_summary, embedding')
             .eq('chat_id', preferChatId)
             .eq('user_id', userId)
@@ -341,29 +492,32 @@ export async function fetchCharacterMemories(
             .eq('is_auto_summary', true)
             .order('created_at', { ascending: false })
             .limit(Math.min(limitAuto, 3));
-          return { data: r.data || [] };
+          return { data: r.data ?? [] };
         })());
       }
 
       // Also fetch most recent across chats for this user-character pair
       autoQueries.push((async () => {
         const r = await supabase
-          .from('character_memories')
+          .from<AutoSummaryRow>('character_memories')
           .select('id, summary_content, trigger_keywords, created_at, updated_at, last_injected_at, injection_count, content_hash, is_auto_summary, embedding')
           .eq('user_id', userId)
           .eq('character_id', characterId)
           .eq('is_auto_summary', true)
           .order('created_at', { ascending: false })
           .limit(limitAuto);
-        return { data: r.data || [] };
+        return { data: r.data ?? [] };
       })());
 
       queries.push(Promise.all(autoQueries).then((results) => {
         // Flatten and dedupe by id or content_hash
-        const flat = results.map(r => (r?.data || [])).flat();
+        const flat = results.flatMap((result) => result.data ?? []);
         const seen = new Set<string>();
-        const deduped = flat.filter((m: any) => {
-          const key = m.id || m.content_hash || `${m.summary_content?.slice(0, 64)}:${m.created_at}`;
+        const deduped = flat.filter((memory) => {
+          const key =
+            memory.id ??
+            memory.content_hash ??
+            `${memory.summary_content?.slice(0, 64) ?? ''}:${memory.created_at}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
@@ -375,15 +529,15 @@ export async function fetchCharacterMemories(
 
     const results = await Promise.all(queries);
 
-    const nonAuto = results[0].data || [];
-    const auto = includeAuto ? (results[1]?.data || []) : [];
+    const nonAuto: CharacterMemoryRow[] = results[0]?.data ?? [];
+    const auto: CharacterMemoryRow[] = includeAuto ? results[1]?.data ?? [] : [];
 
     const memories = [...nonAuto, ...auto];
 
     console.log(`✅ Fetched memories -> nonAuto: ${nonAuto.length}, auto: ${auto.length}`);
 
     // Debug preview
-  memories.forEach((memory: any, index: number) => {
+  memories.forEach((memory, index) => {
       console.log(`🧠 Memory ${index + 1}:`, {
         id: memory.id,
         isAuto: memory.is_auto_summary,
@@ -398,7 +552,7 @@ export async function fetchCharacterMemories(
         contentHash: memory.content_hash?.substring(0, 8)
       });
     });
-  return memories as any;
+  return memories;
   } catch (error) {
     console.error('❌ Unexpected error fetching character memories:', error);
     return [];
@@ -413,16 +567,16 @@ export async function fetchSelectedPersona(
   if (!selectedPersonaId) return null;
 
   const { data: persona } = await supabase
-    .from('personas')
+    .from<PersonaRow>('personas')
     .select('name, bio, lore')
     .eq('id', selectedPersonaId)
     .eq('user_id', userId)
     .single();
 
   return persona ? {
-    name: asString((persona as any).name),
-    bio: asString((persona as any).bio),
-    lore: asString((persona as any).lore)
+    name: asString(persona.name),
+    bio: asString(persona.bio),
+    lore: asString(persona.lore)
   } : null;
 }
 
@@ -443,7 +597,7 @@ async function getUserLastUsedPersona(userId: string, supabase: SupabaseClient):
     return null;
   }
 
-  return asString((data as any).selected_persona_id) || null;
+  return asString(data.selected_persona_id) ?? null;
 }
 
 /**
@@ -451,7 +605,7 @@ async function getUserLastUsedPersona(userId: string, supabase: SupabaseClient):
  */
 async function getUserDefaultPersona(userId: string, supabase: SupabaseClient): Promise<string | null> {
   const { data, error } = await supabase
-    .from('personas')
+    .from<PersonaRow>('personas')
     .select('id')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
@@ -462,7 +616,7 @@ async function getUserDefaultPersona(userId: string, supabase: SupabaseClient): 
     return null;
   }
 
-  return asString((data as any).id) || null;
+  return asString(data.id) ?? null;
 }
 
 /**
@@ -480,7 +634,7 @@ export async function getBestPersonaForNewChat(userId: string, characterId: stri
     console.log('🎭 No user default persona found, trying user\'s first persona');
     // Fallback to user's first created persona
     const { data: persona, error: personaError } = await supabase
-      .from('personas')
+      .from<PersonaRow>('personas')
       .select('id')
       .eq('user_id', userId)
       .order('created_at', { ascending: true })
@@ -497,7 +651,7 @@ export async function getBestPersonaForNewChat(userId: string, characterId: stri
 
   // Verify the persona still exists and belongs to this user
   const { data: persona, error: personaError } = await supabase
-    .from('personas')
+    .from<PersonaRow>('personas')
     .select('id')
     .eq('id', profile.default_persona_id)
     .eq('user_id', userId)
@@ -521,7 +675,7 @@ export async function fetchChatSelectedPersona(
   supabase: SupabaseClient
 ): Promise<{ name?: string; bio?: string; lore?: string } | null> {
   const { data: chat } = await supabase
-    .from('chats')
+    .from<ChatPersonaRow>('chats')
     .select(`
       selected_persona_id,
       personas:selected_persona_id(
@@ -534,8 +688,8 @@ export async function fetchChatSelectedPersona(
     .eq('user_id', userId)
     .single();
 
-  if (!chat || !(chat as any).personas) return null;
-  const p = (chat as any).personas;
+  if (!chat || !chat.personas) return null;
+  const p = chat.personas;
   return {
     name: asString(p.name),
     bio: asString(p.bio),
@@ -543,7 +697,7 @@ export async function fetchChatSelectedPersona(
   };
 }
 
-// Consolidated persona + profile bootstrap accessor to reduce duplicate queries.
+// Consolidated persona + profile accessor to reduce duplicate queries.
 // Precedence:
 // 1. Chat-selected persona (if chatId provided and persona exists)
 // 2. Explicit selectedPersonaId (validated against user)
@@ -559,31 +713,75 @@ export async function getUserPersonaProfile(options: {
   const { supabase, userId, chatId, explicitPersonaId } = options;
   // Run profile + chat persona + explicit persona lookup in parallel; fallback persona queries only if needed.
   const [profileRes, chatPersonaRes, explicitPersonaRes] = await Promise.all([
-    supabase.from('profiles').select('username, timezone, default_persona_id').eq('id', userId).single(),
-    chatId ? supabase.from('chats').select(`selected_persona_id, personas:selected_persona_id(name,bio,lore)`).eq('id', chatId).eq('user_id', userId).maybeSingle() : Promise.resolve({ data: null }),
-    explicitPersonaId ? supabase.from('personas').select('name,bio,lore,id,user_id').eq('id', explicitPersonaId).eq('user_id', userId).maybeSingle() : Promise.resolve({ data: null })
+    supabase
+      .from<ProfileWithDefaultRow>('profiles')
+      .select('username, timezone, default_persona_id')
+      .eq('id', userId)
+      .single(),
+    chatId
+      ? supabase
+          .from<ChatPersonaRow>('chats')
+          .select(`selected_persona_id, personas:selected_persona_id(name,bio,lore)`)
+          .eq('id', chatId)
+          .eq('user_id', userId)
+          .maybeSingle()
+      : Promise.resolve<{ data: ChatPersonaRow | null }>({ data: null }),
+    explicitPersonaId
+      ? supabase
+          .from<PersonaRow>('personas')
+          .select('name,bio,lore,id,user_id')
+          .eq('id', explicitPersonaId)
+          .eq('user_id', userId)
+          .maybeSingle()
+      : Promise.resolve<{ data: PersonaRow | null }>({ data: null })
   ]);
 
-  const profileData: any = profileRes.data || null;
+  const profileData = profileRes.data ?? null;
   // Priority 1: chat-selected
-  let persona: any = chatPersonaRes?.data?.personas || null;
+  let persona: PersonaRow | null = chatPersonaRes.data?.personas ?? null;
   // Priority 2: explicit selection
-  if (!persona && explicitPersonaRes?.data) persona = explicitPersonaRes.data;
-  let defaultPersonaId: string | null = profileData?.default_persona_id || null;
+  if (!persona && explicitPersonaRes.data) persona = explicitPersonaRes.data;
+  const defaultPersonaId: string | null = profileData?.default_persona_id ?? null;
 
   // Priority 3: default persona id from profile
   if (!persona && defaultPersonaId) {
-    const { data: defPersona } = await supabase.from('personas').select('name,bio,lore').eq('id', defaultPersonaId).eq('user_id', userId).maybeSingle();
+    const { data: defPersona } = await supabase.from<PersonaRow>('personas').select('name,bio,lore').eq('id', defaultPersonaId).eq('user_id', userId).maybeSingle();
     if (defPersona) persona = defPersona;
   }
   // Priority 4: first created persona
   if (!persona) {
-    const { data: firstPersona } = await supabase.from('personas').select('name,bio,lore').eq('user_id', userId).order('created_at',{ ascending: true }).limit(1).maybeSingle();
+    const { data: firstPersona } = await supabase.from<PersonaRow>('personas').select('name,bio,lore').eq('user_id', userId).order('created_at',{ ascending: true }).limit(1).maybeSingle();
     if (firstPersona) persona = firstPersona;
   }
-  const personaOut = persona ? { name: persona.name, bio: persona.bio, lore: persona.lore } : null;
-  const profileOut = profileData ? { username: profileData.username, timezone: profileData.timezone } : null;
+  const personaOut = persona ? { name: persona.name ?? undefined, bio: persona.bio ?? undefined, lore: persona.lore ?? undefined } : null;
+  const profileOut = profileData ? { username: profileData.username ?? undefined, timezone: profileData.timezone ?? undefined } : null;
   return { profile: profileOut, persona: personaOut };
+}
+
+export async function fetchRelationshipSnapshot(
+  supabase: SupabaseClient,
+  userId: string,
+  characterId: string,
+  options?: { forceEval?: boolean; autoPromote?: boolean }
+): Promise<Record<string, unknown> | null> {
+  const forceEval = options?.forceEval ?? false;
+  const autoPromote = options?.autoPromote ?? true;
+  try {
+    const { data, error } = await supabase.rpc('get_or_evaluate_relationship_snapshot', {
+      p_user_id: userId,
+      p_character_id: characterId,
+      p_force_eval: forceEval,
+      p_auto_promote: autoPromote
+    });
+    if (error) {
+      console.warn('relationship.snapshot.rpc.error', error.message);
+      return null;
+    }
+    return data || null;
+  } catch (e) {
+    console.warn('relationship.snapshot.error', (e as Error)?.message);
+    return null;
+  }
 }
 
 export async function fetchCurrentContext(
@@ -600,7 +798,7 @@ export async function fetchCurrentContext(
     .eq('character_id', characterId)
     .maybeSingle();
 
-  let raw = contextData?.current_context || null;
+  let raw = (contextData?.current_context as CurrentContext | null) ?? null;
 
   // Fallback: if no stored context, attempt to derive from character_definitions (initial_addon_context in personality_summary)
   if ((!raw || Object.values(raw).every(v => v == null)) && characterId) {
@@ -611,11 +809,22 @@ export async function fetchCurrentContext(
         .eq('character_id', characterId)
         .maybeSingle();
       if (def?.personality_summary) {
-        let parsed: any = null;
-        try { parsed = typeof def.personality_summary === 'string' ? JSON.parse(def.personality_summary) : def.personality_summary; } catch {}
-        if (parsed?.initial_addon_context_enabled && parsed?.initial_addon_context && typeof parsed.initial_addon_context === 'object') {
-          raw = parsed.initial_addon_context;
-          console.log('🌱 Fallback initial_addon_context loaded from character_definitions');
+        let parsed: unknown = null;
+        try {
+          parsed = typeof def.personality_summary === 'string'
+            ? JSON.parse(def.personality_summary)
+            : def.personality_summary;
+        } catch (parseError) {
+          console.warn('Failed to parse fallback personality summary', parseError);
+        }
+        if (parsed && typeof parsed === 'object') {
+          const payload = parsed as {
+            initial_addon_context_enabled?: boolean;
+            initial_addon_context?: Record<string, unknown>;
+          };
+          if (payload.initial_addon_context_enabled && payload.initial_addon_context && typeof payload.initial_addon_context === 'object') {
+            raw = payload.initial_addon_context as CurrentContext;
+          }
         }
       }
     } catch (fbErr) {
@@ -625,82 +834,23 @@ export async function fetchCurrentContext(
 
   if (error && !raw) {
     console.log('No context found in chat_context table for chat:', chatId);
-    return {} as any;
+    return {};
   }
 
   const pick = (k: string) => (typeof raw?.[k] === 'string' && raw[k].trim() && raw[k] !== 'No context') ? raw[k].trim() : null;
-  const normalized: any = {
-    moodTracking: pick('moodTracking') || pick('mood'),
-    clothingInventory: pick('clothingInventory') || pick('clothing'),
-    locationTracking: pick('locationTracking') || pick('location'),
-    timeAndWeather: pick('timeAndWeather') || pick('time_weather'),
-    relationshipStatus: pick('relationshipStatus') || pick('relationship'),
-    characterPosition: pick('characterPosition') || pick('character_position'),
-    enchantmentStatus: pick('enchantmentStatus') || pick('enchantment_status'),
-    itemInventory: pick('itemInventory') || pick('item_inventory')
+  const normalized: CurrentContext = {
+    moodTracking: (pick('moodTracking') ?? pick('mood')) ?? undefined,
+    clothingInventory: (pick('clothingInventory') ?? pick('clothing')) ?? undefined,
+    locationTracking: (pick('locationTracking') ?? pick('location')) ?? undefined,
+    timeAndWeather: (pick('timeAndWeather') ?? pick('time_weather')) ?? undefined,
+    relationshipStatus: (pick('relationshipStatus') ?? pick('relationship')) ?? undefined,
+    characterPosition: (pick('characterPosition') ?? pick('character_position')) ?? undefined,
+    enchantmentStatus: (pick('enchantmentStatus') ?? pick('enchantment_status')) ?? undefined,
+    itemInventory: (pick('itemInventory') ?? pick('item_inventory')) ?? undefined
   };
   Object.keys(normalized).forEach(k => normalized[k] == null && delete normalized[k]);
   console.log('✅ Fetched & normalized context:', { raw, normalized });
   return normalized;
-}
-
-// Bootstrap snapshot accessor
-export async function fetchChatBootstrapSnapshot(options: {
-  supabase: SupabaseClient;
-  userId: string;
-  chatId: string;
-  characterId: string;
-  includeMemories?: boolean;
-  memoryLimit?: number;
-}): Promise<{
-  profile: { username?: string; timezone?: string } | null;
-  persona: { name?: string; bio?: string; lore?: string } | null;
-  character: { id: string; name: string; greeting?: string | null; personality_summary?: any } | null;
-  context: any;
-  relationship: any;
-  latest_ai_message: { id: string; content: string; message_order: number; created_at: string } | null;
-  memories?: Array<{ id: string; summary_content: string; trigger_keywords: string[]; created_at: string }> | null;
-}> {
-  const { supabase, userId, chatId, characterId, includeMemories, memoryLimit } = options;
-  try {
-    const { data, error } = await supabase.rpc('get_chat_bootstrap_snapshot', {
-      p_user_id: userId,
-      p_chat_id: chatId,
-      p_character_id: characterId,
-      p_include_memories: !!includeMemories,
-      p_memory_limit: memoryLimit ?? 20
-    });
-    if (error) {
-      console.warn('bootstrap.snapshot.rpc.error', error.message);
-      throw new Error('Failed bootstrap snapshot');
-    }
-    if (!data || typeof data !== 'object') throw new Error('Empty snapshot');
-    const rawCtx = (data as any).context?.current_context || null;
-    const pick2 = (k: string) => (typeof rawCtx?.[k] === 'string' && rawCtx[k].trim() && rawCtx[k] !== 'No context') ? rawCtx[k].trim() : null;
-    const normalizedContext: any = rawCtx ? {
-      moodTracking: pick2('moodTracking') || pick2('mood'),
-      clothingInventory: pick2('clothingInventory') || pick2('clothing'),
-      locationTracking: pick2('locationTracking') || pick2('location'),
-      timeAndWeather: pick2('timeAndWeather') || pick2('time_weather'),
-      relationshipStatus: pick2('relationshipStatus') || pick2('relationship'),
-      characterPosition: pick2('characterPosition') || pick2('character_position'),
-      enchantmentStatus: pick2('enchantmentStatus') || pick2('enchantment_status'),
-      itemInventory: pick2('itemInventory') || pick2('item_inventory')
-    } : {};
-    Object.keys(normalizedContext).forEach(k => normalizedContext[k] == null && delete normalizedContext[k]);
-    return {
-      profile: (data as any).profile || null,
-      persona: (data as any).persona || null,
-      character: (data as any).character || null,
-      context: normalizedContext,
-      relationship: (data as any).relationship || null,
-      latest_ai_message: (data as any).latest_ai_message || null,
-      memories: (data as any).memories || null
-    };
-  } catch (e) {
-    console.warn('bootstrap.snapshot.error', (e as Error).message);
-    return { profile: null, persona: null, character: null, context: {}, relationship: null, latest_ai_message: null, memories: null };
-  }
 }
 
 export async function getNextMessageOrder(
@@ -827,7 +977,7 @@ export async function getLatestAutoSummary(
 
   try {
     const { data: summary, error } = await supabase
-      .from('character_memories')
+      .from<AutoSummaryRow>('character_memories')
       .select('id, name, summary_content, created_at')
       .eq('character_id', characterId)
       .eq('is_auto_summary', true)
@@ -850,7 +1000,7 @@ export async function getLatestAutoSummary(
       console.log('🤷 No auto-summary found for character:', characterId);
     }
 
-  return summary as any;
+  return summary;
   } catch (error) {
     console.error('❌ Unexpected error fetching auto-summary:', error);
     return null;
@@ -878,13 +1028,14 @@ export async function fetchMessagesForSummary(
 
   // The messages are fetched in descending order, so we need to reverse them
   // to get the correct chronological order for the summary.
-  const chronologicalMessages = (messages || []).reverse().map((m: any) => ({
+  const rows: SummaryMessageRow[] = (messages ?? []) as SummaryMessageRow[];
+  const chronologicalMessages = [...rows].reverse().map((row) => ({
     chat_id: chatId,
     author_id: null,
-    content: String(m.content ?? ''),
-    is_ai_message: Boolean(m.is_ai_message),
+    content: typeof row.content === 'string' ? row.content : String(row.content ?? ''),
+    is_ai_message: Boolean(row.is_ai_message),
     message_order: 0, // not selected here
-    created_at: String(m.created_at || new Date().toISOString())
+    created_at: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString()
   })) as Message[];
 
   console.log(`✅ Fetched ${chronologicalMessages.length} messages for summary.`);
@@ -905,5 +1056,16 @@ export async function fetchContextRecency(
     .eq('character_id', characterId)
     .maybeSingle();
   if (error || !data) return { updatedAt: null };
-  return { updatedAt: (data as any).updated_at as string };
+  return { updatedAt: data?.updated_at ?? null };
 }
+
+
+
+
+
+
+
+
+
+
+

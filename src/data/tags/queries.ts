@@ -1,33 +1,55 @@
-import { supabase } from '@/db/client';
-import type { Tables } from '@/integrations/supabase/types';
+import type { PostgrestError } from '@supabase/supabase-js';
 
-export type Tag = Tables<'tags'>;
+import { supabase } from '@/db/client';
+import { callRpc } from '@/db/rpc';
+import type { Json } from '@/integrations/supabase/types';
+
+export interface Tag {
+  id: number;
+  name: string;
+  description?: string | null;
+  slug?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  metadata?: Json;
+}
+
+interface TagCacheEntry {
+  data: Tag[];
+  fetchedAt: number;
+}
 
 // Simple in-memory cache (reset on reload)
-let _allTagsCache: { data: Tag[]; fetchedAt: number } | null = null;
+let allTagsCache: TagCacheEntry | null = null;
 const TAG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-async function fetchAllTagsCached(force = false): Promise<{ data: Tag[]; error: any }> {
+interface TagsQueryResult {
+  data: Tag[];
+  error: PostgrestError | null;
+}
+
+async function fetchAllTagsCached(force = false): Promise<TagsQueryResult> {
   if (
     force ||
-    !_allTagsCache ||
-    Date.now() - _allTagsCache.fetchedAt > TAG_CACHE_TTL_MS
+    !allTagsCache ||
+    Date.now() - allTagsCache.fetchedAt > TAG_CACHE_TTL_MS
   ) {
     const { data, error } = await supabase
       .from('tags')
       .select('*')
       .order('name');
-    if (error) return { data: [], error };
-    _allTagsCache = { data: (data as Tag[]) || [], fetchedAt: Date.now() };
+    if (error || !data) return { data: [], error };
+    const rows = data as Tag[];
+    allTagsCache = { data: rows, fetchedAt: Date.now() };
   }
-  return { data: _allTagsCache.data, error: null };
+  return { data: allTagsCache.data, error: null };
 }
 
 // Unified list function (replaces getAllTags / getTagNames internally)
 export const listTags = async (opts?: {
   namesOnly?: boolean;
   forceRefresh?: boolean;
-}): Promise<{ data: Tag[] | string[]; error: any }> => {
+}): Promise<{ data: Tag[] | string[]; error: PostgrestError | null }> => {
   const { namesOnly = false, forceRefresh = false } = opts || {};
   const { data, error } = await fetchAllTagsCached(forceRefresh);
   if (error) return { data: [], error };
@@ -43,7 +65,7 @@ export const getTagNames = async () => listTags({ namesOnly: true });
 export const getTagByName = async (
   name: string,
   opts?: { caseInsensitive?: boolean }
-): Promise<{ data: Tag | null; error: any }> => {
+): Promise<{ data: Tag | null; error: PostgrestError | null }> => {
   const { caseInsensitive = true } = opts || {};
   const { data, error } = await fetchAllTagsCached();
   if (error) return { data: null, error };
@@ -62,7 +84,7 @@ export const getNSFWTag = async () => getTagByName('nsfw', { caseInsensitive: tr
 // Bulk resolution (case-insensitive) using cache to avoid multiple round trips
 export const getTagsByNames = async (
   names: string[]
-): Promise<{ data: Tag[]; error: any }> => {
+): Promise<{ data: Tag[]; error: PostgrestError | null }> => {
   if (!names?.length) return { data: [], error: null };
   const wanted = new Set(names.map(n => n.toLowerCase()));
   const { data, error } = await fetchAllTagsCached();
@@ -72,17 +94,28 @@ export const getTagsByNames = async (
 };
 
 // Utility to return only IDs for given names (common pattern elsewhere)
-export const resolveTagIds = async (names: string[]): Promise<{ data: number[]; error: any }> => {
+export const resolveTagIds = async (
+  names: string[],
+): Promise<{ data: number[]; error: PostgrestError | null }> => {
   const { data, error } = await getTagsByNames(names);
   if (error) return { data: [], error };
   return { data: data.map(t => t.id), error: null };
 };
 
-export const resolveTagNamesRPC = async (names: string[]): Promise<{ data: Array<Pick<Tag,'id'|'name'>>; error: any }> => {
+export interface TagNameResolution {
+  id: number;
+  name: string;
+}
+
+export const resolveTagNamesRPC = async (
+  names: string[],
+): Promise<{ data: TagNameResolution[]; error: PostgrestError | null }> => {
   if (!names?.length) return { data: [], error: null };
-  const { data, error } = await (supabase as any).rpc('resolve_tag_names', { p_names: names });
-  if (error) return { data: [], error };
-  return { data: (data as any[])?.map(r => ({ id: r.id, name: r.name })) || [], error: null };
+  const { data, error } = await callRpc<TagNameResolution[]>(supabase, 'resolve_tag_names', {
+    p_names: names,
+  });
+  if (error || !data) return { data: [], error };
+  return { data, error: null };
 };
 
-export const invalidateTagCache = () => { _allTagsCache = null; };
+export const invalidateTagCache = () => { allTagsCache = null; };

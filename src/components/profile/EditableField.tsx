@@ -116,7 +116,9 @@ export const EditableField: React.FC<EditableFieldProps> = ({
     <div className={cn("space-y-2", className)}>
       <div className="flex items-start gap-2">
         <InputComponent
-          ref={inputRef as any}
+          ref={(node) => {
+            inputRef.current = node as HTMLInputElement | HTMLTextAreaElement | null;
+          }}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onKeyDown={handleKeyDown}

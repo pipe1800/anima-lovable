@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -12,49 +12,32 @@ import {
   Eye,
   Activity
 } from 'lucide-react';
-import { capitalizeText, isCharacterRelevantContext, getContextLabel, getAddonKey } from '@/lib/utils/textFormatting';
-import { convertDatabaseContextToTrackedContext, hasValidContext } from '@/utils/contextConverter';
+import { capitalizeText, isCharacterRelevantContext } from '@/lib/utils/textFormatting';
+import { convertDatabaseContextToTrackedContext, hasValidContext, DatabaseContext } from '@/utils/contextConverter';
+import type { TrackedContext as ChatTrackedContext } from '@/types/chat';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-export interface TrackedContext {
-  moodTracking: string;
-  clothingInventory: string;
-  locationTracking: string;
-  timeAndWeather: string;
-  relationshipStatus: string;
-  characterPosition: string;
-  enchantmentStatus: string; // NEW
-  itemInventory: string; // NEW
-}
+type ContextAddonKey = keyof Pick<
+  ChatTrackedContext,
+  | 'moodTracking'
+  | 'clothingInventory'
+  | 'locationTracking'
+  | 'timeAndWeather'
+  | 'relationshipStatus'
+  | 'characterPosition'
+  | 'enchantmentStatus'
+  | 'itemInventory'
+>;
 
-// Database context format (from messages.current_context)
-export interface DatabaseContext {
-  mood?: string;
-  clothing?: string;
-  location?: string;
-  time_weather?: string;
-  relationship?: string;
-  character_position?: string;
-}
+type ContextUpdates = Partial<Record<ContextAddonKey, { previous: string; current: string }>>;
+type AddonSettings = Partial<Record<ContextAddonKey, boolean>>;
 
 interface ContextDisplayProps {
-  context?: TrackedContext;
-  contextUpdates?: {
-    [key: string]: {
-      previous: string;
-      current: string;
-    };
-  };
-  currentContext?: TrackedContext | DatabaseContext;
-  addonSettings?: {
-    moodTracking?: boolean;
-    clothingInventory?: boolean;
-    locationTracking?: boolean;
-    timeAndWeather?: boolean;
-    relationshipStatus?: boolean;
-    characterPosition?: boolean;
-  };
+  context?: ChatTrackedContext;
+  contextUpdates?: ContextUpdates;
+  currentContext?: ChatTrackedContext | DatabaseContext;
+  addonSettings?: AddonSettings;
   className?: string;
   // New: optional right-aligned actions to render on the same line as the toggle
   rightActions?: React.ReactNode;
@@ -63,315 +46,273 @@ interface ContextDisplayProps {
 interface ContextItem {
   label: string;
   value: string;
-  key: string;
+  key: ContextAddonKey;
   isEnabled: boolean;
   isHistorical: boolean;
   icon: React.ComponentType<{ className?: string }>;
   gradient: string;
   bgColor: string;
+  relationshipStage?: RelationshipStageMeta;
+}
+
+interface RelationshipStageMeta {
+  percent?: number | null;
+  ready?: boolean;
 }
 
 // Context addon configuration with beautiful styling
-const contextAddonConfig = [
-  { 
-    label: 'Mood Tracking', 
-    key: 'moodTracking', 
+const contextAddonConfig: Array<{
+  label: string;
+  key: ContextAddonKey;
+  addonKey: ContextAddonKey;
+  icon: React.ComponentType<{ className?: string }>;
+  gradient: string;
+  bgColor: string;
+}> = [
+  {
+    label: 'Mood Tracking',
+    key: 'moodTracking',
     addonKey: 'moodTracking',
     icon: Brain,
     gradient: 'from-pink-500 to-violet-500',
-    bgColor: 'bg-pink-500/10 border-pink-500/20'
+    bgColor: 'bg-pink-500/10 border-pink-500/20',
   },
-  { 
-    label: 'Clothing Inventory', 
-    key: 'clothingInventory', 
+  {
+    label: 'Clothing Inventory',
+    key: 'clothingInventory',
     addonKey: 'clothingInventory',
     icon: Shirt,
     gradient: 'from-blue-500 to-cyan-500',
-    bgColor: 'bg-blue-500/10 border-blue-500/20'
+    bgColor: 'bg-blue-500/10 border-blue-500/20',
   },
-  { 
-    label: 'Location Tracking', 
-    key: 'locationTracking', 
+  {
+    label: 'Location Tracking',
+    key: 'locationTracking',
     addonKey: 'locationTracking',
     icon: MapPin,
     gradient: 'from-green-500 to-emerald-500',
-    bgColor: 'bg-green-500/10 border-green-500/20'
+    bgColor: 'bg-green-500/10 border-green-500/20',
   },
-  { 
-    label: 'Time & Weather', 
-    key: 'timeAndWeather', 
+  {
+    label: 'Time & Weather',
+    key: 'timeAndWeather',
     addonKey: 'timeAndWeather',
     icon: CloudSun,
     gradient: 'from-orange-500 to-yellow-500',
-    bgColor: 'bg-orange-500/10 border-orange-500/20'
+    bgColor: 'bg-orange-500/10 border-orange-500/20',
   },
-  { 
-    label: 'Relationship Status', 
-    key: 'relationshipStatus', 
+  {
+    label: 'Relationship Status',
+    key: 'relationshipStatus',
     addonKey: 'relationshipStatus',
     icon: Heart,
     gradient: 'from-red-500 to-pink-500',
-    bgColor: 'bg-red-500/10 border-red-500/20'
+    bgColor: 'bg-red-500/10 border-red-500/20',
   },
-  { 
-    label: 'Character Position', 
-    key: 'characterPosition', 
+  {
+    label: 'Character Position',
+    key: 'characterPosition',
     addonKey: 'characterPosition',
     icon: User,
     gradient: 'from-purple-500 to-indigo-500',
-    bgColor: 'bg-purple-500/10 border-purple-500/20'
+    bgColor: 'bg-purple-500/10 border-purple-500/20',
   },
-  { 
-    label: 'Enchantment Status', 
-    key: 'enchantmentStatus', 
+  {
+    label: 'Enchantment Status',
+    key: 'enchantmentStatus',
     addonKey: 'enchantmentStatus',
     icon: Sparkles,
     gradient: 'from-fuchsia-500 to-pink-500',
-    bgColor: 'bg-fuchsia-500/10 border-fuchsia-500/20'
+    bgColor: 'bg-fuchsia-500/10 border-fuchsia-500/20',
   },
-  { 
-    label: 'Item Inventory', 
-    key: 'itemInventory', 
+  {
+    label: 'Item Inventory',
+    key: 'itemInventory',
     addonKey: 'itemInventory',
     icon: Activity,
     gradient: 'from-amber-500 to-orange-500',
-    bgColor: 'bg-amber-500/10 border-amber-500/20'
+    bgColor: 'bg-amber-500/10 border-amber-500/20',
   },
 ];
 
-export const ContextDisplay = ({ context, contextUpdates, currentContext, addonSettings, className = '', rightActions }: ContextDisplayProps) => {
+const DEFAULT_TRACKED_CONTEXT: ChatTrackedContext = {
+  moodTracking: 'No context',
+  clothingInventory: 'No context',
+  locationTracking: 'No context',
+  timeAndWeather: 'No context',
+  relationshipStatus: 'No context',
+  characterPosition: 'No context',
+  enchantmentStatus: 'No context',
+  itemInventory: 'No context',
+};
+
+const getAddonEnabled = (settings: AddonSettings | undefined, key: ContextAddonKey): boolean => {
+  if (!settings) return true;
+  return Boolean(settings[key]);
+};
+
+const sanitizeValue = (value: string | null | undefined): string | null => {
+  if (!value || value === 'No context') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+export const ContextDisplay: React.FC<ContextDisplayProps> = ({
+  context,
+  contextUpdates,
+  currentContext,
+  addonSettings,
+  className = '',
+  rightActions,
+}) => {
+  const [relationshipProgress] = useState<RelationshipStageMeta | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [relationshipProgress, setRelationshipProgress] = useState<{ percent: number; ready: boolean } | null>(null);
-  const [relationshipMeta, setRelationshipMeta] = useState<any>(null);
 
-  // Remove relationship meta event listeners (meta no longer emitted)
-  useEffect(() => { return () => {}; }, []);
+  const effectiveContext = currentContext ?? context ?? null;
 
-  // Use the most relevant context source
-  const effectiveContext = currentContext || context;
+  const normalizedEffective = useMemo<ChatTrackedContext | null>(() => {
+    if (!effectiveContext) return null;
+    return convertDatabaseContextToTrackedContext(effectiveContext) ?? DEFAULT_TRACKED_CONTEXT;
+  }, [effectiveContext]);
 
-  // Process context data into unified format with FIXED KEY MAPPING
-  let contextItems: ContextItem[] = [];
-  
-  // Handle effectiveContext (prioritized) - PRIORITY 1 - UNIVERSAL CONTEXT HANDLING
-  if (effectiveContext) {
-    // Check if context is already in TrackedContext format or needs conversion
-    let workingContext: TrackedContext;
-    
-    if ('moodTracking' in effectiveContext) {
-      // Already in TrackedContext format (from messages.current_context)
-      workingContext = effectiveContext as TrackedContext;
-    } else {
-      // Database format (from chat_context.current_context) - needs conversion
-      const convertedContext = convertDatabaseContextToTrackedContext(effectiveContext);
-      workingContext = convertedContext || {
-        moodTracking: 'No context',
-        clothingInventory: 'No context',
-        locationTracking: 'No context',
-        timeAndWeather: 'No context',
-        relationshipStatus: 'No context',
-        characterPosition: 'No context',
-        enchantmentStatus: 'No context', // NEW
-        itemInventory: 'No context' // NEW
-      };
-    }
-    
-    contextItems = contextAddonConfig.map(item => {
-      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
-      
-      // Get context value using both possible formats for maximum compatibility
-      let contextValue = null;
-      
-      if (typeof workingContext === 'object' && workingContext !== null) {
-        // Try TrackedContext format first (preferred)
-        if ('moodTracking' in workingContext) {
-          const trackedContext = workingContext as TrackedContext;
-          // Use the key directly since contextAddonConfig keys match TrackedContext properties
-          contextValue = (trackedContext as any)[item.key];
-        } else {
-          // Fallback to raw database format (shouldn't happen after conversion but just in case)
-          const dbContext = workingContext as any;
-          if (item.key === 'moodTracking') contextValue = dbContext.mood;
-          else if (item.key === 'clothingInventory') contextValue = dbContext.clothing;
-          else if (item.key === 'locationTracking') contextValue = dbContext.location;
-          else if (item.key === 'timeAndWeather') contextValue = dbContext.time_weather;
-          else if (item.key === 'relationshipStatus') contextValue = dbContext.relationship;
-          else if (item.key === 'characterPosition') contextValue = dbContext.character_position;
-        }
-      }
-      
-      // Filter out null, undefined, empty string, and "No context" values
-      if (contextValue && contextValue !== 'No context' && contextValue.trim() !== '' && isCharacterRelevantContext(item.addonKey, contextValue)) {
+  const contextItems = useMemo<ContextItem[]>(() => {
+    const toItem = (
+      config: (typeof contextAddonConfig)[number],
+      rawValue: string | null | undefined,
+      isEnabled: boolean,
+      markHistorical: boolean,
+    ): ContextItem | null => {
+      const usable = sanitizeValue(rawValue);
+
+      if (usable && isCharacterRelevantContext(config.addonKey, usable)) {
         return {
-          label: item.label,
-          value: capitalizeText(contextValue),
-          key: item.key,
-          isEnabled: isEnabled,
-          isHistorical: false,
-          icon: item.icon,
-          gradient: item.gradient,
-          bgColor: item.bgColor
-        };
-      } else if (isEnabled) {
-        return {
-          label: item.label,
-          value: 'No context yet',
-          key: item.key,
-          isEnabled: true,
-          isHistorical: false,
-          icon: item.icon,
-          gradient: item.gradient,
-          bgColor: item.bgColor
+          label: config.label,
+          value: capitalizeText(usable),
+          key: config.key,
+          isEnabled,
+          isHistorical: markHistorical && !isEnabled,
+          icon: config.icon,
+          gradient: config.gradient,
+          bgColor: config.bgColor,
         };
       }
-      return null as any;
-    }).filter(Boolean) as ContextItem[];
-  }
-  // Handle contextUpdates (from historical messages) - PRIORITY 2
-  else if (contextUpdates && Object.keys(contextUpdates).length > 0) {
-    contextItems = contextAddonConfig.map(item => {
-      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
-      const updateData = (contextUpdates as any)[item.addonKey];
-      
-      if (updateData && updateData.current !== 'No context' && isCharacterRelevantContext(item.addonKey, updateData.current)) {
-        return {
-          label: item.label,
-          value: capitalizeText(updateData.current),
-          key: item.key,
-          isEnabled: isEnabled,
-          isHistorical: !isEnabled,
-          icon: item.icon,
-          gradient: item.gradient,
-          bgColor: item.bgColor
-        };
-      } else if (isEnabled) {
-        return {
-          label: item.label,
-          value: 'No context yet',
-          key: item.key,
-          isEnabled: true,
-          isHistorical: false,
-          icon: item.icon,
-          gradient: item.gradient,
-          bgColor: item.bgColor
-        };
-      }
-      return null as any;
-    }).filter(Boolean) as ContextItem[];
-  }
-  // Handle legacy context format - PRIORITY 3
-  else if (context) {
-    contextItems = contextAddonConfig.map(item => {
-      const isEnabled = addonSettings ? addonSettings[item.addonKey] : true; // Default to enabled if settings not loaded
-      const contextValue = (context as any)[item.addonKey];
-      
-      if (contextValue && contextValue !== 'No context' && isCharacterRelevantContext(item.addonKey, contextValue)) {
-        return {
-          label: item.label,
-          value: capitalizeText(contextValue),
-          key: item.key,
-          isEnabled: isEnabled,
-          isHistorical: !isEnabled,
-          icon: item.icon,
-          gradient: item.gradient,
-          bgColor: item.bgColor
-        };
-      } else if (isEnabled) {
-        return {
-          label: item.label,
-          value: 'No context yet',
-          key: item.key,
-          isEnabled: true,
-          isHistorical: false,
-          icon: item.icon,
-          gradient: item.gradient,
-          bgColor: item.bgColor
-        };
-      }
-      return null as any;
-    }).filter(Boolean) as ContextItem[];
-  }
-  // If no context data but addons are enabled, show all enabled addons with "No context yet"
-  else {
-    contextItems = contextAddonConfig.map(item => {
-      const isEnabled = addonSettings ? addonSettings[item.addonKey] : false;
+
       if (isEnabled) {
         return {
-          label: item.label,
+          label: config.label,
           value: 'No context yet',
-          key: item.key,
+          key: config.key,
           isEnabled: true,
           isHistorical: false,
-          icon: item.icon,
-          gradient: item.gradient,
-          bgColor: item.bgColor
-        } as ContextItem;
+          icon: config.icon,
+          gradient: config.gradient,
+          bgColor: config.bgColor,
+        };
       }
-      return null as any;
-    }).filter(Boolean) as ContextItem[];
-  }
 
-  // Augment contextItems to include progress bar marker for relationshipStatus
-  contextItems = contextItems.map(ci => {
-    if (ci.key === 'relationshipStatus') {
-      return { ...ci, __relationship: true } as any;
+      return null;
+    };
+
+    const items: ContextItem[] = [];
+
+    if (normalizedEffective) {
+      for (const config of contextAddonConfig) {
+        const enabled = getAddonEnabled(addonSettings, config.addonKey);
+        const rawValue = normalizedEffective[config.key];
+        const item = toItem(config, rawValue, enabled, false);
+        if (item) items.push(item);
+      }
+      return items.map((item) =>
+        item.key === 'relationshipStatus'
+          ? {
+              ...item,
+              relationshipStage: relationshipProgress ?? undefined,
+            }
+          : item,
+      );
     }
-    return ci;
-  });
 
-  // Check if any stateful addons are enabled (default to true if settings not loaded yet)
-  const hasEnabledAddons = !addonSettings || (addonSettings && (
-    addonSettings.moodTracking || 
-    addonSettings.clothingInventory || 
-    addonSettings.locationTracking || 
-    addonSettings.timeAndWeather || 
-    addonSettings.relationshipStatus ||
-    addonSettings.characterPosition
-  ));
+    if (contextUpdates && Object.keys(contextUpdates).length > 0) {
+      for (const config of contextAddonConfig) {
+        const enabled = getAddonEnabled(addonSettings, config.addonKey);
+        const update = contextUpdates[config.addonKey];
+  const item = toItem(config, update?.current, enabled, true);
+        if (item) items.push(item);
+      }
+      return items;
+    }
 
-  // Show context if we have valid context data OR if addons are enabled OR while settings are loading
-  const shouldRender = hasEnabledAddons || hasValidContext(effectiveContext) || context || contextUpdates;
-  
-  // TEMPORARY: Force render if we have any context for debugging
-  const hasAnyContext = hasValidContext(effectiveContext) || hasValidContext(context);
-  const forceRender = hasAnyContext;
-  
-  if (!shouldRender && !forceRender) {
-    return null;
-  }
+    if (context) {
+      for (const config of contextAddonConfig) {
+        const enabled = getAddonEnabled(addonSettings, config.addonKey);
+        const rawValue = context[config.addonKey];
+  const item = toItem(config, rawValue, enabled, true);
+        if (item) items.push(item);
+      }
+      return items;
+    }
 
-  // Count enabled context items
-  const enabledContextCount = contextItems.filter(item => item.isEnabled && item.value !== 'No context yet').length;
-  const totalEnabledAddons = contextItems.filter(item => item.isEnabled).length;
+    if (addonSettings) {
+      for (const config of contextAddonConfig) {
+        if (getAddonEnabled(addonSettings, config.addonKey)) {
+          items.push({
+            label: config.label,
+            value: 'No context yet',
+            key: config.key,
+            isEnabled: true,
+            isHistorical: false,
+            icon: config.icon,
+            gradient: config.gradient,
+            bgColor: config.bgColor,
+          });
+        }
+      }
+    }
 
-  const renderRelationshipProgress = React.useCallback(() => {
-    const pctBase = relationshipMeta && typeof relationshipMeta.stage_progress_percent === 'number'
-      ? relationshipMeta.stage_progress_percent
-      : (relationshipMeta && typeof relationshipMeta.percent_to_next === 'number'
-        ? relationshipMeta.percent_to_next
-        : (relationshipProgress ? relationshipProgress.percent : null));
-    const ready = relationshipMeta ? !!relationshipMeta.ready_for_next : (relationshipProgress?.ready || false);
-    // Show placeholder bar if we have meta but no computed percent yet
-    if ((pctBase === null || pctBase === undefined) && !relationshipMeta) return null;
-    const pctDisplay = pctBase === null || pctBase === undefined ? 0 : Math.round(Math.max(0, Math.min(1, pctBase)) * 100);
+    return items;
+  }, [addonSettings, context, contextUpdates, normalizedEffective, relationshipProgress]);
+
+  const hasEnabledAddons = useMemo(() => {
+    if (!addonSettings) return true;
+    return contextAddonConfig.some((config) => getAddonEnabled(addonSettings, config.addonKey));
+  }, [addonSettings]);
+
+  const shouldRender = hasEnabledAddons || hasValidContext(effectiveContext) || hasValidContext(context) || Boolean(contextUpdates && Object.keys(contextUpdates).length);
+
+  const renderRelationshipProgress = useCallback((stage?: RelationshipStageMeta) => {
+    const pctBase = stage?.percent ?? null;
+    if (pctBase === null || pctBase === undefined) return null;
+
+    const pctDisplay = Math.round(Math.max(0, Math.min(1, pctBase)) * 100);
+    const ready = stage?.ready ?? false;
     const barColor = pctDisplay >= 100 ? 'bg-green-500' : 'bg-gradient-to-r from-red-500 via-yellow-500 to-green-500';
+
     return (
       <div className="mt-2">
         <div className="flex justify-between text-[10px] uppercase tracking-wide mb-1 text-slate-400">
           <span>Stage Progress</span>
-          <span className={ready ? 'text-green-400' : 'text-slate-400'}>{pctDisplay}%{ready ? ' Ready' : ''}</span>
+          <span className={ready ? 'text-green-400' : 'text-slate-400'}>
+            {pctDisplay}%{ready ? ' Ready' : ''}
+          </span>
         </div>
         <div className="h-2 rounded bg-slate-700/60 overflow-hidden relative">
           <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${pctDisplay}%` }} />
           {pctDisplay === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-[9px] text-slate-500 tracking-wide">
-              {relationshipMeta ? 'Initializing' : '—'}
+              —
             </div>
           )}
         </div>
       </div>
     );
-  }, [relationshipProgress, relationshipMeta]);
+  }, []);
+
+  if (!shouldRender) {
+    return null;
+  }
+
+  const enabledContextCount = contextItems.filter((item) => item.isEnabled && item.value !== 'No context yet').length;
+  const totalEnabledAddons = contextItems.filter((item) => item.isEnabled).length;
 
   return (
     <div className={`${className}`}>

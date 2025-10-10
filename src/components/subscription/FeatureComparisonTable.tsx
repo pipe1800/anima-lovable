@@ -1,4 +1,3 @@
-import React from 'react';
 import { CheckCircle, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -7,7 +6,7 @@ interface Plan {
   name: string;
   price_monthly: number;
   monthly_credits_allowance: number;
-  features: any;
+  features: string[] | null;
   is_active: boolean;
 }
 
@@ -27,43 +26,43 @@ const featureRows: FeatureRow[] = [
     label: 'Monthly Price',
     key: 'price',
     type: 'price',
-    getValue: (plan) => plan.price_monthly === 0 ? 'Free' : `$${plan.price_monthly}`
+    getValue: (plan: Plan) => (plan.price_monthly === 0 ? 'Free' : `$${plan.price_monthly}`)
   },
   {
     label: 'Monthly Credits',
     key: 'credits',
     type: 'credits',
-    getValue: (plan) => plan.monthly_credits_allowance.toLocaleString()
+    getValue: (plan: Plan) => plan.monthly_credits_allowance.toLocaleString()
   },
   {
     label: 'Character Creation',
     key: 'character_creation',
     type: 'boolean',
-    getValue: (plan) => true // All plans have this
+    getValue: () => true // All plans have this
   },
   {
     label: 'Chat with Characters',
     key: 'chat_feature',
     type: 'boolean',
-    getValue: (plan) => true // All plans have this
+    getValue: () => true // All plans have this
   },
   {
     label: 'Basic AI Models',
     key: 'basic_models',
     type: 'boolean',
-    getValue: (plan) => true // All plans have this
+    getValue: () => true // All plans have this
   },
   {
     label: 'Advanced AI Models',
     key: 'advanced_models',
     type: 'boolean',
-    getValue: (plan) => plan.price_monthly > 0 // Only paid plans
+    getValue: (plan: Plan) => plan.price_monthly > 0 // Only paid plans
   },
   {
     label: 'Custom Personas',
     key: 'custom_personas',
     type: 'value',
-    getValue: (plan) => {
+    getValue: (plan: Plan) => {
       if (plan.price_monthly === 0) return '1';
       if (plan.name === 'True Fan') return '5';
       if (plan.name === 'The Whale') return '10';
@@ -74,36 +73,36 @@ const featureRows: FeatureRow[] = [
     label: 'World Info Access',
     key: 'world_info',
     type: 'boolean',
-    getValue: (plan) => plan.price_monthly > 0 // Only paid plans
+    getValue: (plan: Plan) => plan.price_monthly > 0 // Only paid plans
   },
   {
     label: 'Credit Booster Packs',
     key: 'credit_boosters',
     type: 'boolean',
-    getValue: (plan) => plan.price_monthly > 0 // Only paid plans
+    getValue: (plan: Plan) => plan.price_monthly > 0 // Only paid plans
   },
   {
     label: 'Add-ons',
     key: 'addons',
     type: 'boolean',
-    getValue: (plan) => plan.name === 'True Fan' || plan.name === 'The Whale'
+    getValue: (plan: Plan) => plan.name === 'True Fan' || plan.name === 'The Whale'
   },
   {
     label: 'Priority Generation',
     key: 'priority_generation',
     type: 'boolean',
-    getValue: (plan) => plan.name === 'The Whale' // Only highest tier
+    getValue: (plan: Plan) => plan.name === 'The Whale' // Only highest tier
   }
 ];
 
-export const FeatureComparisonTable: React.FC<FeatureComparisonTableProps> = ({ plans }) => {
+export const FeatureComparisonTable = ({ plans }: FeatureComparisonTableProps) => {
   if (!plans || plans.length === 0) {
     return null;
   }
 
   const activePlans = plans.filter(plan => plan.is_active);
 
-  const renderFeatureCell = (plan: Plan, feature: FeatureRow) => {
+  const renderFeatureCell = (plan: Plan, feature: FeatureRow): JSX.Element | null => {
     const value = feature.getValue ? feature.getValue(plan) : false;
     
     if (feature.type === 'boolean') {

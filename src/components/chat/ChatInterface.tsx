@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 // Removed greetingDismissedStore to ensure greeting selection UI always appears for each new chat session
 
 import { Send } from 'lucide-react';
@@ -8,11 +8,10 @@ import ChatMessages from './ChatMessages';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatUnified } from '@/hooks/useChatUnified';
 import { useChatPerformance } from '@/hooks/useChatPerformance';
-import type { TrackedContext } from '@/types/chat';
+import type { Message as ChatMessage, TrackedContext } from '@/types/chat';
 import { createChat } from '@/lib/chat-operations';
 import { handleChatError } from '@/utils/chatErrorHandling';
 import logger from '@/utils/logger';
-import { type Persona } from '@/data/personas/mutations';
 import { usePersonaById } from '@/data/personas/hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { chatQueryKeys } from '@/data/chats/queryKeys';
@@ -20,8 +19,15 @@ import { useNavigate } from 'react-router-dom';
 import { buildGreetingVariants } from '@/lib/greeting-utils'; // still used for initial variants (could swap to getGreetingVariants)
 import { upsertChatContext } from '@/data/chats/queries';
 import { ChatManagement } from '@/data/edge';
+import type { UserGlobalChatSettings } from '@/types/chatSettings';
 
 // Removed AddonDebugPanel (no longer needed)
+
+declare global {
+  interface Window {
+    __chatCharDefs?: Record<string, unknown>;
+  }
+}
 
 interface Character {
   id: string;
@@ -29,7 +35,98 @@ interface Character {
   tagline: string;
   avatar: string;
   fallback: string;
+  character_definitions?: {
+    greeting?: string | null;
+    personality_summary?: unknown;
+  } | null;
+  character_definition?: {
+    greeting?: string | null;
+    personality_summary?: unknown;
+  } | null;
+  definition?: Array<{ personality_summary?: unknown }> | null;
 }
+
+interface CharacterDetails extends Character {
+  definition?: Array<{ personality_summary?: unknown }> | null;
+}
+
+interface AddonSettingsPayload {
+  dynamicWorldInfo: boolean;
+  enhancedMemory: boolean;
+  moodTracking: boolean;
+  clothingInventory: boolean;
+  locationTracking: boolean;
+  timeAndWeather: boolean;
+  relationshipStatus: boolean;
+  characterPosition: boolean;
+  enchantmentStatus: boolean;
+  itemInventory: boolean;
+  chainOfThought: boolean;
+  fewShotExamples: boolean;
+}
+
+type StreamingMode = 'instant' | 'smooth' | 'adaptive';
+
+interface UnifiedMessageLite extends Partial<ChatMessage> {
+  id?: string;
+  content?: string | null;
+  is_ai_message?: boolean | null;
+  role?: string | null;
+  user_id?: string | null;
+  current_context?: TrackedContext | null;
+}
+
+interface PersonaLike {
+  avatar_url?: unknown;
+}
+
+interface InitialAddonContextPayload {
+  initial_addon_context_enabled?: unknown;
+  initial_addon_context?: unknown;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const toMessageList = (value: unknown): UnifiedMessageLite[] => {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord) as UnifiedMessageLite[];
+};
+
+const isUserMessage = (message: UnifiedMessageLite): boolean => {
+  if (!message) return false;
+  if (message.is_ai_message === false) return true;
+  if (message.isUser === true) return true;
+  return message.role === 'user';
+};
+
+const isAiMessage = (message: UnifiedMessageLite): boolean => {
+  if (!message) return false;
+  if (message.is_ai_message === true) return true;
+  if (message.isUser === false) return true;
+  return message.role === 'assistant';
+};
+
+const parseJsonSafely = <T,>(value: unknown): T | null => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return null;
+    }
+  }
+  return isRecord(value) ? (value as T) : null;
+};
+
+const coerceStreamingMode = (mode: StreamingMode): 'smooth' | 'instant' => (
+  mode === 'instant' ? 'instant' : 'smooth'
+);
+
+const CHAT_AI_REGENERATE_EVENT = 'chat-ai-regenerate';
+const CHAT_AI_VARIANT_NEXT_EVENT = 'chat-ai-variant-next';
+const CHAT_AI_VARIANT_PREV_EVENT = 'chat-ai-variant-prev';
 
 interface ChatInterfaceProps {
   character: Character;
@@ -41,9 +138,9 @@ interface ChatInterfaceProps {
   selectedWorldInfoId?: string | null;
   onChatCreated?: (chatId: string) => void; // New callback for when chat is created
   onMessageSent?: () => Promise<void>; // New callback for when message is sent
-  characterDetails?: any; // New: full character details including definition (for greeting variants)
+  characterDetails?: CharacterDetails | null; // New: full character details including definition (for greeting variants)
   creditsBalanceOverride?: number; // Provided by parent to avoid duplicate fetches
-  globalSettingsOverride?: any; // Provided by parent to avoid duplicate fetches
+  globalSettingsOverride?: UserGlobalChatSettings | null; // Provided by parent to avoid duplicate fetches
 }
 
 const ChatInterface = ({
@@ -64,7 +161,13 @@ const ChatInterface = ({
   const [isFirstMessage, setIsFirstMessage] = useState(true);
   const [currentChatId, setCurrentChatId] = useState<string | null>(existingChatId || null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(propSelectedPersonaId || null);
-  const { data: selectedPersonaData } = usePersonaById(selectedPersonaId);
+  const selectedPersonaQuery = usePersonaById(selectedPersonaId);
+  const selectedPersonaData = selectedPersonaQuery.data;
+  const personaAvatarUrl: string | undefined = React.useMemo(() => {
+    if (!selectedPersonaData || typeof selectedPersonaData !== 'object') return undefined;
+  const avatar = (selectedPersonaData as PersonaLike).avatar_url;
+    return typeof avatar === 'string' ? avatar : undefined;
+  }, [selectedPersonaData]);
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [isPreChatPhase, setIsPreChatPhase] = useState(!existingChatId); // true until chat created
@@ -95,7 +198,8 @@ const ChatInterface = ({
   }, [currentChatId, chatPhase]);
 
   // Greeting variants (available before chat creation)
-  const greetingVariants = React.useMemo(() => buildGreetingVariants((characterDetails as any) || (character as any)), [characterDetails, character]);
+  const greetingSource = characterDetails ?? character;
+  const greetingVariants = React.useMemo(() => buildGreetingVariants(greetingSource), [greetingSource]);
   const hasMultipleGreetings = greetingVariants.length > 1;
 
   // Lazy fetch character definitions if missing (defense-in-depth)
@@ -109,8 +213,8 @@ const ChatInterface = ({
         const { data } = await getCharacterGreetingSummary(character.id);
         if (!cancelled && data?.character_definitions) {
           // mutate local prop-like cache by forcing state via ref indirection: wrap into temp object
-          (window as any).__chatCharDefs = (window as any).__chatCharDefs || {};
-          (window as any).__chatCharDefs[character.id] = data.character_definitions;
+          window.__chatCharDefs = window.__chatCharDefs || {};
+          window.__chatCharDefs[character.id] = data.character_definitions;
         }
       } catch { /* ignore */ }
     })();
@@ -153,8 +257,9 @@ const ChatInterface = ({
 
   // Listen for auto-summary success events and show notification
   useEffect(() => {
-    const handleAutoSummary = (event: CustomEvent) => {
-      log.info('Auto-summary notification received:', event.detail);
+    const handleAutoSummary: EventListener = (event) => {
+      const detail = (event as CustomEvent).detail;
+      log.info('Auto-summary notification received:', detail);
       toast({
         title: "🧠 New Memory Added",
         description: "Conversation automatically summarized to maintain performance.",
@@ -162,10 +267,10 @@ const ChatInterface = ({
       });
     };
 
-    window.addEventListener('autoSummarySuccess', handleAutoSummary as EventListener);
+    window.addEventListener('autoSummarySuccess', handleAutoSummary);
     
     return () => {
-      window.removeEventListener('autoSummarySuccess', handleAutoSummary as EventListener);
+      window.removeEventListener('autoSummarySuccess', handleAutoSummary);
     };
   }, [toast, log]);
 
@@ -200,47 +305,56 @@ const ChatInterface = ({
     externalCreditsBalance: creditsBalanceOverride,
     externalGlobalSettings: globalSettingsOverride
   });
+  const messageList = React.useMemo(() => toMessageList(messages), [messages]);
   // Broadcast message count to parent layout (replaces separate HEAD count query)
   useEffect(() => {
     if (!currentChatId) return;
     try {
-      const ev = new CustomEvent('chat-messages-updated', { detail: { chatId: currentChatId, count: messages.length } });
+      const ev = new CustomEvent('chat-messages-updated', { detail: { chatId: currentChatId, count: messageList.length } });
       window.dispatchEvent(ev);
-    } catch {}
-  }, [messages.length, currentChatId]);
+    } catch (error) {
+      log.warn('Failed to dispatch chat-messages-updated event', error);
+    }
+  }, [messageList.length, currentChatId, log]);
   // Reintroduce effectiveTrackedContext (was removed during duplicate cleanup)
   const effectiveTrackedContext = parentTrackedContext || unifiedTrackedContext;
   useEffect(() => {
     if (currentChatId && effectiveTrackedContext?.relationshipStatus && effectiveTrackedContext.relationshipStatus !== 'No context') {
-      try { window.dispatchEvent(new CustomEvent('chat-context-updated', { detail: { chatId: currentChatId, context: { relationship: effectiveTrackedContext.relationshipStatus } } })); } catch {}
+      try {
+        window.dispatchEvent(new CustomEvent('chat-context-updated', {
+          detail: { chatId: currentChatId, context: { relationship: effectiveTrackedContext.relationshipStatus } }
+        }));
+      } catch (error) {
+        log.warn('Failed to dispatch chat-context-updated event', error);
+      }
     }
-  }, [effectiveTrackedContext?.relationshipStatus, currentChatId]);
+  }, [effectiveTrackedContext?.relationshipStatus, currentChatId, log]);
   // Derived: whether any user message exists in this chat (used to lock greeting picker)
   const hasUserMessage = React.useMemo(() => {
-    if (!messages || messages.length === 0) return false;
-    return messages.some((m: any) => {
-      // Treat anything that is NOT explicitly an AI message as user (covers null / undefined backend values)
-      if (m.is_ai_message === true) return false;
-      if (m.isUser === true) return true;
-      if (m.role === 'user') return true;
-      // If backend omits is_ai_message for user messages, count those with a user_id / without is_ai_message true
-      if (m.user_id && m.is_ai_message !== true) return true;
+    if (messageList.length === 0) return false;
+    return messageList.some((message) => {
+      if (message.is_ai_message === true) return false;
+      if (message.isUser === true) return true;
+      if (message.role === 'user') return true;
+      if (message.user_id && (message.is_ai_message === false || message.is_ai_message === undefined || message.is_ai_message === null)) {
+        return true;
+      }
       return false;
     });
-  }, [messages]);
+  }, [messageList]);
   // Guard: only evaluate greeting sync after messages have loaded at least once
-  const messagesLoaded = !!messages && messages.length > 0;
+  const messagesLoaded = messageList.length > 0;
   useEffect(() => {
     if (!messagesLoaded || !currentChatId) return;
     if (hasUserMessage) return; // user already sent a message -> locked
-    const firstAi = messages.find((m: any) => (m.is_ai_message === true) || (m.role === 'assistant') || (m.isUser === false));
+    const firstAi = messageList.find((message) => isAiMessage(message));
     if (firstAi && typeof firstAi.content === 'string') {
       // Mark greeting persisted once we see first AI message
       if (!greetingPersisted) setGreetingPersisted(true);
       const idx = greetingVariants.indexOf(firstAi.content);
       if (idx >= 0 && idx !== selectedGreetingIndex) setSelectedGreetingIndex(idx);
     }
-  }, [messagesLoaded, messages, currentChatId, hasUserMessage, greetingVariants, selectedGreetingIndex, greetingPersisted]);
+  }, [messagesLoaded, messageList, currentChatId, hasUserMessage, greetingVariants, selectedGreetingIndex, greetingPersisted]);
 
   // ✅ FIX: Safety cleanup for stuck streaming states
   useEffect(() => {
@@ -260,34 +374,40 @@ const ChatInterface = ({
   // Use provided global settings override (avoids duplicate network fetches)
   const globalSettings = globalSettingsOverride;
   const backgroundImage = globalSettings?.background_image_url || null;
-  const currentAddonSettings = globalSettings ? {
-    dynamicWorldInfo: globalSettings.dynamic_world_info,
-    enhancedMemory: globalSettings.enhanced_memory,
-    moodTracking: globalSettings.mood_tracking,
-    clothingInventory: globalSettings.clothing_inventory,
-    locationTracking: globalSettings.location_tracking,
-    timeAndWeather: globalSettings.time_and_weather,
-    relationshipStatus: globalSettings.relationship_status,
-    characterPosition: globalSettings.character_position,
-    enchantmentStatus: (globalSettings as any).enchantment_status, // NEW
-    itemInventory: (globalSettings as any).item_inventory, // NEW
-    chainOfThought: globalSettings.chain_of_thought,
-    fewShotExamples: globalSettings.few_shot_examples,
-  } : {
-    dynamicWorldInfo: false,
-    enhancedMemory: false,
-    moodTracking: false,
-    clothingInventory: false,
-    locationTracking: false,
-    timeAndWeather: false,
-    relationshipStatus: false,
-    characterPosition: false,
-    enchantmentStatus: false, // NEW
-    itemInventory: false, // NEW
-    chainOfThought: false,
-    fewShotExamples: false,
-  };
-  const streamingMode = (globalSettings?.streaming_mode || 'smooth') as 'smooth' | 'instant';
+  const currentAddonSettings = React.useMemo<AddonSettingsPayload>(() => {
+    if (!globalSettings) {
+      return {
+        dynamicWorldInfo: false,
+        enhancedMemory: false,
+        moodTracking: false,
+        clothingInventory: false,
+        locationTracking: false,
+        timeAndWeather: false,
+        relationshipStatus: false,
+        characterPosition: false,
+        enchantmentStatus: false,
+        itemInventory: false,
+        chainOfThought: false,
+        fewShotExamples: false,
+      };
+    }
+    return {
+      dynamicWorldInfo: globalSettings.dynamic_world_info,
+      enhancedMemory: globalSettings.enhanced_memory,
+      moodTracking: globalSettings.mood_tracking,
+      clothingInventory: globalSettings.clothing_inventory,
+      locationTracking: globalSettings.location_tracking,
+      timeAndWeather: globalSettings.time_and_weather,
+      relationshipStatus: globalSettings.relationship_status,
+      characterPosition: globalSettings.character_position,
+      enchantmentStatus: globalSettings.enchantment_status,
+      itemInventory: globalSettings.item_inventory,
+      chainOfThought: globalSettings.chain_of_thought,
+      fewShotExamples: globalSettings.few_shot_examples,
+    };
+  }, [globalSettings]);
+  const streamingMode: StreamingMode = globalSettings?.streaming_mode ?? 'smooth';
+  const coercedStreamingMode = React.useMemo(() => coerceStreamingMode(streamingMode), [streamingMode]);
   // Style options for greeting bubble (mirror ChatMessages)
   const aiBubbleColor = globalSettings?.ai_bubble_color || '#1f2937';
   const aiBubbleOpacity = typeof globalSettings?.ai_bubble_opacity === 'number' ? globalSettings!.ai_bubble_opacity : 0.9;
@@ -339,22 +459,20 @@ const ChatInterface = ({
 
       // Attempt to seed manual addon context if character has initial_addon_context
       try {
-        const initialCtx = (characterDetails as any)?.definition?.[0]?.personality_summary;
-        let parsed: any = null;
-        if (initialCtx) {
-          try { parsed = typeof initialCtx === 'string' ? JSON.parse(initialCtx) : initialCtx; } catch {}
-        }
-        const enabled = parsed?.initial_addon_context_enabled;
+        const initialCtx = characterDetails?.definition?.[0]?.personality_summary ?? null;
+        const parsed = parseJsonSafely<InitialAddonContextPayload>(initialCtx);
+        const enabled = parsed?.initial_addon_context_enabled === true;
         const manualCtx = parsed?.initial_addon_context;
-        if (enabled && manualCtx && typeof manualCtx === 'object') {
-          const cleaned = Object.fromEntries(Object.entries(manualCtx).filter(([_,v]) => typeof v === 'string' && v.trim()));
-          if (Object.keys(cleaned).length > 0) {
+        if (enabled && isRecord(manualCtx)) {
+          const cleanedEntries = Object.entries(manualCtx).filter(([, value]) => typeof value === 'string' && value.trim().length > 0) as Array<[string, string]>;
+          if (cleanedEntries.length > 0) {
+            const cleaned = Object.fromEntries(cleanedEntries);
             log.info('🟢 Seeding manual initial addon context', cleaned);
             await upsertChatContext({
               chatId: newChatId,
               userId: user.id,
               characterId: character.id,
-              currentContext: cleaned as any
+              currentContext: cleaned
             });
           }
         }
@@ -362,8 +480,12 @@ const ChatInterface = ({
         log.warn('Manual addon context seed failed', seedErr);
       }
 
-  // Skip greeting polling; first AI message arrives via realtime and unified hook
-  try { await queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(newChatId) }); } catch {}
+      // Skip greeting polling; first AI message arrives via realtime and unified hook
+      try {
+        await queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(newChatId) });
+      } catch (invalidateError) {
+        log.warn('Failed to invalidate chat messages after creation', invalidateError);
+      }
 
       if (chatPhase === 'greeting') {
         setChatPhase('creating');
@@ -383,7 +505,7 @@ const ChatInterface = ({
       setChatPhase('active');
       setHasSentFirstUserMessage(true);
       onFirstMessage();
-    } catch (error: any) {
+    } catch (error) {
       log.error('[FLOW X] Error in deferred creation path', error);
       const chatError = handleChatError(error, 'creating chat', false);
       toast({ title: 'Error', description: chatError.message, variant: 'destructive' });
@@ -510,15 +632,19 @@ const ChatInterface = ({
           const scroller = document.querySelector('.chat-messages-container');
           if (scroller) {
             (scroller as HTMLElement).scrollTop = (scroller as HTMLElement).scrollHeight;
-            requestAnimationFrame(() => { (scroller as HTMLElement).scrollTop = (scroller as HTMLElement).scrollHeight; });
+            requestAnimationFrame(() => {
+              (scroller as HTMLElement).scrollTop = (scroller as HTMLElement).scrollHeight;
+            });
           } else {
             window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
           }
         });
-      } catch {}
+      } catch (scrollError) {
+        log.warn('Failed to auto-scroll after sending message', scrollError);
+      }
 
-  // Only refocus if user had keyboard open
-  focusBackIfNeeded();
+      // Only refocus if user had keyboard open
+      focusBackIfNeeded();
 
       if (onMessageSent) await onMessageSent();
 
@@ -533,29 +659,29 @@ const ChatInterface = ({
         onFirstMessage();
       }
 
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error sending message:', error);
       updateMetrics(Date.now() - startTime, true);
       
-      if (error.message?.includes('Authentication failed') || error.message?.includes('401')) {
+      if (error instanceof Error && (error.message.includes('Authentication failed') || error.message.includes('401'))) {
         toast({
           title: "Authentication Error",
           description: "Your session has expired. Please refresh the page and sign in again.",
           variant: "destructive",
         });
         setTimeout(() => { window.location.reload(); }, 3000);
-      } else if (error.message?.includes('Insufficient credits')) {
+      } else if (error instanceof Error && error.message.includes('Insufficient credits')) {
         setShowInsufficientCreditsModal(true);
-      } else if (error.message?.includes('Server error')) {
+      } else if (error instanceof Error && error.message.includes('Server error')) {
         toast({ title: "Service Temporarily Unavailable", description: "Our servers are experiencing high load. Please try again in a moment.", variant: "destructive" });
-      } else if (error.message?.includes('Chat service not found')) {
+      } else if (error instanceof Error && error.message.includes('Chat service not found')) {
         toast({ title: "Service Unavailable", description: "The chat service is temporarily unavailable. Please try again later.", variant: "destructive" });
       } else {
         const chatError = handleChatError(error, 'sending message', false);
         toast({ title: "Error", description: chatError.message, variant: "destructive" });
       }
     }
-  }, [inputValue, user, currentChatId, chatPhase, createChatAndSendFirstMessage, character.id, isFirstMessage, onFirstMessage, sendMessage, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, creditsBalance, toast, updateMetrics, onMessageSent]);
+  }, [inputValue, user, currentChatId, createChatAndSendFirstMessage, isFirstMessage, onFirstMessage, sendMessage, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, effectiveTrackedContext, creditsBalance, toast, updateMetrics, onMessageSent, log]);
 
   // Pre-chat greeting selection simply updates index; actual greeting persisted on create
   const handleSelectGreeting = useCallback((idx: number) => {
@@ -571,48 +697,45 @@ const ChatInterface = ({
 
   // Helper to trigger a variant generation (keeps previous AI message)
   const regenerateLastAI = useCallback(async (keepPrevious: boolean) => {
+    log.info('♻️ Regenerating last AI response', { keepPrevious });
     if (!user || !currentChatId) {
       throw new Error('No active chat');
     }
     if (creditsBalance < 1) throw new Error('Insufficient credits');
     // Derive last user message from cached messages (avoid extra select)
-    const all = messages || [];
-    const lastUser = [...all].reverse().find(m => (m as any).is_ai_message === false || (m as any).isUser === true || (m as any).role === 'user');
-    if (!lastUser || typeof (lastUser as any).content !== 'string' || !(lastUser as any).content.trim()) {
+    const all = messageList;
+    const lastUser = [...all].reverse().find((message) => isUserMessage(message));
+    if (!lastUser || typeof lastUser.content !== 'string' || !lastUser.content.trim()) {
       console.warn('No last user message found in cache to regenerate');
       throw new Error('No previous user message to regenerate');
     }
 
-    try {
-      const streamingMode = (globalSettings?.streaming_mode || 'smooth') as 'smooth' | 'instant';
-      await ChatManagement.sendMessageStreaming({
-        chatId: currentChatId,
-        message: (lastUser as any).content as string,
-        characterId: character.id,
-        addonSettings: currentAddonSettings,
-        selectedPersonaId: selectedPersonaId ?? null,
-        selectedWorldInfoId: selectedWorldInfoId ?? null,
-      }, {
-        streamingMode,
-        onToken: (token, aggregate) => {
-          if (streamingMode === 'smooth') {
-            // dispatch streaming update via custom event for now (optional)
-            const ev = new CustomEvent('chat-ai-variant-stream', { detail: { aggregate } });
-            window.dispatchEvent(ev);
-          }
-        },
-        onDone: (final) => {
-          if (streamingMode !== 'smooth') {
-            const ev = new CustomEvent('chat-ai-variant-stream', { detail: { aggregate: final } });
-            window.dispatchEvent(ev);
-          }
+  const localStreamingMode = coercedStreamingMode;
+    await ChatManagement.sendMessageStreaming({
+      chatId: currentChatId,
+      message: lastUser.content,
+      characterId: character.id,
+      addonSettings: currentAddonSettings,
+      selectedPersonaId: selectedPersonaId ?? null,
+      selectedWorldInfoId: selectedWorldInfoId ?? null,
+    }, {
+      streamingMode: localStreamingMode,
+      onToken: (_token, aggregate) => {
+        if (localStreamingMode === 'smooth') {
+          // dispatch streaming update via custom event for now (optional)
+          const ev = new CustomEvent('chat-ai-variant-stream', { detail: { aggregate } });
+          window.dispatchEvent(ev);
         }
-      });
-      return;
-    } catch (err) {
-      throw err;
-    }
-  }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, messages, globalSettings]);
+      },
+      onDone: (final) => {
+        if (localStreamingMode !== 'smooth') {
+          const ev = new CustomEvent('chat-ai-variant-stream', { detail: { aggregate: final } });
+          window.dispatchEvent(ev);
+        }
+      }
+    });
+    return;
+  }, [user, currentChatId, creditsBalance, character.id, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, messageList, coercedStreamingMode, log]);
 
   // Regeneration UI map: messageId -> streaming content
   const [regeneratingContentById, setRegeneratingContentById] = useState<Record<string, string>>({});
@@ -629,7 +752,7 @@ const ChatInterface = ({
       setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: '' }));
       regenerationStartRef.current[aiMessageId] = Date.now();
       let full = '';
-      const streamingMode = (globalSettings?.streaming_mode || 'smooth') as 'smooth' | 'instant';
+  const streamingMode = coercedStreamingMode;
       await ChatManagement.regenerateMessageStreaming({
         chatId: currentChatId,
         characterId: character.id,
@@ -639,7 +762,7 @@ const ChatInterface = ({
         selectedWorldInfoId: selectedWorldInfoId ?? null,
       }, {
         streamingMode,
-        onToken: (token, agg) => {
+        onToken: (_token, agg) => {
           if (streamingMode === 'smooth') {
             full = agg;
             setRegeneratingContentById(prev => ({ ...prev, [aiMessageId]: full }));
@@ -659,24 +782,37 @@ const ChatInterface = ({
       }
       if (currentChatId && full) {
         const key = chatQueryKeys.chat.messages(currentChatId);
-        queryClient.setQueryData(key, (old: any) => {
+        const updatedAt = new Date().toISOString();
+        const updateEntry = (entry: unknown): unknown => {
+          if (!isRecord(entry)) return entry;
+          const entryId = typeof entry.id === 'string' ? entry.id : undefined;
+          if (entryId !== aiMessageId) return entry;
+          return { ...entry, content: full, updated_at: updatedAt };
+        };
+        queryClient.setQueryData(key, (old: unknown) => {
           if (!old) return old;
           if (Array.isArray(old)) {
-            return old.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m);
+            return old.map(updateEntry);
           }
-          if (old.pages) {
+          if (isRecord(old) && Array.isArray(old.pages)) {
             return {
               ...old,
-              pages: old.pages.map((p: any) => ({
-                ...p,
-                messages: p.messages?.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
-              }))
+              pages: old.pages.map((page) => {
+                if (!isRecord(page)) return page;
+                const messagesUpdated = Array.isArray(page.messages)
+                  ? page.messages.map(updateEntry)
+                  : page.messages;
+                return {
+                  ...page,
+                  messages: messagesUpdated,
+                };
+              }),
             };
           }
-          if (old.messages) {
+          if (isRecord(old) && Array.isArray(old.messages)) {
             return {
               ...old,
-              messages: old.messages.map((m: any) => m.id === aiMessageId ? { ...m, content: full, updated_at: new Date().toISOString() } : m)
+              messages: old.messages.map(updateEntry),
             };
           }
           return old;
@@ -693,26 +829,30 @@ const ChatInterface = ({
         queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(currentChatId) });
         if (user?.id) queryClient.invalidateQueries({ queryKey: chatQueryKeys.user.credits(user.id) });
         setTimeout(() => {
-          try { queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(currentChatId) }); } catch {}
+          try {
+            queryClient.invalidateQueries({ queryKey: chatQueryKeys.chat.messages(currentChatId) });
+          } catch (asyncInvalidateError) {
+            log.warn('Failed to invalidate chat messages after regeneration', asyncInvalidateError);
+          }
         }, 1200);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Regenerate failed:', err);
       setRegeneratingContentById(prev => { 
         const { [aiMessageId]: _, ...rest } = prev; 
         return rest; 
       });
-      if (err?.message?.includes('credits')) {
+      if (err instanceof Error && err.message.includes('credits')) {
         setShowInsufficientCreditsModal(true);
       } else {
         toast({ 
           title: 'Error', 
-          description: err.message || 'Failed to regenerate message', 
+          description: err instanceof Error ? err.message : 'Failed to regenerate message', 
           variant: 'destructive' 
         });
       }
     }
-  }, [user, currentChatId, creditsBalance, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, character.id, queryClient, toast, globalSettings]);
+  }, [user, currentChatId, creditsBalance, currentAddonSettings, selectedPersonaId, selectedWorldInfoId, character.id, queryClient, toast, coercedStreamingMode, log]);
 
   // --- Responsive typing/streaming indicator control ---
   // Track stream progress to detect stagnation (backend slow to flip isStreaming false)
@@ -736,40 +876,49 @@ const ChatInterface = ({
   }, [isStreaming]);
   // Determine last AI message content
   const lastAiMessageContent = React.useMemo(() => {
-    if (!messages || !messages.length) return '';
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m: any = messages[i];
-      if (m && (m.is_ai_message === true || m.isUser === false || m.role === 'assistant')) {
-        return typeof m.content === 'string' ? m.content : '';
+    if (messageList.length === 0) return '';
+    for (let i = messageList.length - 1; i >= 0; i--) {
+      const message = messageList[i];
+      if (message && isAiMessage(message)) {
+        return typeof message.content === 'string' ? message.content : '';
       }
     }
     return '';
-  }, [messages]);
+  }, [messageList]);
   const streamingCompleteMatch = !!(isStreaming && streamingMessage && lastAiMessageContent && lastAiMessageContent === streamingMessage);
   const stagnated = isStreaming && !streamingCompleteMatch && (Date.now() - streamProgressRef.current.ts > 2000) && streamProgressRef.current.len > 0;
   const showRespondingIndicator = isTyping || (isStreaming && !streamingCompleteMatch && !stagnated);
 
   // Reconcile regeneration overrides: clear when message matches or vanished or timeout
   useEffect(() => {
-    if (!messages || !messages.length) return;
-    setRegeneratingContentById(prev => {
+    if (messageList.length === 0) return;
+    setRegeneratingContentById((prev) => {
       if (!prev || Object.keys(prev).length === 0) return prev;
       let changed = false;
       const next = { ...prev };
       for (const id of Object.keys(prev)) {
-        const msg = (messages as any).find((m: any) => m.id === id);
+        const msg = messageList.find((message) => message.id === id);
         const override = prev[id];
-        if (!msg) { delete next[id]; changed = true; continue; }
-        // If backend content now equals our override (final persisted) OR backend has any content while override was placeholder
-        if ((override === '' && msg.content && msg.content.length > 0) || (override && msg.content === override)) {
-          delete next[id]; changed = true; continue; }
-        // Safety timeout (25s)
+        if (!msg) {
+          delete next[id];
+          changed = true;
+          continue;
+        }
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        if ((override === '' && content.length > 0) || (override && content === override)) {
+          delete next[id];
+          changed = true;
+          continue;
+        }
         const started = regenerationStartRef.current[id];
-        if (started && Date.now() - started > 25000) { delete next[id]; changed = true; continue; }
+        if (started && Date.now() - started > 25000) {
+          delete next[id];
+          changed = true;
+        }
       }
       return changed ? next : prev;
     });
-  }, [messages]);
+  }, [messageList]);
 
   // Keep latest regenerate function in a ref to avoid stale closures in global event listeners
   const regenerateLastAIRef = useRef(regenerateLastAI);
@@ -779,42 +928,38 @@ const ChatInterface = ({
 
   // Variant navigation handlers (inline editing handled within MessageGroup UI)
   useEffect(() => {
-    const onRegenerate = async (e: any) => {
-      const messageId = e?.detail?.messageId as string | undefined;
+    const onRegenerate: EventListener = async (event) => {
+      const messageId = (event as CustomEvent<{ messageId?: string }>).detail?.messageId;
       if (!messageId || !currentChatId) return;
       // Enforce: only last AI message can be regenerated
-      const lastAi = (() => {
-        for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
-          const m = messages[i] as any;
-          if (m && !m.isUser) return m;
-        }
-        return null as any;
-      })();
+      const lastAi = [...messageList].reverse().find((message) => isAiMessage(message));
       if (!lastAi || lastAi.id !== messageId) {
         return; // ignore attempts on older AI messages
       }
       await regenerateMessageById(messageId);
     };
-    const onVariantNext = async (_e: any) => {
+    const onVariantNext: EventListener = async () => {
       try {
         await regenerateLastAIRef.current?.(true);
-      } catch (err: any) {
-        if (err?.message?.includes('credits')) setShowInsufficientCreditsModal(true);
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('credits')) {
+          setShowInsufficientCreditsModal(true);
+        }
       }
     };
-    const onVariantPrev = (_e: any) => {
+    const onVariantPrev: EventListener = () => {
       setVariantIndexByMessage((prev) => prev);
     };
 
-    window.addEventListener('chat-ai-regenerate' as any, onRegenerate as any);
-    window.addEventListener('chat-ai-variant-next' as any, onVariantNext as any);
-    window.addEventListener('chat-ai-variant-prev' as any, onVariantPrev as any);
+    window.addEventListener(CHAT_AI_REGENERATE_EVENT, onRegenerate);
+    window.addEventListener(CHAT_AI_VARIANT_NEXT_EVENT, onVariantNext);
+    window.addEventListener(CHAT_AI_VARIANT_PREV_EVENT, onVariantPrev);
     return () => {
-      window.removeEventListener('chat-ai-regenerate' as any, onRegenerate as any);
-      window.removeEventListener('chat-ai-variant-next' as any, onVariantNext as any);
-      window.removeEventListener('chat-ai-variant-prev' as any, onVariantPrev as any);
+      window.removeEventListener(CHAT_AI_REGENERATE_EVENT, onRegenerate);
+      window.removeEventListener(CHAT_AI_VARIANT_NEXT_EVENT, onVariantNext);
+      window.removeEventListener(CHAT_AI_VARIANT_PREV_EVENT, onVariantPrev);
     };
-  }, [currentChatId, regenerateMessageById, messages]);
+  }, [currentChatId, regenerateMessageById, messageList]);
 
   const handleUpgrade = () => {
     navigate('/subscription');
@@ -1018,8 +1163,8 @@ const ChatInterface = ({
                   className="float-left w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7"
                   style={{
                     backgroundImage: `url(${character.avatar})`,
-                    maskImage: avatarMask as any,
-                    WebkitMaskImage: avatarMask as any,
+                    maskImage: avatarMask,
+                    WebkitMaskImage: avatarMask,
                   }}
                 />
               )}
@@ -1120,7 +1265,7 @@ const ChatInterface = ({
               isRealtimeConnected={isRealtimeConnected}
               debugInfo={debugInfo}
               renderBackground={false}
-              userAvatarUrlOverride={selectedPersonaData?.avatar_url || undefined}
+              userAvatarUrlOverride={personaAvatarUrl}
               regeneratingContentByMessageId={regeneratingContentById}
               globalSettingsOverride={globalSettings}
             />

@@ -13,20 +13,106 @@ import { useToast } from '@/hooks/use-toast';
 import { Billing } from '@/data';
 import { PayPalManagement } from '@/data/edge';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Database } from '@/integrations/supabase/types';
 
 // Define types from the new billing schema
-type Plan = Database['billing']['Tables']['plans']['Row'];
-type Subscription = Database['billing']['Tables']['subscriptions']['Row'];
-type CreditPack = Database['billing']['Tables']['credit_packs']['Row'];
-type CreditPackPurchase = Database['billing']['Tables']['credit_pack_purchases']['Row'];
+type Plan = {
+  id: string;
+  name: string;
+  price_monthly: number | null;
+  monthly_credits_allowance: number;
+  features: string[] | null;
+};
 
 // Define more specific types for our component state
-type SubscriptionWithPlan = Subscription & { plan: Plan | null };
-type PurchaseWithPack = CreditPackPurchase & { credit_pack: { name: string; credits_granted: number } | null };
+type SubscriptionWithPlan = {
+  id: string;
+  status: string;
+  paypal_subscription_id: string | null;
+  current_period_end: string | null;
+  plan: Plan | null;
+};
+type CreditPack = {
+  id: string;
+  name: string;
+  price_cents: number;
+  credits_granted: number;
+  description: string | null;
+};
+type PurchaseWithPack = {
+  id: string;
+  created_at: string;
+  credits_granted: number;
+  status: string;
+  credit_pack: { name: string; credits_granted: number } | null;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const normalizePlan = (value: unknown): Plan | null => {
+  if (!isRecord(value)) return null;
+  const { id, name } = value;
+  if (typeof id !== 'string' || typeof name !== 'string') return null;
+
+  const price = typeof value.price_monthly === 'number' ? value.price_monthly : null;
+  const allowance = typeof value.monthly_credits_allowance === 'number' ? value.monthly_credits_allowance : 0;
+  const features = Array.isArray(value.features)
+    ? value.features.filter((feature): feature is string => typeof feature === 'string')
+    : null;
+
+  return {
+    id,
+    name,
+    price_monthly: price,
+    monthly_credits_allowance: allowance,
+    features,
+  };
+};
+
+const normalizeSubscription = (value: unknown): SubscriptionWithPlan | null => {
+  if (!isRecord(value) || typeof value.id !== 'string') return null;
+
+  return {
+    id: value.id,
+    status: typeof value.status === 'string' ? value.status : 'unknown',
+    paypal_subscription_id: typeof value.paypal_subscription_id === 'string' ? value.paypal_subscription_id : null,
+    current_period_end: typeof value.current_period_end === 'string' ? value.current_period_end : null,
+    plan: normalizePlan(value.plan ?? null),
+  };
+};
+
+const normalizeCreditPack = (value: unknown): CreditPack | null => {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
+
+  return {
+    id: value.id,
+    name: value.name,
+    price_cents: typeof value.price_cents === 'number' ? value.price_cents : 0,
+    credits_granted: typeof value.credits_granted === 'number' ? value.credits_granted : 0,
+    description: typeof value.description === 'string' ? value.description : null,
+  };
+};
+
+const normalizePurchasePack = (value: unknown): { name: string; credits_granted: number } | null => {
+  if (!isRecord(value) || typeof value.name !== 'string') return null;
+  const credits = typeof value.credits_granted === 'number' ? value.credits_granted : 0;
+  return { name: value.name, credits_granted: credits };
+};
+
+const normalizePurchase = (value: unknown): PurchaseWithPack | null => {
+  if (!isRecord(value) || typeof value.id !== 'string') return null;
+
+  return {
+    id: value.id,
+    created_at: typeof value.created_at === 'string' ? value.created_at : new Date().toISOString(),
+    credits_granted: typeof value.credits_granted === 'number' ? value.credits_granted : 0,
+    status: typeof value.status === 'string' ? value.status : 'unknown',
+    credit_pack: normalizePurchasePack(value.credit_pack ?? null),
+  };
+};
 
 const BillingSettings = () => {
-  const { session, user, supabase } = useAuth();
+  const { user, supabase } = useAuth();
   const { toast } = useToast();
   const [subscription, setSubscription] = useState<SubscriptionWithPlan | null>(null);
   const [credits, setCredits] = useState(0);
@@ -43,12 +129,23 @@ const BillingSettings = () => {
         const { data, error } = await Billing.getUserBillingOverview(supabase, user.id, 50);
         if (error) throw error;
         if (data) {
-          // Normalize subscription shape to match previous state (plan nested already)
-            setSubscription((data.subscription as any) || null);
-            setCredits(data.credits || 0);
-            setPurchases((data.purchases as any) || []);
-            setPlans((data.plans as any) || []);
-            setCreditPacks((data.credit_packs as any) || []);
+          setSubscription(normalizeSubscription(data.subscription));
+          setCredits(typeof data.credits === 'number' ? data.credits : 0);
+          setPurchases(
+            (Array.isArray(data.purchases) ? data.purchases : [])
+              .map(normalizePurchase)
+              .filter((purchase): purchase is PurchaseWithPack => purchase !== null),
+          );
+          setPlans(
+            (Array.isArray(data.plans) ? data.plans : [])
+              .map(normalizePlan)
+              .filter((plan): plan is Plan => plan !== null),
+          );
+          setCreditPacks(
+            (Array.isArray(data.credit_packs) ? data.credit_packs : [])
+              .map(normalizeCreditPack)
+              .filter((pack): pack is CreditPack => pack !== null),
+          );
         }
       } catch (err) {
         console.error('Error fetching billing overview:', err);
@@ -187,13 +284,13 @@ const BillingSettings = () => {
                 </div>
                 <div className="text-right">
                   <p className="font-semibold text-lg">
-                    ${subscription.plan?.price_monthly}/month
+                    ${(subscription.plan?.price_monthly ?? 0).toFixed(2)}/month
                   </p>
                   <p className="text-sm text-muted-foreground">
                     Renews on:{' '}
-                    {new Date(
-                      subscription.current_period_end,
-                    ).toLocaleDateString()}
+                    {subscription.current_period_end
+                      ? new Date(subscription.current_period_end).toLocaleDateString()
+                      : '—'}
                   </p>
                 </div>
               </div>
@@ -267,7 +364,7 @@ const BillingSettings = () => {
                 <CardHeader>
                   <CardTitle>{plan.name}</CardTitle>
                   <CardDescription className="text-3xl font-bold">
-                    ${plan.price_monthly}/month
+                    ${(plan.price_monthly ?? 0).toFixed(2)}/month
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex-grow">
@@ -276,8 +373,8 @@ const BillingSettings = () => {
                       <Check className="mr-2 h-4 w-4 text-green-500" />
                       {plan.monthly_credits_allowance.toLocaleString()} credits per month
                     </li>
-                    {(Array.isArray(plan.features) ? plan.features : []).map((feature: any, i) => (
-                      <li key={i} className="flex items-center">
+                    {(plan.features ?? []).map((feature, index) => (
+                      <li key={`${plan.id}-feature-${index}`} className="flex items-center">
                         <Check className="mr-2 h-4 w-4 text-green-500" />
                         {feature}
                       </li>
@@ -319,7 +416,7 @@ const BillingSettings = () => {
                 <p className="text-lg font-semibold text-center">
                   {pack.credits_granted.toLocaleString()} Credits
                 </p>
-                <p className="text-sm text-muted-foreground mt-2">{pack.description}</p>
+                <p className="text-sm text-muted-foreground mt-2">{pack.description ?? 'No description provided.'}</p>
               </CardContent>
               <CardFooter>
                 <Button

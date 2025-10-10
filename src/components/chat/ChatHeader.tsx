@@ -3,12 +3,22 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Zap, Brain, Settings } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import type { User } from '@supabase/supabase-js';
+import type { Character } from '@/types/chat';
+
+interface CharacterDetailsLike {
+  avatar_url?: string | null;
+  creator?: {
+    username?: string | null;
+    avatar_url?: string | null;
+  } | null;
+}
 
 interface ChatHeaderProps {
-  character: any;
-  characterDetails: any;
+  character: Character;
+  characterDetails: CharacterDetailsLike | Character | null;
   creditsBalance?: number;
-  currentUser: any;
+  currentUser: User | null;
   isCreatingMemory: boolean;
   currentChatId?: string;
   onConfirmCreateMemory: () => void;
@@ -26,7 +36,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   character,
   characterDetails,
   creditsBalance,
-  currentUser,
+  currentUser: _currentUser,
   isCreatingMemory,
   currentChatId,
   onConfirmCreateMemory,

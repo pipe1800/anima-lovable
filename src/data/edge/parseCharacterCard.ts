@@ -41,7 +41,11 @@ export async function parseCharacterCardEdge(file: File, opts: ParseCharacterCar
 
     if (!resp.ok) {
       let json: any = null; // eslint-disable-line @typescript-eslint/no-explicit-any
-      try { json = await resp.json(); } catch {}
+      try {
+        json = await resp.json();
+      } catch (parseError) {
+        console.warn('Failed to parse error payload from parse-character-card', parseError);
+      }
       throw new EdgeFunctionError(json?.error || `Parser error: ${resp.status}`, { code: json?.code, status: resp.status, details: json });
     }
     return resp.json();

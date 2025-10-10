@@ -1704,7 +1704,8 @@ ALTER FUNCTION "public"."get_credit_history"("p_user_id" "uuid", "p_limit" integ
 
 
 CREATE OR REPLACE FUNCTION "public"."get_public_character_cards"("p_search" "text" DEFAULT NULL::"text", "p_sort" "text" DEFAULT 'popular'::"text", "p_tag_ids" integer[] DEFAULT NULL::integer[], "p_creator_username" "text" DEFAULT NULL::"text", "p_include_nsfw" boolean DEFAULT true, "p_limit" integer DEFAULT 20, "p_offset" integer DEFAULT 0) RETURNS TABLE("id" "uuid", "name" "text", "short_description" "text", "avatar_url" "text", "interaction_count" integer, "created_at" timestamp with time zone, "creator_id" "uuid", "likes_count" integer, "favorites_count" integer, "chats_count" integer, "creator" "jsonb", "tags" "jsonb"[], "total_count" bigint)
-    LANGUAGE "sql" STABLE
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
     AS $$
   with params as (
     select 
@@ -1806,7 +1807,7 @@ BEGIN
            'chats',      COALESCE((SELECT count(*) FROM chats WHERE user_id = p_target_user_id),0),
            'characters', COALESCE((SELECT count(*) FROM characters WHERE creator_id = p_target_user_id),0),
            'favorites',  COALESCE((SELECT count(*) FROM character_favorites WHERE user_id = p_target_user_id),0),
-           'personas',   0
+           'personas',   COALESCE((SELECT count(*) FROM personas WHERE user_id = p_target_user_id),0)
          )
     INTO v_counts;
 
@@ -1960,56 +1961,6 @@ COMMENT ON FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "p_
 
 
 
-CREATE OR REPLACE FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") RETURNS json
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'public', 'billing', 'auth'
-    AS $$
-DECLARE
-  v_profile record;
-  v_subscription record;
-  v_credits integer := 0;
-  v_counts jsonb;
-BEGIN
-  PERFORM public._assert_self(p_user_id);
-
-  SELECT id, username, avatar_url, banner_url, bio, onboarding_completed, created_at, timezone, default_persona_id
-    INTO v_profile
-  FROM profiles
-  WHERE id = p_user_id;
-
-  SELECT s.id, s.plan_id, s.status, s.created_at, s.current_period_end,
-         p.name AS plan_name, p.monthly_credits_allowance
-    INTO v_subscription
-  FROM billing.subscriptions s
-  JOIN billing.plans p ON p.id = s.plan_id
-  WHERE s.user_id = p_user_id
-    AND s.status = 'active'
-  ORDER BY s.created_at DESC
-  LIMIT 1;
-
-  SELECT balance INTO v_credits FROM billing.credits WHERE user_id = p_user_id;
-
-  SELECT jsonb_build_object(
-           'chats',      COALESCE((SELECT count(*) FROM chats WHERE user_id = p_user_id),0),
-           'characters', COALESCE((SELECT count(*) FROM characters WHERE creator_id = p_user_id),0),
-           'favorites',  COALESCE((SELECT count(*) FROM character_favorites WHERE user_id = p_user_id),0),
-           'personas',   COALESCE((SELECT count(*) FROM personas WHERE user_id = p_user_id),0)
-         )
-    INTO v_counts;
-
-  RETURN json_build_object(
-    'profile',      CASE WHEN v_profile IS NOT NULL THEN to_jsonb(v_profile) ELSE NULL END,
-    'subscription', CASE WHEN v_subscription IS NOT NULL THEN to_jsonb(v_subscription) ELSE NULL END,
-    'credits',      COALESCE(v_credits,0),
-    'counts',       v_counts
-  );
-END;
-$$;
-
-
-ALTER FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") OWNER TO "postgres";
-
-
 CREATE OR REPLACE FUNCTION "public"."get_user_chats"("p_limit" integer DEFAULT 20, "p_offset" integer DEFAULT 0) RETURNS TABLE("chat_id" "uuid", "character_id" "uuid", "chat_created_at" timestamp with time zone, "chat_updated_at" timestamp with time zone, "character_name" "text", "character_avatar_url" "text", "last_message_id" "uuid", "last_message_created_at" timestamp with time zone, "last_message_is_ai" boolean, "last_message_content" "text", "message_count" bigint, "total_count" bigint)
     LANGUAGE "sql"
     AS $$
@@ -2152,7 +2103,8 @@ BEGIN
   SELECT jsonb_build_object(
            'characters', (SELECT count(*) FROM characters WHERE creator_id = p_user_id),
            'favorites',  (SELECT count(*) FROM character_favorites WHERE user_id = p_user_id),
-           'chats',      (SELECT count(*) FROM chats WHERE user_id = p_user_id)
+           'chats',      (SELECT count(*) FROM chats WHERE user_id = p_user_id),
+           'personas',   (SELECT count(*) FROM personas WHERE user_id = p_user_id)
          ) INTO v_counts;
 
   RETURN json_build_object(
@@ -2718,7 +2670,8 @@ ALTER FUNCTION "public"."record_relationship_signal"("p_user_id" "uuid", "p_char
 
 
 CREATE OR REPLACE FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) RETURNS TABLE("id" "uuid", "name" "text", "avatar_url" "text", "short_description" "text", "likes_count" integer, "chats_count" integer, "creator" "jsonb", "tags" "jsonb")
-    LANGUAGE "plpgsql"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
     AS $$
 begin
   if tag_ids is null or array_length(tag_ids, 1) is null then
@@ -6011,9 +5964,6 @@ GRANT ALL ON FUNCTION "public"."get_user_billing_overview"("p_user_id" "uuid", "
 
 
 
-REVOKE ALL ON FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."get_user_bootstrap"("p_user_id" "uuid") TO "service_role";
 
 
 

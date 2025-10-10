@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import type { FC } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Brain, Calendar, MessageSquare, Coins, RefreshCw, Edit, Save, Trash2 } from 'lucide-react';
-import { CharacterMemory } from '@/hooks/useCharacterMemories';
+import type { CharacterMemory } from '@/hooks/useCharacterMemories';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -31,7 +32,7 @@ function hashString(input: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-export const MemoriesDialog: React.FC<MemoriesDialogProps> = ({
+export const MemoriesDialog: FC<MemoriesDialogProps> = ({
   open,
   onOpenChange,
   memories,
@@ -80,9 +81,10 @@ export const MemoriesDialog: React.FC<MemoriesDialogProps> = ({
       toast.success('Memory updated');
       cancelEdit();
       onRefresh();
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Failed to update memory', e);
-      toast.error('Failed to update memory', { description: e?.message || 'Please try again.' });
+      const description = e instanceof Error ? e.message : 'Please try again.';
+      toast.error('Failed to update memory', { description });
     } finally {
       setSaving(false);
     }
@@ -97,9 +99,10 @@ export const MemoriesDialog: React.FC<MemoriesDialogProps> = ({
       toast.success('Memory deleted');
       if (editingId === id) cancelEdit();
       onRefresh();
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Failed to delete memory', e);
-      toast.error('Failed to delete memory', { description: e?.message || 'Please try again.' });
+      const description = e instanceof Error ? e.message : 'Please try again.';
+      toast.error('Failed to delete memory', { description });
     } finally {
       setDeletingId(null);
     }

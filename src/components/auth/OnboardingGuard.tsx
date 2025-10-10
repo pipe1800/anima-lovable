@@ -1,16 +1,17 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface OnboardingGuardProps {
-  children: React.ReactNode;
+  children: ReactNode;
   requireOnboardingComplete?: boolean;
 }
 
 const OnboardingGuard = ({ children, requireOnboardingComplete = false }: OnboardingGuardProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, loading, profileReady } = useAuth() as any;
+  const { user, profile, loading, profileReady } = useAuth();
   const isCompleted = profile?.onboarding_completed;
   const path = location.pathname;
 
@@ -41,7 +42,7 @@ const OnboardingGuard = ({ children, requireOnboardingComplete = false }: Onboar
     );
   }
 
-  return <>{children}</>; 
+  return children;
 };
 
 export default OnboardingGuard;

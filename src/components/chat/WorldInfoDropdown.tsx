@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { WorldInfo } from '@/data';
 import { useNavigate } from 'react-router-dom';
 
-interface WorldInfo {
+export interface WorldInfoSummary {
   id: string;
   name: string;
   short_description: string | null;
@@ -18,7 +18,7 @@ interface WorldInfo {
 
 interface WorldInfoDropdownProps {
   isVisible: boolean;
-  onWorldInfoSelect: (worldInfo: WorldInfo | null) => void;
+  onWorldInfoSelect: (worldInfo: WorldInfoSummary | null) => void;
   disabled?: boolean;
   selectedWorldInfoId?: string | null;
 }
@@ -32,8 +32,8 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
   const { user } = useAuth();
   const { handleStepAction } = useTutorial();
   const navigate = useNavigate();
-  const [worldInfos, setWorldInfos] = useState<WorldInfo[]>([]);
-  const [selectedWorldInfo, setSelectedWorldInfo] = useState<WorldInfo | null>(null);
+  const [worldInfos, setWorldInfos] = useState<WorldInfoSummary[]>([]);
+  const [selectedWorldInfo, setSelectedWorldInfo] = useState<WorldInfoSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -42,7 +42,9 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
       
       try {
         const { data, error } = await WorldInfo.listUserWorldInfos(user.id);
-        if (!error && data) setWorldInfos(data as any);
+        if (!error && data) {
+          setWorldInfos((data as WorldInfoSummary[]) ?? []);
+        }
       } catch (error) {
         console.error('Error loading world infos:', error);
       } finally {
@@ -70,8 +72,16 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
 
       try {
         // Fallback single fetch (small scope) – keep until we add a dedicated getWorldInfoSummary(id)
-        const { data } = await WorldInfo.getWorldInfoSummary(selectedWorldInfoId);
-        if (data) setSelectedWorldInfo(data as any);
+        const { data } = await WorldInfo.fetchWorldInfoFull(selectedWorldInfoId);
+        if (data) {
+          setSelectedWorldInfo({
+            id: data.id,
+            name: data.name,
+            short_description: data.short_description ?? null,
+            visibility: data.visibility,
+            creator_id: data.creator_id,
+          });
+        }
       } catch (e) {
         console.warn('Failed to fetch selected world info by id:', e);
       }
@@ -92,7 +102,7 @@ export const WorldInfoDropdown: React.FC<WorldInfoDropdownProps> = ({
     }
   }, [selectedWorldInfoId, worldInfos]);
 
-  const handleWorldInfoSelect = (worldInfo: WorldInfo | null) => {
+  const handleWorldInfoSelect = (worldInfo: WorldInfoSummary | null) => {
     if (disabled) return;
     setSelectedWorldInfo(worldInfo);
     onWorldInfoSelect(worldInfo);

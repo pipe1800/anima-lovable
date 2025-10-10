@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { useAuth, useBillingCredits } from '@/contexts/AuthContext';
@@ -29,7 +30,16 @@ const LOGO_URL = '/assets/logo.png';
 const logoImage = new Image();
 logoImage.src = LOGO_URL;
 
-const baseMainItems = [
+type MainNavItem = {
+  title: string;
+  url: string;
+  icon: LucideIcon;
+  tutorialAttr?: string;
+  isActive?: boolean;
+  planName?: string | null;
+};
+
+const baseMainItems: ReadonlyArray<Omit<MainNavItem, 'isActive' | 'planName'>> = [
   { title: "Dashboard", url: "/dashboard", icon: Home },
   { title: "Create Character", url: "/character-creator", icon: Plus, tutorialAttr: "create-character-nav" },
   { title: "Discover", url: "/discover", icon: Compass, tutorialAttr: "discover-nav" },
@@ -94,7 +104,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
   }, []);
 
   // Create main items with dynamic subscription icon
-  const mainItems = useMemo(() => {
+  const mainItems: MainNavItem[] = useMemo(() => {
     const hasActiveSubscription = subscription?.status === 'active' && subscription?.plan?.price_monthly > 0;
     const planName = subscription?.plan?.name?.toLowerCase();
     
@@ -221,11 +231,9 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
 
           <div className="space-y-3">
             {mainItems.map((item) => {
-              const IconComponent = item.icon;
-              const isActiveItem = isActive(item.url);
-              const isSubscriptionItem = item.title === "Subscription";
-              const hasActiveSubscription = (item as any).isActive;
-              const planName = (item as any).planName;
+              const { icon: IconComponent, title, url, tutorialAttr, isActive: hasActiveSubscription = false, planName } = item;
+              const isActiveItem = isActive(url);
+              const isSubscriptionItem = title === "Subscription";
               
               // Determine crown icon styling
               let crownClasses = "w-5 h-5 flex-shrink-0";
@@ -241,15 +249,15 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
               
               return (
                 <NavLink 
-                  key={item.title}
-                  to={item.url}
+                  key={title}
+                  to={url}
                   className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} w-full space-x-4 px-4 py-3.5 transition-all duration-200 text-base ${
                     isActiveItem 
                       ? 'bg-[#FF7A00]/20 text-[#FF7A00] border-r-2 border-[#FF7A00]' 
                       : 'text-gray-300 hover:text-white hover:bg-gray-800/50'
                   }`}
-                  title={isCollapsed ? item.title : undefined}
-                  data-tutorial={(item as any).tutorialAttr}
+                  title={isCollapsed ? title : undefined}
+                  data-tutorial={tutorialAttr}
                 >
                   {isSubscriptionItem ? (
                     <Crown className={crownClasses} />
@@ -257,7 +265,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({ sidebarMode = 'navigation', onT
                     <IconComponent className="w-5 h-5 flex-shrink-0" />
                   )}
                   {!isCollapsed && (
-                    <span className="font-medium text-base">{item.title}</span>
+                    <span className="font-medium text-base">{title}</span>
                   )}
                 </NavLink>
               );

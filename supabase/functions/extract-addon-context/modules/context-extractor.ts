@@ -2,21 +2,16 @@
  * Context extraction utilities for addon features
  * Uses a separate lightweight model (mistralai/mistral-small-3.2-24b-instruct) specifically for context analysis
  * This keeps context extraction separate from message generation models
- */
-// Allow Deno global in TS type-checking
-declare const Deno: any;
-
-import { dbToUi, type DbContext } from '../../_shared/context-mapper.ts';
-
+ */ // Allow Deno global in TS type-checking
+import { dbToUi } from '../../_shared/context-mapper.ts';
 // Runtime helper to safely pluck OpenRouter choices
-function extractChoiceContent(payload: any): string {
+function extractChoiceContent(payload) {
   if (!payload || typeof payload !== 'object') return '{}';
-  const choices = (payload as any).choices;
+  const choices = payload.choices;
   if (!Array.isArray(choices) || !choices[0]) return '{}';
   const content = choices[0]?.message?.content;
   return typeof content === 'string' ? content : '{}';
 }
-
 export async function extractInitialContext(character, addonSettings, openRouterKey, replaceTemplatesFn) {
   if (!addonSettings || !Object.values(addonSettings).some(Boolean)) {
     console.log('No addons enabled - skipping initial context extraction');
@@ -45,41 +40,47 @@ Return only the JSON object with no additional text. If a field is not mentioned
       'Content-Type': 'application/json',
       'HTTP-Referer': Deno.env.get('SITE_URL') || 'https://yourapp.com',
       'X-Title': 'AnimaChat-InitialContext'
-    } as const;
-
+    };
     const body = {
       model: 'mistralai/mistral-small-3.2-24b-instruct',
       messages: [
-        { role: 'user', content: contextPrompt }
+        {
+          role: 'user',
+          content: contextPrompt
+        }
       ],
       temperature: 0,
       top_p: 0.1,
       max_tokens: 250
     };
-
     const contextResponse = await fetch(url, {
       method: 'POST',
-      headers: headers as any,
+      headers: headers,
       body: JSON.stringify(body)
     });
     if (contextResponse.ok) {
-  const contextData: any = await contextResponse.json();
-  const contextStr = extractChoiceContent(contextData);
+      const contextData = await contextResponse.json();
+      const contextStr = extractChoiceContent(contextData);
       console.log('📝 Initial context extraction response:', contextStr);
       const cleanedContextStr = contextStr.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
-      let parsed: any = null;
+      let parsed = null;
       try {
         parsed = JSON.parse(cleanedContextStr);
       } catch (parseError) {
         console.error('Failed to parse initial context JSON:', parseError);
         return null;
       }
-
-      const allowedKeys = ['mood','location','clothing','time_weather','character_position'];
+      const allowedKeys = [
+        'mood',
+        'location',
+        'clothing',
+        'time_weather',
+        'character_position'
+      ];
       if (!parsed || typeof parsed !== 'object') return null;
       // Normalize to allowed keys and enforce defaults/limits
-      const result: Record<string, string> = {};
-      for (const k of allowedKeys) {
+      const result = {};
+      for (const k of allowedKeys){
         const v = parsed[k];
         if (typeof v === 'string' && v.trim()) result[k] = v.trim().slice(0, 120);
         else result[k] = 'No context';
@@ -99,14 +100,13 @@ export async function extractContextFromResponse(character, conversationContext,
     characterId,
     callStack: new Error().stack?.split('\n').slice(0, 5)
   });
-  
   if (!addonSettings || !Object.values(addonSettings).some(Boolean)) {
     console.log('No addons enabled - skipping context extraction');
     return null;
   }
   // Build context fields based on enabled addons only
-  const enabledFields: string[] = [];
-  const contextFields: Record<string, string> = {};
+  const enabledFields = [];
+  const contextFields = {};
   if (addonSettings.moodTracking) {
     enabledFields.push('"mood": "character\'s current emotional state"');
     contextFields.mood = 'mood';
@@ -127,7 +127,6 @@ export async function extractContextFromResponse(character, conversationContext,
     enabledFields.push('"character_position": "character\'s physical position, posture, or stance"');
     contextFields.character_position = 'character_position';
   }
-
   // Add time awareness context extraction
   if (addonSettings.timeAwareness) {
     enabledFields.push('"conversation_tone": "current emotional tone (neutral/tense/romantic/playful/serious/angry/sad/excited)"');
@@ -135,7 +134,6 @@ export async function extractContextFromResponse(character, conversationContext,
     contextFields.conversation_tone = 'conversation_tone';
     contextFields.urgency_level = 'urgency_level';
   }
-
   if (enabledFields.length === 0) {
     console.log('No context addons enabled - skipping context extraction');
     return null;
@@ -145,16 +143,16 @@ export async function extractContextFromResponse(character, conversationContext,
   const godMode = !!addonSettings.godMode;
   const prior = previousContext || {};
   const reasonKeys = Object.keys(contextFields);
-  const noPriorContext = !prior || Object.values(prior).every(v => !v || v === 'No context');
+  const noPriorContext = !prior || Object.values(prior).every((v)=>!v || v === 'No context');
   const cardSnippet = noPriorContext ? `\nCHARACTER CARD SEED (do not hallucinate beyond this; only use to disambiguate): ${[
     character?.personality_summary || '',
     character?.description || '',
-    typeof character?.scenario === 'string' ? character?.scenario : (character?.scenario ? JSON.stringify(character.scenario) : ''),
+    typeof character?.scenario === 'string' ? character?.scenario : character?.scenario ? JSON.stringify(character.scenario) : '',
     character?.greeting || ''
-  ].join(' ').replace(/\s+/g,' ').trim().slice(0,800)}\n` : '';
+  ].join(' ').replace(/\s+/g, ' ').trim().slice(0, 800)}\n` : '';
   const contextPrompt = `You are extracting UPDATED context fields from a single user → AI exchange.${cardSnippet}
 
-PRIOR CONTEXT (may be partial): ${JSON.stringify(prior).slice(0,400)}
+PRIOR CONTEXT (may be partial): ${JSON.stringify(prior).slice(0, 400)}
 
 USER: "${message}"
 CHARACTER: "${aiResponse}"
@@ -183,7 +181,7 @@ RULES:
 
 Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to its object.`;
   try {
-    const tryParse = (raw: string) => {
+    const tryParse = (raw)=>{
       const cleaned = raw.trim().replace(/^```json\s*/, '').replace(/\s*```$/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
       try {
         return JSON.parse(cleaned);
@@ -191,28 +189,24 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
         return null;
       }
     };
-
-    const validateSchema = (obj: any, allowedKeys: string[]) => {
+    const validateSchema = (obj, allowedKeys)=>{
       if (!obj || typeof obj !== 'object') return false;
       // Ensure only allowed keys and string values
-      for (const key of Object.keys(obj)) {
+      for (const key of Object.keys(obj)){
         if (!allowedKeys.includes(key)) return false;
         if (obj[key] !== null && typeof obj[key] !== 'string') return false;
         if (typeof obj[key] === 'string' && obj[key].length > 120) obj[key] = obj[key].slice(0, 120);
       }
       return true;
     };
-
     const allowedKeys = Object.keys(contextFields);
-
-    const buildBody = (messagesArr: any[]) => ({
-      model: 'mistralai/mistral-small-3.2-24b-instruct',
-      messages: messagesArr,
-      temperature: 0,
-      top_p: 0.1,
-      max_tokens: 250
-    });
-
+    const buildBody = (messagesArr)=>({
+        model: 'mistralai/mistral-small-3.2-24b-instruct',
+        messages: messagesArr,
+        temperature: 0,
+        top_p: 0.1,
+        max_tokens: 250
+      });
     const url = 'https://openrouter.ai/api/v1/chat/completions';
     const headers = {
       'Authorization': `Bearer ${openRouterKey}`,
@@ -220,34 +214,49 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
       'HTTP-Referer': Deno.env.get('SITE_URL') || 'https://yourapp.com',
       'X-Title': 'AnimaChat-Context'
     };
-
-    const firstReq = await fetch(url, { method: 'POST', headers, body: JSON.stringify(buildBody([{ role: 'user', content: contextPrompt }])) });
+    const firstReq = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(buildBody([
+        {
+          role: 'user',
+          content: contextPrompt
+        }
+      ]))
+    });
     if (!firstReq.ok) throw new Error(`OpenRouter error: ${firstReq.status}`);
-  const firstJson: any = await firstReq.json();
-  const firstText = extractChoiceContent(firstJson);
+    const firstJson = await firstReq.json();
+    const firstText = extractChoiceContent(firstJson);
     console.log('📝 Raw context extraction response:', firstText);
-
     let parsed = tryParse(firstText);
     if (!parsed || !validateSchema(parsed, allowedKeys)) {
       console.warn('⚠️ Context JSON invalid; retrying with corrective system message');
       const fixPrompt = `Return ONLY a valid minified JSON object for these keys: ${allowedKeys.join(', ')}. No prose, no markdown fences.`;
-      const retryReq = await fetch(url, { method: 'POST', headers, body: JSON.stringify(buildBody([
-        { role: 'system', content: fixPrompt },
-        { role: 'user', content: contextPrompt }
-      ])) });
+      const retryReq = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(buildBody([
+          {
+            role: 'system',
+            content: fixPrompt
+          },
+          {
+            role: 'user',
+            content: contextPrompt
+          }
+        ]))
+      });
       if (retryReq.ok) {
-  const retryJson: any = await retryReq.json();
-  const retryText = extractChoiceContent(retryJson);
+        const retryJson = await retryReq.json();
+        const retryText = extractChoiceContent(retryJson);
         parsed = tryParse(retryText);
       }
     }
-
     if (!parsed) return null;
-
-    const flattened: Record<string,string> = {};
-    for (const key of allowedKeys) {
+    const flattened = {};
+    for (const key of allowedKeys){
       const raw = parsed[key];
-      let value: string | null = null;
+      let value = null;
       let reason = 'no_change';
       if (raw && typeof raw === 'object') {
         if (typeof raw.value === 'string') value = raw.value.trim();
@@ -255,13 +264,13 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
       } else if (typeof raw === 'string') {
         value = raw.trim(); // backward compat
       }
-      const priorVal = (prior as any)[key];
+      const priorVal = prior[key];
       if (!value || value === '') value = priorVal || 'No context';
       if (value === 'No context' && priorVal) value = priorVal; // prefer prior
       if (!godMode && reason === 'ai_spontaneous' && priorVal) {
         value = priorVal;
       }
-      flattened[key] = value.slice(0,120);
+      flattened[key] = value.slice(0, 120);
     }
     console.log('🔍 Parsed context (flattened):', flattened);
     // Heuristic fallback enhancement for LOCATION & CHARACTER POSITION if model missed a clear cue
@@ -269,22 +278,21 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
       const lowerAI = (aiResponse || '').toLowerCase();
       const lowerUser = (message || '').toLowerCase();
       const textWindow = lowerUser + ' \n ' + lowerAI;
-
       // Simple location phrase extraction
       const locationPatterns = [
         /\b(?:at|in|inside|within|on|near|by|beside|outside) (?:the )?([a-z0-9\- ]{2,40}\b)/g,
         /\b(arrives|heads|goes|walks|steps|moves) (?:to|into|inside|toward|onto) (?:the )?([a-z0-9\- ]{2,40}\b)/g,
         /\b(beach|forest|cabin|room|bedroom|kitchen|hallway|garden|park|library|classroom|office|street|shore|mountain|camp|campfire|market|plaza|docks|harbor)\b/g
       ];
-      const priorLocation = (prior as any).location || (prior as any).location_tracking || (prior as any).locationTracking;
-      let detectedLoc: string | null = null;
-      for (const pattern of locationPatterns) {
-        let m: RegExpExecArray | null;
-        while ((m = pattern.exec(textWindow))) {
+      const priorLocation = prior.location || prior.location_tracking || prior.locationTracking;
+      let detectedLoc = null;
+      for (const pattern of locationPatterns){
+        let m;
+        while ((m = pattern.exec(textWindow)) !== null){
           const group = m[m.length - 1];
-            if (group) {
-              detectedLoc = group.trim();
-            }
+          if (group) {
+            detectedLoc = group.trim();
+          }
         }
       }
       if (detectedLoc && detectedLoc.length <= 40) {
@@ -294,15 +302,35 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
           console.log('📍 Heuristic location update applied:', detectedLoc);
         }
       }
-
       // Character position heuristics
       if (flattened['character_position']) {
         const existingPos = flattened['character_position'];
         // If model returned prior unchanged but we see a new posture word, update
-        const postureKeywords = ['sitting','sits','squat','squatting','standing','stands','leaning','leans','lying','laying','reclining','crouching','kneeling','running','walking','pacing','folds her arms','folding her arms','cross-legged','perched'];
-        const found = postureKeywords.filter(k => lowerAI.includes(k));
+        const postureKeywords = [
+          'sitting',
+          'sits',
+          'squat',
+          'squatting',
+          'standing',
+          'stands',
+          'leaning',
+          'leans',
+          'lying',
+          'laying',
+          'reclining',
+          'crouching',
+          'kneeling',
+          'running',
+          'walking',
+          'pacing',
+          'folds her arms',
+          'folding her arms',
+          'cross-legged',
+          'perched'
+        ];
+        const found = postureKeywords.filter((k)=>lowerAI.includes(k));
         if (found.length > 0) {
-          const concise = found.slice(0,2).join(', ').replace(/s$/,'');
+          const concise = found.slice(0, 2).join(', ').replace(/s$/, '');
           if (concise && concise.length < 50 && !existingPos.toLowerCase().includes(concise.split(',')[0])) {
             flattened['character_position'] = concise;
             console.log('🧍 Heuristic character_position update applied:', concise);
@@ -312,17 +340,22 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
     } catch (heurErr) {
       console.warn('⚠️ Heuristic enhancement failed (non-fatal):', heurErr);
     }
-
     // === USER INTENT GATING (prevents spontaneous drift) ===
     try {
       if (!godMode) {
         const intentRegex = /(change|put on|take off|remove|switch|swap|go to|move to|head to|walk to|enter|leave|travel to|pick up|drop|equip|unequip|wear|put .* on|move over to|step into|steps into|heads toward|heads to)/i;
         const userShowsIntent = intentRegex.test(message || '');
         if (!userShowsIntent) {
-          const gateFields = ['mood','clothing','location','time_weather','character_position'];
+          const gateFields = [
+            'mood',
+            'clothing',
+            'location',
+            'time_weather',
+            'character_position'
+          ];
           let gatedCount = 0;
-          for (const f of gateFields) {
-            const priorVal = (prior as any)[f];
+          for (const f of gateFields){
+            const priorVal = prior[f];
             if (priorVal && flattened[f] && flattened[f] !== priorVal) {
               console.log(`🚫 Gated spontaneous change for ${f}: '${flattened[f]}' -> reverting to prior '${priorVal}'`);
               flattened[f] = priorVal;
@@ -337,41 +370,61 @@ Return JSON ONLY with top-level keys: ${reasonKeys.join(', ')} each mapping to i
     } catch (gateErr) {
       console.warn('⚠️ User intent gating failed (non-fatal):', gateErr);
     }
-
     return flattened;
   } catch (error) {
     console.error('Context extraction error:', error);
   }
   return null;
 }
-export async function saveContextUpdates(extractedContext, addonSettings, userId, chatId, characterId, supabase, options: { forcePersist?: boolean } = {}) {
+export async function saveContextUpdates(extractedContext, addonSettings, userId, chatId, characterId, supabase, options = {}) {
   if (!extractedContext || !addonSettings) return;
-
   // Fetch existing persisted context so we don't erase unchanged fields
-  let existing: any = null;
+  let existing = null;
   try {
-    const { data: existingRow } = await supabase
-      .from('chat_context')
-      .select('current_context')
-      .eq('chat_id', chatId)
-      .maybeSingle();
+    const { data: existingRow } = await supabase.from('chat_context').select('current_context').eq('chat_id', chatId).maybeSingle();
     existing = existingRow?.current_context || null;
   } catch (e) {
     console.warn('⚠️ Failed to fetch existing chat_context (continuing with null):', e);
   }
-
   const contextMappings = [
-    { setting: 'moodTracking', field: 'mood', type: 'mood' },
-    { setting: 'clothingInventory', field: 'clothing', type: 'clothing' },
-    { setting: 'locationTracking', field: 'location', type: 'location' },
-    { setting: 'timeAndWeather', field: 'time_weather', type: 'time_weather' },
-    { setting: 'characterPosition', field: 'character_position', type: 'character_position' },
-    { setting: 'timeAwareness', field: 'conversation_tone', type: 'conversation_tone' },
-    { setting: 'timeAwareness', field: 'urgency_level', type: 'urgency_level' }
+    {
+      setting: 'moodTracking',
+      field: 'mood',
+      type: 'mood'
+    },
+    {
+      setting: 'clothingInventory',
+      field: 'clothing',
+      type: 'clothing'
+    },
+    {
+      setting: 'locationTracking',
+      field: 'location',
+      type: 'location'
+    },
+    {
+      setting: 'timeAndWeather',
+      field: 'time_weather',
+      type: 'time_weather'
+    },
+    {
+      setting: 'characterPosition',
+      field: 'character_position',
+      type: 'character_position'
+    },
+    {
+      setting: 'timeAwareness',
+      field: 'conversation_tone',
+      type: 'conversation_tone'
+    },
+    {
+      setting: 'timeAwareness',
+      field: 'urgency_level',
+      type: 'urgency_level'
+    }
   ];
-
   // Start with existing (so unchanged fields persist)
-  const contextData: DbContext = {
+  const contextData = {
     mood: existing?.mood ?? null,
     clothing: existing?.clothing ?? null,
     location: existing?.location ?? null,
@@ -381,41 +434,36 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
     conversation_tone: existing?.conversation_tone ?? null,
     urgency_level: existing?.urgency_level ?? null
   };
-
   let hasUpdates = false;
-
-  for (const { setting, field } of contextMappings) {
+  for (const { setting, field } of contextMappings){
     if (!addonSettings[setting]) continue; // skip disabled addons
     const newValue = extractedContext[field]; // only present when model signaled change
     if (typeof newValue === 'string' && newValue && newValue !== 'No context') {
-      if ((contextData as any)[field] !== newValue) {
-        (contextData as any)[field] = newValue; // apply change
+      if (contextData[field] !== newValue) {
+        contextData[field] = newValue; // apply change
         hasUpdates = true;
         console.log(`💾 Updated ${field} context ->`, newValue);
       }
     } else {
-      // No new value provided -> keep existing as-is
-      // (Do NOT null it out; this preserves prior state until an explicit update arrives)
+    // No new value provided -> keep existing as-is
+    // (Do NOT null it out; this preserves prior state until an explicit update arrives)
     }
   }
-
   // If forcing persist for first-time baseline and we still have no row, allow upsert (will just store existing merged nulls)
   if (!hasUpdates && !options.forcePersist) {
     console.log('⏭️ No context changes detected; skipping persist (existing values retained in DB)');
     return;
   }
-
   try {
-    const { error } = await supabase
-      .from('chat_context')
-      .upsert({
-        user_id: userId,
-        chat_id: chatId,
-        character_id: characterId,
-        current_context: contextData,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'chat_id' });
-
+    const { error } = await supabase.from('chat_context').upsert({
+      user_id: userId,
+      chat_id: chatId,
+      character_id: characterId,
+      current_context: contextData,
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: 'chat_id'
+    });
     if (error) {
       console.error('Context update error:', error);
     } else {
@@ -423,21 +471,16 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
       // Also update latest AI message with FULL merged context for UI
       try {
         const messageContext = dbToUi(contextData);
-        const { data: latestMessage, error: messageError } = await supabase
-          .from('messages')
-          .select('id')
-          .eq('chat_id', chatId)
-          .eq('is_ai_message', true)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+        const { data: latestMessage, error: messageError } = await supabase.from('messages').select('id').eq('chat_id', chatId).eq('is_ai_message', true).order('created_at', {
+          ascending: false
+        }).limit(1).single();
         if (messageError) {
           console.error('❌ Failed to find latest AI message:', messageError);
         } else if (latestMessage) {
-          const { error: updateError } = await supabase
-            .from('messages')
-            .update({ current_context: messageContext, updated_at: new Date().toISOString() })
-            .eq('id', latestMessage.id);
+          const { error: updateError } = await supabase.from('messages').update({
+            current_context: messageContext,
+            updated_at: new Date().toISOString()
+          }).eq('id', latestMessage.id);
           if (updateError) console.error('❌ Failed to update latest AI message with merged context:', updateError);
           else console.log('✅ Latest AI message updated with merged context');
         }
@@ -449,3 +492,4 @@ export async function saveContextUpdates(extractedContext, addonSettings, userId
     console.error('Context update error:', err);
   }
 }
+

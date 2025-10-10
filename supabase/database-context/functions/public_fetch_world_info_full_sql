@@ -1,0 +1,72 @@
+CREATE OR REPLACE FUNCTION "public"."fetch_world_info_full"("p_world_info_id" "uuid") RETURNS "jsonb"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+DECLARE
+  v_user_id uuid := auth.uid();
+  v_result jsonb;
+BEGIN
+  SELECT jsonb_build_object(
+    'id', wi.id,
+    'name', wi.name,
+    'short_description', wi.short_description,
+    'visibility', wi.visibility,
+    'creator_id', wi.creator_id,
+    'likes_count', wi.likes_count,
+    'interaction_count', wi.interaction_count,
+    'created_at', wi.created_at,
+    'updated_at', wi.updated_at,
+    'creator', to_jsonb(pr) - 'id',
+    'entries', COALESCE(e.entries, '[]'::jsonb),
+    'tags', COALESCE(t.tags, '[]'::jsonb),
+    'is_liked', CASE WHEN v_user_id IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM public.user_reactions ur
+        WHERE ur.target_type = 'world'::public.reaction_target_type
+          AND ur.target_id = wi.id
+          AND ur.reaction_type = 'like'::public.reaction_type_enum
+          AND ur.user_id = v_user_id
+      ) THEN true ELSE false END,
+    'is_used', false
+  ) INTO v_result
+  FROM public.world_infos wi
+  LEFT JOIN public.profiles pr ON pr.id = wi.creator_id
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', we.id,
+      'keywords', we.keywords,
+      'entry_text', we.entry_text,
+      'created_at', we.created_at
+    ) ORDER BY we.created_at DESC) AS entries
+    FROM public.world_info_entries we
+    WHERE we.world_info_id = wi.id
+  ) e ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(jsonb_build_object('id', tg.id, 'name', tg.name) ORDER BY tg.name) AS tags
+    FROM public.world_info_tags wit
+    JOIN public.tags tg ON tg.id = wit.tag_id
+    WHERE wit.world_info_id = wi.id
+  ) t ON TRUE
+  WHERE wi.id = p_world_info_id
+    AND (
+      wi.visibility = 'public'
+      OR (v_user_id IS NOT NULL AND wi.creator_id = v_user_id)
+      OR (
+        v_user_id IS NOT NULL AND EXISTS (
+          SELECT 1
+          FROM public.user_reactions ur
+          WHERE ur.target_type = 'world'::public.reaction_target_type
+            AND ur.target_id = wi.id
+            AND ur.reaction_type = 'like'::public.reaction_type_enum
+            AND ur.user_id = v_user_id
+        )
+      )
+    );
+
+  IF v_result IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  RETURN v_result;
+END;
+$$;

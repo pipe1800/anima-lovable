@@ -19,63 +19,294 @@ export interface LatentCharacterProfile {
 export interface ValidationResult { valid: boolean; cleaned?: LatentCharacterProfile; populatedDomains: number; confidenceAvg: number; }
 
 const ENUMS = {
-  risk_level: ['very_low','low','med','high','very_high'],
-  authority_posture: ['defer','challenge','subvert','ignore'],
-  time_focus: ['past','present','future','multi'],
-  trust_ramp: ['fast','cautious','guarded','transactional'],
-  attachment_flavor: ['secure','avoidant','anxious','mixed'],
-  role_self_frame: ['caretaker','mentor','disruptor','outsider','strategist','observer'],
-  thinking_mode: ['analytical','intuitive','heuristic','methodical'],
-  emotional_regulation: ['stable','bursty','suppressed','volatile'],
-  verbosity: ['laconic','balanced','expansive'],
-  pacing: ['rapid','measured','contemplative'],
-  humor_style: ['none','dry','sardonic','absurd','dark','punny','wry'],
-  palette: ['minimalist','ornate','gothic','pastoral','neon','naturalistic','utilitarian','elegant'],
-  defining_memory_type: ['loss','betrayal','triumph','mentorship','failure','creation'],
-  schema_bias: ['betrayal','opportunity','decay','order','providence'],
-  orientation: ['heterosexual','homosexual','bisexual','pansexual','asexual','demisexual','queer','questioning','unspecified'],
-  intimacy_drive: ['low','moderate','high'],
-  flirting_style: ['direct','playful','teasing','reserved','intellectual','subtle']
+  risk_level: ['very_low', 'low', 'med', 'high', 'very_high'] as const,
+  authority_posture: ['defer', 'challenge', 'subvert', 'ignore'] as const,
+  time_focus: ['past', 'present', 'future', 'multi'] as const,
+  trust_ramp: ['fast', 'cautious', 'guarded', 'transactional'] as const,
+  attachment_flavor: ['secure', 'avoidant', 'anxious', 'mixed'] as const,
+  role_self_frame: ['caretaker', 'mentor', 'disruptor', 'outsider', 'strategist', 'observer'] as const,
+  thinking_mode: ['analytical', 'intuitive', 'heuristic', 'methodical'] as const,
+  emotional_regulation: ['stable', 'bursty', 'suppressed', 'volatile'] as const,
+  verbosity: ['laconic', 'balanced', 'expansive'] as const,
+  pacing: ['rapid', 'measured', 'contemplative'] as const,
+  humor_style: ['none', 'dry', 'sardonic', 'absurd', 'dark', 'punny', 'wry'] as const,
+  palette: ['minimalist', 'ornate', 'gothic', 'pastoral', 'neon', 'naturalistic', 'utilitarian', 'elegant'] as const,
+  defining_memory_type: ['loss', 'betrayal', 'triumph', 'mentorship', 'failure', 'creation'] as const,
+  schema_bias: ['betrayal', 'opportunity', 'decay', 'order', 'providence'] as const,
+  orientation: ['heterosexual', 'homosexual', 'bisexual', 'pansexual', 'asexual', 'demisexual', 'queer', 'questioning', 'unspecified'] as const,
+  intimacy_drive: ['low', 'moderate', 'high'] as const,
+  flirting_style: ['direct', 'playful', 'teasing', 'reserved', 'intellectual', 'subtle'] as const,
 };
 
-function shortTxt(v: any): string | undefined { if (typeof v !== 'string') return undefined; const s = v.trim().toLowerCase(); return s ? s.slice(0,60) : undefined; }
-function enumOk(v: any, list: string[]) { return typeof v === 'string' && list.includes(v) ? v : undefined; }
-function intIn(v: any, min: number, max: number) { return Number.isInteger(v) && v>=min && v<=max ? v : undefined; }
-function listStr(arr: any, maxItems: number) {
-  if (!Array.isArray(arr)) return undefined;
-  const out = arr
-    .filter(x => typeof x === 'string')
-    .map(x => x.trim().toLowerCase())
-    .filter(x => x.length > 0)
-    .map(x => x.slice(0,40));
-  if (!out.length) return undefined;
-  return out.slice(0, maxItems);
+type UnknownRecord = Record<string, unknown>;
+
+type NonNullableProperty<T> = Exclude<T, null | undefined>;
+
+const isRecord = (value: unknown): value is UnknownRecord => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const hasMeaningfulValue = (obj: Record<string, unknown>): boolean =>
+  Object.values(obj).some((value) => {
+    if (value === undefined || value === null) {
+      return false;
+    }
+    if (typeof value === 'string') {
+      return value.trim().length > 0;
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return true;
+  });
+
+function shortTxt(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed ? trimmed.slice(0, 60) : undefined;
 }
 
-export function validateLatentProfile(raw: any): ValidationResult {
+function enumOk<const T extends readonly string[]>(value: unknown, list: T): T[number] | undefined {
+  if (typeof value !== 'string') return undefined;
+  return list.includes(value as T[number]) ? (value as T[number]) : undefined;
+}
+
+function intIn(value: unknown, min: number, max: number): number | undefined {
+  if (!Number.isInteger(value)) return undefined;
+  const intVal = Number(value);
+  return intVal >= min && intVal <= max ? intVal : undefined;
+}
+
+function listStr(value: unknown, maxItems: number): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => entry.slice(0, 40));
+  if (!normalized.length) return undefined;
+  return normalized.slice(0, maxItems);
+}
+
+const withRecord = (value: unknown, cb: (record: UnknownRecord) => void): void => {
+  if (isRecord(value)) {
+    cb(value);
+  }
+};
+
+export function validateLatentProfile(raw: unknown): ValidationResult {
+  if (!isRecord(raw)) {
+    return { valid: false, populatedDomains: 0, confidenceAvg: 0 };
+  }
+
   const cleaned: LatentCharacterProfile = {};
   let populated = 0;
-  if (!raw || typeof raw !== 'object') return { valid: false, populatedDomains: 0, confidenceAvg: 0 };
 
-  const tryObj = (o:any, cb:(v:any)=>void) => { if (o && typeof o==='object' && !Array.isArray(o)) cb(o); };
+  withRecord(raw['drives'], (drivesRecord) => {
+    const drives: Partial<NonNullableProperty<LatentCharacterProfile['drives']>> = {};
+    const motiveCore = shortTxt(drivesRecord['motive_core']);
+    const hiddenAgenda = shortTxt(drivesRecord['hidden_agenda']);
+    const fearAnchor = shortTxt(drivesRecord['fear_anchor']);
+    if (motiveCore) drives.motive_core = motiveCore;
+    if (hiddenAgenda) drives.hidden_agenda = hiddenAgenda;
+    if (fearAnchor) drives.fear_anchor = fearAnchor;
+    if (hasMeaningfulValue(drives as Record<string, unknown>)) {
+      cleaned.drives = drives;
+      populated += 1;
+    }
+  });
 
-  tryObj(raw.drives, d=> { const o:any={}; o.motive_core=shortTxt(d.motive_core); o.hidden_agenda=shortTxt(d.hidden_agenda); o.fear_anchor=shortTxt(d.fear_anchor); if(Object.values(o).some(Boolean)){cleaned.drives=o;populated++;} });
-  tryObj(raw.values_framework, v=> { const o:any={}; if(Array.isArray(v.value_stack)){const vs=v.value_stack.filter((x:any)=>typeof x==='string').map((x:string)=>x.toLowerCase().trim()).filter(Boolean).slice(0,3); if(vs.length>=2)o.value_stack=vs;} o.moral_flex_point=shortTxt(v.moral_flex_point); if(Object.keys(o).length) { cleaned.values_framework=o; populated++; } });
-  tryObj(raw.internal_conflict, ic=> { const o:any={}; const t=shortTxt(ic.tension_axis); if(t && t.includes(' vs ')) o.tension_axis=t; const r=shortTxt(ic.resolution_pull); if(r && o.tension_axis && o.tension_axis.split(' vs ').includes(r)) o.resolution_pull=r; if(Object.keys(o).length){cleaned.internal_conflict=o;populated++;} });
-  tryObj(raw.worldview_profile, w=> { const o:any={}; o.risk_level=enumOk(w.risk_level,ENUMS.risk_level); o.authority_posture=enumOk(w.authority_posture,ENUMS.authority_posture); o.time_focus=enumOk(w.time_focus,ENUMS.time_focus); o.worldview_note=shortTxt(w.worldview_note); Object.keys(o).forEach(k=>o[k]==null&&delete o[k]); if(Object.keys(o).length){cleaned.worldview_profile=o;populated++;} });
-  tryObj(raw.relational_style, r=> { const o:any={}; o.trust_ramp=enumOk(r.trust_ramp,ENUMS.trust_ramp); o.attachment_flavor=enumOk(r.attachment_flavor,ENUMS.attachment_flavor); o.role_self_frame=enumOk(r.role_self_frame,ENUMS.role_self_frame); const orient=enumOk(r.orientation,ENUMS.orientation); if(orient) o.orientation=orient; const idrv=enumOk(r.intimacy_drive,ENUMS.intimacy_drive); if(idrv) o.intimacy_drive=idrv; const fstyle=enumOk(r.flirting_style,ENUMS.flirting_style); if(fstyle) o.flirting_style=fstyle; const bnote=shortTxt(r.boundary_note); if(bnote) o.boundary_note=bnote; const k=listStr(r.kinks,8); if(k) o.kinks=k; const tons=listStr(r.turn_ons,8); if(tons) o.turn_ons=tons; const toffs=listStr(r.turn_offs,8); if(toffs) o.turn_offs=toffs; const fets=listStr(r.fetishes,8); if(fets) o.fetishes=fets; Object.keys(o).forEach(k=>o[k]==null&&delete o[k]); if(Object.keys(o).length){cleaned.relational_style=o;populated++;} });
-  tryObj(raw.cog_emotional_style, c=> { const o:any={}; o.thinking_mode=enumOk(c.thinking_mode,ENUMS.thinking_mode); o.emotional_regulation=enumOk(c.emotional_regulation,ENUMS.emotional_regulation); o.escalation_trigger=shortTxt(c.escalation_trigger); Object.keys(o).forEach(k=>o[k]==null&&delete o[k]); if(Object.keys(o).length){cleaned.cog_emotional_style=o;populated++;} });
-  tryObj(raw.communication_texture, ct=> { const o:any={}; o.verbosity=enumOk(ct.verbosity,ENUMS.verbosity); o.pacing=enumOk(ct.pacing,ENUMS.pacing); o.humor_style=enumOk(ct.humor_style,ENUMS.humor_style); o.signature_discourse=shortTxt(ct.signature_discourse); Object.keys(o).forEach(k=>o[k]==null&&delete o[k]); if(Object.keys(o).length){cleaned.communication_texture=o;populated++;} });
-  tryObj(raw.aesthetic_bias, a=> { const o:any={}; o.palette=enumOk(a.palette,ENUMS.palette); const m=intIn(a.modesty_to_flaunt,0,4); if(m!=null) o.modesty_to_flaunt=m; const p=intIn(a.practicality_bias,0,4); if(p!=null) o.practicality_bias=p; if(Object.keys(o).length){cleaned.aesthetic_bias=o;populated++;} });
-  tryObj(raw.constraint_and_secret, cs=> { const o:any={}; o.limiting_factor=shortTxt(cs.limiting_factor); o.hidden_soft_spot=shortTxt(cs.hidden_soft_spot); if(Object.values(o).some(Boolean)){cleaned.constraint_and_secret=o;populated++;} });
-  tryObj(raw.growth_arc_anchor, g=> { const o:any={}; o.growth_vector=shortTxt(g.growth_vector); o.resistance_factor=shortTxt(g.resistance_factor); if(Object.values(o).some(Boolean)){cleaned.growth_arc_anchor=o;populated++;} });
-  tryObj(raw.memory_schema, ms=> { const o:any={}; o.defining_memory_type=enumOk(ms.defining_memory_type,ENUMS.defining_memory_type); o.schema_bias=enumOk(ms.schema_bias,ENUMS.schema_bias); Object.keys(o).forEach(k=>o[k]==null&&delete o[k]); if(Object.keys(o).length){cleaned.memory_schema=o;populated++;} });
-  tryObj(raw.meta_control, mc=> { const c=Number(mc.confidence_avg); if(!Number.isNaN(c) && c>=0 && c<=1) cleaned.meta_control={ confidence_avg: Number(c.toFixed(2)) }; });
+  withRecord(raw['values_framework'], (valuesRecord) => {
+    const valuesFramework: Partial<NonNullableProperty<LatentCharacterProfile['values_framework']>> = {};
+    const stack = valuesRecord['value_stack'];
+    if (Array.isArray(stack)) {
+      const normalized = stack
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map((entry) => entry.toLowerCase().trim())
+        .filter((entry) => entry.length > 0)
+        .slice(0, 3);
+      if (normalized.length >= 2) {
+        valuesFramework.value_stack = normalized;
+      }
+    }
+    const moralFlexPoint = shortTxt(valuesRecord['moral_flex_point']);
+    if (moralFlexPoint) {
+      valuesFramework.moral_flex_point = moralFlexPoint;
+    }
+    if (Object.keys(valuesFramework).length > 0) {
+      cleaned.values_framework = valuesFramework;
+      populated += 1;
+    }
+  });
 
-  // defaults
-  cleaned.worldview_profile = { risk_level: cleaned.worldview_profile?.risk_level || 'med', ...(cleaned.worldview_profile||{}) };
-  cleaned.communication_texture = { verbosity: cleaned.communication_texture?.verbosity || 'balanced', pacing: cleaned.communication_texture?.pacing || 'measured', humor_style: cleaned.communication_texture?.humor_style || 'none', ...(cleaned.communication_texture||{}) };
-  cleaned.aesthetic_bias = { practicality_bias: cleaned.aesthetic_bias?.practicality_bias ?? 2, modesty_to_flaunt: cleaned.aesthetic_bias?.modesty_to_flaunt ?? 2, ...(cleaned.aesthetic_bias||{}) };
+  withRecord(raw['internal_conflict'], (conflictRecord) => {
+    const internalConflict: Partial<NonNullableProperty<LatentCharacterProfile['internal_conflict']>> = {};
+    const tensionAxis = shortTxt(conflictRecord['tension_axis']);
+    if (tensionAxis && tensionAxis.includes(' vs ')) {
+      internalConflict.tension_axis = tensionAxis;
+    }
+    const resolutionPull = shortTxt(conflictRecord['resolution_pull']);
+    if (
+      resolutionPull &&
+      internalConflict.tension_axis &&
+      internalConflict.tension_axis.split(' vs ').includes(resolutionPull)
+    ) {
+      internalConflict.resolution_pull = resolutionPull;
+    }
+    if (Object.keys(internalConflict).length > 0) {
+      cleaned.internal_conflict = internalConflict;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['worldview_profile'], (worldviewRecord) => {
+    const worldview: Partial<NonNullableProperty<LatentCharacterProfile['worldview_profile']>> = {};
+    const risk = enumOk(worldviewRecord['risk_level'], ENUMS.risk_level);
+    const authority = enumOk(worldviewRecord['authority_posture'], ENUMS.authority_posture);
+    const timeFocus = enumOk(worldviewRecord['time_focus'], ENUMS.time_focus);
+    const note = shortTxt(worldviewRecord['worldview_note']);
+    if (risk) worldview.risk_level = risk;
+    if (authority) worldview.authority_posture = authority;
+    if (timeFocus) worldview.time_focus = timeFocus;
+    if (note) worldview.worldview_note = note;
+    if (Object.keys(worldview).length > 0) {
+      cleaned.worldview_profile = worldview;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['relational_style'], (relationalRecord) => {
+    const relational: Partial<NonNullableProperty<LatentCharacterProfile['relational_style']>> = {};
+    const trustRamp = enumOk(relationalRecord['trust_ramp'], ENUMS.trust_ramp);
+    const attachment = enumOk(relationalRecord['attachment_flavor'], ENUMS.attachment_flavor);
+    const roleFrame = enumOk(relationalRecord['role_self_frame'], ENUMS.role_self_frame);
+    const orientation = enumOk(relationalRecord['orientation'], ENUMS.orientation);
+    const intimacyDrive = enumOk(relationalRecord['intimacy_drive'], ENUMS.intimacy_drive);
+    const flirtingStyle = enumOk(relationalRecord['flirting_style'], ENUMS.flirting_style);
+    const boundaryNote = shortTxt(relationalRecord['boundary_note']);
+    const kinks = listStr(relationalRecord['kinks'], 8);
+    const turnOns = listStr(relationalRecord['turn_ons'], 8);
+    const turnOffs = listStr(relationalRecord['turn_offs'], 8);
+    const fetishes = listStr(relationalRecord['fetishes'], 8);
+    if (trustRamp) relational.trust_ramp = trustRamp;
+    if (attachment) relational.attachment_flavor = attachment;
+    if (roleFrame) relational.role_self_frame = roleFrame;
+    if (orientation) relational.orientation = orientation;
+    if (intimacyDrive) relational.intimacy_drive = intimacyDrive;
+    if (flirtingStyle) relational.flirting_style = flirtingStyle;
+    if (boundaryNote) relational.boundary_note = boundaryNote;
+    if (kinks) relational.kinks = kinks;
+    if (turnOns) relational.turn_ons = turnOns;
+    if (turnOffs) relational.turn_offs = turnOffs;
+    if (fetishes) relational.fetishes = fetishes;
+    if (Object.keys(relational).length > 0) {
+      cleaned.relational_style = relational;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['cog_emotional_style'], (cogRecord) => {
+    const cognitive: Partial<NonNullableProperty<LatentCharacterProfile['cog_emotional_style']>> = {};
+    const thinkingMode = enumOk(cogRecord['thinking_mode'], ENUMS.thinking_mode);
+    const emotionalReg = enumOk(cogRecord['emotional_regulation'], ENUMS.emotional_regulation);
+    const escalation = shortTxt(cogRecord['escalation_trigger']);
+    if (thinkingMode) cognitive.thinking_mode = thinkingMode;
+    if (emotionalReg) cognitive.emotional_regulation = emotionalReg;
+    if (escalation) cognitive.escalation_trigger = escalation;
+    if (Object.keys(cognitive).length > 0) {
+      cleaned.cog_emotional_style = cognitive;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['communication_texture'], (commRecord) => {
+    const communication: Partial<NonNullableProperty<LatentCharacterProfile['communication_texture']>> = {};
+    const verbosity = enumOk(commRecord['verbosity'], ENUMS.verbosity);
+    const pacing = enumOk(commRecord['pacing'], ENUMS.pacing);
+    const humor = enumOk(commRecord['humor_style'], ENUMS.humor_style);
+    const discourse = shortTxt(commRecord['signature_discourse']);
+    if (verbosity) communication.verbosity = verbosity;
+    if (pacing) communication.pacing = pacing;
+    if (humor) communication.humor_style = humor;
+    if (discourse) communication.signature_discourse = discourse;
+    if (Object.keys(communication).length > 0) {
+      cleaned.communication_texture = communication;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['aesthetic_bias'], (aestheticRecord) => {
+    const aesthetic: Partial<NonNullableProperty<LatentCharacterProfile['aesthetic_bias']>> = {};
+    const palette = enumOk(aestheticRecord['palette'], ENUMS.palette);
+    const modesty = intIn(aestheticRecord['modesty_to_flaunt'], 0, 4);
+    const practicality = intIn(aestheticRecord['practicality_bias'], 0, 4);
+    if (palette) aesthetic.palette = palette;
+    if (modesty != null) aesthetic.modesty_to_flaunt = modesty;
+    if (practicality != null) aesthetic.practicality_bias = practicality;
+    if (Object.keys(aesthetic).length > 0) {
+      cleaned.aesthetic_bias = aesthetic;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['constraint_and_secret'], (constraintRecord) => {
+    const constraint: Partial<NonNullableProperty<LatentCharacterProfile['constraint_and_secret']>> = {};
+    const limitingFactor = shortTxt(constraintRecord['limiting_factor']);
+    const hiddenSoftSpot = shortTxt(constraintRecord['hidden_soft_spot']);
+    if (limitingFactor) constraint.limiting_factor = limitingFactor;
+    if (hiddenSoftSpot) constraint.hidden_soft_spot = hiddenSoftSpot;
+    if (hasMeaningfulValue(constraint as Record<string, unknown>)) {
+      cleaned.constraint_and_secret = constraint;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['growth_arc_anchor'], (growthRecord) => {
+    const growth: Partial<NonNullableProperty<LatentCharacterProfile['growth_arc_anchor']>> = {};
+    const growthVector = shortTxt(growthRecord['growth_vector']);
+    const resistanceFactor = shortTxt(growthRecord['resistance_factor']);
+    if (growthVector) growth.growth_vector = growthVector;
+    if (resistanceFactor) growth.resistance_factor = resistanceFactor;
+    if (hasMeaningfulValue(growth as Record<string, unknown>)) {
+      cleaned.growth_arc_anchor = growth;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['memory_schema'], (memoryRecord) => {
+    const memory: Partial<NonNullableProperty<LatentCharacterProfile['memory_schema']>> = {};
+    const definingMemory = enumOk(memoryRecord['defining_memory_type'], ENUMS.defining_memory_type);
+    const schemaBias = enumOk(memoryRecord['schema_bias'], ENUMS.schema_bias);
+    if (definingMemory) memory.defining_memory_type = definingMemory;
+    if (schemaBias) memory.schema_bias = schemaBias;
+    if (Object.keys(memory).length > 0) {
+      cleaned.memory_schema = memory;
+      populated += 1;
+    }
+  });
+
+  withRecord(raw['meta_control'], (metaRecord) => {
+    const confidence = Number(metaRecord['confidence_avg']);
+    if (!Number.isNaN(confidence) && confidence >= 0 && confidence <= 1) {
+      cleaned.meta_control = { confidence_avg: Number(confidence.toFixed(2)) };
+    }
+  });
+
+  cleaned.worldview_profile = {
+    risk_level: cleaned.worldview_profile?.risk_level || 'med',
+    ...(cleaned.worldview_profile || {}),
+  };
+  cleaned.communication_texture = {
+    verbosity: cleaned.communication_texture?.verbosity || 'balanced',
+    pacing: cleaned.communication_texture?.pacing || 'measured',
+    humor_style: cleaned.communication_texture?.humor_style || 'none',
+    ...(cleaned.communication_texture || {}),
+  };
+  cleaned.aesthetic_bias = {
+    practicality_bias: cleaned.aesthetic_bias?.practicality_bias ?? 2,
+    modesty_to_flaunt: cleaned.aesthetic_bias?.modesty_to_flaunt ?? 2,
+    ...(cleaned.aesthetic_bias || {}),
+  };
 
   const confidence = cleaned.meta_control?.confidence_avg ?? Math.min(1, populated / 11);
   return { valid: true, cleaned, populatedDomains: populated, confidenceAvg: confidence };

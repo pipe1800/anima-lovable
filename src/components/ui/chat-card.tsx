@@ -1,4 +1,5 @@
-import React from 'react';
+import { memo } from 'react';
+import type { MouseEvent } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -7,34 +8,38 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { MessageCircle, Clock, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
+interface ChatCharacter {
+  id?: string;
+  name: string;
+  avatar?: string | null;
+  image?: string | null;
+  tagline?: string | null;
+}
+
+export interface ChatSummary {
+  id: string;
+  character: ChatCharacter;
+  title?: string;
+  message_count?: number;
+  last_message_at?: string | null;
+  created_at: string;
+  chat_mode?: 'companion' | 'storytelling' | string;
+  time_awareness_enabled?: boolean;
+  last_message?: string | null;
+  lastMessage?: string | null;
+}
+
 interface ChatCardProps {
-  chat: {
-    id: string;
-    character: {
-      id?: string;
-      name: string;
-      avatar?: string;
-      image?: string;
-      tagline?: string;
-    };
-    title?: string;
-    message_count?: number;
-    last_message_at?: string;
-    created_at: string;
-    chat_mode?: string;
-    time_awareness_enabled?: boolean;
-    last_message?: string | null;
-    lastMessage?: string; // backwards compatibility
-  };
+  chat: ChatSummary;
   isSelected?: boolean;
   onSelect?: (chatId: string) => void;
-  onContinue: (chat: any) => void;
-  onDelete?: (chatId: string, event: React.MouseEvent) => void;
+  onContinue: (chat: ChatSummary) => void;
+  onDelete?: (chatId: string, event: MouseEvent) => void;
   showSelection?: boolean;
   isDetailed?: boolean;
 }
 
-export const ChatCard = React.memo(({ 
+export const ChatCard = memo(({ 
   chat, 
   isSelected = false, 
   onSelect, 
@@ -43,19 +48,19 @@ export const ChatCard = React.memo(({
   showSelection = false,
   isDetailed = false
 }: ChatCardProps) => {
-  const handleContinueClick = (e: React.MouseEvent) => {
+  const handleContinueClick = (e: MouseEvent) => {
     e.stopPropagation();
     onContinue(chat);
   };
 
-  const handleSelectionChange = (e: React.MouseEvent) => {
+  const handleSelectionChange = (e: MouseEvent) => {
     e.stopPropagation();
     if (onSelect) {
       onSelect(chat.id);
     }
   };
 
-  const handleDeleteClick = (e: React.MouseEvent) => {
+  const handleDeleteClick = (e: MouseEvent) => {
     e.stopPropagation();
     if (onDelete) {
       onDelete(chat.id, e);

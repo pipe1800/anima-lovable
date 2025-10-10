@@ -54,15 +54,19 @@
 }
 /**
  * Update chat metadata
- */
-export async function updateChatMetadata(supabase, chatId) {
+ */ export async function updateChatMetadata(supabase, chatId) {
   try {
     // Attempt update including context_extracted; if column missing, retry without it.
-    const base = { updated_at: new Date().toISOString(), context_extracted: true } as any;
-    let { error: chatUpdateError } = await supabase.from('chats').update(base).eq('id', chatId);
+    const base = {
+      updated_at: new Date().toISOString(),
+      context_extracted: true
+    };
+    const { error: chatUpdateError } = await supabase.from('chats').update(base).eq('id', chatId);
     if (chatUpdateError && /context_extracted/i.test(chatUpdateError.message || '')) {
       console.warn('⚠️ context_extracted column missing; retrying without it');
-      const { error: retryError } = await supabase.from('chats').update({ updated_at: new Date().toISOString() }).eq('id', chatId);
+      const { error: retryError } = await supabase.from('chats').update({
+        updated_at: new Date().toISOString()
+      }).eq('id', chatId);
       if (retryError) {
         console.error('❌ Chat metadata retry failed:', retryError);
         return; // do not throw; non-fatal

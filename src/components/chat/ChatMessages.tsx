@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import type { Message, TrackedContext } from '@/types/chat';
+import type { UserGlobalChatSettings } from '@/types/chatSettings';
 import { MessageGroup } from './MessageGroup';
 import { groupMessages } from '@/utils/messageGrouping';
 import { useUserGlobalChatSettings } from '@/data/chats/settings';
@@ -37,8 +38,13 @@ interface ChatMessagesProps {
   // New: show regenerating stream for a deleted AI message in place
   regeneratingContentByMessageId?: Record<string, string>;
   // Optimization: allow parent to provide global settings to avoid duplicate queries
-  globalSettingsOverride?: any;
+  globalSettingsOverride?: UserGlobalChatSettings | null;
 }
+
+type AugmentedMessage = Message & {
+  is_ai_message?: boolean;
+  isTemporaryStreaming?: boolean;
+};
 
 const ChatMessages = ({ 
   chatId, 
@@ -72,7 +78,7 @@ const ChatMessages = ({
   // Use override if provided (prevents extra React Query fetch)
   // Avoid duplicate fetch if parent already provided settings
   const { data: globalSettings } = useUserGlobalChatSettings({ enabled: !globalSettingsOverride });
-  const effectiveGlobalSettings = globalSettingsOverride || globalSettings;
+  const effectiveGlobalSettings = globalSettingsOverride || globalSettings || null;
 
   // Map global style settings
   const backgroundImage = effectiveGlobalSettings?.background_image_url || null;
@@ -173,11 +179,13 @@ const ChatMessages = ({
 
   // Compute the last AI message from the current messages list (must be before effects using it)
   const lastAiMessage = useMemo(() => {
-    for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
-      const m = messages[i] as any;
-      if (m && !m.isUser) return m;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (message && !message.isUser) {
+        return message;
+      }
     }
-    return null as any;
+    return null;
   }, [messages]);
 
   // New simplified approach: typewriter animation on complete message based on user preference
@@ -205,19 +213,19 @@ const ChatMessages = ({
   const isTypewriterComplete = !isTyping && !!lastProcessedMessageRef.current && !isStreaming;
 
   // Simple filtering - hide real messages that match the message being animated
-  const filteredMessages = useMemo(() => {
-    return (messages || []).filter((m: any) => {
-      if (!m) return false;
-      if (!m.content || !String(m.content).trim()) return false;
+  const filteredMessages = useMemo<AugmentedMessage[]>(() => {
+    return messages.filter((message) => {
+      if (!message) return false;
+      if (!message.content || !String(message.content).trim()) return false;
       
       // Hide real message if we're currently animating the same content
       if (shouldAnimate && isTyping && lastProcessedMessageRef.current && 
-          m.content === lastProcessedMessageRef.current && !m.isTemporaryStreaming) {
+          message.content === lastProcessedMessageRef.current && !(message as AugmentedMessage).isTemporaryStreaming) {
         return false;
       }
       
       return true;
-    });
+    }) as AugmentedMessage[];
   }, [messages, shouldAnimate, isTyping]);
 
   // Temporary streaming message while typewriter animates (only in smooth mode)
@@ -227,8 +235,8 @@ const ChatMessages = ({
     if (!typewriterText) return null;
     if (isTypewriterComplete) return null;
     // Use a very high message_order to ensure it appears last
-    const maxOrder = Math.max(...(filteredMessages.map((m: any) => m.message_order || 0).concat([0])));
-    return {
+    const maxOrder = Math.max(...filteredMessages.map((message) => message.message_order ?? 0), 0);
+    const tempMessage: AugmentedMessage = {
       id: `streaming-${chatId}`,
       content: typewriterText,
       isUser: false,
@@ -236,11 +244,12 @@ const ChatMessages = ({
       isTemporaryStreaming: true,
       timestamp: new Date(),
       message_order: maxOrder + 1000, // Large gap to ensure it's always last
-    } as any;
+    };
+    return tempMessage;
   }, [filteredMessages, chatId, typewriterText, isTypewriterComplete, shouldAnimate]);
 
   // Simple logic: show temp message only if animating in smooth mode
-  const streamingAugmentedMessages = useMemo(() => {
+  const streamingAugmentedMessages = useMemo<AugmentedMessage[]>(() => {
     if (shouldAnimate && tempStreamingMessage && isTyping) {
       return [...filteredMessages, tempStreamingMessage];
     }
@@ -249,26 +258,27 @@ const ChatMessages = ({
 
   // Group messages (with stabilization for streaming group to reduce avatar flicker)
   const messageGroups = useMemo(() => {
-    const groups = groupMessages(streamingAugmentedMessages as any);
-    return groups.map(g => {
-      if (g.messages.some((m: any) => m.isTemporaryStreaming)) {
+    const groups = groupMessages(streamingAugmentedMessages);
+    return groups.map(group => {
+      if (group.messages.some((message) => (message as AugmentedMessage).isTemporaryStreaming)) {
         return {
-          ...g,
+          ...group,
           id: `streaming-group-${chatId}`,
-          _stable: true,
-        } as any;
+        };
       }
-      return g;
+      return group;
     });
   }, [streamingAugmentedMessages, chatId]);
 
   // RE-ADD lastAiGroupId computation (needed for canModify prop)
-  const lastAiGroupId = useMemo(() => {
-    for (let i = messageGroups.length - 1; i >= 0; i--) {
-      const g: any = messageGroups[i];
-      if (g && g.isUser === false) return g.id as string;
+  const lastAiGroupId = useMemo<string | null>(() => {
+    for (let i = messageGroups.length - 1; i >= 0; i -= 1) {
+      const group = messageGroups[i];
+      if (group && group.isUser === false) {
+        return group.id;
+      }
     }
-    return null as any;
+    return null;
   }, [messageGroups]);
 
   // RE-ADD load earlier handler
@@ -481,7 +491,7 @@ const ChatMessages = ({
               regeneratingContentByMessageId={regeneratingContentByMessageId}
               canModify={!group.isUser && group.id === lastAiGroupId}
               globalSettingsOverride={effectiveGlobalSettings}
-              {...({ styleOptions } as any)}
+              styleOptions={styleOptions}
             />
           ))
         ) : (
@@ -495,13 +505,18 @@ const ChatMessages = ({
         )}
 
         {/* Live streaming bubble for smooth mode */}
-        {false && showStreamingBubble && (
+        {showStreamingBubble && (
           <MessageGroup
             key="streaming-group"
             group={{
               id: 'streaming-group',
               messages: [
-                { id: 'streaming-temp', content: typewriterText, isUser: false } as any,
+                {
+                  id: 'streaming-temp',
+                  content: typewriterText,
+                  isUser: false,
+                  timestamp: new Date(),
+                },
               ],
               isUser: false,
               timestamp: new Date(),
@@ -514,7 +529,7 @@ const ChatMessages = ({
             userAvatarUrlOverride={userAvatarUrlOverride}
             canModify={false}
             globalSettingsOverride={effectiveGlobalSettings}
-            {...({ styleOptions } as any)}
+            styleOptions={styleOptions}
           />
         )}
 

@@ -4,9 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { OptimizedImage } from '@/components/ui/optimized-image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +15,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-import { MobileNavMenu } from '@/components/layout/MobileNavMenu';
 import { TopBar } from '@/components/ui/TopBar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -39,33 +35,120 @@ import { StatsCard } from '@/components/ui/stats-card';
 import { ChatCard } from '@/components/ui/chat-card';
 import { DashboardErrorBoundary } from '@/components/ui/dashboard-error-boundary';
 import { formatNumberWithK } from '@/lib/utils/formatting';
-import { getThumbUrl, preloadImages } from '@/utils/image';
+import { preloadImages } from '@/utils/image';
 import { 
-  MessageCircle, 
-  Trophy, 
-  Zap, 
-  Star, 
-  TrendingUp,
-  Clock,
+  MessageCircle,
+  Zap,
+  Star,
   Users,
-  Sparkles,
   Plus,
   Edit,
-  Share,
-  CreditCard,
-  CheckCircle,
   Crown,
   Heart,
   Loader2,
   Eye,
   Trash2
 } from 'lucide-react';
+import type { Character } from '@/types/chat';
+
+interface PaginatedUserChatsData {
+  data: DashboardRecentChatRecord[];
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  error?: unknown;
+}
+
+interface DashboardRecentChatRecord {
+  chat_id?: string;
+  id?: string;
+  character_id?: string;
+  character?: {
+    id?: string;
+    name?: string;
+    avatar?: string | null;
+    avatar_url?: string | null;
+  } | null;
+  character_name?: string;
+  character_avatar_url?: string | null;
+  last_message?: {
+    content?: string | null;
+    created_at?: string;
+  } | null;
+  messages?: Array<{ content?: string | null }>;
+  title?: string;
+  message_count?: number;
+  last_message_at?: string;
+  chat_updated_at?: string;
+  updated_at?: string;
+  created_at?: string;
+  chat_created_at?: string;
+  userSettings?: {
+    chat_mode?: string;
+    time_awareness_enabled?: boolean;
+  } | null;
+  chat_mode?: string;
+  time_awareness_enabled?: boolean;
+}
+
+interface DashboardCharacterRecord {
+  id: string;
+  name: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  visibility?: string | null;
+  chats_count?: number | null;
+  likes_count?: number | null;
+  tagline?: string | null;
+  short_description?: string | null;
+  interaction_count?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  creator?: {
+    username?: string | null;
+  } | null;
+}
+
+interface FormattedDashboardCharacter {
+  id: string;
+  name: string;
+  description?: string | null;
+  avatar: string;
+  image: string;
+  isPublic: boolean;
+  chatCount: number;
+  likeCount: number;
+  tagline: string;
+  totalChats: number;
+  likesCount: number;
+  originalCharacter: DashboardCharacterRecord;
+  isLiked: boolean;
+  creatorUsername?: string;
+}
+
+interface FormattedRecentChat {
+  id: string;
+  character: {
+    id: string;
+    name: string;
+    avatar: string | null;
+    image: string | null;
+  };
+  title: string;
+  message_count: number;
+  last_message_at?: string;
+  created_at: string;
+  chat_mode: string;
+  time_awareness_enabled: boolean;
+  last_message: string | null;
+}
 
 export function DashboardContent() {
   const { user, profile, loading: authLoading, subscription: authSubscription } = useAuth();
   const navigate = useNavigate();
   const { startChat, isCreating } = useChatCreation();
   const queryClient = useQueryClient();
+  const userId = user?.id ?? null;
   
   // Track active dashboard tab to conditionally render actions (e.g., Delete All on recent chats only)
   // Persist active tab across renders
@@ -98,7 +181,7 @@ export function DashboardContent() {
   }, [currentPage]);
 
   // Enable real-time updates
-  useRealtimeUpdates(user?.id);
+  useRealtimeUpdates(userId ?? undefined);
   
   // Single combined dashboard query
   const {
@@ -117,11 +200,20 @@ export function DashboardContent() {
   } = useUserChatsPaginated(currentPage, chatsPerPage);
 
   // Memoize extracted data with fallbacks
-  const recentChats = useMemo(() => chatsData?.data || [], [chatsData?.data]);
+  const recentChats = useMemo<DashboardRecentChatRecord[]>(
+    () => (chatsData?.data ?? []) as DashboardRecentChatRecord[],
+    [chatsData?.data]
+  );
   const totalChats = useMemo(() => chatsData?.totalCount || 0, [chatsData?.totalCount]);
   const totalPages = useMemo(() => chatsData?.totalPages || 1, [chatsData?.totalPages]);
-  const myCharacters = useMemo(() => dashboardData?.characters || [], [dashboardData?.characters]);
-  const favoriteCharacters = useMemo(() => dashboardData?.favorites || [], [dashboardData?.favorites]);
+  const myCharacters = useMemo<DashboardCharacterRecord[]>(
+    () => (dashboardData?.characters ?? []) as DashboardCharacterRecord[],
+    [dashboardData?.characters]
+  );
+  const favoriteCharacters = useMemo<DashboardCharacterRecord[]>(
+    () => (dashboardData?.favorites ?? []) as DashboardCharacterRecord[],
+    [dashboardData?.favorites]
+  );
   const userCredits = useMemo(() => dashboardData?.credits || 0, [dashboardData?.credits]);
   const likedSet = useMemo(() => new Set(dashboardData?.likedCharacterIds || []), [dashboardData?.likedCharacterIds]);
   
@@ -159,69 +251,72 @@ export function DashboardContent() {
   const username = profile?.username || user?.email?.split('@')[0] || 'User';
 
   // Memoize formatted data for performance
-  const formattedRecentChats = useMemo(() => 
-    recentChats.map((chat: any) => {
-      // Adapt to RPC shape from get_user_chats (chat_id, character_name, character_avatar_url, last_message ...)
-      const chatId = chat.chat_id || chat.id; // fallback if legacy shape
-      const characterId = chat.character_id || chat.character?.id;
-      const characterName = chat.character_name || chat.character?.name || 'Unknown';
-      const avatarUrl = chat.character_avatar_url || chat.character?.avatar_url || chat.character?.avatar;
-      const lastMessageObj = chat.last_message || null; // RPC already normalizes last_message
-      const lastMessageContent = lastMessageObj?.content || chat.messages?.[0]?.content || null;
-      return {
-        id: chatId,
-        character: {
-          id: characterId,
-          name: characterName,
-          avatar: avatarUrl,
-          image: avatarUrl,
-        },
-        title: chat.title || `Chat with ${characterName}`,
-        message_count: chat.message_count || 0, // Now populated by RPC
-        last_message_at: chat.last_message_at || lastMessageObj?.created_at || chat.chat_updated_at || chat.updated_at || chat.created_at || chat.chat_created_at,
-        created_at: chat.created_at || chat.chat_created_at,
-        chat_mode: chat.userSettings?.chat_mode || chat.chat_mode || 'storytelling',
-        time_awareness_enabled: chat.userSettings?.time_awareness_enabled || chat.time_awareness_enabled || false,
-        last_message: lastMessageContent,
-      };
-    }), [recentChats]
+  const formattedRecentChats = useMemo<FormattedRecentChat[]>(
+    () =>
+      recentChats.map((chat, index) => {
+        // Adapt to RPC shape from get_user_chats (chat_id, character_name, character_avatar_url, last_message ...)
+        const chatId = chat.chat_id ?? chat.id ?? `chat-${index}`;
+        const characterId = chat.character_id ?? chat.character?.id ?? 'unknown-character';
+        const characterName = chat.character_name ?? chat.character?.name ?? 'Unknown';
+        const avatarUrl = chat.character_avatar_url ?? chat.character?.avatar_url ?? chat.character?.avatar ?? null;
+        const lastMessageObj = chat.last_message ?? null; // RPC already normalizes last_message
+        const lastMessageContent = lastMessageObj?.content ?? chat.messages?.[0]?.content ?? null;
+        return {
+          id: chatId,
+          character: {
+            id: characterId,
+            name: characterName,
+            avatar: avatarUrl,
+            image: avatarUrl,
+          },
+          title: chat.title ?? `Chat with ${characterName}`,
+          message_count: chat.message_count ?? 0, // Now populated by RPC
+          last_message_at:
+            chat.last_message_at ??
+            lastMessageObj?.created_at ??
+            chat.chat_updated_at ??
+            chat.updated_at ??
+            chat.created_at ??
+            chat.chat_created_at ??
+            undefined,
+          created_at: chat.created_at ?? chat.chat_created_at ?? new Date().toISOString(),
+          chat_mode: chat.userSettings?.chat_mode ?? chat.chat_mode ?? 'storytelling',
+          time_awareness_enabled: chat.userSettings?.time_awareness_enabled ?? chat.time_awareness_enabled ?? false,
+          last_message: lastMessageContent,
+        };
+      }),
+    [recentChats]
   );
 
-  const formattedMyCharacters = useMemo(() => 
-    myCharacters.map((character: any) => ({
-      id: character.id,
-      name: character.name,
-      description: character.description,
-      avatar: character.name?.charAt(0) || 'C',
-      image: character.avatar_url || "/placeholder.svg",
-      isPublic: character.visibility === 'public',
-      chatCount: character.chats_count || 0,  // Use chats_count
-      likeCount: character.likes_count || 0,        // Use likes_count
-      tagline: character.tagline || character.short_description || '',
-      totalChats: character.chats_count || 0, // Use chats_count
-      likesCount: character.likes_count || 0,       // Use likes_count
-  originalCharacter: character,
-  isLiked: likedSet.has(character.id)
-    })), [myCharacters]
+  const formatCharacter = useCallback((character: DashboardCharacterRecord): FormattedDashboardCharacter => ({
+    id: character.id,
+    name: character.name,
+    description: character.description ?? null,
+    avatar: character.name?.charAt(0) ?? 'C',
+    image: character.avatar_url ?? "/placeholder.svg",
+    isPublic: character.visibility === 'public',
+    chatCount: character.chats_count ?? 0,
+    likeCount: character.likes_count ?? 0,
+    tagline: character.tagline ?? character.short_description ?? '',
+    totalChats: character.chats_count ?? 0,
+    likesCount: character.likes_count ?? 0,
+    originalCharacter: character,
+    isLiked: likedSet.has(character.id),
+    creatorUsername: character.creator?.username ?? undefined,
+  }), [likedSet]);
+
+  const formattedMyCharacters = useMemo<FormattedDashboardCharacter[]>(
+    () => myCharacters.map(formatCharacter),
+    [formatCharacter, myCharacters]
   );
 
-  const formattedFavoriteCharacters = useMemo(() =>
-    favoriteCharacters.map((character: any) => ({
-      id: character.id,
-      name: character.name,
-      tagline: character.tagline || '',
-      avatar: character.name?.charAt(0) || 'C',
-      image: character.avatar_url || "/placeholder.svg",
-      totalChats: character.chats_count || character.interaction_count || 0,
-      likesCount: character.likes_count || 0,
-      creatorUsername: character.creator?.username || 'Unknown',
-  originalCharacter: character,
-  isLiked: likedSet.has(character.id)
-    })), [favoriteCharacters]
+  const formattedFavoriteCharacters = useMemo<FormattedDashboardCharacter[]>(
+    () => favoriteCharacters.map(formatCharacter),
+    [favoriteCharacters, formatCharacter]
   );
 
   // Preload images when hovering over character tabs
-  const preloadCharacterImages = useCallback(async (characters: any[]) => {
+  const preloadCharacterImages = useCallback(async (characters: Array<{ image: string }>) => {
     const imageUrls = characters
       .map(character => character.image)
       .filter(url => url && url !== '/placeholder.svg');
@@ -281,7 +376,7 @@ export function DashboardContent() {
   }, [currentPage, totalPages]);
 
   // Memoized callback functions for better performance
-  const handleContinueChat = useCallback((chat: any) => {
+  const handleContinueChat = useCallback((chat: FormattedRecentChat) => {
     navigate(`/chat/${chat.character.id}/${chat.id}`, { 
       state: { 
         selectedCharacter: chat.character, 
@@ -290,7 +385,7 @@ export function DashboardContent() {
     });
   }, [navigate]);
 
-  const handleEditCharacter = useCallback((character: any) => {
+  const handleEditCharacter = useCallback((character: DashboardCharacterRecord) => {
     navigate('/character-creator', { 
       state: { 
         editingCharacter: character,
@@ -298,6 +393,20 @@ export function DashboardContent() {
       } 
     });
   }, [navigate]);
+
+  const toChatCharacter = useCallback((character: DashboardCharacterRecord): Character => ({
+    id: character.id,
+    name: character.name,
+    tagline: character.tagline ?? undefined,
+    avatar: character.avatar_url ?? undefined,
+    fallback: character.name?.charAt(0),
+    short_description: character.short_description ?? undefined,
+    avatar_url: character.avatar_url ?? undefined,
+    visibility: (character.visibility as Character['visibility']) ?? undefined,
+    interaction_count: character.interaction_count ?? undefined,
+    created_at: character.created_at ?? undefined,
+    updated_at: character.updated_at ?? undefined,
+  }), []);
 
   const handleChatSelection = useCallback((chatId: string) => {
     setSelectedChats(prev => {
@@ -311,15 +420,11 @@ export function DashboardContent() {
     });
   }, []);
 
-  const handleStartNewChat = useCallback((character: any) => {
-    navigate(`/chat/${character.id}`, { state: { selectedCharacter: character, deferred: true } });
-  }, [navigate]);
-
   const handleDeleteSelected = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setIsDeleting(true);
     try {
-      await Chats.deleteMultipleChats(Array.from(selectedChats), user.id);
+      await Chats.deleteMultipleChats(Array.from(selectedChats), userId);
       setSelectedChats(new Set());
       // Refetch user chats only after deleting
       refetchChats();
@@ -330,17 +435,20 @@ export function DashboardContent() {
       setIsDeleting(false);
       setShowDeleteDialog(false);
     }
-  }, [user, selectedChats, refetchChats]);
+  }, [refetchChats, selectedChats, userId]);
 
   const handleDeleteSingleChat = useCallback(async (chatId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    
+    if (!userId) return;
+
     try {
       // Optimistic update - immediately remove chat from the UI
-      queryClient.setQueryData(['user', 'chats', 'paginated', user.id, currentPage, chatsPerPage], (oldData: any) => {
+      queryClient.setQueryData<PaginatedUserChatsData | undefined>(
+        ['user', 'chats', 'paginated', userId, currentPage, chatsPerPage],
+        (oldData) => {
         if (!oldData) return oldData;
-        
-        const filteredChats = oldData.data.filter((chat: any) => chat.id !== chatId);
+
+        const filteredChats = oldData.data.filter((chat) => (chat.chat_id ?? chat.id) !== chatId);
         return {
           ...oldData,
           data: filteredChats,
@@ -357,7 +465,7 @@ export function DashboardContent() {
       }
       
       // Perform actual deletion
-      const { error } = await Chats.deleteChat(chatId, user.id);
+  const { error } = await Chats.deleteChat(chatId, userId);
         
       if (error) {
         // Revert optimistic update
@@ -384,13 +492,13 @@ export function DashboardContent() {
       // Revert optimistic updates by refetching
       refetchChats();
     }
-  }, [queryClient, user.id, currentPage, chatsPerPage, refetchChats]);
+  }, [chatsPerPage, currentPage, queryClient, refetchChats, selectedChats, totalChats, userId]);
 
   const handleDeleteAllChats = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     setIsDeletingAll(true);
     try {
-      await Chats.deleteAllUserChats(user.id);
+      await Chats.deleteAllUserChats(userId);
       setSelectedChats(new Set());
       refetchChats();
       toast.success('All chats deleted successfully');
@@ -400,7 +508,7 @@ export function DashboardContent() {
       setIsDeletingAll(false);
       setShowDeleteAllDialog(false);
     }
-  }, [user, refetchChats]);
+  }, [refetchChats, userId]);
 
   // Ensure currentPage stays within valid bounds whenever totalPages changes
   useEffect(() => {
@@ -700,7 +808,7 @@ export function DashboardContent() {
                                   size="sm"
                                   disabled={isCreating}
                                   className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50"
-                                  onClick={() => startChat(character.originalCharacter as any)}
+                                  onClick={() => startChat(toChatCharacter(character.originalCharacter))}
                                 >
                                   <MessageCircle className="w-4 h-4 mr-2" />
                                   {isCreating ? 'Creating...' : 'Start Chat'}
@@ -796,7 +904,7 @@ export function DashboardContent() {
                                   size="sm"
                                   disabled={isCreating}
                                   className="bg-[#FF7A00] hover:bg-[#FF7A00]/80 text-white disabled:opacity-50"
-                                  onClick={() => startChat(character.originalCharacter as any)}
+                                  onClick={() => startChat(toChatCharacter(character.originalCharacter))}
                                 >
                                   <MessageCircle className="w-4 h-4 mr-2" />
                                   {isCreating ? 'Creating...' : 'Start Chat'}

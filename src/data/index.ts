@@ -25,7 +25,6 @@ export * as PersonaMutations from './personas/mutations';
 export * as Payments from './billing/paypalClient'; // alias (replaces deprecated ./payments)
 export * as PayPalClient from './billing/paypalClient';
 export * as RelationshipTemplate from './relationships/template';
-// @ts-ignore pending generated types update for new module resolution
 export * as RelationshipProgress from './relationships/progress';
 export * as DebugDiagnostics from './debug/contextDiagnostics';
 

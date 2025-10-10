@@ -57,8 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const profileInFlightRef = useRef<Promise<void> | null>(null);
   const creditsFetchInFlightRef = useRef<Promise<void> | null>(null);
   const timezoneLoggedRef = useRef<boolean>(false);
-  const bootstrapSucceededRef = useRef(false);
-  const profileAttemptedRef = useRef(false); // track that at least one profile fetch/ bootstrap attempt occurred
+  const profileAttemptedRef = useRef(false); // track that at least one profile fetch attempt occurred
 
   const ensureProfileAvatar = async (current: Profile | null) => {
     if (!user?.id || !current || current.avatar_url) return current;
@@ -191,9 +190,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Subscribe to realtime credits changes
   useEffect(() => {
     if (!user?.id) return;
-    // Only subscribe; skip initial refresh if we already have bootstrap credits
-    const needInitialCreditsFetch = !bootstrapSucceededRef.current || creditsBalance === 0;
-    if (needInitialCreditsFetch) refreshCredits();
+    refreshCredits();
     const channel = supabase.channel(`credits-live-${user.id}`)
       .on('postgres_changes', { event: '*', schema: 'billing', table: 'credits', filter: `user_id=eq.${user.id}` }, () => {
         refreshCredits();
@@ -225,45 +222,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const bootstrapUser = async (uid: string, attempt = 0) => {
-    try {
-      const { data, error } = await ProfileQueries.getUserBootstrap(uid);
-      profileAttemptedRef.current = true;
-      if (error || !data) {
-        if (attempt < 2) {
-          const backoff = (attempt + 1) * 400;
-          console.warn('Bootstrap RPC failed (attempt', attempt + 1, ') retrying in', backoff, 'ms', error);
-          await new Promise(r => setTimeout(r, backoff));
-          return bootstrapUser(uid, attempt + 1);
-        }
-        console.error('Bootstrap RPC ultimately failed, falling back to discrete fetches', error);
-        await refreshProfile();
-        await refreshSubscription();
-        return;
-      }
-      const profileData = (data as any)?.profile || null;
-      const subscriptionData = (data as any)?.subscription || null;
-      const creditsData = (data as any)?.credits;
-      setProfile(profileData);
-      setSubscription(subscriptionData);
-      if (typeof creditsData === 'number') {
-        setCreditsBalance(creditsData);
-      }
-      bootstrapSucceededRef.current = true;
-    } catch (e) {
-      profileAttemptedRef.current = true;
-      if (attempt < 2) {
-        const backoff = (attempt + 1) * 400;
-        console.warn('Bootstrap exception (attempt', attempt + 1, ') retrying in', backoff, 'ms', e);
-        await new Promise(r => setTimeout(r, backoff));
-        return bootstrapUser(uid, attempt + 1);
-      }
-      console.error('Bootstrap error after retries, falling back', e);
-      await refreshProfile();
-      await refreshSubscription();
-    }
-  };
-
   useEffect(() => {
     AuthQueries.getSession().then(({ data: { session } }) => {
       const newUser = session?.user ?? null;
@@ -271,7 +229,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSession(session);
         setUser(newUser);
         currentUserIdRef.current = newUser?.id || null;
-        if (newUser?.id) bootstrapUser(newUser.id); // initiate bootstrap immediately
       }
       setLoading(false);
     });
@@ -288,7 +245,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(newUser);
       currentUserIdRef.current = newUser?.id || null;
       setLoading(false);
-      if (newUser?.id) bootstrapUser(newUser.id);
     });
 
     const refreshInterval = setInterval(async () => {
@@ -325,12 +281,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (prevUserIdEffectRef.current === id) return;
     prevUserIdEffectRef.current = id;
     (async () => {
-      if (bootstrapSucceededRef.current && profile && subscription) {
-        // Already primed by bootstrap; avoid duplicate discrete fetches
-        return;
-      }
-      await refreshProfile();
-      await refreshSubscription();
+      await Promise.all([refreshProfile(), refreshSubscription()]);
     })();
   }, [user]);
 
@@ -347,7 +298,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     subscription,
     loading,
     authReady: (!loading && (user == null || profile !== null)),
-    profileReady: (!loading && (user == null || profile !== null || profileAttemptedRef.current || bootstrapSucceededRef.current)),
+    profileReady: (!loading && (user == null || profile !== null || profileAttemptedRef.current)),
     signOut,
     refreshProfile,
     refreshSubscription,
@@ -363,3 +314,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     </AuthContext.Provider>
   );
 };
+

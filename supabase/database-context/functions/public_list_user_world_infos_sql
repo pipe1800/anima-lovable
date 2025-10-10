@@ -4,3 +4,64 @@ CREATE OR REPLACE FUNCTION "public"."list_user_world_infos"("p_user_id" "uuid") 
     AS $$
 DECLARE
   v_auth uuid := auth.uid();
+  v_items jsonb;
+BEGIN
+  IF v_auth IS NULL OR v_auth <> p_user_id THEN
+    RAISE EXCEPTION 'Not authorized';
+  END IF;
+
+  WITH owned AS (
+    SELECT wi.*
+    FROM public.world_infos wi
+    WHERE wi.creator_id = p_user_id
+  ), liked AS (
+    SELECT wi.*
+    FROM public.user_reactions ur
+    JOIN public.world_infos wi ON wi.id = ur.target_id
+    WHERE ur.user_id = p_user_id
+      AND ur.target_type = 'world'::public.reaction_target_type
+      AND ur.reaction_type = 'like'::public.reaction_type_enum
+      AND wi.creator_id <> p_user_id
+  ), unioned AS (
+    SELECT * FROM owned
+    UNION
+    SELECT * FROM liked
+  ), enriched AS (
+    SELECT u.id,
+           u.name,
+           u.short_description,
+           u.creator_id,
+           u.visibility,
+           u.likes_count,
+           u.interaction_count,
+           u.created_at,
+           u.updated_at,
+           (SELECT COUNT(*) FROM public.world_info_entries we WHERE we.world_info_id = u.id) AS entries_count,
+           (SELECT jsonb_agg(jsonb_build_object('id', tg.id, 'name', tg.name) ORDER BY tg.name)
+              FROM public.world_info_tags wit
+              JOIN public.tags tg ON tg.id = wit.tag_id
+              WHERE wit.world_info_id = u.id) AS tags,
+           (SELECT jsonb_build_object('username', p.username, 'avatar_url', p.avatar_url)
+              FROM public.profiles p
+              WHERE p.id = u.creator_id) AS creator
+    FROM unioned u
+  )
+  SELECT jsonb_agg(jsonb_build_object(
+      'id', e.id,
+      'name', e.name,
+      'short_description', e.short_description,
+      'creator_id', e.creator_id,
+      'visibility', e.visibility,
+      'likes_count', e.likes_count,
+      'interaction_count', e.interaction_count,
+      'entriesCount', COALESCE(e.entries_count, 0),
+      'created_at', e.created_at,
+      'updated_at', e.updated_at,
+      'tags', COALESCE(e.tags, '[]'::jsonb),
+      'creator', e.creator
+    )) INTO v_items
+  FROM enriched e;
+
+  RETURN COALESCE(v_items, '[]'::jsonb);
+END;
+$$;

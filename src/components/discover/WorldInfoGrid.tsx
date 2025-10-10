@@ -5,16 +5,12 @@ import { Button } from '@/components/ui/button';
 import { 
   Globe,
   Heart,
-  Star,
   TrendingUp,
-  Loader2,
   Eye,
   ChevronLeft,
   ChevronRight,
-  Users,
   Download
 } from 'lucide-react';
-import { WorldInfoCard } from './WorldInfoCard';
 
 interface WorldInfoGridProps {
   worldInfos: PublicWorldInfo[];
@@ -25,17 +21,24 @@ interface WorldInfoGridProps {
   onPageChange?: (page: number) => void;
 }
 
-type PublicWorldInfo = {
+export interface WorldInfoCreatorSummary {
+  username?: string | null;
+  avatar_url?: string | null;
+}
+
+export interface PublicWorldInfo {
   id: string;
   name: string;
   short_description: string | null;
-  interaction_count: number;
+  description?: string | null;
+  interaction_count?: number | null;
   created_at: string;
-  creator: any;
-  likes_count: number;
-  favorites_count: number;
-  usage_count: number;
-};
+  creator: WorldInfoCreatorSummary | null;
+  likes_count?: number | null;
+  favorites_count?: number | null;
+  usage_count?: number | null;
+  tags?: Array<{ id?: number; name?: string } | string>;
+}
 
 const ITEMS_PER_PAGE = 20;
 
@@ -288,14 +291,14 @@ export function WorldInfoGrid({
                   <div className="flex items-center space-x-3">
                     <div className="flex items-center space-x-1">
                       <Heart className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="text-sm sm:text-base">{worldInfo.likes_count}</span>
+                      <span className="text-sm sm:text-base">{worldInfo.likes_count ?? 0}</span>
                     </div>
                     <div className="flex items-center space-x-1">
                       <Download className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="text-sm sm:text-base">{worldInfo.interaction_count}</span>
+                      <span className="text-sm sm:text-base">{(worldInfo.usage_count ?? 0) + (worldInfo.interaction_count ?? 0)}</span>
                     </div>
                   </div>
-                  {worldInfo.creator && (
+                  {worldInfo.creator?.username && (
                     <span className="text-xs text-gray-500 truncate max-w-[80px] sm:max-w-[120px]">
                       @{worldInfo.creator.username}
                     </span>

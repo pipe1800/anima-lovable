@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { MessageCircle, Heart, Edit, User } from 'lucide-react';
 import { CharacterUser } from '@/data';
+import type { UserCharacterWithComputedTagline } from '@/data/characters/userCharacters';
 // import { getUserCharacters } from '@/lib/supabase-queries';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
@@ -21,7 +22,7 @@ export const CharacterGrid = ({ type }: CharacterGridProps) => {
   const { user } = useAuth();
   const { startChat, isCreating } = useChatCreation();
 
-  const { data: characters = [], isLoading } = useQuery({
+  const { data: characters = [], isLoading } = useQuery<UserCharacterWithComputedTagline[]>({
     queryKey: ['user-characters', user?.id, type],
     queryFn: async () => {
       if (!user?.id) return [];
@@ -37,7 +38,7 @@ export const CharacterGrid = ({ type }: CharacterGridProps) => {
 
   // ... keep existing code (profile character grid queries)
 
-  const handleEditCharacter = (character: any) => {
+  const handleEditCharacter = (character: UserCharacterWithComputedTagline) => {
     navigate('/character-creator', { 
       state: { 
         editingCharacter: character,

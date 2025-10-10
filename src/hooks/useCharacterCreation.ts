@@ -318,10 +318,11 @@ export function useCharacterCreation() {
 
   const validateStep = useCallback((step: number): boolean => {
     switch (step) {
-      case 1: // Foundation
+      case 1: { // Foundation
         const name = characterData.name?.trim();
         const description = characterData.description?.trim();
         return !!(name && description);
+      }
       case 2: // Personality
         return !!(
           characterData.personality?.core_personality &&

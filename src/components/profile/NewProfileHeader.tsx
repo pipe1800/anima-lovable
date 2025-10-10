@@ -8,9 +8,19 @@ import { EditableField } from './EditableField';
 import { ImageUploader } from './ImageUploader';
 import { cn } from '@/lib/utils';
 
+export interface ProfileOverview {
+  id?: string;
+  username?: string | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
+  bio?: string | null;
+  created_at?: string | null;
+  timezone?: string | null;
+}
+
 interface ProfileHeaderProps {
-  profile: any;
-  subscription: any;
+  profile: ProfileOverview | null;
+  subscriptionPlanName: string | null;
   isOwnProfile: boolean;
   isEditing: boolean;
   onEditToggle: () => void;
@@ -19,7 +29,7 @@ interface ProfileHeaderProps {
 
 export const ProfileHeader: React.FC<ProfileHeaderProps> = ({
   profile,
-  subscription,
+  subscriptionPlanName,
   isOwnProfile,
   isEditing,
   onEditToggle,
@@ -108,10 +118,10 @@ export const ProfileHeader: React.FC<ProfileHeaderProps> = ({
                   displayClassName="text-2xl md:text-3xl font-bold"
                   validation={validateUsername}
                 />
-                {subscription && (
+                {subscriptionPlanName && (
                   <Badge variant="secondary" className="h-fit">
                     <Shield className="w-3 h-3 mr-1" />
-                    {subscription.plan.name}
+                    {subscriptionPlanName}
                   </Badge>
                 )}
               </div>

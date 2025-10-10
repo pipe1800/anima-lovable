@@ -3,3 +3,7 @@ npx supabase gen types typescript --project-id rclpyipeytqbamiwcuih --schema pub
 npm run export:schema:dump -- --redump
 
 npx supabase functions deploy
+
+npx supabase functions download <function_name>
+
+npx supabase functions list

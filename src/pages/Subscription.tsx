@@ -415,7 +415,11 @@ export default function Subscription() {
         console.log('✅ Opening PayPal window with URL:', data.data.approvalUrl);
         // Persist state nonce (if provided) for later verification step to mitigate CSRF/replay
         if (data?.data?.state) {
-          try { localStorage.setItem('paypal_upgrade_state', data.data.state); } catch {}
+          try {
+            localStorage.setItem('paypal_upgrade_state', data.data.state);
+          } catch (storageError) {
+            console.warn('Failed to persist PayPal upgrade state', storageError);
+          }
         }
         openPayPalWindow(data.data.approvalUrl);
       } else {

@@ -63,7 +63,7 @@ export default function WorldInfoList() {
   const filteredAndSortedWorldInfos = useMemo(() => {
     const worldInfos = activeTab === 'my-world-info' ? userWorldInfos : publicWorldInfos;
     
-    let filtered = worldInfos.filter((worldInfo: any) => {
+    const filtered = worldInfos.filter((worldInfo: any) => {
       const name = (worldInfo.name || '').toLowerCase();
       const desc = (worldInfo.short_description || worldInfo.description || '').toLowerCase();
       const matchesSearch = !searchQuery || name.includes(searchQuery.toLowerCase()) || desc.includes(searchQuery.toLowerCase());

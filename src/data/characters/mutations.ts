@@ -1,7 +1,11 @@
+import type { PostgrestSingleResponse } from '@supabase/supabase-js';
+
 import { supabase } from '@/db/client';
+import { callRpc } from '@/db/rpc';
+import type { Json } from '@/integrations/supabase/types';
 import { Auth } from '@/data';
 
-export const createCharacter = async (characterData: {
+export interface CreateCharacterInput {
   name: string;
   short_description?: string;
   avatar_url?: string;
@@ -9,9 +13,22 @@ export const createCharacter = async (characterData: {
   definition: string;
   greeting?: string;
   long_description?: string;
-}) => {
+}
+
+interface CharacterRow {
+  id: string;
+  creator_id: string;
+  name: string;
+  short_description: string | null;
+  avatar_url: string | null;
+  visibility: 'public' | 'unlisted' | 'private';
+  created_at: string;
+  updated_at: string;
+}
+
+export const createCharacter = async (characterData: CreateCharacterInput) => {
   const uid = await Auth.requireAuthId();
-  const { data: character, error: characterError } = await supabase
+  const insertResult = await supabase
     .from('characters')
     .insert({
       creator_id: uid,
@@ -20,8 +37,10 @@ export const createCharacter = async (characterData: {
       avatar_url: characterData.avatar_url,
       visibility: characterData.visibility || 'private',
     })
-    .select()
+    .select('*')
     .single();
+
+  const { data: character, error: characterError } = insertResult as PostgrestSingleResponse<CharacterRow>;
   if (characterError || !character) return { data: null, error: characterError };
   const { error: definitionError } = await supabase
     .from('character_definitions')
@@ -38,11 +57,9 @@ export const createCharacter = async (characterData: {
   return { data: character, error: null };
 };
 
-export const deletePrivateCharacter = async (characterId: string) => {
-  try {
-    const { data, error } = await (supabase as any).rpc('delete_private_character', { p_character_id: characterId });
-    return { data, error };
-  } catch (err) {
-    return { data: null, error: err };
-  }
-};
+export const deletePrivateCharacter = (
+  characterId: string,
+): Promise<PostgrestSingleResponse<Json | null>> =>
+  callRpc<Json | null>(supabase, 'delete_private_character', {
+    p_character_id: characterId,
+  });

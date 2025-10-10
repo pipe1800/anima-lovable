@@ -1,4 +1,4 @@
-import React from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,9 +20,10 @@ import {
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
+import type { WorldInfoSummaryItem, WorldInfoTag } from '@/types/world-info';
 
 interface WorldInfoCardProps {
-  worldInfo: any;
+  worldInfo: WorldInfoSummaryItem;
   isOwner?: boolean;
   showCreator?: boolean;
   onEdit?: (id: string) => void;
@@ -41,8 +42,8 @@ export default function WorldInfoCard({
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [showDeleteDialog, setShowDeleteDialog] = React.useState(false);
-  const [isDeleting, setIsDeleting] = React.useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Extract data with proper fallbacks for different data structures
   const {
@@ -50,7 +51,7 @@ export default function WorldInfoCard({
     name,
     short_description,
     avatar_url,
-    tags = [],
+  tags = [],
     creator,
     creator_id,
     profiles,
@@ -68,7 +69,8 @@ export default function WorldInfoCard({
   const totalEntries = entriesCount || entry_count || world_info_entries?.length || 0;
   const totalLikes = likesCount || likes_count || like_count || 0;
   const totalUses = (usage_count || 0) + (interaction_count || 0);
-  const displayTags = tags.slice(0, 4);
+  const normalizedTags: WorldInfoTag[] = Array.isArray(tags) ? tags : [];
+  const displayTags = normalizedTags.slice(0, 4);
   const creatorName = creator?.username || profiles?.username || 'Anonymous';
   const creatorAvatar = creator?.avatar_url || profiles?.avatar_url;
 
@@ -175,15 +177,15 @@ export default function WorldInfoCard({
                         variant="secondary"
                         className="text-[10px] bg-gray-700/50 text-gray-300 border-gray-600 px-1.5 py-0.5"
                       >
-                        {typeof tag === 'string' ? tag : tag.name}
+                        {typeof tag === 'string' ? tag : tag?.name ?? ''}
                       </Badge>
                     ))}
-                    {tags.length > 4 && (
+                    {normalizedTags.length > 4 && (
                       <Badge 
                         variant="secondary"
                         className="text-[10px] bg-gray-700/50 text-gray-300 border-gray-600 px-1.5 py-0.5"
                       >
-                        +{tags.length - 4}
+                        +{normalizedTags.length - 4}
                       </Badge>
                     )}
                   </div>

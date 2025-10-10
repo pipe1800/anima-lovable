@@ -1,15 +1,20 @@
 import { supabase } from '@/db/client';
+import type { Json } from '@/integrations/supabase/types';
 
 export const getSession = () => supabase.auth.getSession();
 export const onAuthStateChange = (callback: Parameters<typeof supabase.auth.onAuthStateChange>[0]) => supabase.auth.onAuthStateChange(callback);
 export const signInWithOAuth = (provider: 'google' | 'discord', redirectTo?: string) =>
   supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
-export const signUpWithEmail = (email: string, password: string, data: Record<string, any>, redirectTo?: string) =>
-  supabase.auth.signUp({ email, password, options: { data, emailRedirectTo: redirectTo } });
+export const signUpWithEmail = (
+  email: string,
+  password: string,
+  data: Record<string, Json> = {},
+  redirectTo?: string
+) => supabase.auth.signUp({ email, password, options: { data, emailRedirectTo: redirectTo } });
 export const signInWithPassword = (email: string, password: string) =>
   supabase.auth.signInWithPassword({ email, password });
 export const signOut = () => supabase.auth.signOut();
-export const updateUser = (data: Record<string, any>) => supabase.auth.updateUser({ data });
+export const updateUser = (data: Record<string, Json>) => supabase.auth.updateUser({ data });
 export const resetPasswordForEmail = (email: string, redirectTo: string) =>
   supabase.auth.resetPasswordForEmail(email, { redirectTo });
 export const setSession = (access_token: string, refresh_token: string) =>

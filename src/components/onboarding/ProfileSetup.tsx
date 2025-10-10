@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Upload, User, Loader2, Check, X } from 'lucide-react';
+import { Upload, Loader2, Check, X } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useProfile';
 import { Profile as ProfileQueries, Uploads } from '@/data';
 import { toast } from 'sonner';
@@ -25,9 +26,6 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
   const [usernameError, setUsernameError] = useState('');
   
   // Detect if the account was created via social auth (Google/Discord)
-  const provider = (user as any)?.app_metadata?.provider || (user as any)?.app_metadata?.providers?.[0];
-  const isSocialSignup = provider === 'google' || provider === 'discord';
-
   // Detect auto-generated username from DB trigger: 'user_' + first 8 chars of id
   const autoUsername = user?.id ? `user_${user.id.slice(0, 8)}` : undefined;
   const isAutoUsername = profile?.username === autoUsername || (!!profile?.username && profile.username.startsWith('user_') && profile.username.length === 13);
@@ -89,13 +87,16 @@ const ProfileSetup = ({ onComplete, onSkip }: ProfileSetupProps) => {
     return () => clearTimeout(timeoutId);
   }, [username, user?.id, needsUsername]);
 
-  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       setAvatar(file);
       const reader = new FileReader();
-      reader.onload = (e) => {
-        setAvatarPreview(e.target?.result as string);
+      reader.onload = (loadEvent) => {
+        const result = loadEvent.target?.result;
+        if (typeof result === 'string') {
+          setAvatarPreview(result);
+        }
       };
       reader.readAsDataURL(file);
     }

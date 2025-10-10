@@ -24,13 +24,13 @@ import {
   fetchUserSelectedWorldInfo,
   fetchCurrentContext, // fallback only
   fetchCharacterMemories, // supplemental memories when bootstrap omitted or disabled
-  fetchChatBootstrapSnapshot, // new consolidated bootstrap accessor
+  getUserPersonaProfile,
+  fetchRelationshipSnapshot,
   saveUserMessage,
   saveCharacterMessage,
   updateChatLastActivity,
   buildTemplateReplacer
 } from './database.ts';
-// Removed getUserPersonaProfile direct usage (now via bootstrap snapshot)
 import { assembleConversation } from './conversation-assembler.ts';
 import type { ConversationKnobs } from './message-counter.ts';
 // (triggerMessageBasedSummary removed here – summaries handled elsewhere post message)
@@ -163,64 +163,41 @@ export async function handleSendMessage(
     const trivialInput = message.trim().length < 4;
     logger.debug('send.init', { requestId, chatId, characterId, len: message.length, trivial: trivialInput, userId: redact(user?.id) });
 
-    // Feature flag: include curated memories in bootstrap (manual summaries only) if enabled & not trivial
-    const includeBootstrapMemories = !trivialInput && (env('BOOTSTRAP_INCLUDE_MEMORIES') === 'true');
+    const memoryPrefetchEnabled = !trivialInput && (env('BOOTSTRAP_INCLUDE_MEMORIES') === 'true');
 
-    // Consolidated bootstrap snapshot (persona/profile/character/context/relationship/latest_ai/memories*)
-    const bootstrap = await fetchChatBootstrapSnapshot({
-      supabase,
-      userId: user.id,
-      chatId,
-      characterId,
-      includeMemories: includeBootstrapMemories,
-      memoryLimit: 20
-    });
-
-    // Independent parallel fetches still required (not part of snapshot): history, settings, plan/model, world info, user-character settings
     const [
+      personaProfile,
       messageHistory,
       globalSettings,
       userCharacterSettings,
       planAndModel,
-      worldInfoEntries
+      worldInfoEntries,
+      currentContextRaw,
+      relationshipSnapshot
     ] = await Promise.all([
+      getUserPersonaProfile({ supabase, userId: user.id, chatId, explicitPersonaId: selectedPersonaId || null }),
       fetchConversationHistory(chatId, supabase),
       fetchUserGlobalSettings(user.id, supabaseAdmin),
       fetchUserCharacterSettings(user.id, characterId, supabaseAdmin),
       getUserPlanAndModel(user.id, supabaseAdmin),
-      fetchUserSelectedWorldInfo(user.id, characterId, selectedWorldInfoId || null, supabase)
+      fetchUserSelectedWorldInfo(user.id, characterId, selectedWorldInfoId || null, supabase),
+      fetchCurrentContext(user.id, chatId, characterId, supabase),
+      fetchRelationshipSnapshot(supabaseAdmin, user.id, characterId, { forceEval: false, autoPromote: true })
     ]);
 
-    // Fallback logic: if bootstrap failed (character null) fetch minimal character directly
-    const character = bootstrap.character || await fetchCharacterData(characterId, supabaseAdmin, { full: false });
-    const userProfile = bootstrap.profile || { username: user?.email || 'User' };
-    const selectedPersona = bootstrap.persona || null;
-    let currentContext: any = bootstrap.context || {};
+    const character = await fetchCharacterData(characterId, supabaseAdmin, { full: false });
+    const userProfile = personaProfile?.profile || { username: user?.email || 'User' };
+    const selectedPersona = personaProfile?.persona || null;
+    let currentContext: CurrentContext | Record<string, any> = currentContextRaw || {};
 
-    // Supplemental memories logic:
-    // If bootstrap memories disabled OR flag off -> fetch full memory strategy (manual + limited auto) like before
-    let characterMemories = bootstrap.memories as any[] | null;
-    if (!includeBootstrapMemories) {
-      characterMemories = await fetchCharacterMemories(user.id, characterId, supabase, { chatId, includeAutoSummaries: !trivialInput, limitNonAuto: 30, limitAuto: 5 });
-    } else if (includeBootstrapMemories && !trivialInput) {
-      // Optionally append a small set of auto summaries (not included in bootstrap RPC) for richer context
-      try {
-        const autoSubset = await fetchCharacterMemories(user.id, characterId, supabase, { chatId, includeAutoSummaries: true, limitNonAuto: 0, limitAuto: 5 });
-        if (Array.isArray(autoSubset) && autoSubset.length) {
-          const manual = Array.isArray(characterMemories) ? characterMemories : [];
-          // Filter to only auto summaries from the subset fetch
-          const autoOnly = autoSubset.filter(m => m.is_auto_summary);
-            // Deduplicate by id
-          const seen = new Set<string>();
-          const combined = [...manual, ...autoOnly].filter(m => { const k = m.id; if (seen.has(k)) return false; seen.add(k); return true; });
-          characterMemories = combined;
-        }
-      } catch (e) {
-        logger.warn('bootstrap.autoSummaries.append.error', { requestId, chatId, message: (e as Error)?.message });
-      }
-    }
+    const characterMemories = await fetchCharacterMemories(user.id, characterId, supabase, {
+      chatId,
+      includeAutoSummaries: !trivialInput,
+      limitNonAuto: memoryPrefetchEnabled ? 20 : 30,
+      limitAuto: 5
+    });
 
-  const effectiveAddonSettings = sanitizeAddonSettings(globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {}));
+    const effectiveAddonSettings = sanitizeAddonSettings(globalSettings ? mapGlobalSettingsToAddonSettings(globalSettings) : (addonSettings || {}));
     if (userCharacterSettings?.time_awareness_enabled) effectiveAddonSettings.timeAwareness = true;
 
     const addonsActive = anyAddonEnabled(effectiveAddonSettings);
@@ -250,7 +227,7 @@ export async function handleSendMessage(
     const userMessage = await saveUserMessage(supabase, chatId, user.id, message, nextUserMessageOrder);
 
     const templateContext: TemplateContext = { userName: selectedPersona?.name || userProfile?.username || 'User', charName: character?.name || 'Character' };
-    // currentContext already from bootstrap; fallback to legacy fetch if empty object and we expect some context keys
+    // currentContext already fetched; fallback to legacy fetch if empty object and we expect some context keys
     if (!currentContext || Object.keys(currentContext).length === 0) {
       try {
         const legacyCtx = await fetchCurrentContext(user.id, chatId, characterId, supabase);
@@ -273,13 +250,17 @@ export async function handleSendMessage(
       messageHistory,
       currentContext,
       requestId,
-      // Provide bootstrap snapshot relationship for potential short-circuit if module supports it
-      bootstrapRelationship: bootstrap.relationship || null
+      // Provide preloaded relationship snapshot for potential short-circuit if module supports it
+      preloadedRelationship: relationshipSnapshot || null
     } as any);
-    let relationshipProgress = relLifecycle.relationshipProgress;
+    const relationshipProgress = relLifecycle.relationshipProgress;
     currentContext = relLifecycle.currentContext;
     if (relationshipProgress) {
-      try { (currentContext as any)._relationshipProgress = { ...relationshipProgress }; } catch {}
+      try {
+        (currentContext as any)._relationshipProgress = { ...relationshipProgress };
+      } catch (relationshipError) {
+        logger.warn('relationship.attach.fail', { requestId, chatId, message: (relationshipError as Error)?.message });
+      }
     }
 
     // Time awareness: adjust message for AI
@@ -379,3 +360,4 @@ export async function handleSendMessage(
     logger.info('sendMessage.handler.complete', { requestId, duration: Date.now() - startTime });
   }
 }
+

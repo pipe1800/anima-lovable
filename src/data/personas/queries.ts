@@ -37,15 +37,11 @@ export interface PersonaContextResult {
 
 export async function getPersonaContext(params: { userId: string; chatId?: string | null; includeList?: boolean }) {
   const { userId, chatId, includeList } = params;
-  try {
-    const { data, error } = await (supabase as any).rpc('get_user_persona_context', {
-      p_user_id: userId,
-      p_chat_id: chatId || null,
-      p_include_list: includeList || false,
-    });
-    if (error) throw error;
-    return data as PersonaContextResult;
-  } catch (e) {
-    throw e;
-  }
+  const { data, error } = await (supabase as any).rpc('get_user_persona_context', {
+    p_user_id: userId,
+    p_chat_id: chatId || null,
+    p_include_list: includeList || false,
+  });
+  if (error) throw error;
+  return data as PersonaContextResult;
 }

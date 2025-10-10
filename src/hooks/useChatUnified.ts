@@ -111,7 +111,9 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
       }
       lastInvalidationRef.current[flatKey] = now;
       queryClient.invalidateQueries({ queryKey: key, exact: true });
-    } catch {}
+    } catch (error) {
+      logger.warn('Failed to invalidate chat query', error);
+    }
   }, [queryClient]);
 
   const throttledInvalidateChatData = useCallback((chatIdLocal: string) => {
@@ -307,7 +309,11 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
     setTimeout(() => {
       fetchAndUpdateContext(chatIdParam);
     }, 600);
-    try { window.dispatchEvent(new CustomEvent('chat-ai-response-finished')); } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('chat-ai-response-finished'));
+    } catch (error) {
+      logger.warn('Failed to dispatch chat-ai-response-finished event', error);
+    }
   }, [throttledInvalidateChatData, throttledInvalidate, fetchAndUpdateContext, user?.id]);
 
   const invokeStreamingAI = useCallback(async (
@@ -401,7 +407,13 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
             dispatch({ type: 'UPDATE_CONTEXT', payload: updated });
           logger.debug('Realtime chat_context applied', { rel: updated.relationshipStatus });
           // Fire custom event for existing listeners (Chat.tsx)
-          try { window.dispatchEvent(new CustomEvent('chat-context-updated', { detail: { chatId, context: { relationship: updated.relationshipStatus } } })); } catch {}
+          try {
+            window.dispatchEvent(new CustomEvent('chat-context-updated', {
+              detail: { chatId, context: { relationship: updated.relationshipStatus } }
+            }));
+          } catch (eventError) {
+            logger.warn('Failed to dispatch chat-context-updated event', eventError);
+          }
         } catch (e) {
           logger.error('chat_context.realtime.apply.error', e);
         }
@@ -452,22 +464,18 @@ export const useChatUnified = (chatId: string | null, characterId: string, optio
       if (!user) throw new Error('User not authenticated');
       const startTime = Date.now();
 
-      try {
-        const aiResult = await invokeStreamingAI(
-          chatId,
-          content,
-          characterId,
-          user.id,
-          trackedContext,
-          addonSettings,
-          selectedPersonaId,
-          selectedWorldInfoId
-        );
-        const endTime = Date.now();
-        return { chatId, content, updatedContext: aiResult, metrics: { sendTime: endTime - startTime } };
-      } catch (error) {
-        throw error;
-      }
+      const aiResult = await invokeStreamingAI(
+        chatId,
+        content,
+        characterId,
+        user.id,
+        trackedContext,
+        addonSettings,
+        selectedPersonaId,
+        selectedWorldInfoId
+      );
+      const endTime = Date.now();
+      return { chatId, content, updatedContext: aiResult, metrics: { sendTime: endTime - startTime } };
     },
     onMutate: async ({ chatId, content }) => {
       const key = chatQueryKeys.chat.messages(chatId);

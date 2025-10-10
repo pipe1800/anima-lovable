@@ -5,7 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  { ignores: ["dist", "src/integrations/supabase/types.ts"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -24,6 +24,8 @@ export default tseslint.config(
         { allowConstantExport: true },
       ],
       "@typescript-eslint/no-unused-vars": "off",
+      // TODO: project still uses `any` widely; track via warnings until full typing pass lands
+      "@typescript-eslint/no-explicit-any": "warn",
       // Disallow importing the raw integrations supabase client anywhere except db/client.ts
       "no-restricted-imports": [
         "error",
@@ -37,6 +39,13 @@ export default tseslint.config(
           patterns: [],
         },
       ],
+    },
+  }
+  ,
+  {
+    files: ["src/db/client.ts"],
+    rules: {
+      "no-restricted-imports": "off",
     },
   }
 );

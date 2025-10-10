@@ -137,10 +137,12 @@ const AuthPage = () => {
     // Process hash state after OAuth callback
     if (window.location.hash.startsWith('#state=')) {
       try {
-        const raw = decodeURIComponent(window.location.hash.replace('#state=',''));
+        const raw = decodeURIComponent(window.location.hash.replace('#state=', ''));
         const parsed = JSON.parse(raw);
         if (parsed?.r) navigate(parsed.r, { replace: true });
-      } catch {}
+      } catch (stateError) {
+        console.warn('Failed to parse OAuth state payload', stateError);
+      }
       finally {
         // Clean hash
         history.replaceState(null, '', window.location.pathname + window.location.search);

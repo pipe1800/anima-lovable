@@ -86,7 +86,11 @@ export const cascadeDeleteWorldInfo = async (worldInfoId: string) => {
   // Delete dependents (order matters for FK constraints)
   await (supabase as any).from('world_info_entries').delete().eq('world_info_id', worldInfoId);
   await (supabase as any).from('world_info_tags').delete().eq('world_info_id', worldInfoId);
-  await (supabase as any).from('world_info_user_likes').delete().eq('world_info_id', worldInfoId);
+  await supabase
+    .from('user_reactions')
+    .delete()
+    .eq('target_type', 'world')
+    .eq('target_id', worldInfoId);
   await (supabase as any).from('world_info_users').delete().eq('world_info_id', worldInfoId);
   const { error } = await supabase.from('world_infos').delete().eq('id', worldInfoId);
   return { error };

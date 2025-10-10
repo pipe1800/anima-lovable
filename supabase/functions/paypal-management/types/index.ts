@@ -1,3 +1,16 @@
+import type { SupabaseClient, User } from 'https://esm.sh/@supabase/supabase-js@2.50.3';
+import type { Database } from '../../../../src/integrations/supabase/types.ts';
+
+export type PayPalSupabaseClient = SupabaseClient<Database>;
+export type PayPalSupabaseAdminClient = SupabaseClient<Database>;
+export type PayPalAuthenticatedUser = User & { email: string };
+
+export interface DenoEnvGlobal {
+  env: {
+    get(name: string): string | undefined;
+  };
+}
+
 export type PayPalOperation = 
   | 'create-subscription'
   | 'verify-subscription' 
@@ -41,7 +54,7 @@ export interface SaveSubscriptionRequest extends BasePayPalRequest {
   operation: 'save-subscription';
   subscriptionId: string;
   planId: string;
-  paypalSubscriptionDetails?: any;
+  paypalSubscriptionDetails?: PayPalSubscription;
 }
 
 // Order Operations
@@ -60,7 +73,7 @@ export interface CaptureOrderRequest extends BasePayPalRequest {
 export interface WebhookRequest extends BasePayPalRequest {
   operation: 'webhook';
   event_type: string;
-  resource: any;
+  resource: PayPalSubscriptionResource;
   // No user authentication for webhooks
 }
 
@@ -77,12 +90,12 @@ export type PayPalManagementRequest =
 // Response Types
 export interface PayPalResponse {
   success: boolean;
-  data?: any;
+  data?: unknown;
   error?: string;
   subscriptionId?: string;
   orderId?: string;
   approvalUrl?: string;
-  captureResult?: any;
+  captureResult?: CaptureOrderResponse;
 }
 
 // Specific Response Types
@@ -121,37 +134,62 @@ export interface CaptureOrderResponse {
 }
 
 // PayPal API Types
+export interface PayPalLink {
+  href: string;
+  rel: string;
+  method?: string;
+  title?: string;
+}
+
+export interface PayPalSubscriber {
+  email_address?: string;
+}
+
+export interface PayPalBillingInfo {
+  next_billing_time?: string | null;
+}
+
 export interface PayPalSubscription {
   id: string;
   status: string;
   plan_id: string;
-  subscriber: {
-    email_address: string;
-  };
-  billing_info?: any;
-  links?: Array<{
-    href: string;
-    rel: string;
-    method: string;
-  }>;
+  custom_id?: string;
+  subscriber?: PayPalSubscriber;
+  billing_info?: PayPalBillingInfo;
+  links?: PayPalLink[];
+}
+
+export interface PayPalSubscriptionListResponse {
+  subscriptions?: PayPalSubscription[];
+}
+
+export interface PayPalMoney {
+  currency_code: string;
+  value: string;
+}
+
+export interface PayPalCapture {
+  id?: string;
+  status?: string;
+  amount?: PayPalMoney;
+}
+
+export interface PayPalPurchaseUnitPayments {
+  captures?: PayPalCapture[];
+}
+
+export interface PayPalPurchaseUnit {
+  amount: PayPalMoney;
+  description?: string;
+  payments?: PayPalPurchaseUnitPayments;
 }
 
 export interface PayPalOrder {
   id: string;
   status: string;
   intent: string;
-  purchase_units: Array<{
-    amount: {
-      currency_code: string;
-      value: string;
-    };
-    description?: string;
-  }>;
-  links?: Array<{
-    href: string;
-    rel: string;
-    method: string;
-  }>;
+  purchase_units: PayPalPurchaseUnit[];
+  links?: PayPalLink[];
 }
 
 export interface PayPalAccessToken {
@@ -160,6 +198,23 @@ export interface PayPalAccessToken {
   app_id: string;
   expires_in: number;
   scope: string;
+}
+
+export interface PayPalSubscriptionResource {
+  id: string;
+  custom_id?: string;
+  plan_id?: string;
+  status?: string;
+}
+
+export interface PayPalOrderCaptureResponse {
+  id: string;
+  status: string;
+  purchase_units: PayPalPurchaseUnit[];
+  payer?: {
+    email_address?: string;
+  };
+  links?: PayPalLink[];
 }
 
 // Database Types
@@ -210,7 +265,7 @@ export type PayPalWebhookEventType =
 
 export interface WebhookEventData {
   event_type: PayPalWebhookEventType;
-  resource: any;
+  resource: PayPalSubscriptionResource;
   summary: string;
   resource_type: string;
   create_time: string;

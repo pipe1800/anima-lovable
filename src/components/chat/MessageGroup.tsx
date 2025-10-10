@@ -1,4 +1,5 @@
-import React, { memo } from 'react';
+import { memo, useState, useEffect, useRef, useCallback } from 'react';
+import type { CSSProperties, KeyboardEventHandler } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatMessageTime } from "@/utils/messageGrouping";
 import { FormattedMessage } from "@/components/ui/FormattedMessage";
@@ -8,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Pencil, RotateCcw, /* ChevronLeft, ChevronRight,*/ Check, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { updateMessageContent } from '@/data/chats/queries';
+import type { UserGlobalChatSettings } from '@/types/chatSettings';
 
 interface MessageGroupData {
   id: string;
@@ -59,8 +61,18 @@ interface MessageGroupProps {
   // New: only allow edit/regenerate on the very latest AI group
   canModify?: boolean;
   // Optimization: pass global settings to nested FormattedMessage to avoid repeated queries
-  globalSettingsOverride?: any;
+  globalSettingsOverride?: Partial<UserGlobalChatSettings> | null;
 }
+
+type ChatAiEditEventDetail = {
+  groupId?: string;
+  messageId?: string;
+};
+
+type ChatAiBeginEditEvent = CustomEvent<ChatAiEditEventDetail>;
+
+const BEGIN_EDIT_EVENT = 'chat-ai-begin-edit';
+const REGENERATE_EVENT = 'chat-ai-regenerate';
 
 // Helper: hex + opacity -> rgba string
 const toRgba = (hex?: string, opacity?: number, fallbackHex: string = '#1f2937', fallbackOpacity: number = 1) => {
@@ -131,7 +143,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
 
   // Bubble background per side - modified for avatar-as-bubble-bg style
   let bubbleBg: string;
-  let bubbleStyle: React.CSSProperties = {};
+  const bubbleStyle: CSSProperties = {};
   
   if (avatarStyle === 'bubble-bg' && ((isUser && resolvedUserAvatarUrl) || (!isUser && character.avatar))) {
     // For bubble-bg style, we'll use color background and handle the avatar section separately
@@ -143,24 +155,23 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
   }
 
   // Navigation: keep all messages visible but track a highlighted one (AI only)
-  const [activeIndex, setActiveIndex] = React.useState(Math.max(messages.length - 1, 0));
-  const messageRefs = React.useRef<Array<HTMLDivElement | null>>([]);
-  React.useEffect(() => {
+  const [activeIndex, setActiveIndex] = useState(Math.max(messages.length - 1, 0));
+  const messageRefs = useRef<Array<HTMLDivElement | null>>([]);
+  useEffect(() => {
     setActiveIndex(Math.max(messages.length - 1, 0));
     // Ensure newest is visible
     const el = messageRefs.current[Math.max(messages.length - 1, 0)];
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, group.id]);
+  }, [messages, group.id]);
 
   // Inline edit state for AI messages
-  const [editingIndex, setEditingIndex] = React.useState<number | null>(null);
-  const [editValue, setEditValue] = React.useState('');
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [editingHeight, setEditingHeight] = React.useState<number | null>(null);
-  const [editingWidth, setEditingWidth] = React.useState<number | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [editingHeight, setEditingHeight] = useState<number | null>(null);
+  const [editingWidth, setEditingWidth] = useState<number | null>(null);
 
   const startEdit = () => {
     if (isUser) return;
@@ -169,7 +180,8 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
     const current = messages[index];
     if (!current || current.id === 'streaming-temp') return;
     // Broadcast begin-edit to ensure only one message is edited at a time globally
-    window.dispatchEvent(new CustomEvent('chat-ai-begin-edit', { detail: { groupId: group.id, messageId: current.id } }));
+  const beginEditEvent: ChatAiBeginEditEvent = new CustomEvent(BEGIN_EDIT_EVENT, { detail: { groupId: group.id, messageId: current.id } });
+  window.dispatchEvent(beginEditEvent);
     // Measure current bubble dimensions before switching to textarea
     const el = messageRefs.current[index];
     if (el) {
@@ -183,7 +195,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
     setEditValue(current.content || '');
   };
 
-  const cancelEdit = React.useCallback(() => {
+  const cancelEdit = useCallback(() => {
     setEditingIndex(null);
     setEditValue('');
     setEditingHeight(null);
@@ -201,14 +213,15 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
       toast({ title: 'Updated', description: 'Message edited successfully.' });
       cancelEdit();
       // Realtime should update the UI; if not, the next refresh will
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message || 'Failed to save edit', variant: 'destructive' });
+    } catch (err: unknown) {
+      const description = err instanceof Error ? err.message : 'Failed to save edit';
+      toast({ title: 'Error', description, variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
   };
 
-  const onKeyDownEditor: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+  const onKeyDownEditor: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       saveEdit();
@@ -219,12 +232,12 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
   };
 
   // Close edit when clicking outside the currently edited bubble or its controls
-  React.useEffect(() => {
+  useEffect(() => {
     if (editingIndex === null) return;
     const handlePointerDown = (e: PointerEvent) => {
-      const container = messageRefs.current[editingIndex!];
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
+      const container = messageRefs.current[editingIndex];
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
       // Ignore clicks on Save/Cancel controls
       if (target.closest('[data-edit-control="true"]')) return;
       if (container && !container.contains(target)) {
@@ -236,16 +249,17 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
   }, [editingIndex, cancelEdit]);
 
   // Listen for begin-edit events from other groups to enforce single-edit globally
-  React.useEffect(() => {
-    const onBeginEdit = (e: any) => {
-      const sourceGroupId = e?.detail?.groupId as string | undefined;
+  useEffect(() => {
+    const onBeginEdit: EventListener = (event) => {
+      const detail = (event as ChatAiBeginEditEvent).detail;
+      const sourceGroupId = detail?.groupId;
       if (!sourceGroupId) return;
       if (sourceGroupId !== group.id && editingIndex !== null) {
         cancelEdit();
       }
     };
-    window.addEventListener('chat-ai-begin-edit' as any, onBeginEdit as any);
-    return () => window.removeEventListener('chat-ai-begin-edit' as any, onBeginEdit as any);
+    window.addEventListener(BEGIN_EDIT_EVENT, onBeginEdit);
+    return () => window.removeEventListener(BEGIN_EDIT_EVENT, onBeginEdit);
   }, [group.id, editingIndex, cancelEdit]);
 
   // Action handlers: regenerate (restricted to last message only)
@@ -254,7 +268,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
     if (!canModify) return; // Only allow regenerate on latest AI message/group
     const current = messages[Math.max(messages.length - 1, 0)];
     if (!current) return;
-    const ev = new CustomEvent('chat-ai-regenerate', { detail: { messageId: current.id } });
+    const ev = new CustomEvent<{ messageId: string }>(REGENERATE_EVENT, { detail: { messageId: current.id } });
     window.dispatchEvent(ev);
   };
 
@@ -266,13 +280,13 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
   const latestMessage = messages[messages.length - 1];
   const regenOverride = latestMessage && regeneratingContentByMessageId[latestMessage.id];
   const isRegenerating = regenOverride !== undefined;
-  const [animationStage, setAnimationStage] = React.useState(0);
-  React.useEffect(() => {
+  const [animationStage, setAnimationStage] = useState(0);
+  useEffect(() => {
     if (!isRegenerating) return;
     const id = setInterval(() => setAnimationStage(s => (s + 1) % 3), 450);
     return () => clearInterval(id);
   }, [isRegenerating]);
-  const displayContentFor = (msg: any) => {
+  const displayContentFor = (msg: Message) => {
     const override = regeneratingContentByMessageId[msg.id];
     if (override === undefined) return msg.content;
     if (override.length === 0) return `Regenerating${'.'.repeat(animationStage + 1)}`;
@@ -343,7 +357,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                         <span style={textColor ? { color: textColor } : undefined}>
                           <FormattedMessage
                             content={displayContentFor(message)}
-                            className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                            className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[message.id] ? 'animate-pulse' : ''}`}
                             settingsOverride={globalSettingsOverride}
                           />
                         </span>
@@ -383,11 +397,11 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                     {/* Floated avatar panel */}
                     <div
                       className="float-left w-[5.6rem] h-[7rem] md:w-32 md:h-40 bg-center bg-cover mr-5 md:mr-7 mb-2 md:mb-3"
-                      style={{
-                        backgroundImage: `url(${imageUrl})`,
-                        maskImage: avatarMask as any,
-                        WebkitMaskImage: avatarMask as any,
-                      }}
+                        style={{
+                          backgroundImage: `url(${imageUrl})`,
+                          maskImage: avatarMask,
+                          WebkitMaskImage: avatarMask,
+                        }}
                     />
                     {/* Text/content block flows to the right of avatar until it exceeds avatar height, then wraps beneath */}
                     <div className="pt-2 pb-3 pr-4 pl-2 md:pl-4 min-h-[7rem]">
@@ -406,7 +420,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                         <span style={textColor ? { color: textColor } : undefined}>
                           <FormattedMessage
                             content={displayContentFor(message)}
-                            className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                            className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[message.id] ? 'animate-pulse' : ''}`}
                             settingsOverride={globalSettingsOverride}
                           />
                         </span>
@@ -462,7 +476,7 @@ export const MessageGroup = memo(function MessageGroup({ group, character, track
                   <span style={textColor ? { color: textColor } : undefined}>
                     <FormattedMessage
                       content={displayContentFor(message)}
-                      className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[(message as any).id] ? 'animate-pulse' : ''}`}
+                      className={`whitespace-pre-wrap select-text message-content ${regeneratingContentByMessageId?.[message.id] ? 'animate-pulse' : ''}`}
                       settingsOverride={globalSettingsOverride}
                     />
                   </span>

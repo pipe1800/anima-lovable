@@ -39,6 +39,25 @@ export const updateProfile = async (userId: string, updates: Partial<Profile>) =
   return { data, error };
 };
 
+export const isUsernameAvailable = async (username: string, excludeUserId?: string | null) => {
+  const normalized = username.trim().toLowerCase();
+  if (!normalized) return { available: false };
+
+  const query = supabase
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('username', normalized);
+
+  if (excludeUserId) {
+    query.neq('id', excludeUserId);
+  }
+
+  const { count, error } = await query;
+  if (error) throw error;
+
+  return { available: !count || count === 0 };
+};
+
 // Ensure avatar exists (idempotent) and persist to profile.
 export const ensureUserAvatar = async (userId: string) => {
   const { data: existing } = await supabase
@@ -58,19 +77,9 @@ export const ensureUserAvatar = async (userId: string) => {
 };
 
 // ---------------------------------------------------------------------------
-// New RPC wrappers (2025-08-21): replace deprecated get_user_profile_overview
+// RPC wrappers
 // ---------------------------------------------------------------------------
-export interface UserBootstrapResult { profile: any; subscription: any | null; credits: number; counts?: any; }
 export interface PublicProfileOverviewResult { profile: any; counts: { chats: number; characters: number; favorites: number; personas?: number }; }
-
-export const getUserBootstrap = async (userId: string) => {
-  try {
-    const { data, error } = await (supabase as any).rpc('get_user_bootstrap', { p_user_id: userId });
-    return { data: data as UserBootstrapResult | null, error };
-  } catch (error) {
-    return { data: null, error };
-  }
-};
 
 export const getPublicProfileOverview = async (targetUserId: string) => {
   try {

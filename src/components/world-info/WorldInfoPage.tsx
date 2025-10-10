@@ -34,37 +34,94 @@ import {
   Globe,
   Upload,
   Loader2,
-  X,
-  Sparkles
+  X
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { useQueryClient } from '@tanstack/react-query';
 import { useUserWorldInfos, usePublicWorldInfos } from '@/hooks/useWorldInfos';
 import { useAllTags } from '@/hooks/useTags';
-import { createWorldInfo as createWorldInfoData, addWorldInfoEntry as addWorldInfoEntryData } from '@/data/worldInfo/mutations';
 import { importWorldInfo as importWorldInfoData } from '@/data/worldInfo/importExport';
 import { cn } from '@/lib/utils';
 import WorldInfoCard from './WorldInfoCard';
+import type { WorldInfoSummaryItem, ImportedWorldInfoEntry } from '@/types/world-info';
+import type { Tag } from '@/data/tags/queries';
+
+type SortOption = 'most-used' | 'most-liked' | 'recently-created' | 'recently-updated' | 'a-z' | 'z-a';
+
+interface WorldInfoImportJson {
+  name?: string;
+  description?: string;
+  entries?: unknown;
+  data?: {
+    name?: string;
+    description?: string;
+    entries?: unknown;
+  };
+}
+
+const normalizeKeywords = (value: unknown): ImportedWorldInfoEntry['keywords'] => {
+  if (Array.isArray(value)) {
+    return value.filter((keyword): keyword is string => typeof keyword === 'string');
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return [] as string[];
+};
+
+const coerceImportedEntry = (value: unknown): ImportedWorldInfoEntry => {
+  if (!value || typeof value !== 'object') return {};
+  const record = value as ImportedWorldInfoEntry & Record<string, unknown>;
+  const keywordsSource = record.keywords ?? record.keys ?? record.key;
+  const entryTextSource =
+    record.entry_text ??
+    (typeof record.content === 'string' ? record.content : undefined) ??
+    (typeof record.entry === 'string' ? record.entry : undefined) ??
+    (typeof record.text === 'string' ? record.text : undefined);
+
+  return {
+    keywords: normalizeKeywords(keywordsSource),
+    entry_text: typeof entryTextSource === 'string' ? entryTextSource : undefined,
+    text: typeof record.text === 'string' ? record.text : undefined,
+    content: typeof record.content === 'string' ? record.content : undefined,
+  };
+};
+
+const hasMeaningfulContent = (entry: ImportedWorldInfoEntry) =>
+  typeof entry.entry_text === 'string' ||
+  typeof entry.text === 'string' ||
+  typeof entry.content === 'string';
+
+const parseImportedEntries = (raw: unknown): ImportedWorldInfoEntry[] => {
+  const values: unknown[] = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === 'object'
+      ? Object.values(raw as Record<string, unknown>)
+      : [];
+
+  return values
+    .map(coerceImportedEntry)
+    .filter(hasMeaningfulContent)
+    .slice(0, 100);
+};
 
 export default function WorldInfoPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // State - Start with discover tab as default
   const [activeTab, setActiveTab] = useState('discover');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState('most-used');
+  const [sortBy, setSortBy] = useState<SortOption>('most-used');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importStatus, setImportStatus] = useState<'idle' | 'reading' | 'creating' | 'entries' | 'complete'>('idle');
-  const [importedEntriesCount, setImportedEntriesCount] = useState({ current: 0, total: 0 });
+  const [importedEntriesCount, setImportedEntriesCount] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
   const [isDesktop, setIsDesktop] = useState(false);
 
   // Check if desktop on mount and window resize
@@ -82,47 +139,58 @@ export default function WorldInfoPage() {
   // Queries
   const { data: userWorldInfos = [], isLoading: isLoadingUser } = useUserWorldInfos();
   const { data: publicWorldInfos = [], isLoading: isLoadingPublic } = usePublicWorldInfos();
-  const { data: allTags = [] } = useAllTags();
+  const { data: allTagsRaw = [] } = useAllTags();
+  const allTags: Tag[] = Array.isArray(allTagsRaw)
+    ? allTagsRaw.filter((tag): tag is Tag => typeof tag === 'object' && tag !== null && 'id' in tag && 'name' in tag)
+    : [];
 
   // Filter and sort logic
   const filteredAndSortedWorldInfos = useMemo(() => {
-    let worldInfos = activeTab === 'my-world-info' ? userWorldInfos : publicWorldInfos;
-    
-    // Apply filters
-    let filtered = worldInfos.filter((worldInfo: any) => {
-      const matchesSearch = !searchQuery || 
-        worldInfo.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (worldInfo.short_description && worldInfo.short_description.toLowerCase().includes(searchQuery.toLowerCase()));
-      
-      const matchesTags = selectedTags.length === 0 || 
-        (worldInfo.tags && selectedTags.every(tagName => 
-          worldInfo.tags.some((tag: any) => 
-            typeof tag === 'string' ? tag === tagName : tag.name === tagName
-          )
-        ));
-      
-      return matchesSearch && matchesTags;
+    const worldInfos: WorldInfoSummaryItem[] = activeTab === 'my-world-info' ? userWorldInfos : publicWorldInfos;
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+
+    const filtered = worldInfos.filter((worldInfo) => {
+      const name = worldInfo.name ?? '';
+      const description = worldInfo.short_description ?? '';
+      const matchesSearch =
+        normalizedQuery.length === 0 ||
+        name.toLowerCase().includes(normalizedQuery) ||
+        description.toLowerCase().includes(normalizedQuery);
+
+      if (!matchesSearch) return false;
+
+      if (selectedTags.length === 0) return true;
+
+      const normalizedTags = Array.isArray(worldInfo.tags) ? worldInfo.tags : [];
+      return selectedTags.every((tagName) =>
+        normalizedTags.some((tag) =>
+          typeof tag === 'string' ? tag === tagName : tag?.name === tagName
+        )
+      );
     });
 
-    // Sort
-    filtered.sort((a: any, b: any) => {
+    const getCreatedAt = (item: WorldInfoSummaryItem) => (item.created_at ? new Date(item.created_at).getTime() : 0);
+    const getUpdatedAt = (item: WorldInfoSummaryItem) => {
+      const updated = item.updated_at ?? item.created_at;
+      return updated ? new Date(updated).getTime() : 0;
+    };
+    const getLikes = (item: WorldInfoSummaryItem) => item.likesCount ?? item.likes_count ?? item.like_count ?? 0;
+    const getUsage = (item: WorldInfoSummaryItem) => (item.usage_count ?? 0) + (item.interaction_count ?? 0);
+
+    filtered.sort((a, b) => {
       switch (sortBy) {
         case 'a-z':
-          return a.name.localeCompare(b.name);
+          return (a.name ?? '').localeCompare(b.name ?? '');
         case 'z-a':
-          return b.name.localeCompare(a.name);
+          return (b.name ?? '').localeCompare(a.name ?? '');
         case 'recently-created':
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          return getCreatedAt(b) - getCreatedAt(a);
         case 'recently-updated':
-          return new Date(b.updated_at || b.created_at).getTime() - 
-                 new Date(a.updated_at || a.created_at).getTime();
+          return getUpdatedAt(b) - getUpdatedAt(a);
         case 'most-liked':
-          const bLikes = b.likesCount || b.likes_count || b.like_count || 0;
-          const aLikes = a.likesCount || a.likes_count || a.like_count || 0;
-          return bLikes - aLikes;
+          return getLikes(b) - getLikes(a);
         case 'most-used':
-          return ((b.usage_count || 0) + (b.interaction_count || 0)) - 
-                 ((a.usage_count || 0) + (a.interaction_count || 0));
+          return getUsage(b) - getUsage(a);
         default:
           return 0;
       }
@@ -155,33 +223,27 @@ export default function WorldInfoPage() {
       setImportStatus('reading');
 
       const text = await file.text();
-      const jsonData = JSON.parse(text);
+      const jsonData = JSON.parse(text) as WorldInfoImportJson;
 
-      const rawEntries = jsonData.entries || jsonData.data?.entries || [];
-      let entriesArray: any[] = [];
-      if (Array.isArray(rawEntries)) {
-        entriesArray = rawEntries;
-      } else if (rawEntries && typeof rawEntries === 'object') {
-        entriesArray = Object.entries(rawEntries).map(([k, v]: [string, any]) => ({
-          keywords: v?.keys || v?.key || v?.keywords || [],
-          entry_text: v?.entry_text || v?.content || v?.entry || v?.text || ''
-        }));
-      }
-      if (entriesArray.length > 100) entriesArray = entriesArray.slice(0,100);
+      setImportStatus('entries');
+      const entries = parseImportedEntries(jsonData.entries ?? jsonData.data?.entries);
+      setImportedEntriesCount({ current: entries.length, total: entries.length });
+      setImportProgress(entries.length > 0 ? 100 : 0);
+      setImportStatus('complete');
 
       navigate('/world-info/create', {
         state: {
           importedWorldInfo: {
-            name: jsonData.name || jsonData.data?.name || '',
-            description: jsonData.description || jsonData.data?.description || '',
-            entries: entriesArray
+            name: jsonData.name ?? jsonData.data?.name ?? '',
+            description: jsonData.description ?? jsonData.data?.description ?? '',
+            entries,
           }
         }
       });
 
       toast({
         title: "Imported",
-        description: `Staged ${entriesArray.length} entries for editing`
+        description: `Staged ${entries.length} entries for editing`
       });
     } catch (error) {
       console.error('Error staging import:', error);
@@ -352,7 +414,7 @@ export default function WorldInfoPage() {
                 </Popover>
 
                 {/* Sort Dropdown */}
-                <Select value={sortBy} onValueChange={setSortBy}>
+                <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortOption)}>
                   <SelectTrigger className="w-full sm:w-[180px] bg-[#121212] border-gray-700 text-white">
                     <SelectValue placeholder="Sort by" />
                   </SelectTrigger>
@@ -432,9 +494,9 @@ export default function WorldInfoPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-                  {filteredAndSortedWorldInfos.map((worldInfo: any, index: number) => (
+                  {filteredAndSortedWorldInfos.map((worldInfo, index) => (
                     <WorldInfoCard
-                      key={worldInfo.id}
+                      key={worldInfo.id ?? `public-world-info-${index}`}
                       worldInfo={worldInfo}
                       isOwner={worldInfo.creator_id === user?.id}
                       showCreator={true}
@@ -474,9 +536,9 @@ export default function WorldInfoPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-                  {filteredAndSortedWorldInfos.map((worldInfo: any, index: number) => (
+                  {filteredAndSortedWorldInfos.map((worldInfo, index) => (
                     <WorldInfoCard
-                      key={worldInfo.id}
+                      key={worldInfo.id ?? `my-world-info-${index}`}
                       worldInfo={worldInfo}
                       isOwner={true}
                       showCreator={false}

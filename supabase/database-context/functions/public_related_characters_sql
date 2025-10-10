@@ -1,5 +1,6 @@
 CREATE OR REPLACE FUNCTION "public"."related_characters"("current_character_id" "uuid", "tag_ids" integer[]) RETURNS TABLE("id" "uuid", "name" "text", "avatar_url" "text", "short_description" "text", "likes_count" integer, "chats_count" integer, "creator" "jsonb", "tags" "jsonb")
-    LANGUAGE "plpgsql"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'auth'
     AS $$
 begin
   if tag_ids is null or array_length(tag_ids, 1) is null then

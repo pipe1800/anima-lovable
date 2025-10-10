@@ -1,12 +1,10 @@
 // Thin delegation wrapper to unified implementation in chat-management database module.
 // Maintains existing import surface for extract-addon-context without duplicating logic.
 import { fetchCharacterData as unifiedFetchCharacterData, buildTemplateReplacer } from '../../chat-management/modules/database.ts';
-
-export async function fetchCharacterData(characterId: string, supabase: any, options?: { full?: boolean }) {
+export async function fetchCharacterData(characterId, supabase, options) {
   return unifiedFetchCharacterData(characterId, supabase, options);
 }
-
-export async function fetchUserData(userId: string, supabase: any) {
+export async function fetchUserData(userId, supabase) {
   try {
     const [personaRes, profileRes] = await Promise.allSettled([
       supabase.from('personas').select('*').eq('user_id', userId).limit(1).single(),
@@ -17,12 +15,14 @@ export async function fetchUserData(userId: string, supabase: any) {
       profile: profileRes.status === 'fulfilled' ? profileRes.value.data : null
     };
   } catch (e) {
-    console.warn('userData.fetch.warn', (e as any)?.message);
-    return { persona: null, profile: null };
+    console.warn('userData.fetch.warn', e?.message);
+    return {
+      persona: null,
+      profile: null
+    };
   }
 }
-
-export function getCharacterForContext(character: any) {
+export function getCharacterForContext(character) {
   return {
     personality_summary: character?.character_definitions?.personality_summary || '',
     description: character?.character_definitions?.description || '',
@@ -30,8 +30,7 @@ export function getCharacterForContext(character: any) {
     greeting: character?.character_definitions?.greeting || ''
   };
 }
-
-export function createTemplateReplacer(persona: any, profile: any, character: any) {
+export function createTemplateReplacer(persona, profile, character) {
   return buildTemplateReplacer({
     userName: persona?.name || profile?.username || 'User',
     charName: character?.name || 'Character'

@@ -1,8 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.3';
-// Declare Deno for type-checking if executing under Node locally
-declare const Deno: any;
+import type { SupabaseClient } from '../types/interfaces.ts';
 import type { AuthResult } from '../types/interfaces.ts';
 import { CORS_HEADERS } from '../types/interfaces.ts';
+import { getEnv } from './env.ts';
 
 /**
  * Authentication utilities for chat-stream function
@@ -17,13 +17,9 @@ export async function authenticateUser(req: Request): Promise<AuthResult> {
     throw new Error('No authorization header');
   }
 
-  const supabaseUrl = (globalThis as any).Deno?.env?.get('SUPABASE_URL') || (typeof process !== 'undefined' ? process.env.SUPABASE_URL : undefined);
-  const supabaseAnon = (globalThis as any).Deno?.env?.get('SUPABASE_ANON_KEY') || (typeof process !== 'undefined' ? process.env.SUPABASE_ANON_KEY : undefined);
-  if (!supabaseUrl || !supabaseAnon) {
-    console.error('❌ Supabase environment variables missing');
-    throw new Error('Server misconfiguration');
-  }
-  const supabase = createClient(
+  const supabaseUrl = getEnv('SUPABASE_URL');
+  const supabaseAnon = getEnv('SUPABASE_ANON_KEY');
+  const supabase: SupabaseClient = createClient(
     supabaseUrl,
     supabaseAnon,
     {
@@ -41,12 +37,8 @@ export async function authenticateUser(req: Request): Promise<AuthResult> {
     throw new Error('Invalid token');
   }
   
-  const serviceKey = (globalThis as any).Deno?.env?.get('SUPABASE_SERVICE_ROLE_KEY') || (typeof process !== 'undefined' ? process.env.SUPABASE_SERVICE_ROLE_KEY : undefined);
-  if (!serviceKey) {
-    console.error('❌ Service role key missing');
-    throw new Error('Server misconfiguration');
-  }
-  const supabaseAdmin = createClient(
+  const serviceKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+  const supabaseAdmin: SupabaseClient = createClient(
     supabaseUrl,
     serviceKey
   );
@@ -54,15 +46,16 @@ export async function authenticateUser(req: Request): Promise<AuthResult> {
   console.log('✅ User authenticated successfully:', user.id);
   
   return {
-    user: { id: user.id, email: user.email } as any,
-    supabase: supabase as any,
-    supabaseAdmin: supabaseAdmin as any
+    user: { id: user.id, email: user.email ?? undefined },
+    supabase,
+    supabaseAdmin,
   };
 }
 
-export function createCorsResponse(data: any = null, status: number = 200): Response {
+export function createCorsResponse(data: unknown = null, status: number = 200): Response {
+  const body = data === null ? null : JSON.stringify(data);
   return new Response(
-    data ? JSON.stringify(data) : null,
+    body,
     {
       status,
       headers: {
@@ -78,12 +71,12 @@ export function createErrorResponse(error: string, status: number = 500): Respon
 }
 
 export function createStreamingErrorResponse(error: string): Response {
-  const errorStream = new ReadableStream({
+  const errorStream = new ReadableStream<Uint8Array>({
     start(controller) {
       const encoder = new TextEncoder();
       const errorMessage = `Error: ${error}. Please try again.`;
       controller.enqueue(encoder.encode(`data: {"choices":[{"delta":{"content":"${errorMessage}"}}]}\n\n`));
-      controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
       controller.close();
     }
   });

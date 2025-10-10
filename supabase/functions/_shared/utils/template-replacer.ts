@@ -23,12 +23,24 @@ export function replaceTemplates(content: string, context: TemplateContext): str
 /**
  * Create template replacer function with user/character data
  */
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const readString = (value: unknown, key: string): string | undefined => {
+  if (!isRecord(value)) return undefined;
+  const entry = value[key];
+  return typeof entry === 'string' && entry.trim().length > 0 ? entry : undefined;
+};
+
 export function createTemplateReplacer(
-  userPersona: any,
-  userProfile: any, 
+  userPersona: unknown,
+  userProfile: unknown,
   characterName: string
 ): (content: string) => string {
-  const userName = userPersona?.name || userProfile?.username || 'User';
+  const personaName = readString(userPersona, 'name');
+  const profileName = readString(userProfile, 'username');
+  const userName = personaName || profileName || 'User';
   const charName = characterName || 'Character';
   
   console.log('🔧 Template replacement setup - userName:', userName, 'charName:', charName);

@@ -177,7 +177,9 @@ const CharacterCreator = () => {
           if (nsfwTagRow) {
             setSelectedTags(prev => prev.some(t => t.name.toLowerCase() === 'nsfw') ? prev : [...prev, nsfwTagRow as Tag]);
           }
-        } catch {}
+        } catch (nsfwError) {
+          console.warn('Failed to add NSFW tag after import', nsfwError);
+        }
       } else {
         toast({ title: 'Character Imported', description: 'Character data has been imported successfully.' });
       }
@@ -188,7 +190,9 @@ const CharacterCreator = () => {
         if (tokenInfo.totals.overTotal) {
           toast({ title: 'Token Limit Exceeded', description: 'Imported character exceeds 3,500 token limit. Reduce content before saving.', variant: 'destructive' });
         }
-      } catch {}
+      } catch (tokenEstimationError) {
+        console.warn('Failed to estimate token usage after import', tokenEstimationError);
+      }
     } catch (err) {
       console.error('Error invoking parse-character-card, attempting fallback...', err);
       try {

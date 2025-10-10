@@ -4,12 +4,27 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MessageCircle, Edit, Brain, Heart, Star, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { Separator } from '@/components/ui/separator';
+import type { Character } from '@/types/chat';
+
+interface CharacterDefinitionData {
+  personality_summary?: string | Record<string, unknown> | null;
+  scenario?: string | Record<string, unknown> | null;
+  greeting?: string | null;
+}
+
+export interface CharacterDetailsLike {
+  avatar_url?: string | null;
+  character_definitions?: CharacterDefinitionData | null;
+  definition?: CharacterDefinitionData[];
+  short_description?: string | null;
+  creator?: { username?: string | null } | null;
+  tags?: Array<{ tag?: { name?: string | null }; name?: string | null }>;
+}
 
 interface ChatDetailsPanelProps {
   loading: boolean;
-  character: any;
-  characterDetails: any;
+  character: Character & { fallback?: string };
+  characterDetails: CharacterDetailsLike | null;
   isCharacterOwner: boolean;
   onStartNewChat: () => void;
   isCreatingNewChat: boolean;
@@ -40,42 +55,65 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
   onFavorite,
 }) => {
   const navigate = useNavigate();
+  const [expandSummary, setExpandSummary] = useState(false);
+  const [expandScenario, setExpandScenario] = useState(false);
+  const [expandGreeting, setExpandGreeting] = useState(false);
 
   if (loading) {
     return <div className="p-4 text-gray-400 text-center py-4">Loading character details...</div>;
   }
 
   // Safely extract definition fields
-  const defs = characterDetails?.character_definitions || characterDetails?.definition?.[0] || null;
-  const parseJson = (val: any) => {
+  const defs: CharacterDefinitionData | null = characterDetails?.character_definitions || characterDetails?.definition?.[0] || null;
+  const asRecord = (value: unknown): Record<string, unknown> | null => (
+    typeof value === 'object' && value !== null ? value as Record<string, unknown> : null
+  );
+  const parseJson = <T,>(val: unknown): T | null => {
     if (!val || typeof val !== 'string') return null;
-    try { return JSON.parse(val); } catch { return null; }
+    try {
+      return JSON.parse(val) as T;
+    } catch {
+      return null;
+    }
   };
 
   // Short Summary
   let shortSummary: string | null = null;
-  const personality = parseJson(defs?.personality_summary) || defs?.personality_summary;
-  if (personality) {
-    if (typeof personality === 'string') shortSummary = personality;
-    else shortSummary = personality.title || personality.summary || personality.overview || null;
+  const personalitySource = defs?.personality_summary;
+  if (typeof personalitySource === 'string') {
+    shortSummary = personalitySource;
+  } else {
+    const personalityObject = asRecord(personalitySource) || parseJson<Record<string, unknown>>(personalitySource);
+    if (personalityObject) {
+      const title = personalityObject.title;
+      const summary = personalityObject.summary;
+      const overview = personalityObject.overview;
+      shortSummary = (typeof title === 'string' && title.trim()) ? title :
+        (typeof summary === 'string' && summary.trim()) ? summary :
+        (typeof overview === 'string' && overview.trim()) ? overview : null;
+    }
   }
   if (!shortSummary) shortSummary = characterDetails?.short_description || null;
 
   // Scenario
   let scenarioText: string | null = null;
-  const scenario = parseJson(defs?.scenario) || defs?.scenario;
-  if (scenario) {
-    if (typeof scenario === 'string') scenarioText = scenario;
-    else scenarioText = [scenario.title, scenario.description].filter(Boolean).join(': ');
+  const scenarioSource = defs?.scenario;
+  if (typeof scenarioSource === 'string') {
+    scenarioText = scenarioSource;
+  } else {
+    const scenarioObject = asRecord(scenarioSource) || parseJson<Record<string, unknown>>(scenarioSource);
+    if (scenarioObject) {
+      const title = scenarioObject.title;
+      const description = scenarioObject.description;
+      const parts = [title, description].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
+      scenarioText = parts.length ? parts.join(': ') : null;
+    }
   }
 
   // Greeting
-  const greetingText: string | null = defs?.greeting || null;
+  const greetingText: string | null = typeof defs?.greeting === 'string' ? defs.greeting : null;
 
   // Read more toggles
-  const [expandSummary, setExpandSummary] = useState(false);
-  const [expandScenario, setExpandScenario] = useState(false);
-  const [expandGreeting, setExpandGreeting] = useState(false);
   const shouldClamp = (text?: string | null, limit = 240) => !!text && text.length > limit;
 
   return (
@@ -123,7 +161,7 @@ const ChatDetailsPanel: React.FC<ChatDetailsPanelProps> = ({
         <div>
           <h3 className="text-white font-semibold mb-2 text-sm">Tags</h3>
           <div className="flex flex-wrap gap-2">
-            {characterDetails.tags.map((tagItem: any, index: number) => (
+            {characterDetails.tags.map((tagItem, index) => (
               <span
                 key={index}
                 className="px-2.5 py-1 rounded-md text-xs bg-[#11111a] text-gray-200 border border-gray-700/60 hover:border-gray-600/60 transition-colors"

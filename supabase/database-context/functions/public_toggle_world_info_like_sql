@@ -2,4 +2,58 @@ CREATE OR REPLACE FUNCTION "public"."toggle_world_info_like"("p_world_info_id" "
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 DECLARE
-  v_user_id UUID;
+  v_user_id uuid;
+  v_deleted uuid;
+  v_inserted uuid;
+  v_new_count integer;
+  v_is_liked boolean := false;
+BEGIN
+  v_user_id := auth.uid();
+  IF v_user_id IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  DELETE FROM public.user_reactions ur
+  WHERE ur.user_id = v_user_id
+    AND ur.target_type = 'world'::public.reaction_target_type
+    AND ur.target_id = p_world_info_id
+    AND ur.reaction_type = 'like'::public.reaction_type_enum
+  RETURNING ur.id INTO v_deleted;
+
+  IF v_deleted IS NULL THEN
+    INSERT INTO public.user_reactions (user_id, target_type, target_id, reaction_type, metadata)
+    VALUES (
+      v_user_id,
+      'world'::public.reaction_target_type,
+      p_world_info_id,
+      'like'::public.reaction_type_enum,
+      '{}'::jsonb
+    )
+    ON CONFLICT (user_id, target_type, target_id, reaction_type) DO NOTHING
+    RETURNING id INTO v_inserted;
+
+    v_is_liked := true;
+
+    IF v_inserted IS NULL THEN
+      PERFORM 1
+      FROM public.user_reactions ur
+      WHERE ur.user_id = v_user_id
+        AND ur.target_type = 'world'::public.reaction_target_type
+        AND ur.target_id = p_world_info_id
+        AND ur.reaction_type = 'like'::public.reaction_type_enum;
+      IF NOT FOUND THEN
+        v_is_liked := false;
+      END IF;
+    END IF;
+  END IF;
+
+  SELECT likes_count INTO v_new_count
+  FROM public.world_infos
+  WHERE id = p_world_info_id;
+
+  RETURN jsonb_build_object(
+    'liked', v_is_liked,
+    'likes_count', COALESCE(v_new_count, 0)
+  );
+END;
+$$;

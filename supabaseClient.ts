@@ -1,6 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL as string;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY as string;
+import type { Database } from './src/integrations/supabase/types';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+	throw new Error('Missing Supabase environment configuration. Set SUPABASE_URL and SUPABASE_ANON_KEY.');
+}
+
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);

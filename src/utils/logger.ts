@@ -7,7 +7,9 @@ const isEnabled = () => {
       const flag = window.localStorage.getItem('debug:chat');
       if (flag === '1' || flag === 'true') return true;
     }
-  } catch {}
+  } catch (storageError) {
+    console.warn('Failed to read debug flag from localStorage', storageError);
+  }
   // Fallback to env (only available at build-time)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const env = (import.meta as any)?.env;

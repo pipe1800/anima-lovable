@@ -3,14 +3,15 @@ import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ChatCard } from '@/components/ui/chat-card';
+import type { ChatHistoryEntry } from '@/types/chatHistory';
 
 interface ChatHistoryListProps {
   loading: boolean;
-  filteredChatHistory: any[];
+  filteredChatHistory: ChatHistoryEntry[];
   searchQuery: string;
   setSearchQuery: (v: string) => void;
   currentChatId?: string;
-  onSelectChat: (characterId: string, chatId: string) => void;
+  onSelectChat: (characterId: string | undefined, chatId: string) => void;
   onDeleteChat: (chatId: string) => void;
 }
 
@@ -31,9 +32,10 @@ const ChatHistoryListComponent: React.FC<ChatHistoryListProps> = ({
     setVisibleCount(PAGE_SIZE);
   }, [searchQuery, filteredChatHistory.length]);
 
-  const visibleChats = useMemo(() => (
-    (filteredChatHistory || []).slice(0, visibleCount)
-  ), [filteredChatHistory, visibleCount]);
+  const visibleChats = useMemo(
+    () => filteredChatHistory.slice(0, visibleCount),
+    [filteredChatHistory, visibleCount]
+  );
 
   const hasMore = (filteredChatHistory?.length || 0) > visibleCount;
 
@@ -67,17 +69,20 @@ const ChatHistoryListComponent: React.FC<ChatHistoryListProps> = ({
                   id: chat.id,
                   character: {
                     id: chat.character?.id,
-                    name: (() => { const n = chat.character?.name || chat.title || 'Unknown'; return n.length > 15 ? n.slice(0,15) + '…' : n; })(),
-                    avatar: chat.character?.avatar_url,
-                    image: chat.character?.avatar_url,
-                    tagline: chat.character?.tagline || chat.character?.short_description,
+                    name: (() => {
+                      const name = chat.character?.name || chat.title || 'Unknown';
+                      return name.length > 15 ? `${name.slice(0, 15)}…` : name;
+                    })(),
+                    avatar: chat.character?.avatar_url || undefined,
+                    image: chat.character?.avatar_url || undefined,
+                    tagline: chat.character?.tagline || chat.character?.short_description || undefined,
                   },
                   title: chat.title,
                   message_count: chat.message_count,
                   last_message_at: chat.last_message_at,
                   created_at: chat.created_at,
-                  chat_mode: chat.userSettings?.chat_mode,
-                  time_awareness_enabled: chat.userSettings?.time_awareness_enabled,
+                  chat_mode: chat.userSettings?.chat_mode || undefined,
+                  time_awareness_enabled: chat.userSettings?.time_awareness_enabled || undefined,
                   last_message: chat.messages?.[0]?.content || chat.lastMessage || null,
                 }}
                 onContinue={() => {

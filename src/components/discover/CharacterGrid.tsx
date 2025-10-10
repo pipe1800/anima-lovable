@@ -18,6 +18,8 @@ import { CharacterCardSkeleton } from './CharacterCardSkeleton';
 import { getThumbUrl } from '@/utils/image';
 import { useQueryClient } from '@tanstack/react-query';
 import { chatQueryConfigs } from '@/data/chats/queryKeys';
+import type { PublicCharacterCard } from '@/data/characters/queries';
+import type { Character } from '@/types/chat';
 
 interface CharacterGridProps {
   characters: PublicCharacter[];
@@ -38,21 +40,29 @@ export type CharacterCard = {
   visibility: string;
 };
 
-type PublicCharacter = {
-  id: string;
-  name: string;
-  short_description: string | null;
-  avatar_url: string | null;
-  interaction_count: number;
-  created_at: string;
-  creator: any;
-  chats_count: number;
-  likes_count: number;
-  favorites_count: number;
-  tags: { id: number; name: string }[];
-};
+export type PublicCharacter = PublicCharacterCard;
 
 const ITEMS_PER_PAGE = 20;
+
+const extractCreatorUsername = (creator: PublicCharacter['creator']): string | null => {
+  if (!creator) return null;
+  if (typeof creator === 'string') return creator;
+  if (typeof creator === 'object' && 'username' in creator) {
+    const value = (creator as Record<string, unknown>).username;
+    return typeof value === 'string' ? value : null;
+  }
+  return null;
+};
+
+const toChatCharacter = (character: PublicCharacter): Character => ({
+  id: character.id,
+  name: character.name,
+  avatar: character.avatar_url ?? undefined,
+  avatar_url: character.avatar_url,
+  short_description: character.short_description,
+  interaction_count: character.interaction_count,
+  created_at: character.created_at,
+});
 
 const PaginationControls = ({ 
   currentPage, 
@@ -171,7 +181,7 @@ export function CharacterGrid({
       navigate('/auth?mode=signup');
     } else {
       // Deferred creation model: just navigate; ChatInterface will create on first message
-      startChat(character);
+      startChat(toChatCharacter(character));
     }
   };
 
@@ -206,7 +216,9 @@ export function CharacterGrid({
       <div 
         className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6 lg:gap-8 transition-all duration-500 ease-in-out"
       >
-        {displayCharacters.map((character, index) => (
+        {displayCharacters.map((character, index) => {
+          const creatorUsername = extractCreatorUsername(character.creator);
+          return (
           <Card
             key={character.id}
             className="bg-[#121212] border-gray-700/50 hover:border-[#FF7A00]/50 transition-all duration-300 hover:shadow-lg hover:shadow-[#FF7A00]/20 relative overflow-hidden h-64 sm:h-80 group cursor-pointer"
@@ -293,16 +305,16 @@ export function CharacterGrid({
                       <span className="text-sm sm:text-base">{character.favorites_count}</span>
                     </div>
                   </div>
-                  {character.creator && (
+                  {creatorUsername && (
                     <span className="text-xs text-gray-500 truncate max-w-[80px] sm:max-w-[120px]">
-                      @{character.creator.username}
+                      @{creatorUsername}
                     </span>
                   )}
                 </div>
               </div>
             </CardContent>
           </Card>
-        ))}
+        );})}
       </div>
 
       {/* Empty State */}

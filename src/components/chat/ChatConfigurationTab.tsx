@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, Plus, Edit, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -10,28 +10,86 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { WorldInfoDropdown } from './WorldInfoDropdown';
+import type { WorldInfoSummary } from './WorldInfoDropdown';
 import { useUserGlobalChatSettings, useUpdateGlobalChatSettings } from '@/data/chats/settings';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { Persona } from '@/data/personas/mutations';
 import { useQueryClient } from '@tanstack/react-query';
-import { UserGlobalChatSettings } from '@/types/chatSettings';
+import type { UserGlobalChatSettings } from '@/types/chatSettings';
 import { updateChatSelectedPersona } from '@/lib/chat-persona-operations';
 import { updateUserDefaultPersona } from '@/lib/character-persona-operations';
 import { CharacterChatModeToggle } from '@/components/character-creator/CharacterChatModeToggle';
 
+type ToggleableAddonKey =
+  | 'dynamic_world_info'
+  | 'enhanced_memory'
+  | 'mood_tracking'
+  | 'clothing_inventory'
+  | 'location_tracking'
+  | 'time_and_weather'
+  | 'relationship_status'
+  | 'character_position'
+  | 'enchantment_status'
+  | 'item_inventory'
+  | 'chain_of_thought'
+  | 'few_shot_examples'
+  | 'god_mode';
+
+type StatefulAddonKey =
+  | 'mood_tracking'
+  | 'clothing_inventory'
+  | 'location_tracking'
+  | 'time_and_weather'
+  | 'relationship_status'
+  | 'character_position'
+  | 'enchantment_status'
+  | 'item_inventory';
+
+const STATEFUL_KEYS: StatefulAddonKey[] = [
+  'mood_tracking',
+  'clothing_inventory',
+  'location_tracking',
+  'time_and_weather',
+  'relationship_status',
+  'character_position',
+  'enchantment_status',
+  'item_inventory',
+];
+
+const isStatefulAddon = (key: ToggleableAddonKey): key is StatefulAddonKey =>
+  STATEFUL_KEYS.includes(key as StatefulAddonKey);
+
+type AddonDefinition = {
+  name: string;
+  cost: number;
+  description: string;
+  available: boolean;
+  dynamicCost: number | null;
+  comingSoon?: boolean;
+};
+
+type AddonCategoryMap = Record<string, Partial<Record<ToggleableAddonKey, AddonDefinition>>>;
+
+export interface PersonaLike {
+  id: string;
+  name: string | null;
+  bio: string | null;
+  lore?: string | null;
+  avatar_url: string | null;
+}
+
 interface ChatConfigurationTabProps {
   characterId: string;
   userId: string;
-  personas: Persona[];
-  selectedPersona: Persona | null;
-  setSelectedPersona: (persona: Persona | null) => void;
+  personas: PersonaLike[];
+  selectedPersona: PersonaLike | null;
+  setSelectedPersona: (persona: PersonaLike | null) => void;
   onPersonaSaved?: () => void; // Callback to notify parent that persona was saved
   setShowPersonaModal: (show: boolean) => void;
   setShowEditPersonaModal?: (show: boolean) => void;
-  setPersonaToEdit?: (persona: Persona | null) => void;
+  setPersonaToEdit?: (persona: PersonaLike | null) => void;
   worldInfoDropdownVisible: boolean;
-  onWorldInfoSelect: (worldInfo: any) => void;
+  onWorldInfoSelect: (worldInfo: WorldInfoSummary | null) => void;
   currentChatId?: string;
   selectedWorldInfoId?: string | null;
   // Moved from Details tab -> now configured here per chat
@@ -91,28 +149,9 @@ export const ChatConfigurationTab = ({
   const effectiveSettings = globalSettings ? { ...globalSettings, ...pendingChanges } : null;
 
   // Count active stateful tracking addons for Guest Pass limits (using effective settings)
-  const activeStatefulAddons = effectiveSettings ? [
-    effectiveSettings.mood_tracking,
-    effectiveSettings.clothing_inventory,
-    effectiveSettings.location_tracking,
-    effectiveSettings.time_and_weather,
-    effectiveSettings.relationship_status,
-    effectiveSettings.character_position,
-    (effectiveSettings as any).enchantment_status,
-    (effectiveSettings as any).item_inventory,
-  ].filter(Boolean).length : 0;
-
-  // Define which keys are considered stateful tracking addons (for limit checks)
-  const STATEFUL_KEYS: Array<keyof UserGlobalChatSettings | string> = [
-    'mood_tracking',
-    'clothing_inventory',
-    'location_tracking',
-    'time_and_weather',
-    'relationship_status',
-    'character_position',
-    'enchantment_status', // NEW
-    'item_inventory', // NEW
-  ];
+  const activeStatefulAddons = effectiveSettings
+    ? STATEFUL_KEYS.reduce((count, key) => (effectiveSettings[key] ? count + 1 : count), 0)
+    : 0;
 
   // Display persona shows pending selection or current selection
   const displayPersona = hasPersonaChange
@@ -124,7 +163,7 @@ export const ChatConfigurationTab = ({
   const isGuestPass = userPlan === 'Guest Pass';
   const isTrueFanOrWhale = userPlan === 'True Fan' || userPlan === 'The Whale';
 
-  const addonCategories = {
+  const addonCategories: AddonCategoryMap = {
     'Core Enhancements': {
       dynamic_world_info: { 
         name: 'Dynamic World Info', 
@@ -197,14 +236,14 @@ export const ChatConfigurationTab = ({
         name: 'Enchantment Status',
         cost: 5,
         description: 'Track magical effects & buffs',
-        available: isTrueFanOrWhale || (effectiveSettings as any)?.enchantment_status || activeStatefulAddons < 2,
+  available: isTrueFanOrWhale || effectiveSettings?.enchantment_status || activeStatefulAddons < 2,
         dynamicCost: null
       },
       item_inventory: {
         name: 'Item Inventory',
         cost: 5,
         description: 'Track items carried',
-        available: isTrueFanOrWhale || (effectiveSettings as any)?.item_inventory || activeStatefulAddons < 2,
+  available: isTrueFanOrWhale || effectiveSettings?.item_inventory || activeStatefulAddons < 2,
         dynamicCost: null
       },
     },
@@ -229,10 +268,7 @@ export const ChatConfigurationTab = ({
   };
 
   // Handler functions for global settings - now tracks changes instead of immediately saving
-  const handleToggleAddon = (addonKey: keyof Pick<UserGlobalChatSettings, 
-    'dynamic_world_info' | 'enhanced_memory' | 'mood_tracking' | 'clothing_inventory' | 
-    'location_tracking' | 'time_and_weather' | 'relationship_status' | 'character_position' | 
-    'chain_of_thought' | 'few_shot_examples' | 'god_mode'> | 'enchantment_status' | 'item_inventory') => {
+  const handleToggleAddon = (addonKey: ToggleableAddonKey) => {
     
     if (!globalSettings) return;
 
@@ -240,7 +276,7 @@ export const ChatConfigurationTab = ({
     const newValue = !currentValue;
 
     // Guest Pass safeguard: prevent enabling more than 2 stateful tracking addons
-    if (isGuestPass && STATEFUL_KEYS.includes(addonKey)) {
+    if (isGuestPass && isStatefulAddon(addonKey)) {
       // If turning ON and this would exceed the limit, block and notify
       const prospectiveCount = activeStatefulAddons + (currentValue ? 0 : 1);
       if (newValue && prospectiveCount > 2) {
@@ -268,7 +304,7 @@ export const ChatConfigurationTab = ({
   // Pending local-only settings for per-chat values and world info
   const [pendingChatMode, setPendingChatMode] = useState<typeof chatMode>(chatMode);
   const [pendingTimeAwareness, setPendingTimeAwareness] = useState<boolean>(timeAwarenessEnabled);
-  const [pendingWorldInfo, setPendingWorldInfo] = useState<any | null>(null);
+  const [pendingWorldInfo, setPendingWorldInfo] = useState<WorldInfoSummary | null>(null);
 
   useEffect(() => setPendingChatMode(chatMode), [chatMode]);
   useEffect(() => setPendingTimeAwareness(timeAwarenessEnabled), [timeAwarenessEnabled]);
@@ -277,20 +313,6 @@ export const ChatConfigurationTab = ({
   useEffect(() => {
     onUnsavedChange?.(hasUnsavedChanges);
   }, [hasUnsavedChanges, onUnsavedChange]);
-
-  // Support external discard from parent via signal counter
-  useEffect(() => {
-    if (discardSignal !== undefined) {
-      // noop: on change, discard
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [discardSignal]);
-
-  // Override to actually discard when signal changes
-  useEffect(() => {
-    // If parent increments signal, discard local changes
-    // We track last seen value in a ref-less simple state
-  }, []);
 
   // Save all pending changes
   const handleSaveChanges = async () => {
@@ -359,7 +381,7 @@ export const ChatConfigurationTab = ({
   };
 
   // Discard pending changes
-  const handleDiscardChanges = () => {
+  const handleDiscardChanges = useCallback(() => {
     setPendingChanges({});
     setPendingPersonaId(null);
     setHasPersonaChange(false);
@@ -368,7 +390,7 @@ export const ChatConfigurationTab = ({
     setPendingChatMode(chatMode);
     setPendingTimeAwareness(timeAwarenessEnabled);
     toast.info('Changes discarded');
-  };
+  }, [chatMode, timeAwarenessEnabled]);
 
   // React to discardSignal increment to discard locally
   const [lastDiscardSignal, setLastDiscardSignal] = useState<number | undefined>(discardSignal);
@@ -377,8 +399,7 @@ export const ChatConfigurationTab = ({
       setLastDiscardSignal(discardSignal);
       handleDiscardChanges();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [discardSignal]);
+  }, [discardSignal, handleDiscardChanges, lastDiscardSignal]);
 
   if (settingsLoading) {
     return (
@@ -506,7 +527,7 @@ export const ChatConfigurationTab = ({
         </div>
         
         <WorldInfoDropdown 
-          isVisible={true}
+          isVisible={worldInfoDropdownVisible}
           onWorldInfoSelect={(wi) => {
             setPendingWorldInfo(wi);
             setHasUnsavedChanges(true);
@@ -576,9 +597,10 @@ export const ChatConfigurationTab = ({
                 {categoryName}
               </h4>
               <div className="grid grid-cols-2 gap-3">
-                {Object.entries(addons).map(([key, details]) => {
-                  const isEnabled = effectiveSettings?.[key as keyof UserGlobalChatSettings] as boolean;
-                  const isComingSoon = (details as any).comingSoon;
+                {(Object.entries(addons) as Array<[ToggleableAddonKey, AddonDefinition | undefined]>).map(([key, details]) => {
+                  if (!details) return null;
+                  const isEnabled = Boolean(effectiveSettings?.[key]);
+                  const isComingSoon = Boolean(details.comingSoon);
                   return (
                     <div key={key} className={`flex flex-col p-3 rounded-lg border ${
                       details.available && !isComingSoon
@@ -606,7 +628,7 @@ export const ChatConfigurationTab = ({
                         ) : (
                           <Switch
                             checked={isEnabled}
-                            onCheckedChange={() => handleToggleAddon(key as any)}
+                            onCheckedChange={() => handleToggleAddon(key)}
                             disabled={saving || !details.available}
                             className="data-[state=checked]:bg-[#FF7A00]"
                           />

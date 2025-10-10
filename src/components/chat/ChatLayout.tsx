@@ -1,40 +1,112 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
-// import { supabase } from '@/db/client';
-import { Chats } from '@/data';
-import { CharacterInteractions } from '@/data';
-import type { Persona } from '@/data/personas/mutations';
-import { useUserGlobalChatSettings } from '@/data/chats/settings';
-import { CharacterUserSettings } from '@/data';
-import { getBrowserTimezone } from '@/utils/timezone';
-import AppSidebar from '@/components/dashboard/AppSidebar';
-import { ContextSidebar } from './ContextSidebar';
-import { UnifiedSidebarToggle } from './UnifiedSidebarToggle';
-import { MobileHeader } from '@/components/layout/MobileHeader';
-import { toast } from 'sonner';
-import { useTutorial } from '@/contexts/TutorialContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { MemoriesDialog } from './MemoriesDialog';
-import ChatHeader from './ChatHeader';
-import { ChatModeMismatchModal } from '@/components/character-creator/ChatModeMismatchModal';
-import { ChatModeChangeModal } from '@/components/character-creator/ChatModeChangeModal';
-import { useCharacterMemories } from '@/hooks/useCharacterMemories';
-import type { TrackedContext, Character } from '@/types/chat';
-import { getMemoryCostExplanation } from '@/lib/memory-cost-calculator';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { chatQueryConfigs, chatQueryKeys } from '@/data/chats/queryKeys';
-import logger from '@/utils/logger';
-// import RightPanel from './RightPanel';
-const RightPanelLazy = lazy(() => import('./RightPanel'));
+import { toast } from 'sonner';
+
+import AppSidebar from '@/components/dashboard/AppSidebar';
+import { MobileHeader } from '@/components/layout/MobileHeader';
+import { ChatModeChangeModal } from '@/components/character-creator/ChatModeChangeModal';
+import { ChatModeMismatchModal } from '@/components/character-creator/ChatModeMismatchModal';
+import { ContextSidebar } from './ContextSidebar';
+import ChatHeader from './ChatHeader';
+import { MemoriesDialog } from './MemoriesDialog';
 import PersonaCreateModal from './PersonaCreateModal';
 import PersonaEditModal from './PersonaEditModal';
-import { useWorldInfoSelection } from '@/hooks/chat/useWorldInfoSelection';
+import { useUserGlobalChatSettings } from '@/data/chats/settings';
+import { chatQueryConfigs, chatQueryKeys } from '@/data/chats/queryKeys';
 import { usePersonaManager, personaKeys } from '@/hooks/chat/usePersonaManager';
-import { createChat } from '@/lib/chat-operations';
+import { useWorldInfoSelection } from '@/hooks/chat/useWorldInfoSelection';
+import { useCharacterMemories } from '@/hooks/useCharacterMemories';
+import { useTutorial } from '@/contexts/TutorialContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { getMemoryCostExplanation } from '@/lib/memory-cost-calculator';
 import { createMemory as createMemoryOp } from '@/lib/memory-operations';
-import { buildGreetingVariants } from '@/lib/greeting-utils';
+import { getBrowserTimezone } from '@/utils/timezone';
+import logger from '@/utils/logger';
+import { Chats, CharacterInteractions, CharacterProfileView, CharacterUserSettings } from '@/data';
+import type { Persona } from '@/data/personas/mutations';
+import { convertDatabaseContextToTrackedContext } from '@/utils/contextConverter';
+import type { Character } from '@/types/chat';
+import type { TrackedContext } from '@/types/chat';
+import type { CharacterFullData } from '@/data/characters/profileView';
+import type { UserGlobalChatSettings } from '@/types/chatSettings';
+import type { ChatHistoryEntry } from '@/types/chatHistory';
+// import RightPanel from './RightPanel';
+const RightPanelLazy = lazy(() => import('./RightPanel'));
 
-// ChatLayout component
+type CharacterSummary = Awaited<ReturnType<typeof CharacterProfileView.getPublicCharacterSummary>>['data'];
+type CharacterDetails = CharacterFullData | CharacterSummary | null;
+type ChatModeResult = Awaited<ReturnType<typeof Chats.getChatMode>>['data'];
+type UserCharacterSettingsRow = Awaited<ReturnType<typeof CharacterUserSettings.getUserCharacterSettings>>['data'];
+type PersonaDraftState = {
+  name: string;
+  bio: string;
+  lore: string;
+  avatar_url: string | null;
+};
+
+interface PersonaManagerReturn {
+  personas: Persona[];
+  selectedPersona: Persona | null;
+  showCreateModal: boolean;
+  setShowCreateModal: React.Dispatch<React.SetStateAction<boolean>>;
+  showEditModal: boolean;
+  setShowEditModal: React.Dispatch<React.SetStateAction<boolean>>;
+  personaToEdit: Persona | null;
+  setPersonaToEdit: React.Dispatch<React.SetStateAction<Persona | null>>;
+  currentPersonaDraft: PersonaDraftState;
+  setCurrentPersonaDraft: React.Dispatch<React.SetStateAction<PersonaDraftState>>;
+  createPersona: (payload: { name: string; bio: string | null; lore: string | null; avatar_url: string | null }) => Promise<Persona>;
+  deletePersona: (id: string) => Promise<void>;
+  setSelectedPersona: (persona: Persona | null) => void;
+}
+
+interface ChatMessagesUpdatedDetail {
+  chatId: string;
+  count: number;
+}
+
+type ChatMessagesUpdatedEvent = CustomEvent<ChatMessagesUpdatedDetail>;
+
+interface CharacterDefinitionSource {
+  character_definitions?: {
+    initial_addon_context_enabled?: boolean;
+    initial_addon_context?: Record<string, unknown> | null;
+    personality_summary?: string | Record<string, unknown> | null;
+  };
+}
+
+interface PersonaSummaryContext {
+  initial_addon_context_enabled?: boolean;
+  initial_addon_context?: Record<string, unknown> | null;
+}
+
+type InitialContextKey =
+  | 'mood'
+  | 'clothing'
+  | 'location'
+  | 'time_weather'
+  | 'relationship'
+  | 'character_position'
+  | 'enchantment_status'
+  | 'item_inventory';
+
+interface WindowWithCharacterDetails extends Window {
+  characterDetails?: CharacterDefinitionSource | null;
+}
+
+const isCharacterDefinitionSource = (value: unknown): value is CharacterDefinitionSource => (
+  typeof value === 'object' && value !== null && 'character_definitions' in value
+);
+
+const safeParseJson = <T,>(value: string): T | null => {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+};
+
 interface ChatLayoutProps {
   character: Character;
   children: React.ReactNode;
@@ -43,9 +115,9 @@ interface ChatLayoutProps {
   onContextUpdate?: (context: TrackedContext) => void;
   onPersonaChange?: (personaId: string | null) => void;
   onWorldInfoChange?: (worldInfoId: string | null) => void;
-  characterDetails?: any; // pre-fetched character details to avoid refetch
+  characterDetails?: CharacterDetails; // pre-fetched character details to avoid refetch
   creditsBalanceOverride?: number; // provided by page to avoid duplicate /credits queries
-  globalSettingsOverride?: any; // provided by page to avoid duplicate global settings fetch
+  globalSettingsOverride?: UserGlobalChatSettings | null; // provided by page to avoid duplicate global settings fetch
   relationshipStage?: string | null; // NEW canonical relationship stage display
 }
 
@@ -97,7 +169,34 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const mobileUsername = profile?.username || currentUser?.email?.split('@')[0] || 'User';
 
   // Persona manager hook
-  const { personas, selectedPersona, setSelectedPersona, showCreateModal, setShowCreateModal, showEditModal, setShowEditModal, personaToEdit, setPersonaToEdit, currentPersonaDraft, setCurrentPersonaDraft, createPersona: createPersonaAsync, deletePersona: deletePersonaAsync } = usePersonaManager(currentUser?.id, currentChatId);
+  const personaManager: PersonaManagerReturn = usePersonaManager(currentUser?.id, currentChatId);
+  const resolvePersona = (value: PersonaManagerReturn['selectedPersona']): Persona | null => (
+    value && typeof value === 'object' && 'id' in value ? value as Persona : null
+  );
+
+  const extractPersonaId = (value: Persona | null): string | null => {
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    return typeof record.id === 'string' ? record.id : null;
+  };
+  const {
+    personas,
+    setSelectedPersona,
+    showCreateModal,
+    setShowCreateModal,
+    showEditModal,
+    setShowEditModal,
+    personaToEdit,
+    setPersonaToEdit,
+    currentPersonaDraft,
+    setCurrentPersonaDraft,
+    createPersona: createPersonaAsync,
+    deletePersona: deletePersonaAsync,
+  } = personaManager;
+  const selectedPersona: Persona | null = useMemo(
+    () => resolvePersona(personaManager.selectedPersona),
+    [personaManager.selectedPersona]
+  );
   const [isCreatingPersona, setIsCreatingPersona] = useState(false);
 
   // Tutorial state
@@ -108,25 +207,38 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   
   // Global settings (skip duplicate fetch)
   const { data: internalGlobalSettings } = useUserGlobalChatSettings({ enabled: !globalSettingsOverride });
-  const globalSettings = globalSettingsOverride || internalGlobalSettings;
+  const globalSettings = (globalSettingsOverride ?? internalGlobalSettings) ?? undefined;
+  const addonSettings = useMemo(() => {
+    if (!globalSettings) return undefined;
+    return {
+      moodTracking: globalSettings.mood_tracking,
+      clothingInventory: globalSettings.clothing_inventory,
+      locationTracking: globalSettings.location_tracking,
+      timeAndWeather: globalSettings.time_and_weather,
+      relationshipStatus: globalSettings.relationship_status,
+      characterPosition: globalSettings.character_position,
+      enchantmentStatus: globalSettings.enchantment_status,
+      itemInventory: globalSettings.item_inventory,
+    } as const;
+  }, [globalSettings]);
 
   // Message count (replaces HEAD count query): derived from unified chat hook via event
   const [currentChatMessageCount, setCurrentChatMessageCount] = useState(0);
   const messageCountLoading = false; // no network loading now
   useEffect(() => {
-    const handler = (e: any) => {
-      if (!e?.detail) return;
-      if (e.detail.chatId === currentChatId) {
-        setCurrentChatMessageCount(e.detail.count || 0);
-      }
+    const listener: EventListener = (event) => {
+      const customEvent = event as ChatMessagesUpdatedEvent;
+      const detail = customEvent.detail;
+      if (!detail || detail.chatId !== currentChatId) return;
+      setCurrentChatMessageCount(detail.count ?? 0);
     };
-    window.addEventListener('chat-messages-updated', handler);
-    return () => window.removeEventListener('chat-messages-updated', handler);
+    window.addEventListener('chat-messages-updated', listener);
+    return () => window.removeEventListener('chat-messages-updated', listener);
   }, [currentChatId]);
   
   // Memories Dialog state
   const [showMemoriesDialog, setShowMemoriesDialog] = useState(false);
-  const { memories, loading: memoriesLoading, error: memoriesError, refreshMemories, fetchMemories } = useCharacterMemories(
+  const { memories, loading: memoriesLoading, error: memoriesError, refreshMemories } = useCharacterMemories(
     character.id,
     currentUser?.id
   );
@@ -137,7 +249,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const [showMismatchModal, setShowMismatchModal] = useState(false);
   const [showChangeModal, setShowChangeModal] = useState(false);
   const [pendingChatMode, setPendingChatMode] = useState<'storytelling' | 'companion' | null>(null);
-  const [currentChat, setCurrentChat] = useState<any>(null);
+  const [currentChat, setCurrentChat] = useState<ChatModeResult | null>(null);
   
   // Time awareness state
   const [timeAwarenessEnabled, setTimeAwarenessEnabled] = useState(false);
@@ -188,36 +300,53 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   // React Query migrations
   // =========================
   // Character details
-  const characterDetailsQuery = useQuery({
+  const characterDetailsQuery = useQuery<CharacterSummary | null>({
     ...chatQueryConfigs.characterSummary(character.id),
-    enabled: !characterDetailsOverride, // skip if provided by parent
+    enabled: !characterDetailsOverride,
   });
-  const characterDetails = useMemo(() => {
-    if (characterDetailsOverride) return characterDetailsOverride;
-    const d: any = characterDetailsQuery.data;
-    return d?.data ?? d ?? null;
-  }, [characterDetailsOverride, characterDetailsQuery.data]);
+  const characterDetails = useMemo<CharacterDetails>(() => (
+    characterDetailsOverride ?? characterDetailsQuery.data ?? null
+  ), [characterDetailsOverride, characterDetailsQuery.data]);
 
   // User chats
-  const { data: chats = [], isLoading: chatsLoading } = useQuery({
+  const { data: chats = [], isLoading: chatsLoading } = useQuery<ChatHistoryEntry[]>({
     queryKey: ['user', 'chats', currentUser?.id],
     queryFn: async () => {
-      if (!currentUser?.id) return [] as any[];
+      if (!currentUser?.id) return [];
       const { data } = await Chats.getUserChatsPaginated(currentUser.id, 1, 50);
-      return data || [];
+      return (data ?? []).map((chat) => {
+        const entry: ChatHistoryEntry = {
+          id: chat.chat_id,
+          title: chat.character_name,
+          character: {
+            id: chat.character_id,
+            name: chat.character_name ?? 'Unknown',
+            avatar_url: chat.character_avatar_url,
+            short_description: null,
+            tagline: null,
+          },
+          message_count: chat.message_count ?? 0,
+          last_message_at: chat.last_message?.created_at ?? null,
+          created_at: chat.chat_created_at,
+          userSettings: null,
+          lastMessage: chat.last_message?.content ?? null,
+          messages: chat.last_message ? [{ content: chat.last_message.content }] : null,
+        };
+        return entry;
+      });
     },
     enabled: !!currentUser?.id,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
   const filteredChatHistory = useMemo(() => {
-    const base = chats || [];
-    if (!searchQuery.trim()) return base;
-    const q = searchQuery.toLowerCase();
-    return base.filter((chat: any) =>
-      chat.character?.name?.toLowerCase().includes(q) ||
-      chat.title?.toLowerCase().includes(q)
-    );
+    if (!searchQuery.trim()) return chats;
+    const query = searchQuery.toLowerCase();
+    return chats.filter((chat) => {
+      const characterName = chat.character?.name?.toLowerCase() ?? '';
+      const title = chat.title?.toLowerCase() ?? '';
+      return characterName.includes(query) || title.includes(query);
+    });
   }, [chats, searchQuery]);
 
   // Likes / Favorites
@@ -236,44 +365,50 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   useEffect(() => setIsFavorited(!!favoritedQuery.data), [favoritedQuery.data]);
 
   // User character settings
-  const userCharSettingsQuery = useQuery({
+  const userCharSettingsQuery = useQuery<UserCharacterSettingsRow | null>({
     queryKey: ['user', 'character-settings', currentUser?.id, character.id],
-    queryFn: async () => currentUser ? CharacterUserSettings.getUserCharacterSettings(currentUser.id, character.id) : null,
+    queryFn: async () => {
+      if (!currentUser?.id) return null;
+      const { data } = await CharacterUserSettings.getUserCharacterSettings(currentUser.id, character.id);
+      return data ?? null;
+    },
     enabled: !!currentUser?.id,
   });
+  const userCharacterSettings = userCharSettingsQuery.data;
   useEffect(() => {
-    const settings: any = userCharSettingsQuery.data;
-    if (settings) {
-      setChatMode(settings.chat_mode);
-      setTimeAwarenessEnabled(settings.time_awareness_enabled || false);
+    const mode = userCharacterSettings?.chat_mode;
+    if (mode === 'storytelling' || mode === 'companion') {
+      setChatMode(mode);
     }
-  }, [userCharSettingsQuery.data]);
+    if (userCharacterSettings?.time_awareness_enabled !== undefined) {
+      setTimeAwarenessEnabled(Boolean(userCharacterSettings.time_awareness_enabled));
+    }
+  }, [userCharacterSettings?.chat_mode, userCharacterSettings?.time_awareness_enabled]);
 
   // Current chat metadata
-  const currentChatModeQuery = useQuery({
+  const currentChatModeQuery = useQuery<ChatModeResult | null>({
     queryKey: ['chat', 'mode', currentChatId, currentUser?.id],
     queryFn: async () => {
       if (!currentChatId || !currentUser?.id) return null;
       const { data } = await Chats.getChatMode(currentChatId, currentUser.id);
-      return data;
+      return data ?? null;
     },
     enabled: !!currentChatId && !!currentUser?.id,
   });
   useEffect(() => {
-    const chatData: any = currentChatModeQuery.data;
-    if (chatData) setCurrentChat(chatData);
-    const settings: any = userCharSettingsQuery.data;
-    if (chatData?.chat_mode && settings?.chat_mode && chatData.chat_mode !== settings.chat_mode) {
-      setShowMismatchModal(true);
-    }
-  }, [currentChatModeQuery.data, userCharSettingsQuery.data]);
+    const chatData = currentChatModeQuery.data;
+    setCurrentChat(chatData ?? null);
+    const chatModeValue = chatData?.chat_mode;
+    const settingsMode = userCharacterSettings?.chat_mode;
+    setShowMismatchModal(Boolean(chatModeValue && settingsMode && chatModeValue !== settingsMode));
+  }, [currentChatModeQuery.data, userCharacterSettings?.chat_mode]);
 
   // Notify parent when persona changes (from hook)
   useEffect(() => {
-    if (onPersonaChange) {
-      logger.debug('🎭 ChatLayout: Notifying parent of persona change:', selectedPersona?.id);
-      onPersonaChange(selectedPersona?.id || null);
-    }
+    if (!onPersonaChange) return;
+    const personaId = extractPersonaId(selectedPersona);
+    logger.debug('🎭 ChatLayout: Notifying parent of persona change:', personaId);
+    onPersonaChange(personaId);
   }, [selectedPersona, onPersonaChange]);
 
   // Reload persona data for current chat -> invalidate selected query
@@ -293,7 +428,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       const newState = await CharacterInteractions.toggleCharacterLike(character.id, currentUser.id);
       setIsLiked(newState);
       queryClient.invalidateQueries({ queryKey: ['character', 'liked', currentUser?.id, character.id] });
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error('Error updating like status:', error);
     }
   };
@@ -304,7 +439,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       const newState = await CharacterInteractions.toggleCharacterFavorite(character.id, currentUser.id);
       setIsFavorited(newState);
       queryClient.invalidateQueries({ queryKey: ['character', 'favorited', currentUser?.id, character.id] });
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error('Error updating favorite status:', error);
     }
   };
@@ -344,7 +479,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
   const handleRightPanelToggle = useCallback(() => {
     logger.debug('🔧 Right panel toggle clicked:', { isActive, currentStep, rightPanelOpen });
     setRightPanelOpen(prev => !prev);
-  }, [isActive, currentStep]);
+  }, [isActive, currentStep, rightPanelOpen]);
 
   // Advance tutorial after panel actually opens (Step 3 -> 4)
   useEffect(() => {
@@ -365,10 +500,12 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = (event) => {
+        const result = event.target?.result;
+        if (typeof result !== 'string') return;
         setCurrentPersonaDraft(prev => ({
           ...prev,
-          avatar_url: e.target?.result as string
+          avatar_url: result
         }));
       };
       reader.readAsDataURL(file);
@@ -393,10 +530,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         lore: currentPersonaDraft.lore.trim() || null,
         avatar_url: currentPersonaDraft.avatar_url,
       });
-      setSelectedPersona(newPersona as Persona);
+      setSelectedPersona(newPersona);
       setShowCreateModal(false);
       toast.success('Persona created successfully!');
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error('Error creating persona:', error);
       toast.error('Failed to create persona');
     } finally {
@@ -408,7 +545,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     try {
       await deletePersonaAsync(id);
       toast.success('Persona removed');
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error('Error removing persona:', error);
       toast.error('Failed to remove persona');
     }
@@ -418,9 +555,9 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
     if (!currentUser) return;
 
     // Optimistically remove from chat history cache
-    queryClient.setQueryData(['user', 'chats', currentUser.id], (old: any[] | undefined) => {
+    queryClient.setQueryData<ChatHistoryEntry[]>(['user', 'chats', currentUser.id], (old) => {
       if (!old) return old;
-      return old.filter((c: any) => c.id !== chatId);
+      return old.filter(chat => chat.id !== chatId);
     });
 
     // If deleting the currently open chat, navigate to character base route immediately
@@ -435,7 +572,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       toast.success('Chat deleted successfully');
       // Ensure server truth
       queryClient.invalidateQueries({ queryKey: ['user', 'chats', currentUser.id] });
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error('Error deleting chat:', error);
       toast.error('Failed to delete chat');
       // Revalidate to restore correct state if optimistic update was wrong
@@ -461,7 +598,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         description: 'A new chat has been created with the updated mode'
       });
       queryClient.invalidateQueries({ queryKey: ['user', 'character-settings', currentUser.id, character.id] });
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error('Error updating chat mode:', error);
       toast.error('Failed to update chat mode');
     } finally {
@@ -484,7 +621,7 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           : 'The character will no longer react to response delays'
       });
       queryClient.invalidateQueries({ queryKey: ['user', 'character-settings', currentUser.id, character.id] });
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error('Error updating time awareness:', error);
       toast.error('Failed to update time awareness setting');
     } finally {
@@ -528,9 +665,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       } else {
         throw new Error(data?.message || data?.error || 'Failed to create memory');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Please try again later.';
       logger.error('Error creating memory:', error);
-      toast.error('Failed to create memory', { description: error.message || 'Please try again later.' });
+      toast.error('Failed to create memory', { description: message });
     } finally {
       setIsCreatingMemory(false);
     }
@@ -542,25 +680,16 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         if (!currentChatId || !currentUser?.id || !character?.id) return;
         const { data, error } = await Chats.getChatContext({ chatId: currentChatId, userId: currentUser.id, characterId: character.id });
         if (error) {
-          logger.warn('Context fetch skipped/failed:', error.message || error.toString());
+          const message = 'message' in error ? (error as { message?: string }).message : String(error);
+          logger.warn('Context fetch skipped/failed:', message);
           return;
         }
-        if (data?.current_context) {
-          const raw = data.current_context as any;
-          const converted = {
-            moodTracking: raw?.mood || 'No context',
-            clothingInventory: raw?.clothing || 'No context',
-            locationTracking: raw?.location || 'No context',
-            timeAndWeather: raw?.time_weather || 'No context',
-            relationshipStatus: raw?.relationship || 'No context',
-            characterPosition: raw?.character_position || 'No context',
-            enchantmentStatus: raw?.enchantment_status || 'No context',
-            itemInventory: raw?.item_inventory || 'No context'
-          };
-          if (onContextUpdate) onContextUpdate(converted);
+        const tracked = data?.current_context ? convertDatabaseContextToTrackedContext(data.current_context) : null;
+        if (tracked && onContextUpdate) {
+          onContextUpdate(tracked);
         }
-      } catch (e:any) {
-        logger.error('Failed to fetch initial context:', e);
+      } catch (error: unknown) {
+        logger.error('Failed to fetch initial context:', error);
       }
     };
     fetchInitialContext();
@@ -568,26 +697,47 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
 
   const preChatInitialContextSeededRef = useRef(false);
   useEffect(() => {
-    if (currentChatId) return; // only pre-chat
-    if (preChatInitialContextSeededRef.current) return;
-    if (!onContextUpdate) return;
-    const def = (characterDetailsOverride || (window as any).characterDetails || {} as any).character_definitions || (character as any).character_definitions || {};
-    let initialCtx: any = null;
+    if (currentChatId || preChatInitialContextSeededRef.current || !onContextUpdate) return;
+
+    const windowCharacterDetails = typeof window !== 'undefined'
+      ? (window as WindowWithCharacterDetails).characterDetails
+      : null;
+
+    const definitionSource = (
+      (characterDetailsOverride && isCharacterDefinitionSource(characterDetailsOverride) ? characterDetailsOverride : null)
+      ?? (windowCharacterDetails && isCharacterDefinitionSource(windowCharacterDetails) ? windowCharacterDetails : null)
+      ?? (isCharacterDefinitionSource(character as unknown) ? character as CharacterDefinitionSource : null)
+    );
+
+    const definitions = definitionSource?.character_definitions ?? null;
+    if (!definitions) return;
+
+    let initialCtx: Record<string, unknown> | null = null;
     try {
-      if (def.initial_addon_context_enabled && def.initial_addon_context && typeof def.initial_addon_context === 'object') {
-        initialCtx = def.initial_addon_context;
-      } else if (def.personality_summary) {
-        const parsed = typeof def.personality_summary === 'string' ? JSON.parse(def.personality_summary) : def.personality_summary;
-        if (parsed?.initial_addon_context_enabled && parsed?.initial_addon_context && typeof parsed.initial_addon_context === 'object') {
-          initialCtx = parsed.initial_addon_context;
+      if (definitions.initial_addon_context_enabled && definitions.initial_addon_context && typeof definitions.initial_addon_context === 'object') {
+        initialCtx = definitions.initial_addon_context;
+      } else if (definitions.personality_summary) {
+        const parsedSummary = typeof definitions.personality_summary === 'string'
+          ? safeParseJson<PersonaSummaryContext>(definitions.personality_summary)
+          : definitions.personality_summary as PersonaSummaryContext | null;
+        if (parsedSummary?.initial_addon_context_enabled && parsedSummary.initial_addon_context && typeof parsedSummary.initial_addon_context === 'object') {
+          initialCtx = parsedSummary.initial_addon_context;
         }
       }
-    } catch { /* swallow */ }
+    } catch (error) {
+      logger.debug('Failed to parse initial addon context; continuing without seeding', error);
+    }
+
     if (!initialCtx) return;
-    const pick = (k: string) => {
-      const v = initialCtx[k];
-      return (typeof v === 'string' && v.trim()) ? v.trim() : 'No context';
+
+    const pick = (key: InitialContextKey) => {
+      const value = initialCtx?.[key];
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+      return 'No context';
     };
+
     const mapped: TrackedContext = {
       moodTracking: pick('mood'),
       clothingInventory: pick('clothing'),
@@ -596,13 +746,18 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
       relationshipStatus: pick('relationship'),
       characterPosition: pick('character_position'),
       enchantmentStatus: pick('enchantment_status'),
-      itemInventory: pick('item_inventory')
+      itemInventory: pick('item_inventory'),
     };
-    // If all are 'No context', skip
-    const anyValue = Object.values(mapped).some(v => v && v !== 'No context');
-    if (!anyValue) return;
+
+    const hasContextValue = Object.values(mapped).some(value => value && value !== 'No context');
+    if (!hasContextValue) return;
+
     preChatInitialContextSeededRef.current = true;
-    try { onContextUpdate(mapped); } catch {}
+    try {
+      onContextUpdate(mapped);
+    } catch (error) {
+      logger.warn('Failed to propagate initial manual addon context', error);
+    }
   }, [currentChatId, onContextUpdate, characterDetailsOverride, character]);
 
   return (
@@ -615,10 +770,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
         />
       ) : (
         <ContextSidebar
-          context={trackedContext as any}
-            addonSettings={globalSettings}
-            character={{ id: character.id, name: character.name, avatar_url: (character as any).avatar_url }}
-            onBackToNav={() => setSidebarView('navigation')}
+          context={trackedContext}
+          addonSettings={addonSettings}
+          character={{ id: character.id, name: character.name, avatar_url: character.avatar_url ?? undefined }}
+          onBackToNav={() => setSidebarView('navigation')}
         />
       )}
       <div className="flex flex-col flex-1 min-w-0">
@@ -640,7 +795,10 @@ export const ChatLayout = ({ character, children, currentChatId, trackedContext,
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
           currentChatId={currentChatId}
-          onSelectChat={(characterId: string, chatId: string) => { if (chatId !== currentChatId) navigate(`/chat/${characterId}/${chatId}`); }}
+          onSelectChat={(characterId: string, chatId: string) => {
+            if (!characterId || chatId === currentChatId) return;
+            navigate(`/chat/${characterId}/${chatId}`);
+          }}
           onDeleteChat={handleDeleteChat}
           character={character}
           characterDetails={characterDetails}

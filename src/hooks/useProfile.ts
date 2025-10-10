@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/db/client'
 import { Profile as ProfileQueries, Billing as BillingQueries, Auth } from '@/data'
+import { getUserDashboardOverview } from '@/data/dashboard/queries'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Profile } from '@/types/database'
 
@@ -23,33 +24,15 @@ export const useProfile = (userId?: string) => {
 
         // Get current auth user (non-throwing)
         const { user } = await Auth.getAuthUser();
-        const isOwnProfile = user?.id === userId
+        const isOwnProfile = user?.id === userId;
 
-        // Prefer unified overview RPC to minimize calls
-        try {
-          if (isOwnProfile) {
-            const { data: bootstrap, error: bootErr } = await ProfileQueries.getUserBootstrap(userId);
-            if (!bootErr && bootstrap?.profile) {
-              setProfile(bootstrap.profile as Profile);
-              return;
-            }
-          } else {
-            const { data: pub, error: pubErr } = await ProfileQueries.getPublicProfileOverview(userId);
-            if (!pubErr && pub?.profile) {
-              setProfile(pub.profile as Profile);
-              return;
-            }
-          }
-        } catch { /* fallback below */ }
-
-        // Use appropriate query based on whether it's the user's own profile
-        const { data, error } = isOwnProfile 
+        const { data, error } = isOwnProfile
           ? await ProfileQueries.getPrivateProfile(userId)
-          : await ProfileQueries.getPublicProfile(userId)
+          : await ProfileQueries.getPublicProfile(userId);
 
-        if (error) throw error
-        
-        setProfile(data as Profile)
+        if (error) throw error;
+
+        setProfile((data as Profile) || null);
       } catch (err) {
         console.error('Error fetching profile:', err)
         setError(err as Error)
@@ -71,22 +54,12 @@ export const useProfile = (userId?: string) => {
       const { user } = await Auth.getAuthUser();
       const isOwnProfile = user?.id === userId
 
-      try {
-        if (isOwnProfile) {
-          const { data: bootstrap, error: bootErr } = await ProfileQueries.getUserBootstrap(userId);
-          if (!bootErr && bootstrap?.profile) { setProfile(bootstrap.profile as Profile); return }
-        } else {
-          const { data: pub, error: pubErr } = await ProfileQueries.getPublicProfileOverview(userId);
-          if (!pubErr && pub?.profile) { setProfile(pub.profile as Profile); return }
-        }
-      } catch { /* fallback */ }
-
       const { data, error } = isOwnProfile 
         ? await ProfileQueries.getPrivateProfile(userId)
         : await ProfileQueries.getPublicProfile(userId)
 
       if (error) throw error
-      setProfile(data as Profile)
+      setProfile((data as Profile) || null)
     } catch (err) {
       console.error('Error fetching profile:', err)
       setError(err as Error)
@@ -134,20 +107,19 @@ export const useCurrentUserOptimized = () => {
 
 // Profile stats query
 export const useProfileStats = () => {
-  // Uses unified user bootstrap RPC now
   const { user } = useAuth();
   return useQuery({
     queryKey: ['profile-stats', user?.id],
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
-      const { data, error } = await ProfileQueries.getUserBootstrap(user.id);
+      const { data, error } = await getUserDashboardOverview(supabase as any, user.id);
       if (error) throw error;
-      const counts = (data as any)?.counts || { chats:0, characters:0, favorites:0, personas:0 };
+      const counts = data?.counts || { chats: 0, characters: 0, favorites: 0, personas: 0 };
       return {
-        characterCount: counts.characters,
-        chatCount: counts.chats,
-        creditsBalance: (data as any)?.credits ?? 0,
-        followersCount: 0,
+        totalCharacters: counts.characters || 0,
+        totalChats: counts.chats || 0,
+        totalFavorites: counts.favorites || 0,
+        totalPersonas: counts.personas || 0,
       };
     },
     enabled: !!user,

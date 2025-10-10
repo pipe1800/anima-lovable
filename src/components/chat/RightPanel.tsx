@@ -11,6 +11,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import type { ChatHistoryEntry } from '@/types/chatHistory';
+import type { WorldInfoSummary } from './WorldInfoDropdown';
+import type { CharacterDetailsLike } from './ChatDetailsPanel';
+import type { PersonaLike } from './ChatConfigurationTab';
 
 // Lazy loaded tab contents
 const ChatHistoryList = lazy(() => import('./ChatHistoryList'));
@@ -27,7 +31,7 @@ interface RightPanelProps {
   onConfigTabClicked: () => void;
   // history props
   loading: boolean;
-  filteredChatHistory: any[];
+  filteredChatHistory: ChatHistoryEntry[];
   searchQuery: string;
   setSearchQuery: (v: string) => void;
   currentChatId?: string;
@@ -35,7 +39,7 @@ interface RightPanelProps {
   onDeleteChat: (chatId: string) => Promise<void> | void;
   // details props
   character: Character;
-  characterDetails: any;
+  characterDetails: CharacterDetailsLike | null;
   isCharacterOwner: boolean;
   onStartNewChat: () => void;
   isCreatingNewChat: boolean;
@@ -47,7 +51,7 @@ interface RightPanelProps {
   onLike: () => void;
   isFavorited: boolean;
   onFavorite: () => void;
-  currentUser: any;
+  currentUser: unknown;
   chatMode: 'storytelling' | 'companion';
   onChatModeChange: (mode: 'storytelling' | 'companion') => void;
   chatModeLoading: boolean;
@@ -57,15 +61,15 @@ interface RightPanelProps {
   userTimezone: string;
   // config props
   worldInfoDropdownVisible: boolean;
-  onWorldInfoSelect: (worldInfo: { id: string; name: string } | null) => void;
+  onWorldInfoSelect: (worldInfo: WorldInfoSummary | null) => void;
   selectedWorldInfoId: string | null;
   currentUserId?: string;
-  personas: any[];
-  selectedPersona: any | null;
-  setSelectedPersona: (p: any | null) => void;
+  personas: PersonaLike[];
+  selectedPersona: PersonaLike | null;
+  setSelectedPersona: (p: PersonaLike | null) => void;
   setShowPersonaModal: (open: boolean) => void;
   setShowEditPersonaModal: (open: boolean) => void;
-  setPersonaToEdit: (p: any | null) => void;
+  setPersonaToEdit: (p: PersonaLike | null) => void;
   onPersonaSaved: () => Promise<void> | void;
 }
 
@@ -94,7 +98,7 @@ export default function RightPanel(props: RightPanelProps) {
     onLike,
     isFavorited,
     onFavorite,
-    currentUser,
+  currentUser: _currentUser,
     chatMode,
     onChatModeChange,
     chatModeLoading,
@@ -131,7 +135,9 @@ export default function RightPanel(props: RightPanelProps) {
       if (typeof window !== 'undefined' && window.innerWidth < 768) {
         onClose();
       }
-    } catch {}
+    } catch (error) {
+      console.warn('Failed to auto-close right panel after save', error);
+    }
   };
 
   // Unsaved changes dialog state

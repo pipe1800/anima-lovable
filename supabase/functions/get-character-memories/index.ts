@@ -1,5 +1,6 @@
 import { authenticateUser, createCorsResponse, createErrorResponse } from '../_shared/auth.ts';
 import { getMemoriesSchema, safeParse, sanitizePayload } from '../_shared/validation.ts';
+import { fetchCharacterMemories } from '../chat-management/modules/database.ts';
 
 function redactUserId(id?: string) {
   if (!id) return 'anon';
@@ -45,24 +46,17 @@ globalThis.Deno.serve(async (req) => {
 
   console.log('🧠 Fetching memories for character:', { characterId, user: redactUserId(userId) });
 
-    // Fetch memories from the database
-    const { data: memories, error } = await supabaseAdmin
-      .from('character_memories')
-      .select('*')
-      .eq('character_id', characterId)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+    const memories = await fetchCharacterMemories(userId, characterId, supabaseAdmin, {
+      includeAutoSummaries: true,
+      limitNonAuto: 100,
+      limitAuto: 20
+    });
 
-    if (error) {
-      console.error('❌ Error fetching memories:', error);
-      return createErrorResponse('Failed to fetch memories', 500);
-    }
-
-    console.log('✅ Successfully fetched memories:', memories?.length || 0);
+    console.log('✅ Successfully fetched memories:', memories.length);
 
     return createCorsResponse({
       success: true,
-      data: memories || []
+      data: memories
     });
 
   } catch (error) {

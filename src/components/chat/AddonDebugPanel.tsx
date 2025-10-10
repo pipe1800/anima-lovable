@@ -3,13 +3,22 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Info } from 'lucide-react';
+import type { AddonToggleState } from '@/types/chatSettings';
 
 interface AddonDebugPanelProps {
-  addonSettings: any;
+  addonSettings?: AddonToggleState | null;
   characterId: string;
   userId: string;
   userPlan: string;
 }
+
+const STATEFUL_ADDONS: Array<keyof AddonToggleState> = [
+  'moodTracking',
+  'clothingInventory',
+  'locationTracking',
+  'timeAndWeather',
+  'relationshipStatus',
+];
 
 export const AddonDebugPanel = ({ addonSettings, characterId, userId, userPlan }: AddonDebugPanelProps) => {
   const [isVisible, setIsVisible] = React.useState(false);
@@ -19,12 +28,15 @@ export const AddonDebugPanel = ({ addonSettings, characterId, userId, userPlan }
     return null;
   }
 
-  const activeAddons = Object.entries(addonSettings || {})
-    .filter(([key, value]) => value === true)
-    .map(([key]) => key);
+  const resolvedSettings: AddonToggleState | null = addonSettings ?? null;
+  const addonKeys = resolvedSettings
+    ? (Object.keys(resolvedSettings) as Array<keyof AddonToggleState>)
+    : [];
 
-  const statefulAddons = ['moodTracking', 'clothingInventory', 'locationTracking', 'timeAndWeather', 'relationshipStatus'];
-  const activeStatefulCount = statefulAddons.filter(key => addonSettings?.[key]).length;
+  const activeAddons = addonKeys.filter((key) => !!resolvedSettings?.[key]);
+
+  const activeStatefulCount = STATEFUL_ADDONS.filter((key) => !!resolvedSettings?.[key]).length;
+  const addonEntries = addonKeys.map((key) => ({ key, value: !!resolvedSettings?.[key] }));
 
   return (
     <Card className="bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800">
@@ -56,7 +68,7 @@ export const AddonDebugPanel = ({ addonSettings, characterId, userId, userPlan }
             <div className="text-xs space-y-1">
               <strong>Addon States:</strong>
               <div className="grid grid-cols-2 gap-1">
-                {Object.entries(addonSettings || {}).map(([key, value]) => (
+                {addonEntries.map(({ key, value }) => (
                   <div key={key} className="flex justify-between">
                     <span className="truncate">{key}:</span>
                     <Badge variant={value ? 'default' : 'secondary'} className="text-xs">

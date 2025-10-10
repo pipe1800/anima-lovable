@@ -1,7 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Brain, Shirt, MapPin, CloudSun, Heart, User, Sparkles, Activity, Eye, Zap, Settings,
-  ChevronLeft, ChevronRight, Box
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import type { ComponentType, FC } from 'react';
+import {
+  Brain,
+  Shirt,
+  MapPin,
+  CloudSun,
+  Heart,
+  User,
+  Sparkles,
+  Activity,
+  Eye,
+  Zap,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  Box,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +23,8 @@ import { capitalizeText, isCharacterRelevantContext } from '@/lib/utils/textForm
 import { convertDatabaseContextToTrackedContext, hasValidContext } from '@/utils/contextConverter';
 import { SidebarModeToggle } from './SidebarModeToggle';
 import { useAuth } from '@/contexts/AuthContext';
+import logger from '@/utils/logger';
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 export interface TrackedContext {
   moodTracking: string;
@@ -18,6 +33,8 @@ export interface TrackedContext {
   timeAndWeather: string;
   relationshipStatus: string;
   characterPosition: string;
+  enchantmentStatus?: string;
+  itemInventory?: string;
 }
 
 export interface DatabaseContext {
@@ -27,16 +44,20 @@ export interface DatabaseContext {
   time_weather?: string;
   relationship?: string;
   character_position?: string;
+  enchantment_status?: string;
+  item_inventory?: string;
 }
+
+interface ContextUpdateEntry {
+  previous: string;
+  current: string;
+}
+
+type ContextUpdates = Record<string, ContextUpdateEntry>;
 
 interface ContextSidebarProps {
   context?: TrackedContext;
-  contextUpdates?: {
-    [key: string]: {
-      previous: string;
-      current: string;
-    };
-  };
+  contextUpdates?: ContextUpdates;
   currentContext?: TrackedContext | DatabaseContext;
   addonSettings?: {
     moodTracking?: boolean;
@@ -61,15 +82,71 @@ interface ContextItem {
   key: string;
   isEnabled: boolean;
   isHistorical: boolean;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: ComponentType<{ className?: string }>;
   gradient: string;
   bgColor: string;
   isEmpty: boolean;
-  addonKey?: string; // added for lookup
+  addonKey?: keyof TrackedContext; // added for lookup
 }
 
+interface RelationshipGoal {
+  order?: number;
+  label?: string;
+  threshold?: number;
+}
+
+interface RelationshipGoalsTemplate {
+  enabled?: boolean;
+  path?: RelationshipGoal[];
+}
+
+interface RelationshipTemplateRow {
+  relationship_goals?: RelationshipGoalsTemplate | null;
+}
+
+interface RelationshipProgressState {
+  active_order?: number;
+  current_score?: number;
+  invitation_status?: string | null;
+  ready_for_next?: boolean;
+  next_stage_label?: string | null;
+  _next_stage_label?: string | null;
+  total_stages?: number;
+  path_length?: number;
+  pending_regression?: boolean;
+  regression_candidate_order?: number | null;
+  regression_prompt_asked?: boolean;
+  skipped?: boolean;
+  state?: {
+    invitation_status?: string | null;
+    ready_for_next?: boolean;
+    [key: string]: unknown;
+  };
+  _invitationJustIssued?: boolean;
+  _invitationAcceptanceProcessed?: boolean;
+  relationship?: string | null;
+  relationship_line?: string | null;
+  [key: string]: unknown;
+}
+
+interface RelationshipProgressRow {
+  state: RelationshipProgressState | null;
+}
+
+type RelationshipMeta = Record<string, unknown>;
+
 // Context addon configuration with beautiful styling
-const contextAddonConfig = [
+interface ContextAddonDefinition {
+  label: string;
+  key: keyof TrackedContext;
+  addonKey: keyof TrackedContext;
+  icon: ComponentType<{ className?: string }>;
+  gradient: string;
+  bgColor: string;
+  description?: string;
+}
+
+const contextAddonConfig: ContextAddonDefinition[] = [
   { 
     label: 'Mood & Emotion', 
     key: 'moodTracking', 
@@ -144,6 +221,17 @@ const contextAddonConfig = [
   },
 ];
 
+const ADDON_KEY_ALIASES: Partial<Record<keyof TrackedContext, string[]>> = {
+  moodTracking: ['mood_tracking', 'mood'],
+  clothingInventory: ['clothing_inventory', 'clothing'],
+  locationTracking: ['location_tracking', 'location'],
+  timeAndWeather: ['time_and_weather', 'time_weather', 'time'],
+  relationshipStatus: ['relationship_status', 'relationship'],
+  characterPosition: ['character_position', 'position'],
+  enchantmentStatus: ['enchantment_status'],
+  itemInventory: ['item_inventory', 'inventory'],
+};
+
 export const ContextSidebar = ({
   context,
   contextUpdates,
@@ -154,10 +242,36 @@ export const ContextSidebar = ({
   onOpenSettings
 }: ContextSidebarProps) => {
   const { user, supabase: authSupabase } = useAuth();
+  const log = useMemo(() => logger.scoped('ContextSidebar'), []);
+
+  const safeSetSession = useCallback(
+    (key: string, value: string) => {
+      if (typeof window === 'undefined') return;
+      try {
+        sessionStorage.setItem(key, value);
+      } catch (error) {
+        log.warn(`Failed to persist sessionStorage key ${key}`, error);
+      }
+    },
+    [log],
+  );
+
+  const safeGetSession = useCallback(
+    (key: string): string | null => {
+      if (typeof window === 'undefined') return null;
+      try {
+        return sessionStorage.getItem(key);
+      } catch (error) {
+        log.warn(`Failed to read sessionStorage key ${key}`, error);
+        return null;
+      }
+    },
+    [log],
+  );
   // Restore missing state & helper component
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showHistorical, setShowHistorical] = useState(false);
-  const ForceReadyAction: React.FC<{ meta: any }> = () => null; // no-op placeholder (real action handled elsewhere)
+  const ForceReadyAction: FC<{ meta: RelationshipMeta }> = () => null; // no-op placeholder (real action handled elsewhere)
 
   // NEW: pre-chat relationship stage label (visual only)
   const [preChatRelationshipLabel, setPreChatRelationshipLabel] = useState<string | null>(() => {
@@ -177,109 +291,149 @@ export const ContextSidebar = ({
   });
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (preChatRelationshipLabel && relationshipReady !== null) return; // already cached
+
+    const hydrateRelationshipMeta = async () => {
+      if (preChatRelationshipLabel && relationshipReady !== null) return;
       if (!character?.id || !user?.id) return;
+
       try {
-        const supa = authSupabase;
-        if (!supa) return;
-        const { data: tmplRow, error: tmplErr } = await (supa as any)
+        const { data: tmplRow, error: tmplErr } = await authSupabase
           .from('character_latent_profiles')
           .select('relationship_goals')
           .eq('character_id', character.id)
           .maybeSingle();
-        if (tmplErr) return;
-        const template = tmplRow?.relationship_goals;
-        if (!template || typeof template !== 'object' || !Array.isArray(template.path) || template.path.length === 0) return;
-        const { data: progRow } = await (supa as any)
+
+        if (tmplErr) {
+          log.warn('Failed to load relationship template', tmplErr);
+          return;
+        }
+
+        const template = (tmplRow as RelationshipTemplateRow | null)?.relationship_goals;
+        const path = template && Array.isArray(template.path) ? template.path : [];
+        if (!path.length) return;
+
+        const { data: progRow } = await authSupabase
           .from('user_character_relationship_progress')
           .select('state')
           .eq('user_id', user.id)
           .eq('character_id', character.id)
           .maybeSingle();
-        let label: string | null = preChatRelationshipLabel;
-        let readyFlag: boolean | null = relationshipReady;
-        if (progRow?.state) {
-          const state = progRow.state;
-          const activeOrder = Number(state.active_order || state.activeOrder || 1);
-          const goal = template.path.find((g: any)=> (g.order||g.order===0) && g.order === activeOrder);
+
+        const progressRow = progRow as RelationshipProgressRow | null;
+
+        let label = preChatRelationshipLabel;
+        let readyFlag = relationshipReady;
+
+        if (progressRow?.state) {
+          const state = progressRow.state;
+          const activeOrder = Number(
+            state.active_order ?? (state as Record<string, unknown>).activeOrder ?? 1,
+          );
+          const goal = path.find(
+            (item): item is RelationshipGoal => !!item && (item.order ?? 0) === activeOrder,
+          );
           if (!label && goal?.label) label = goal.label;
-          if (readyFlag === null && typeof state.ready_for_next === 'boolean') readyFlag = state.ready_for_next;
+          if (readyFlag === null && typeof state.ready_for_next === 'boolean') {
+            readyFlag = state.ready_for_next;
+          }
         } else {
           if (!label) {
-            const first = template.path.slice().sort((a:any,b:any)=> (a.order||0)-(b.order||0))[0];
+            const first = [...path].sort(
+              (a, b) => (a?.order ?? 0) - (b?.order ?? 0),
+            )[0];
             if (first?.label) label = first.label;
           }
-          if (readyFlag === null) readyFlag = false; // default before any progress
+          if (readyFlag === null) readyFlag = false;
         }
+
         if (!cancelled) {
           if (label && !preChatRelationshipLabel) {
             setPreChatRelationshipLabel(label);
-            try { sessionStorage.setItem(`relLabel:${character.id}`, label); } catch {}
+            safeSetSession(`relLabel:${character.id}`, label);
           }
           if (readyFlag !== null && relationshipReady === null) {
             setRelationshipReady(readyFlag);
-            try { sessionStorage.setItem(`relReady:${character.id}`, readyFlag ? '1':'0'); } catch {}
+            safeSetSession(`relReady:${character.id}`, readyFlag ? '1' : '0');
           }
         }
-      } catch { /* ignore */ }
-    })();
-    return () => { cancelled = true; };
-  }, [character?.id, user?.id, authSupabase, preChatRelationshipLabel, relationshipReady]);
+      } catch (error) {
+        log.warn('Failed to hydrate relationship metadata', error);
+      }
+    };
+
+    hydrateRelationshipMeta();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authSupabase, character?.id, log, preChatRelationshipLabel, relationshipReady, safeSetSession, user?.id]);
 
   // Listen for relationship meta events (mirrors ContextDisplay)
   useEffect(() => {
-    if (!character?.id || !user?.id || !authSupabase) return;
-    // Subscribe to live changes on progress row for this user/character
-    const channel = (authSupabase as any)
+    if (!character?.id || !user?.id) return;
+
+    const channel = authSupabase
       .channel(`rel_progress_${user.id}_${character.id}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'user_character_relationship_progress',
-        filter: `user_id=eq.${user.id},character_id=eq.${character.id}`
-      }, (payload: any) => {
-        const newState = payload?.new?.state;
-        if (newState) {
-          // Update readiness
-            if (typeof newState.ready_for_next === 'boolean') {
-              setRelationshipReady(prev => {
-                if (prev === newState.ready_for_next) return prev;
-                try { sessionStorage.setItem(`relReady:${character.id}`, newState.ready_for_next ? '1':'0'); } catch {}
-                return newState.ready_for_next;
-              });
+      .on<RelationshipProgressRow>(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_character_relationship_progress',
+          filter: `user_id=eq.${user.id},character_id=eq.${character.id}`,
+        },
+        async (payload: RealtimePostgresChangesPayload<RelationshipProgressRow>) => {
+          const newRow = (payload.new ?? null) as RelationshipProgressRow | null;
+          const newState = newRow?.state ?? null;
+          if (!newState) return;
+
+          if (typeof newState.ready_for_next === 'boolean') {
+            setRelationshipReady((prev) => {
+              if (prev === newState.ready_for_next) return prev;
+              safeSetSession(`relReady:${character.id}`, newState.ready_for_next ? '1' : '0');
+              return newState.ready_for_next;
+            });
+          }
+
+          const activeOrder = Number(
+            newState.active_order ?? (newState as Record<string, unknown>).activeOrder ?? 1,
+          );
+          const cachedStage = safeGetSession(`relStageOrder:${character.id}`);
+          if (String(activeOrder) === cachedStage) return;
+
+          try {
+            const { data: tmplRow } = await authSupabase
+              .from('character_latent_profiles')
+              .select('relationship_goals')
+              .eq('character_id', character.id)
+              .maybeSingle();
+            const templatePath = (tmplRow as RelationshipTemplateRow | null)?.relationship_goals?.path;
+            if (Array.isArray(templatePath)) {
+              const goal = templatePath.find(
+                (item): item is RelationshipGoal =>
+                  !!item && (item.order ?? 0) === activeOrder,
+              );
+              if (goal?.label) {
+                setPreChatRelationshipLabel(goal.label);
+                safeSetSession(`relLabel:${character.id}`, goal.label);
+                safeSetSession(`relStageOrder:${character.id}`, String(activeOrder));
+              }
             }
-            // Update label if active stage changed
-            const activeOrder = Number(newState.active_order || newState.activeOrder || 1);
-            // Only update label if we can resolve template from cached session value (store template path length?)
-            // Simpler: if label absent or stage changed, refetch template once.
-            const cachedStage = sessionStorage.getItem(`relStageOrder:${character.id}`);
-            if (String(activeOrder) !== cachedStage) {
-              // minimal refetch of template goals (no progress refetch to avoid loop)
-              (async () => {
-                try {
-                  const { data: tmplRow } = await (authSupabase as any)
-                    .from('character_latent_profiles')
-                    .select('relationship_goals')
-                    .eq('character_id', character.id)
-                    .maybeSingle();
-                  const template = tmplRow?.relationship_goals;
-                  if (template && Array.isArray(template.path)) {
-                    const goal = template.path.find((g:any)=> (g.order||g.order===0) && g.order === activeOrder);
-                    if (goal?.label) {
-                      setPreChatRelationshipLabel(goal.label);
-                      try { sessionStorage.setItem(`relLabel:${character.id}`, goal.label); } catch {}
-                      try { sessionStorage.setItem(`relStageOrder:${character.id}`, String(activeOrder)); } catch {}
-                    }
-                  }
-                } catch {}
-              })();
-            }
-        }
-      })
+          } catch (templateError) {
+            log.warn('Failed to refresh relationship template', templateError);
+          }
+        },
+      )
       .subscribe();
-    return () => { try { (authSupabase as any).removeChannel(channel); } catch {} };
-  }, [authSupabase, user?.id, character?.id]);
+
+    return () => {
+      try {
+        authSupabase.removeChannel(channel);
+      } catch (removeError) {
+        log.warn('Failed to remove Supabase channel', removeError);
+      }
+    };
+  }, [authSupabase, character?.id, log, safeGetSession, safeSetSession, user?.id]);
 
   // Use the most relevant context source
   const effectiveContext = currentContext || context;
@@ -288,61 +442,64 @@ export const ContextSidebar = ({
   let contextItems: ContextItem[] = [];
   
   if (effectiveContext) {
-    // Check if context is already in TrackedContext format or needs conversion
-    let workingContext: TrackedContext;
-    
+    const emptyContext: TrackedContext = {
+      moodTracking: 'No context',
+      clothingInventory: 'No context',
+      locationTracking: 'No context',
+      timeAndWeather: 'No context',
+      relationshipStatus: 'No context',
+      characterPosition: 'No context',
+      enchantmentStatus: 'No context',
+      itemInventory: 'No context',
+    };
+
+    let workingContext: TrackedContext = emptyContext;
+
     if ('moodTracking' in effectiveContext) {
-      workingContext = effectiveContext as TrackedContext;
-      // Fallback: if relationshipStatus empty but raw relationship present
-      const rawRel = (effectiveContext as any).relationship;
-      if ((workingContext.relationshipStatus === 'No context' || !workingContext.relationshipStatus) && typeof rawRel === 'string' && rawRel.trim()) {
-        (workingContext as any).relationshipStatus = rawRel;
+      const tracked = effectiveContext as TrackedContext & DatabaseContext;
+      workingContext = { ...tracked };
+      const rawRelationship = tracked.relationship;
+      if (
+        (!workingContext.relationshipStatus || workingContext.relationshipStatus === 'No context') &&
+        typeof rawRelationship === 'string' &&
+        rawRelationship.trim()
+      ) {
+        workingContext = { ...workingContext, relationshipStatus: rawRelationship };
       }
     } else {
       const convertedContext = convertDatabaseContextToTrackedContext(effectiveContext);
-      workingContext = convertedContext || {
-        moodTracking: 'No context',
-        clothingInventory: 'No context',
-        locationTracking: 'No context',
-        timeAndWeather: 'No context',
-        relationshipStatus: 'No context',
-        characterPosition: 'No context'
-      };
+      workingContext = convertedContext ?? emptyContext;
     }
 
-    const resolveEnabled = (rawKey: string) => {
-      if (!addonSettings) return true; // default on so user sees placeholders
+    const resolveEnabled = (rawKey: keyof TrackedContext): boolean => {
+      if (!addonSettings) return true;
       const snake = rawKey.replace(/([A-Z])/g, '_$1').toLowerCase();
-      // Common alternate names (legacy possibilities)
-      const alt: Record<string,string[]> = {
-        moodTracking: ['mood_tracking','mood'],
-        clothingInventory: ['clothing_inventory','clothing'],
-        locationTracking: ['location_tracking','location'],
-        timeAndWeather: ['time_and_weather','time_weather','time'],
-        relationshipStatus: ['relationship_status','relationship'],
-        characterPosition: ['character_position','position']
-      };
-      const candidates = [rawKey, snake, ...(alt as any)[rawKey] || []];
-      for (const k of candidates) {
-        if (k in addonSettings) return Boolean((addonSettings as any)[k]);
-      }
-      return true; // fallback show
-    };
-    
-    contextItems = contextAddonConfig.map(item => {
-      const isEnabled = resolveEnabled(item.addonKey);
-      const contextValue = (workingContext as any)[item.key];
-      let displayValue = contextValue;
-      if (item.key === 'relationshipStatus') {
-        // Remove stage regex check; just use value or fallback
-        if ((!displayValue || displayValue === 'No context' || (typeof displayValue === 'string' && displayValue.trim() === '')) && preChatRelationshipLabel) {
-          displayValue = preChatRelationshipLabel;
+      const aliases = ADDON_KEY_ALIASES[rawKey] ?? [];
+      const candidates = [rawKey, snake, ...aliases];
+      for (const key of candidates) {
+        if (key in addonSettings) {
+          const candidateKey = key as keyof TrackedContext;
+          return Boolean(addonSettings[candidateKey]);
         }
       }
-      const isEmpty = !displayValue || displayValue === 'No context' || (typeof displayValue === 'string' && displayValue.trim() === '');
+      return true;
+    };
+
+    contextItems = contextAddonConfig.map((item) => {
+      const isEnabled = resolveEnabled(item.addonKey);
+      let displayValue = workingContext[item.key] ?? 'No context';
+      if (
+        item.key === 'relationshipStatus' &&
+        (!displayValue || displayValue === 'No context' || displayValue.trim() === '') &&
+        preChatRelationshipLabel
+      ) {
+        displayValue = preChatRelationshipLabel;
+      }
+      const isEmpty = !displayValue || displayValue === 'No context' || displayValue.trim() === '';
+      const valueText = isEmpty ? 'No context yet' : capitalizeText(displayValue);
       return {
         label: item.label,
-        value: isEmpty ? 'No context yet' : capitalizeText(displayValue),
+        value: valueText,
         key: item.key,
         isEnabled,
         isHistorical: false,
@@ -350,33 +507,33 @@ export const ContextSidebar = ({
         gradient: item.gradient,
         bgColor: item.bgColor,
         isEmpty,
-        addonKey: item.addonKey
+        addonKey: item.addonKey,
       };
     });
   } else {
-    // Show addons with placeholders using same enabled resolution
-    const resolveEnabled = (rawKey: string) => {
+    const resolveEnabled = (rawKey: keyof TrackedContext): boolean => {
       if (!addonSettings) return true;
       const snake = rawKey.replace(/([A-Z])/g, '_$1').toLowerCase();
-      const alt: Record<string,string[]> = {
-        moodTracking: ['mood_tracking','mood'],
-        clothingInventory: ['clothing_inventory','clothing'],
-        locationTracking: ['location_tracking','location'],
-        timeAndWeather: ['time_and_weather','time_weather','time'],
-        relationshipStatus: ['relationship_status','relationship'],
-        characterPosition: ['character_position','position']
-      };
-      const candidates = [rawKey, snake, ...(alt as any)[rawKey] || []];
-      for (const k of candidates) {
-        if (k in addonSettings) return Boolean((addonSettings as any)[k]);
+      const aliases = ADDON_KEY_ALIASES[rawKey] ?? [];
+      const candidates = [rawKey, snake, ...aliases];
+      for (const key of candidates) {
+        if (key in addonSettings) {
+          const candidateKey = key as keyof TrackedContext;
+          return Boolean(addonSettings[candidateKey]);
+        }
       }
       return true;
     };
-    contextItems = contextAddonConfig.map(item => {
+
+    contextItems = contextAddonConfig.map((item) => {
       const isEnabled = resolveEnabled(item.addonKey);
+      const valueText =
+        item.key === 'relationshipStatus' && preChatRelationshipLabel
+          ? preChatRelationshipLabel
+          : 'No context yet';
       return {
         label: item.label,
-        value: item.key === 'relationshipStatus' && preChatRelationshipLabel ? preChatRelationshipLabel : 'No context yet',
+        value: valueText,
         key: item.key,
         isEnabled,
         isHistorical: false,
@@ -384,22 +541,23 @@ export const ContextSidebar = ({
         gradient: item.gradient,
         bgColor: item.bgColor,
         isEmpty: !preChatRelationshipLabel || item.key !== 'relationshipStatus',
-        addonKey: item.addonKey
-      } as ContextItem;
+        addonKey: item.addonKey,
+      };
     });
   }
 
   // Merge live context with updates (latest message deltas) similar to ContextDisplay capabilities
   if (contextUpdates && Object.keys(contextUpdates).length > 0) {
-    contextItems = contextItems.map(item => ({ ...item, addonKey: item.key }));
-    contextItems = contextItems.map(item => {
-      const update = (contextUpdates as any)[item.key] || (item.addonKey ? (contextUpdates as any)[item.addonKey] : undefined);
+    contextItems = contextItems.map((item) => {
+      const update =
+        contextUpdates[item.key] ??
+        (item.addonKey ? contextUpdates[item.addonKey] : undefined);
       if (update && update.current && update.current !== 'No context') {
         return {
           ...item,
           value: capitalizeText(update.current),
           isHistorical: false,
-          isEmpty: false
+          isEmpty: false,
         };
       }
       return item;
@@ -407,23 +565,33 @@ export const ContextSidebar = ({
   }
 
   // Historical (previous) states list if user toggles
-  const historicalItems = contextUpdates ? Object.entries(contextUpdates).map(([rawKey, upd]: any) => {
-    const config = contextAddonConfig.find(c => c.key === rawKey || c.addonKey === rawKey);
-    if (!config) return null;
-    if (!upd.previous || upd.previous === 'No context' || upd.previous === upd.current) return null;
-    return {
-      key: config.key + '_historical',
-      label: config.label + ' (Previous)',
-      value: capitalizeText(upd.previous),
-      icon: config.icon,
-      gradient: config.gradient,
-      bgColor: config.bgColor,
-      isEmpty: false,
-      isHistorical: true,
-      isEnabled: true,
-      addonKey: config.key
-    } as ContextItem & { isHistorical: boolean };
-  }).filter(Boolean) as any[] : [];
+  const historicalItems: ContextItem[] = contextUpdates
+    ? Object.entries(contextUpdates).reduce<ContextItem[]>((acc, [rawKey, upd]) => {
+        if (!upd.previous || upd.previous === 'No context' || upd.previous === upd.current) {
+          return acc;
+        }
+        const config = contextAddonConfig.find((c) => {
+          if (c.key === rawKey) return true;
+          if (c.addonKey === rawKey) return true;
+          const aliases = ADDON_KEY_ALIASES[c.key] ?? [];
+          return aliases.includes(rawKey);
+        });
+        if (!config) return acc;
+        acc.push({
+          label: `${config.label} (Previous)`,
+          value: capitalizeText(upd.previous),
+          key: `${config.key}-historical`,
+          isEnabled: true,
+          isHistorical: true,
+          icon: config.icon,
+          gradient: config.gradient,
+          bgColor: config.bgColor,
+          isEmpty: false,
+          addonKey: config.addonKey,
+        });
+        return acc;
+      }, [])
+    : [];
 
   const hasEnabledAddons = contextItems.length > 0;
   const hasActiveContext = contextItems.some(item => !item.isEmpty);
@@ -656,3 +824,6 @@ export const ContextSidebar = ({
     </div>
   );
 };
+
+
+

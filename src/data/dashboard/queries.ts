@@ -1,6 +1,7 @@
 // Dashboard aggregated data queries (Phase 2)
 // Source of truth for dashboard overview RPC usage.
 import { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/integrations/supabase/types';
 
 export interface DashboardOverviewResult {
   characters: any[];
@@ -9,7 +10,11 @@ export interface DashboardOverviewResult {
   counts: { characters: number; favorites: number; chats: number };
 }
 
-export async function getUserDashboardOverview(client: SupabaseClient, userId: string, opts?: { charsLimit?: number; favsLimit?: number }) {
+export async function getUserDashboardOverview(
+  client: SupabaseClient<Database, '__InternalSupabase'>,
+  userId: string,
+  opts?: { charsLimit?: number; favsLimit?: number },
+) {
   try {
     const { data, error } = await (client as any).rpc('get_user_dashboard_overview', {
       p_user_id: userId,

@@ -3,9 +3,30 @@
 // getEnv('OPENROUTER_API_KEY'); // throws if missing
 // getEnv('LOG_LEVEL', { default: 'info', required: false });
 
+type DenoEnv = {
+  env?: {
+    get(key: string): string | undefined;
+  };
+};
+
+type GlobalProcess = {
+  env?: Record<string, string | undefined>;
+};
+
+type GlobalEnv = typeof globalThis & {
+  Deno?: DenoEnv;
+  process?: GlobalProcess;
+};
+
+const globalEnv = globalThis as GlobalEnv;
+
 const cache = new Map<string, string | undefined>();
 
-interface GetEnvOptions { default?: string; required?: boolean; redact?: boolean }
+interface GetEnvOptions {
+  default?: string;
+  required?: boolean;
+  redact?: boolean;
+}
 
 export function getEnv(key: string, opts: GetEnvOptions = {}): string {
   if (cache.has(key)) {
@@ -17,9 +38,13 @@ export function getEnv(key: string, opts: GetEnvOptions = {}): string {
     return v;
   }
   let val: string | undefined;
-  try { val = (globalThis as any).Deno?.env?.get(key); } catch { /* ignore */ }
-  if (val == null && typeof process !== 'undefined') {
-    val = (process as any).env?.[key];
+  try {
+    val = globalEnv.Deno?.env?.get?.(key);
+  } catch {
+    /* ignore */
+  }
+  if (val == null) {
+    val = globalEnv.process?.env?.[key];
   }
   cache.set(key, val);
   if ((val == null || val === '') && opts.required !== false && opts.default == null) {

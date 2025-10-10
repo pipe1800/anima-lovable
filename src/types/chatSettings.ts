@@ -61,6 +61,17 @@ export interface UserGlobalChatSettings {
   updated_at: string;
 }
 
+export interface AddonToggleState {
+  moodTracking: boolean;
+  clothingInventory: boolean;
+  locationTracking: boolean;
+  timeAndWeather: boolean;
+  relationshipStatus: boolean;
+  characterPosition: boolean;
+  enchantmentStatus: boolean;
+  itemInventory: boolean;
+}
+
 // Legacy interfaces for compatibility (DEPRECATED - everything is now global)
 export interface CharacterAddonSettings {
   dynamicWorldInfo: boolean;

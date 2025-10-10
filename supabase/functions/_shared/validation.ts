@@ -54,18 +54,25 @@ function normalizeSecurityInput(str: string): string {
   });
   return decodeHtmlEntities(unicodeDecoded)
     .normalize('NFKC')
-    .replace(/[\u0000-\u001F]/g, ' ')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1F]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function containsPrototypePollutionKeys(obj: any, depth = 0, maxDepth = 6): boolean {
-  if (!obj || typeof obj !== 'object' || depth > maxDepth) return false;
-  for (const k of Object.keys(obj)) {
-    if (k === '__proto__' || k === 'prototype' || k === 'constructor') return true;
-    const v = obj[k];
-    if (v && typeof v === 'object') {
-      if (containsPrototypePollutionKeys(v, depth + 1, maxDepth)) return true;
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+function containsPrototypePollutionKeys(obj: unknown, depth = 0, maxDepth = 6): boolean {
+  if (!isRecord(obj) || depth > maxDepth) return false;
+  for (const key of Object.keys(obj)) {
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') return true;
+    const value = obj[key];
+    if (value && typeof value === 'object') {
+      if (containsPrototypePollutionKeys(value, depth + 1, maxDepth)) return true;
     }
   }
   return false;
@@ -268,18 +275,37 @@ export const parseCharacterCardJsonSchema = z.object({
 // Generic sanitizer for strings (basic, non-destructive)
 export function sanitizeString(input: string, max = 8000) {
   return input
-    .replace(/[\u0000-\u001F]/g, ' ') // strip control chars
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1F]/g, ' ') // strip control chars
     .replace(/\s+/g, ' ') // collapse whitespace
     .slice(0, max)
     .trim();
 }
 
-export function sanitizePayload(obj: any, stringMax = 8000) {
-  if (!obj || typeof obj !== 'object') return obj;
-  for (const k of Object.keys(obj)) {
-    const v = (obj as any)[k];
-    if (typeof v === 'string') (obj as any)[k] = sanitizeString(v, stringMax);
-    else if (v && typeof v === 'object') sanitizePayload(v, stringMax);
+export function sanitizePayload(obj: unknown, stringMax = 8000): unknown {
+  if (Array.isArray(obj)) {
+    for (let index = 0; index < obj.length; index += 1) {
+      const value = obj[index];
+      if (typeof value === 'string') {
+        obj[index] = sanitizeString(value, stringMax);
+      } else if (value && typeof value === 'object') {
+        sanitizePayload(value, stringMax);
+      }
+    }
+    return obj;
+  }
+
+  if (!isRecord(obj)) {
+    return obj;
+  }
+
+  for (const key of Object.keys(obj)) {
+    const value = obj[key];
+    if (typeof value === 'string') {
+      obj[key] = sanitizeString(value, stringMax);
+    } else if (value && typeof value === 'object') {
+      sanitizePayload(value, stringMax);
+    }
   }
   return obj;
 }

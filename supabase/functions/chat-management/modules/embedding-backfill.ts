@@ -1,11 +1,12 @@
 import type { SupabaseClient } from '../types/streaming-interfaces.ts';
 import { getTextEmbedding } from './embeddings.ts';
 import { normalizeContentForHash } from './memory-utils.ts';
+import { updateEntryEmbedding } from './knowledge.ts';
 
 export type BackfillOptions = {
-  batchSize?: number; // rows per DB page
-  concurrency?: number; // parallel embedding jobs per page
-  maxRows?: number; // total cap, 0 = unlimited
+  batchSize?: number;
+  concurrency?: number;
+  maxRows?: number;
   dryRun?: boolean;
 };
 
@@ -16,6 +17,17 @@ export type BackfillResult = {
   pages: number;
   lastRowCreatedAt?: string;
 };
+
+const NEEDS_EMBEDDING_FILTER = 'embedding_status.eq.pending,embedding_status.eq.failed,embedding_status.is.null';
+const TARGET_ENTRY_TYPES = ['summary', 'memory'];
+
+interface KnowledgeEntryRow {
+  id: string;
+  content: string | null;
+  created_at: string;
+  entry_type: string;
+  embedding_status?: string | null;
+}
 
 export async function backfillMissingEmbeddings(
   supabase: SupabaseClient,
@@ -32,76 +44,81 @@ export async function backfillMissingEmbeddings(
   let pages = 0;
   let lastCreatedAt: string | undefined;
 
-  console.log('🔧 Embedding backfill start', { batchSize, concurrency, maxRows, dryRun });
+  console.log('embedding.backfill.start', { batchSize, concurrency, maxRows, dryRun });
 
   while (true) {
-    // Stop if processed cap reached
     if (maxRows && processed >= maxRows) break;
 
     const { data: rows, error } = await supabase
-      .from('character_memories')
-      .select('id, summary_content, created_at')
-      .is('embedding', null)
-      .not('summary_content', 'is', null)
+      .from<KnowledgeEntryRow>('knowledge_entries')
+      .select('id, content, created_at, entry_type, embedding_status')
+      .in('entry_type', TARGET_ENTRY_TYPES)
+      .or(NEEDS_EMBEDDING_FILTER)
       .order('created_at', { ascending: true })
       .limit(batchSize);
 
     if (error) {
-      console.error('❌ Backfill query error:', error);
+      console.error('embedding.backfill.queryError', error);
       break;
     }
 
     const list = rows || [];
     if (list.length === 0) {
-      console.log('✅ No more rows needing embeddings');
+      console.log('embedding.backfill.nonePending');
       break;
     }
 
     pages++;
     scanned += list.length;
-  const tail = list[list.length - 1] as any;
-  lastCreatedAt = typeof tail?.created_at === 'string' ? tail.created_at as string : undefined;
+    const tail = list[list.length - 1];
+    lastCreatedAt = tail?.created_at ?? undefined;
 
-    console.log(`📦 Backfill page #${pages} - ${list.length} rows`);
+    console.log('embedding.backfill.page', { page: pages, count: list.length });
 
-    // Process in chunks respecting concurrency
     for (let i = 0; i < list.length; i += concurrency) {
       const slice = list.slice(i, i + concurrency);
       const results = await Promise.allSettled(
-  slice.map(async (row: any) => {
+        slice.map(async (row) => {
+          const entryId = String(row.id);
           try {
             if (dryRun) return 'dryRun';
-
-            const text = normalizeContentForHash(typeof row.summary_content === 'string' ? row.summary_content : '');
+            const text = normalizeContentForHash(row.content ?? '');
+            if (!text || text.length === 0) {
+              console.warn('embedding.backfill.skipEmpty', entryId);
+              return 'skipped';
+            }
             const vec = await getTextEmbedding(text);
-            if (!vec) throw new Error('No embedding returned');
-
-            const upd = await supabase
-              .from('character_memories')
-              .update({ embedding: vec as any })
-              .eq('id', String(row.id));
-
-            if (upd.error) throw upd.error;
+            if (!vec || !Array.isArray(vec)) {
+              throw new Error('No embedding returned');
+            }
+            await updateEntryEmbedding(supabase, {
+              entryId,
+              content: text,
+              embeddingVector: vec
+            });
             return 'ok';
           } catch (e) {
-            console.warn('⚠️ Backfill row failed:', String(row?.id), e);
+            console.warn('embedding.backfill.entryFailed', { entryId, error: e });
             throw e;
           }
         })
       );
 
       results.forEach((r) => {
-        if (r.status === 'fulfilled') processed++; else failed++;
+        if (r.status === 'fulfilled' && r.value !== 'skipped') {
+          processed++;
+        } else if (r.status === 'rejected') {
+          failed++;
+        }
       });
 
       if (maxRows && processed >= maxRows) break;
     }
 
-    // Brief delay to avoid rate limits
     await new Promise((res) => setTimeout(res, 300));
   }
 
   const summary: BackfillResult = { scanned, processed, failed, pages, lastRowCreatedAt: lastCreatedAt };
-  console.log('🏁 Embedding backfill complete', summary);
+  console.log('embedding.backfill.complete', summary);
   return summary;
 }

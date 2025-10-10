@@ -292,7 +292,9 @@ export default function PublicCharacterProfile() {
                   const parsed = JSON.parse(raw as unknown as string);
                   creatorNotes = parsed?.notes?.creator_notes || '';
                 }
-              } catch {}
+              } catch (notesError) {
+                console.warn('Failed to parse creator notes', notesError);
+              }
               return creatorNotes ? (
                 <Card className="bg-[#1a1a2e] border-gray-700/50">
                   <CardHeader>

@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Heart, MessageCircle } from 'lucide-react';
 import { Characters } from '@/data';
 import { formatNumberWithK } from '@/lib/utils/formatting';
+import type { Json } from '@/integrations/supabase/types';
 
 interface RelatedCharactersCarouselProps {
   currentCharacterId: string;
@@ -28,18 +29,50 @@ interface RelatedCharacter {
   chats_count: number;
 }
 
-// Normalization function moved local (query logic now centralized in data layer)
-const normalizeRelatedCharacters = (list: any[]): RelatedCharacter[] =>
-  (list || []).map((c: any) => ({
-    id: c.id,
-    name: c.name,
-    avatar_url: c.avatar_url ?? null,
-    short_description: c.short_description ?? null,
-    creator: c.creator || null,
-    tags: Array.isArray(c.tags) ? c.tags : [],
-    likes_count: c.likes_count ?? 0,
-    chats_count: c.chats_count ?? 0,
-  }));
+type RawRelatedCharacter = {
+  id?: unknown;
+  name?: unknown;
+  avatar_url?: unknown;
+  short_description?: unknown;
+  creator?: unknown;
+  tags?: unknown;
+  likes_count?: unknown;
+  chats_count?: unknown;
+};
+
+const isTagArray = (value: unknown): value is Array<{ id: number; name: string }> =>
+  Array.isArray(value) && value.every((tag) => {
+    if (typeof tag !== 'object' || tag === null) return false;
+    const candidate = tag as { id?: unknown; name?: unknown };
+    return typeof candidate.id === 'number' && typeof candidate.name === 'string';
+  });
+
+const normalizeRelatedCharacters = (list: Json[] | null | undefined): RelatedCharacter[] =>
+  (list ?? []).reduce<RelatedCharacter[]>((acc, item) => {
+    const raw = item as RawRelatedCharacter;
+    if (typeof raw.id !== 'string' || typeof raw.name !== 'string') {
+      return acc;
+    }
+
+    const creator = (raw.creator && typeof raw.creator === 'object')
+      ? (raw.creator as { username?: unknown; avatar_url?: unknown })
+      : null;
+
+    acc.push({
+      id: raw.id,
+      name: raw.name,
+      avatar_url: typeof raw.avatar_url === 'string' ? raw.avatar_url : null,
+      short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
+      creator: creator ? {
+        username: typeof creator.username === 'string' ? creator.username : 'Unknown',
+        avatar_url: typeof creator.avatar_url === 'string' ? creator.avatar_url : null,
+      } : null,
+      tags: isTagArray(raw.tags) ? raw.tags : [],
+      likes_count: typeof raw.likes_count === 'number' ? raw.likes_count : 0,
+      chats_count: typeof raw.chats_count === 'number' ? raw.chats_count : 0,
+    });
+    return acc;
+  }, []);
 
 export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedCharactersCarouselProps) {
   const navigate = useNavigate();
@@ -50,7 +83,7 @@ export function RelatedCharactersCarousel({ currentCharacterId, tags }: RelatedC
     queryFn: async () => {
       const { data, error } = await Characters.getRelatedCharacters(currentCharacterId, tagIds);
       if (error) throw error;
-      return normalizeRelatedCharacters(data as any[]);
+      return normalizeRelatedCharacters(data as Json[]);
     },
     enabled: !!currentCharacterId,
   });

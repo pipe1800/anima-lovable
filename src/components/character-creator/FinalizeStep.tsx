@@ -25,7 +25,76 @@ interface FinalizeStepProps {
 
 type VisibilityType = 'public' | 'unlisted' | 'private';
 
-interface RelationshipGoalDraft { id: string; order: number; label: string; threshold: number; description?: string }
+type RelationshipGoalDraft = NonNullable<CharacterFormData['relationshipGoalsTemplate']>['path'][number];
+
+type ManualAddonContextState = {
+  mood: string;
+  clothing: string;
+  location: string;
+  time_weather: string;
+  relationship: string;
+  character_position: string;
+};
+
+type ManualAddonContextPayload = NonNullable<CharacterFormData['manual_addon_context']>;
+
+type SimpleTag = Pick<Tags.Tag, 'id' | 'name'>;
+
+const MANUAL_ADDON_CONTEXT_FIELDS = [
+  { key: 'mood', label: 'Mood' },
+  { key: 'clothing', label: 'Clothing / Inventory' },
+  { key: 'location', label: 'Location / Setting' },
+  { key: 'time_weather', label: 'Time & Weather' },
+  { key: 'relationship', label: 'Relationship Status' },
+  { key: 'character_position', label: 'Character Position' }
+] as const;
+
+type ManualAddonContextField = typeof MANUAL_ADDON_CONTEXT_FIELDS[number]['key'];
+
+const EMPTY_MANUAL_ADDON_CONTEXT: ManualAddonContextState = {
+  mood: '',
+  clothing: '',
+  location: '',
+  time_weather: '',
+  relationship: '',
+  character_position: ''
+};
+
+const toManualAddonContextState = (
+  source: CharacterFormData['manual_addon_context'] | null | undefined
+): ManualAddonContextState => ({
+  ...EMPTY_MANUAL_ADDON_CONTEXT,
+  mood: source?.mood ?? '',
+  clothing: source?.clothing ?? '',
+  location: source?.location ?? '',
+  time_weather: source?.time_weather ?? '',
+  relationship: source?.relationship ?? '',
+  character_position: source?.character_position ?? ''
+});
+
+const toManualAddonPayload = (
+  state: ManualAddonContextState
+): ManualAddonContextPayload | null => {
+  const result: ManualAddonContextPayload = {};
+  MANUAL_ADDON_CONTEXT_FIELDS.forEach(({ key }) => {
+    const value = state[key].trim();
+    if (value) {
+      result[key] = value;
+    }
+  });
+  return Object.keys(result).length > 0 ? result : null;
+};
+
+const isRelationshipGoalDraft = (goal: unknown): goal is RelationshipGoalDraft => {
+  if (!goal || typeof goal !== 'object') return false;
+  const candidate = goal as Partial<RelationshipGoalDraft>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.order === 'number' &&
+    typeof candidate.label === 'string' &&
+    typeof candidate.threshold === 'number'
+  );
+};
 
 const genId = () => crypto.randomUUID();
 
@@ -33,7 +102,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   const [visibility, setVisibility] = useState<VisibilityType>(data.visibility || 'private');
   const [enableNSFW, setEnableNSFW] = useState<boolean>(!!data.nsfw_enabled);
   const [userPlan, setUserPlan] = useState<string>('Guest Pass');
-  const [nsfwTag, setNsfwTag] = useState<{ id: number; name: string } | null>(null);
+  const [nsfwTag, setNsfwTag] = useState<SimpleTag | null>(null);
 
   // New local states for version & notes
   const [version, setVersion] = useState<string>(data.version || '1.0.0');
@@ -42,15 +111,12 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   const [showPublishWarning, setShowPublishWarning] = useState(false);
 
   // Custom Initial Addon Context state
-  const [manualAddonContextEnabled, setManualAddonContextEnabled] = useState<boolean>((data as any)?.manual_addon_context_enabled || false);
-  const [manualAddonContext, setManualAddonContext] = useState<any>({
-    mood: (data as any)?.manual_addon_context?.mood || '',
-    clothing: (data as any)?.manual_addon_context?.clothing || '',
-    location: (data as any)?.manual_addon_context?.location || '',
-    time_weather: (data as any)?.manual_addon_context?.time_weather || '',
-    relationship: (data as any)?.manual_addon_context?.relationship || '',
-    character_position: (data as any)?.manual_addon_context?.character_position || ''
-  });
+  const [manualAddonContextEnabled, setManualAddonContextEnabled] = useState<boolean>(
+    Boolean(data.manual_addon_context_enabled)
+  );
+  const [manualAddonContext, setManualAddonContext] = useState<ManualAddonContextState>(
+    () => toManualAddonContextState(data.manual_addon_context)
+  );
 
   const { user, subscription } = useAuth();
 
@@ -68,8 +134,8 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
         } else {
           setUserPlan('Guest Pass');
         }
-        const { data: tag } = await Tags.getNSFWTag();
-        if (tag) setNsfwTag(tag as any);
+  const { data: tag } = await Tags.getNSFWTag();
+  if (tag) setNsfwTag({ id: tag.id, name: tag.name });
       } catch (error) {
         console.error('Error loading user data:', error);
       }
@@ -82,18 +148,11 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
     if (data) {
       setVisibility(data.visibility || 'private');
       setEnableNSFW(!!data.nsfw_enabled);
-      setVersion(data.version || version || '1.0.0');
+  setVersion(prev => data.version || prev || '1.0.0');
       setCharacterNotes(data.notes?.character_notes || '');
       setCreatorNotes(data.notes?.creator_notes || '');
-      setManualAddonContextEnabled((data as any)?.manual_addon_context_enabled || false);
-      setManualAddonContext({
-        mood: (data as any)?.manual_addon_context?.mood || '',
-        clothing: (data as any)?.manual_addon_context?.clothing || '',
-        location: (data as any)?.manual_addon_context?.location || '',
-        time_weather: (data as any)?.manual_addon_context?.time_weather || '',
-        relationship: (data as any)?.manual_addon_context?.relationship || '',
-        character_position: (data as any)?.manual_addon_context?.character_position || ''
-      });
+      setManualAddonContextEnabled(Boolean(data.manual_addon_context_enabled));
+      setManualAddonContext(toManualAddonContextState(data.manual_addon_context));
     }
   }, [data]);
 
@@ -115,18 +174,29 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   // Handle NSFW toggle with tag synchronization
   const handleNSFWToggle = (checked: boolean) => {
     setEnableNSFW(checked);
+    const hasNSFWTag = selectedTags.some(tag => tag.name.toLowerCase() === 'nsfw');
 
-    if (!nsfwTag) return; // No NSFW tag found in database
-
-    const nsfwTagIndex = selectedTags.findIndex(tag => tag?.name?.toLowerCase() === 'nsfw');
-    
-    if (checked && nsfwTagIndex === -1) {
-      // Add NSFW tag if switch is turned on and tag doesn't exist
-      setSelectedTags([...selectedTags, nsfwTag]);
-    } else if (!checked && nsfwTagIndex !== -1) {
-      // Remove NSFW tag if switch is turned off and tag exists
-      setSelectedTags(selectedTags.filter((_, index) => index !== nsfwTagIndex));
+    if (checked) {
+      if (!nsfwTag || hasNSFWTag) {
+        return;
+      }
+    } else if (!hasNSFWTag) {
+      return;
     }
+
+    setSelectedTags(prevTags => {
+      const hasNSFW = prevTags.some(tag => tag.name.toLowerCase() === 'nsfw');
+      if (checked) {
+        if (!nsfwTag || hasNSFW) {
+          return prevTags;
+        }
+        return [...prevTags, nsfwTag];
+      }
+      if (!hasNSFW) {
+        return prevTags;
+      }
+      return prevTags.filter(tag => tag.name.toLowerCase() !== 'nsfw');
+    });
   };
 
   const confirmPublish = () => {
@@ -137,7 +207,9 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
   // Relationship Goals state and handlers
   const [relGoalsEnabled, setRelGoalsEnabled] = useState<boolean>(!!data.relationshipGoalsTemplate?.enabled);
-  const [relGoals, setRelGoals] = useState<RelationshipGoalDraft[]>(() => data.relationshipGoalsTemplate?.path || []);
+  const [relGoals, setRelGoals] = useState<RelationshipGoalDraft[]>(() =>
+    data.relationshipGoalsTemplate?.path?.filter(isRelationshipGoalDraft).map(goal => ({ ...goal })) ?? []
+  );
   const [showRelGoalErrors, setShowRelGoalErrors] = useState<string | null>(null);
   const [attemptedRefetch, setAttemptedRefetch] = useState(false);
   // Debounce + last submitted snapshot refs
@@ -166,16 +238,26 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
   useEffect(() => {
     const tpl = data.relationshipGoalsTemplate;
     if (!tpl || !Array.isArray(tpl.path)) return;
-    const incoming = tpl.path as any[];
+    const normalizedPath = tpl.path.filter(isRelationshipGoalDraft).map(goal => ({ ...goal }));
     // Compare against current local state; only apply if parent truly differs (not just stale snapshot during local edit)
     const differs = (
       relGoalsEnabled !== !!tpl.enabled ||
-      incoming.length !== relGoals.length ||
-      incoming.some((g, i) => g.id !== relGoals[i]?.id || g.order !== relGoals[i]?.order || g.label !== relGoals[i]?.label || g.threshold !== relGoals[i]?.threshold)
+      normalizedPath.length !== relGoals.length ||
+      normalizedPath.some((goal, index) => {
+        const current = relGoals[index];
+        if (!current) return true;
+        return (
+          goal.id !== current.id ||
+          goal.order !== current.order ||
+          goal.label !== current.label ||
+          goal.threshold !== current.threshold ||
+          (goal.description ?? '') !== (current.description ?? '')
+        );
+      })
     );
     if (differs) {
       setRelGoalsEnabled(!!tpl.enabled);
-      setRelGoals(incoming as any);
+      setRelGoals(normalizedPath);
       console.log('♻️ [FinalizeStep] Applied relationship goals from parent (prop change).');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,8 +276,16 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
         const { RelationshipTemplate } = await import('@/data');
         const resp = await RelationshipTemplate.getTemplate(editingCharacterId);
         console.log('📥 [FinalizeStep] Fallback refetch response:', resp);
-        if (resp?.data?.path?.length >= 2) {
-          onUpdate({ relationshipGoalsTemplate: { enabled: resp.data.enabled !== false, path: resp.data.path }} as any);
+        if (resp?.data?.path?.length) {
+          const normalizedPath = resp.data.path.filter(isRelationshipGoalDraft).map(goal => ({ ...goal }));
+          if (normalizedPath.length >= 2) {
+            onUpdate({
+              relationshipGoalsTemplate: {
+                enabled: resp.data.enabled !== false,
+                path: normalizedPath,
+              },
+            });
+          }
         }
       } catch (e) {
         console.warn('⚠️ [FinalizeStep] Fallback refetch failed:', e);
@@ -215,18 +305,21 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
     }
     if (relGoalsEnabled) {
       if (relGoals.length >= 2) {
-        const payload = { enabled: true, path: relGoals };
+        const payload: NonNullable<CharacterFormData['relationshipGoalsTemplate']> = {
+          enabled: true,
+          path: relGoals.map(goal => ({ ...goal })),
+        };
         const serialized = JSON.stringify(payload);
         if (serialized !== lastSubmittedTemplateRef.current) {
           relGoalsDebounceRef.current = window.setTimeout(() => {
-            onUpdate({ relationshipGoalsTemplate: payload } as any);
+            onUpdate({ relationshipGoalsTemplate: payload });
             lastSubmittedTemplateRef.current = serialized;
           }, 400); // debounce interval
         }
       }
     } else if (data.relationshipGoalsTemplate?.enabled) {
       // User disabled locally; clear immediately (no debounce) if parent still enabled
-      onUpdate({ relationshipGoalsTemplate: undefined } as any);
+      onUpdate({ relationshipGoalsTemplate: undefined });
       lastSubmittedTemplateRef.current = '';
     }
     return () => {
@@ -236,11 +329,14 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
   function flushRelGoalsImmediate() {
     if (!relGoalsEnabled || relGoals.length < 2) return;
-    const payload = { enabled: true, path: relGoals };
+    const payload: NonNullable<CharacterFormData['relationshipGoalsTemplate']> = {
+      enabled: true,
+      path: relGoals.map(goal => ({ ...goal })),
+    };
     const serialized = JSON.stringify(payload);
     if (serialized !== lastSubmittedTemplateRef.current) {
       if (relGoalsDebounceRef.current) clearTimeout(relGoalsDebounceRef.current);
-      onUpdate({ relationshipGoalsTemplate: payload } as any);
+      onUpdate({ relationshipGoalsTemplate: payload });
       lastSubmittedTemplateRef.current = serialized;
     }
   }
@@ -279,23 +375,27 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
 
   const handleFinalize = () => {
     if (!validateRelGoals()) return;
-    const cleanedManualContext = Object.fromEntries(Object.entries(manualAddonContext).filter(([_, v]) => typeof v === 'string' && v.trim()));
+    const manualAddonPayload = manualAddonContextEnabled ? toManualAddonPayload(manualAddonContext) : null;
     const overrides: Partial<CharacterFormData> = {
       visibility,
       nsfw_enabled: enableNSFW,
       version,
       notes: { character_notes: characterNotes, creator_notes: creatorNotes },
-      ...(manualAddonContextEnabled && Object.keys(cleanedManualContext).length > 0 ? {
-        manual_addon_context_enabled: true,
-        manual_addon_context: cleanedManualContext
-      } : {
-        manual_addon_context_enabled: false,
-        manual_addon_context: null
-      }),
-      relationshipGoalsTemplate: relGoalsEnabled ? { enabled: true, path: relGoals } : undefined
+      manual_addon_context_enabled: Boolean(manualAddonPayload),
+      manual_addon_context: manualAddonContextEnabled ? manualAddonPayload : null,
+      relationshipGoalsTemplate: relGoalsEnabled
+        ? { enabled: true, path: relGoals.map(goal => ({ ...goal })) }
+        : undefined
     };
     console.log('🧪 [FinalizeStep] Submitting finalize overrides:', overrides);
     onFinalize(overrides);
+  };
+
+  const updateManualAddonContextField = (field: ManualAddonContextField, value: string) => {
+    setManualAddonContext(prev => ({
+      ...prev,
+      [field]: value,
+    }));
   };
 
   const tokenInfo = estimateCreatorTokenUsage(data, userPlan);
@@ -504,14 +604,7 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
         </div>
         {manualAddonContextEnabled && (
           <div className="mt-4 grid md:grid-cols-2 gap-4">
-            {[
-              { key: 'mood', label: 'Mood' },
-              { key: 'clothing', label: 'Clothing / Inventory' },
-              { key: 'location', label: 'Location / Setting' },
-              { key: 'time_weather', label: 'Time & Weather' },
-              { key: 'relationship', label: 'Relationship Status' },
-              { key: 'character_position', label: 'Character Position' }
-            ].map(f => (
+            {MANUAL_ADDON_CONTEXT_FIELDS.map(f => (
               <div key={f.key} className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-gray-300">{f.label}</label>
                 <textarea
@@ -520,9 +613,9 @@ const FinalizeStep = ({ data, onUpdate, onFinalize, onPrevious, isCreating = fal
                   placeholder="Leave blank to auto-extract"
                   className="bg-[#1e1e1e] border border-gray-700 rounded px-2 py-1 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-purple-500"
                   value={manualAddonContext[f.key]}
-                  onChange={(e) => setManualAddonContext((prev: any) => ({ ...prev, [f.key]: e.target.value }))}
+                  onChange={(e) => updateManualAddonContextField(f.key, e.target.value)}
                 />
-                <div className="flex justify-end text-[10px] text-gray-500">{manualAddonContext[f.key]?.length || 0}/160</div>
+                <div className="flex justify-end text-[10px] text-gray-500">{manualAddonContext[f.key].length}/160</div>
               </div>
             ))}
           </div>

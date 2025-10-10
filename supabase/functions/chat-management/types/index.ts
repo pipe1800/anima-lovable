@@ -61,6 +61,8 @@ export interface ExtractContextRequest {
   }>;
 }
 
+export type ChatAddonSettings = Record<string, unknown>;
+
 export interface SendMessageRequest {
   operation: 'send-message';
   chatId: string;
@@ -68,7 +70,7 @@ export interface SendMessageRequest {
   characterId: string;
   selectedPersonaId?: string | null;
   selectedWorldInfoId?: string | null;
-  addonSettings?: any;
+  addonSettings?: ChatAddonSettings;
 }
 
 export interface CreateMemoryRequest {
@@ -84,14 +86,14 @@ export interface RegenerateMessageRequest {
   aiMessageId: string;
   selectedPersonaId?: string | null;
   selectedWorldInfoId?: string | null;
-  addonSettings?: any;
+  addonSettings?: ChatAddonSettings;
 }
 
 export type ChatManagementRequest = CreateBasicChatRequest | CreateWithGreetingRequest | ExtractContextRequest | SendMessageRequest | CreateMemoryRequest | RegenerateMessageRequest;
 
 export interface ChatResponse {
   success: boolean;
-  data?: any;
+  data?: unknown;
   error?: string;
   chat_id?: string;
   greeting?: string;

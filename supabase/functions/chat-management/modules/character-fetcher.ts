@@ -1,20 +1,36 @@
 /**
  * Character Data Fetching Module
- * 
+ *
  * Handles fetching character information with fallback logic
  * for the extract-chat-context function
  */
 
-import type { 
-  Character
+import type {
+  Character,
+  CharacterDefinition,
+  SupabaseClient,
+  TemplateContext,
 } from '../types/streaming-interfaces.ts';
 import { buildTemplateReplacer } from './database.ts';
-import type { TemplateContext } from '../types/streaming-interfaces.ts';
 
-// Define missing types locally
+interface CharacterWorldInfo {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  world_id?: string | null;
+  worlds?: {
+    id: string;
+    name: string;
+    description?: string | null;
+  } | null;
+}
+
 interface CharacterData extends Character {
-  world_info?: any[];
-  context_settings?: any;
+  personality?: string | null;
+  instructions?: string | null;
+  example_conversations?: string | null;
+  world_info?: CharacterWorldInfo[] | null;
+  context_settings?: Record<string, unknown> | null;
 }
 
 interface UserPersona {
@@ -34,55 +50,57 @@ interface UserProfile {
  */
 export async function fetchCharacterData(
   characterId: string,
-  supabase: any,
-  options?: { full?: boolean }
+  supabase: SupabaseClient,
+  options?: { full?: boolean },
 ): Promise<CharacterData> {
   try {
     const full = options?.full === true;
-    const baseSelect = `id, name, greeting, personality_summary, context_settings, character_definitions(*)`;
-    const fullExtras = `, personality, description, instructions, scenario, example_conversations, world_info:world_infos(id,name,description,world_id,worlds(id,name,description))`;
-    const selectClause = full ? baseSelect + fullExtras : baseSelect;
+    const baseSelect =
+      'id, name, greeting, personality_summary, context_settings, character_definitions(*)';
+    const fullExtras =
+      ', personality, description, instructions, scenario, example_conversations, world_info:world_infos(id,name,description,world_id,worlds(id,name,description))';
+    const selectClause = full ? `${baseSelect}${fullExtras}` : baseSelect;
+
     const { data: character, error: characterError } = await supabase
-      .from('characters')
+      .from<CharacterData>('characters')
       .select(selectClause)
       .eq('id', characterId)
       .single();
 
     if (character && !characterError) {
-      console.log('✅ Character data fetched from characters table');
+      console.log('[character-fetcher] Character data fetched from characters table');
       return character;
     }
 
     // Fallback: Try character_definitions if not found in characters
-    console.log('Character not found in characters table, trying character_definitions...');
-  const { data: def, error: defError } = await supabase
-      .from('character_definitions')
+    console.log('[character-fetcher] Character missing, checking character_definitions');
+    const { data: def, error: defError } = await supabase
+      .from<CharacterDefinition>('character_definitions')
       .select('*')
       .eq('character_id', characterId)
       .single();
-    
+
     if (def && !defError) {
       const fallbackCharacter: CharacterData = {
         id: characterId,
-        name: def.name || 'Unknown Character',
+        name: def.name ?? 'Unknown Character',
         personality_summary: def.personality_summary,
-        description: def.description,
-        scenario: def.scenario,
-        greeting: def.greeting,
+        description: def.description ?? undefined,
+        scenario: def.scenario ?? undefined,
+        greeting: def.greeting ?? undefined,
         character_definitions: def,
       };
-      console.log('✅ Fallback: Found character in character_definitions only');
+      console.log('[character-fetcher] Fallback character loaded from character_definitions');
       return fallbackCharacter;
     }
 
-    // If both fail, throw error
-    console.error('Character fetch error:', characterError);
-    console.error('Character_definitions fetch error:', defError);
+    console.error('[character-fetcher] Character fetch error:', characterError);
+    console.error('[character-fetcher] character_definitions fetch error:', defError);
     throw new Error('Character not found');
-
   } catch (error) {
-    console.error('❌ Failed to fetch character data:', error);
-    throw new Error(`Failed to fetch character: ${error.message}`);
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('[character-fetcher] Failed to fetch character data:', err);
+    throw new Error(`Failed to fetch character: ${err.message}`);
   }
 }
 
@@ -91,36 +109,36 @@ export async function fetchCharacterData(
  */
 export async function fetchUserData(
   userId: string,
-  supabase: any
+  supabase: SupabaseClient,
 ): Promise<{ persona: UserPersona | null; profile: UserProfile | null }> {
   try {
-    const [userPersonaResult, userProfileResult] = await Promise.allSettled([
+    const [personaResponse, profileResponse] = await Promise.all([
       supabase
-        .from('personas')
-        .select('*')
+        .from<UserPersona>('personas')
+        .select('id, name, bio, lore')
         .eq('user_id', userId)
         .limit(1)
-        .single(),
+        .maybeSingle(),
       supabase
-        .from('profiles')
-        .select('username')
+        .from<UserProfile>('profiles')
+        .select('id, username')
         .eq('id', userId)
-        .single()
+        .maybeSingle(),
     ]);
 
-    const persona = userPersonaResult.status === 'fulfilled' ? userPersonaResult.value.data : null;
-    const profile = userProfileResult.status === 'fulfilled' ? userProfileResult.value.data : null;
+    const persona = personaResponse.data ?? null;
+    const profile = profileResponse.data ?? null;
 
-    console.log('✅ User data fetched:', {
-      hasPersona: !!persona,
-      hasProfile: !!profile,
-      username: profile?.username
+    console.log('[character-fetcher] User data fetched', {
+      hasPersona: Boolean(persona),
+      hasProfile: Boolean(profile),
+      username: profile?.username,
     });
 
     return { persona, profile };
-
   } catch (error) {
-    console.error('❌ Failed to fetch user data:', error);
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('[character-fetcher] Failed to fetch user data:', err);
     // Don't throw - these are non-critical for context extraction
     return { persona: null, profile: null };
   }
@@ -131,10 +149,10 @@ export async function fetchUserData(
  */
 export function getCharacterForContext(character: CharacterData) {
   return {
-    personality_summary: character.character_definitions?.personality_summary || '',
-    description: character.character_definitions?.description || '',
-    scenario: character.character_definitions?.scenario || '',
-    greeting: character.character_definitions?.greeting || ''
+    personality_summary: character.character_definitions?.personality_summary ?? '',
+    description: character.character_definitions?.description ?? '',
+    scenario: character.character_definitions?.scenario ?? '',
+    greeting: character.character_definitions?.greeting ?? '',
   };
 }
 
@@ -144,11 +162,11 @@ export function getCharacterForContext(character: CharacterData) {
 export function createTemplateReplacer(
   persona: UserPersona | null,
   profile: UserProfile | null,
-  character: CharacterData
+  character: CharacterData,
 ) {
   const context: TemplateContext = {
-    userName: persona?.name || profile?.username || 'User',
-    charName: character.name || 'Character'
+    userName: persona?.name ?? profile?.username ?? 'User',
+    charName: character.name ?? 'Character',
   };
   return buildTemplateReplacer(context);
 }

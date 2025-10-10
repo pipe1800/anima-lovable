@@ -1,23 +1,30 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Users, MessageSquare, Zap } from 'lucide-react';
+import { Heart, Users, MessageSquare, Zap } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@/contexts/AuthContext';
-import { Profile as ProfileQueries } from '@/data';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { useAuth, useBillingCredits } from '@/contexts/AuthContext';
+import { supabase } from '@/db/client';
+import { getUserDashboardOverview } from '@/data/dashboard/queries';
+import type { Database } from '@/integrations/supabase/types';
 
 export const ProfileStats = () => {
   const { user } = useAuth();
+  const { balance } = useBillingCredits();
   const { data: statsData, isLoading } = useQuery({
     queryKey: ['profile-stats-overview', user?.id],
     queryFn: async () => {
       if (!user) throw new Error('No authenticated user');
-      const { data, error } = await ProfileQueries.getUserBootstrap(user.id);
+      const { data, error } = await getUserDashboardOverview(
+        supabase as SupabaseClient<Database, '__InternalSupabase'>,
+        user.id,
+      );
       if (error) throw error;
-      const counts = (data as any)?.counts || { chats:0, characters:0, favorites:0, personas:0 };
+      const counts = data?.counts || { chats: 0, characters: 0, favorites: 0, personas: 0 };
       return {
-        characterCount: counts.characters,
-        chatCount: counts.chats,
-        creditsBalance: (data as any)?.credits ?? 0,
-        followersCount: 0,
+        characterCount: counts.characters || 0,
+        chatCount: counts.chats || 0,
+        favoritesCount: counts.favorites || 0,
+        personaCount: counts.personas || 0,
       };
     },
     enabled: !!user?.id,
@@ -56,15 +63,15 @@ export const ProfileStats = () => {
     },
     {
       title: 'Credits Balance',
-      value: statsData?.creditsBalance || 0,
+      value: balance || 0,
       icon: Zap,
       color: 'text-yellow-400'
     },
     {
-      title: 'Followers',
-      value: statsData?.followersCount || 0,
-      icon: TrendingUp,
-      color: 'text-green-400'
+      title: 'Favorites',
+      value: statsData?.favoritesCount || 0,
+      icon: Heart,
+      color: 'text-rose-400'
     }
   ];
 

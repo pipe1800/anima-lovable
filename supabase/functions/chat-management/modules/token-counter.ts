@@ -1,3 +1,4 @@
+import { listSummaryMessageCounts } from './knowledge.ts';
 /**
  * Message-based auto-summarization and token management
  * New system: Auto-summary every 15 AI responses, context preserved with recent messages
@@ -89,25 +90,13 @@ export async function getLatestSummaryInfo(chatId: string, supabase: any): Promi
   hasSummaries: boolean;
 }> {
   try {
-    const { data: summaries, error } = await supabase
-      .from('character_memories')
-      .select('message_count')
-      .eq('chat_id', chatId)
-      .eq('is_auto_summary', true)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (error) {
-      console.error('Error fetching summary info:', error);
+    const counts = await listSummaryMessageCounts(supabase, { chatId });
+    if (!counts || counts.length === 0) {
       return { lastSummaryEndMessage: 0, hasSummaries: false };
     }
-
-    if (!summaries || summaries.length === 0) {
-      return { lastSummaryEndMessage: 0, hasSummaries: false };
-    }
-
+    const lastSummaryEndMessage = counts[counts.length - 1];
     return {
-      lastSummaryEndMessage: summaries[0].message_count,
+      lastSummaryEndMessage,
       hasSummaries: true
     };
   } catch (error) {

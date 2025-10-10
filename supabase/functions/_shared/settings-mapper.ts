@@ -98,16 +98,23 @@ export const ADDON_RUNTIME_KEYS = [
 export type AddonDbKey = typeof ADDON_DB_KEYS[number];
 export type AddonRuntimeKey = typeof ADDON_RUNTIME_KEYS[number];
 
+const isAddonRecord = (value: unknown): value is Partial<Record<AddonRuntimeKey, unknown>> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
 export function anyAddonEnabled(addonSettings: Partial<AddonSettings> | null | undefined): boolean {
   if (!addonSettings) return false;
-  return ADDON_RUNTIME_KEYS.some((k) => (addonSettings as any)[k]);
+  return ADDON_RUNTIME_KEYS.some((key) => Boolean(addonSettings[key]));
 }
 
-export function sanitizeAddonSettings(input: any): AddonSettings {
+export function sanitizeAddonSettings(input: unknown): AddonSettings {
   const out: AddonSettings = {};
+  if (!isAddonRecord(input)) {
+    return out;
+  }
   for (const key of ADDON_RUNTIME_KEYS) {
-    if (input && Object.prototype.hasOwnProperty.call(input, key)) {
-      (out as any)[key] = !!input[key];
+    if (Object.prototype.hasOwnProperty.call(input, key)) {
+      out[key] = Boolean(input[key]);
     }
   }
   return out;

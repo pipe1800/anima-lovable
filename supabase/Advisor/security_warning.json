@@ -188,24 +188,6 @@
       "SECURITY"
     ],
     "description": "Detects functions where the search_path parameter is not set.",
-    "detail": "Function \\`public.related_characters\\` has a role mutable search_path",
-    "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable",
-    "metadata": {
-      "name": "related_characters",
-      "type": "function",
-      "schema": "public"
-    },
-    "cache_key": "function_search_path_mutable_public_related_characters_c24fe1d49e7c03f937983cf0445f5cd4"
-  },
-  {
-    "name": "function_search_path_mutable",
-    "title": "Function Search Path Mutable",
-    "level": "WARN",
-    "facing": "EXTERNAL",
-    "categories": [
-      "SECURITY"
-    ],
-    "description": "Detects functions where the search_path parameter is not set.",
     "detail": "Function \\`public.set_was_public_on_visibility_change\\` has a role mutable search_path",
     "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable",
     "metadata": {
@@ -232,24 +214,6 @@
       "schema": "public"
     },
     "cache_key": "function_search_path_mutable_public_decrement_world_info_interaction_count_25ca344d4ebd70937334ed792a4af607"
-  },
-  {
-    "name": "function_search_path_mutable",
-    "title": "Function Search Path Mutable",
-    "level": "WARN",
-    "facing": "EXTERNAL",
-    "categories": [
-      "SECURITY"
-    ],
-    "description": "Detects functions where the search_path parameter is not set.",
-    "detail": "Function \\`public.get_public_character_cards\\` has a role mutable search_path",
-    "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable",
-    "metadata": {
-      "name": "get_public_character_cards",
-      "type": "function",
-      "schema": "public"
-    },
-    "cache_key": "function_search_path_mutable_public_get_public_character_cards_92a1781ebd899ad5292543d9c4411e26"
   },
   {
     "name": "function_search_path_mutable",

@@ -2,12 +2,20 @@
 // Avoid leaking user provided content or API keys in logs.
 
 function hashString(input: string): string {
-  let h = 0, i = 0, len = input.length;
+  let h = 0;
+  let i = 0;
+  const len = input.length;
   while (i < len) { h = (Math.imul(31, h) + input.charCodeAt(i++)) | 0; }
   return ('00000000' + (h >>> 0).toString(16)).slice(-8);
 }
 
-export function redactContent(value: unknown, opts?: { maxPreview?: number }): any {
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+export function redactContent(value: unknown, opts?: { maxPreview?: number }): unknown {
   const maxPreview = opts?.maxPreview ?? 80;
   try {
     if (value == null) return value;
@@ -23,9 +31,9 @@ export function redactContent(value: unknown, opts?: { maxPreview?: number }): a
     if (Array.isArray(value)) {
       return value.map(v => redactContent(v, opts));
     }
-    if (typeof value === 'object') {
-      const out: Record<string, any> = {};
-      for (const [k, v] of Object.entries(value as any)) {
+    if (isRecord(value)) {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value)) {
         if (/key|secret|token|authorization/i.test(k)) {
           out[k] = maskPotentialKey(String(v || ''));
         } else {
@@ -47,7 +55,7 @@ export function maskPotentialKey(k: string): string {
   return clean.slice(0,4) + '****' + clean.slice(-4);
 }
 
-export function safeLog(label: string, payload: any) {
+export function safeLog(label: string, payload: unknown) {
   try {
     console.log(label, JSON.stringify(redactContent(payload)));
   } catch (e) {
@@ -55,9 +63,11 @@ export function safeLog(label: string, payload: any) {
   }
 }
 
-export function safeError(label: string, error: any, context?: any) {
+export function safeError(label: string, error: unknown, context?: unknown) {
   try {
-    const base = { message: error?.message || String(error), name: error?.name || 'Error' };
+    const base = error instanceof Error
+      ? { message: error.message, name: error.name }
+      : { message: String(error), name: 'Error' };
     console.error(label, JSON.stringify({ error: base, context: redactContent(context) }));
   } catch {
     console.error(label, '{"error":"failed_to_log"}');

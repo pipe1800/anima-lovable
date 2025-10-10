@@ -37,9 +37,14 @@ export async function parseCharacterCardToForm(file: File): Promise<any | null> 
     // Find candidate
     let raw: any = null;
     for (const { keyword, text } of chunks) {
-      if (/chara|character|json|metadata|ccv3|tavern|silly|card|data/i.test(keyword) || /^[\[{]/.test(text.trim())) {
+      const trimmed = text.trim();
+      if (
+        /chara|character|json|metadata|ccv3|tavern|silly|card|data/i.test(keyword) ||
+        trimmed.startsWith('{') ||
+        trimmed.startsWith('[')
+      ) {
         try {
-          let payload = text.trim();
+          let payload = trimmed;
           if (!payload.startsWith('{') && !payload.startsWith('[')) {
             try { payload = atob(payload); } catch { /* ignore */ }
           }

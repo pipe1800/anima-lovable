@@ -1,54 +1,48 @@
-import type { StreamingUpdate, CORS_HEADERS } from '../types/streaming-interfaces.ts';
 import { logger } from '../../_shared/logger.ts';
-
 /**
  * Streaming optimization utilities
  * Handles efficient streaming with reduced database I/O and improved performance
- */
-
-export class StreamingOptimizer {
-  private updateBuffer: string = '';
-  private lastDbUpdate: number = 0;
-  private readonly UPDATE_INTERVAL = 1500; // 1.5 seconds
-  private readonly BUFFER_THRESHOLD = 150; // characters
-
-  constructor(private startTime: number) {}
-
-  shouldUpdateDatabase(newContent: string): boolean {
+ */ export class StreamingOptimizer {
+  startTime;
+  updateBuffer;
+  lastDbUpdate;
+  UPDATE_INTERVAL;
+  BUFFER_THRESHOLD;
+  constructor(startTime){
+    this.startTime = startTime;
+    this.updateBuffer = '';
+    this.lastDbUpdate = 0;
+    this.UPDATE_INTERVAL = 1500;
+    this.BUFFER_THRESHOLD = 150;
+  }
+  shouldUpdateDatabase(newContent) {
     const now = Date.now();
     const timeSinceLastUpdate = now - this.lastDbUpdate;
     const contentDelta = newContent.length - this.updateBuffer.length;
-    
     const timeThreshold = timeSinceLastUpdate > this.UPDATE_INTERVAL;
     const sizeThreshold = contentDelta > this.BUFFER_THRESHOLD;
-    
     if (timeThreshold || sizeThreshold) {
       this.lastDbUpdate = now;
       this.updateBuffer = newContent;
       return true;
     }
-    
     return false;
   }
-
-  processStreamChunk(chunk: string, fullResponse: string): StreamingUpdate {
+  processStreamChunk(chunk, fullResponse) {
     const shouldUpdate = this.shouldUpdateDatabase(fullResponse);
-    
     return {
       content: chunk,
       shouldUpdateDatabase: shouldUpdate,
       isComplete: false
     };
   }
-
-  createFinalUpdate(fullResponse: string): StreamingUpdate {
+  createFinalUpdate(fullResponse) {
     return {
       content: fullResponse,
       shouldUpdateDatabase: true,
       isComplete: true
     };
   }
-
   getPerformanceMetrics() {
     const now = Date.now();
     return {
@@ -58,8 +52,7 @@ export class StreamingOptimizer {
     };
   }
 }
-
-export function createStreamingResponse(readable: ReadableStream): Response {
+export function createStreamingResponse(readable) {
   return new Response(readable, {
     headers: {
       'Access-Control-Allow-Origin': '*',
@@ -71,84 +64,81 @@ export function createStreamingResponse(readable: ReadableStream): Response {
     }
   });
 }
-
-export function processStreamBuffer(buffer: string): { lines: string[], remainingBuffer: string } {
+export function processStreamBuffer(buffer) {
   const lines = buffer.split('\n');
   const remainingBuffer = lines.pop() || ''; // Keep incomplete line in buffer
-  
   return {
-    lines: lines.filter(line => line.trim() !== ''),
+    lines: lines.filter((line)=>line.trim() !== ''),
     remainingBuffer
   };
 }
-
-export function parseStreamChunk(line: string): { content: string | null, isDone: boolean } {
+export function parseStreamChunk(line) {
   if (!line.startsWith('data: ')) {
-    return { content: null, isDone: false };
+    return {
+      content: null,
+      isDone: false
+    };
   }
-
   const data = line.slice(6);
-  
   if (data === '[DONE]') {
-    return { content: null, isDone: true };
+    return {
+      content: null,
+      isDone: true
+    };
   }
-
   try {
     const parsed = JSON.parse(data);
     const content = parsed.choices?.[0]?.delta?.content || null;
-    return { content, isDone: false };
+    return {
+      content,
+      isDone: false
+    };
   } catch (e) {
     console.error('Error parsing chunk:', e);
-    return { content: null, isDone: false };
+    return {
+      content: null,
+      isDone: false
+    };
   }
 }
-
-export function createStreamingErrorResponse(error: string, model: string, plan: string): Response {
+export function createStreamingErrorResponse(error, model, plan) {
   const errorStream = new ReadableStream({
-    start(controller) {
+    start (controller) {
       const encoder = new TextEncoder();
       const errorMessage = `OpenRouter API failed (Status: ${error}). Model: ${model}. Plan: ${plan}. Please try again.`;
-      
       controller.enqueue(encoder.encode(`data: {"choices":[{"delta":{"content":"${errorMessage}"}}]}\n\n`));
       controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
       controller.close();
     }
   });
-
   return createStreamingResponse(errorStream);
 }
-
-export interface StreamPipelineOptions {
-  aiResponse: Response;
-  onChunk?(content: string, full: string): Promise<void> | void;
-  onComplete?(full: string): Promise<void> | void;
-  onError?(err: any): Promise<void> | void;
-  sse?: boolean; // default true
-  includeDoneEnvelope?: boolean; // default true
-}
-
-export function streamAIResponse(opts: StreamPipelineOptions): Response {
+export function streamAIResponse(opts) {
   const encoder = new TextEncoder();
   const { aiResponse, onChunk, onComplete, onError, sse = true, includeDoneEnvelope = true } = opts;
   const readable = new ReadableStream({
-    async start(controller) {
+    async start (controller) {
       let full = '';
       try {
         const reader = aiResponse.body?.getReader();
         if (!reader) throw new Error('No reader');
         let buffer = '';
-        while (true) {
+        while(true){
           const { done, value } = await reader.read();
           if (done) break;
-          buffer += new TextDecoder().decode(value, { stream: true });
+          buffer += new TextDecoder().decode(value, {
+            stream: true
+          });
           const { lines, remainingBuffer } = processStreamBuffer(buffer);
           buffer = remainingBuffer;
-          for (const line of lines) {
+          for (const line of lines){
             if (!line.trim()) continue;
             const { content, isDone } = parseStreamChunk(line);
             if (isDone) {
               if (includeDoneEnvelope) {
-                const donePayload = JSON.stringify({ done: true });
+                const donePayload = JSON.stringify({
+                  done: true
+                });
                 controller.enqueue(encoder.encode(`data: ${donePayload}\n\n`));
               }
               if (onComplete) await onComplete(full.trim());
@@ -158,15 +148,21 @@ export function streamAIResponse(opts: StreamPipelineOptions): Response {
             if (content) {
               full += content;
               if (onChunk) await onChunk(content, full);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                content
+              })}\n\n`));
             }
           }
         }
-        if (includeDoneEnvelope) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
+        if (includeDoneEnvelope) controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          done: true
+        })}\n\n`));
         if (onComplete) await onComplete(full.trim());
         controller.close();
       } catch (e) {
-        logger.error('stream.pipeline.error', { message: (e as Error)?.message });
+        logger.error('stream.pipeline.error', {
+          message: e?.message
+        });
         if (onError) await onError(e);
         controller.error(e);
       }

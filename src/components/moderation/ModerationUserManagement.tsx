@@ -1,17 +1,45 @@
-
-import React, { useState } from 'react';
-import { Search, Users, AlertTriangle, Ban, Shield, Mail, Eye, Clock, Calendar, MessageSquare, FileText } from 'lucide-react';
+import { useState } from 'react';
+import { Search, Users, AlertTriangle, Ban, Shield, Mail, Eye, Clock, MessageSquare, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 
+interface ModerationHistoryEntry {
+  date: string;
+  action: string;
+  reason: string;
+  moderator: string;
+}
+
+interface RecentMessageEntry {
+  id: number;
+  content: string;
+  timestamp: string;
+  character: string;
+}
+
+interface ModerationUser {
+  id: number;
+  username: string;
+  email: string;
+  status: 'active' | 'warned' | 'suspended' | 'banned';
+  reports: number;
+  joinDate: string;
+  lastActivity: string;
+  tier: 'whale' | 'premium' | 'free';
+  totalMessages: number;
+  charactersCreated: number;
+  moderationHistory: ModerationHistoryEntry[];
+  recentMessages: RecentMessageEntry[];
+}
+
 export const ModerationUserManagement = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [selectedUser, setSelectedUser] = useState<ModerationUser | null>(null);
   const [isDetailViewOpen, setIsDetailViewOpen] = useState(false);
 
-  const users = [
+  const users: ModerationUser[] = [
     {
       id: 1,
       username: 'john_doe',
@@ -96,7 +124,7 @@ export const ModerationUserManagement = () => {
     user.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: ModerationUser['status']) => {
     switch (status) {
       case 'active': return 'text-green-400 bg-green-400/10';
       case 'warned': return 'text-yellow-400 bg-yellow-400/10';
@@ -105,7 +133,7 @@ export const ModerationUserManagement = () => {
     }
   };
 
-  const getTierColor = (tier: string) => {
+  const getTierColor = (tier: ModerationUser['tier']) => {
     switch (tier) {
       case 'whale': return 'text-purple-400 bg-purple-400/10';
       case 'premium': return 'text-blue-400 bg-blue-400/10';
@@ -114,12 +142,12 @@ export const ModerationUserManagement = () => {
     }
   };
 
-  const handleUserClick = (user: any) => {
+  const handleUserClick = (user: ModerationUser) => {
     setSelectedUser(user);
     setIsDetailViewOpen(true);
   };
 
-  const handleModerationAction = (action: string, userId: number) => {
+  const handleModerationAction = (action: 'message' | 'warn' | 'ban_24h' | 'ban_permanent', userId: number) => {
     console.log(`${action} applied to user ${userId}`);
     // Here you would implement the actual moderation logic
     setIsDetailViewOpen(false);
@@ -316,7 +344,7 @@ export const ModerationUserManagement = () => {
                     Recent Messages
                   </h3>
                   <div className="space-y-3 max-h-60 overflow-y-auto">
-                    {selectedUser.recentMessages.map((message: any) => (
+                    {selectedUser.recentMessages.map((message) => (
                       <div key={message.id} className="bg-gray-800/30 rounded-lg p-3">
                         <div className="flex justify-between items-start mb-2">
                           <span className="text-[#FF7A00] text-sm font-medium">{message.character}</span>
@@ -367,8 +395,8 @@ export const ModerationUserManagement = () => {
                   </h3>
                   <div className="space-y-3 max-h-48 overflow-y-auto">
                     {selectedUser.moderationHistory.length > 0 ? (
-                      selectedUser.moderationHistory.map((record: any, index: number) => (
-                        <div key={index} className="bg-gray-800/30 rounded-lg p-3">
+                      selectedUser.moderationHistory.map((record, index) => (
+                        <div key={`${record.action}-${record.date}-${index}`} className="bg-gray-800/30 rounded-lg p-3">
                           <div className="flex justify-between items-start mb-1">
                             <span className="text-red-400 text-sm font-medium">{record.action}</span>
                             <span className="text-gray-500 text-xs">{record.date}</span>

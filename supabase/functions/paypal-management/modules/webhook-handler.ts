@@ -1,12 +1,16 @@
 import { getPayPalAccessToken } from './paypal-client.ts';
 
-// Global Deno declaration
-declare const Deno: any;
 import type { 
   PayPalManagementRequest, 
   PayPalResponse,
-  WebhookRequest
+  WebhookRequest,
+  PayPalSupabaseAdminClient,
+  DenoEnvGlobal,
+  PlanRecord,
+  SubscriptionRecord
 } from '../types/index.ts';
+// Global Deno declaration
+declare const Deno: DenoEnvGlobal;
 
 /**
  * Webhook Operations Handler
@@ -21,14 +25,16 @@ const CREDIT_AMOUNTS = {
   'The Whale': 32000
 };
 
-/**
+type SubscriptionWithPlan = SubscriptionRecord & { plan: PlanRecord | null };
+
+/** 
  * Handle PayPal Webhook
  * Extracted from: paypal-webhook/index.ts
  * Core business logic: Webhook verification + subscription upgrade processing + credit granting
  */
 export async function handleWebhook(
   request: PayPalManagementRequest & WebhookRequest,
-  supabaseAdmin: any,
+  supabaseAdmin: PayPalSupabaseAdminClient,
   req: Request,
   rawBody: string
 ): Promise<PayPalResponse> {
@@ -105,7 +111,7 @@ export async function handleWebhook(
     // ============================================================================
     const { data: currentSub, error: subError } = await supabaseAdmin
       .from('subscriptions')
-      .select(`
+      .select<SubscriptionWithPlan>(`
         *,
         plan:plans(*)
       `)
@@ -125,21 +131,23 @@ export async function handleWebhook(
       };
     }
 
+    const currentPlanName = currentSub.plan?.name ?? 'Unknown';
+
     console.log('[WEBHOOK] Found current subscription:', {
       subscriptionId: currentSub.id,
-      planName: currentSub.plan.name,
-      oldPaypalId: currentSub.paypal_subscription_id
+      planName: currentPlanName,
+      oldPaypalId: currentSub.paypal_subscription_id,
     });
 
     // ============================================================================
     // UPGRADE VALIDATION
     // ============================================================================
     // Only process if this is an upgrade from True Fan
-    if (currentSub.plan.name !== 'True Fan') {
-      console.log('[WEBHOOK] Not a True Fan upgrade, ignoring:', currentSub.plan.name);
+    if (currentPlanName !== 'True Fan') {
+      console.log('[WEBHOOK] Not a True Fan upgrade, ignoring:', currentPlanName);
       return {
         success: true,
-        data: { message: `Not a True Fan upgrade: ${currentSub.plan.name}` }
+        data: { message: `Not a True Fan upgrade: ${currentPlanName}` },
       };
     }
 
@@ -184,7 +192,7 @@ export async function handleWebhook(
     // ============================================================================
     const { data: whalePlan, error: planError } = await supabaseAdmin
       .from('plans')
-      .select('*')
+      .select<PlanRecord>('*')
       .eq('name', 'The Whale')
       .single();
 
@@ -202,39 +210,51 @@ export async function handleWebhook(
     try {
       const { data: balRow } = await supabaseAdmin.from('credits').select('balance').eq('user_id', customId).maybeSingle();
       priorBalance = balRow?.balance ?? null;
-    } catch {}
+    } catch (balanceError) {
+      console.warn('[WEBHOOK] Failed to fetch prior credit balance', balanceError);
+    }
 
     // =========================================================================
     // GRANT CREDIT DIFFERENCE (use add_user_credits RPC)
     // =========================================================================
+    let newBalance: number | null = null;
     try {
-      const { data: newBal, error: creditRpcErr } = await (supabaseAdmin as any).rpc('add_user_credits', {
+      const creditResult = await supabaseAdmin.rpc('add_user_credits', {
         p_user_id: customId,
         p_amount: creditDifference,
         p_transaction_type: 'subscription_allowance',
-        p_reference_id: currentSub.id
+        p_reference_id: currentSub.id,
       });
-      if (creditRpcErr) {
-        throw new Error(`add_user_credits RPC failed: ${creditRpcErr.message}`);
+      if (creditResult.error) {
+        throw new Error(`add_user_credits RPC failed: ${creditResult.error.message}`);
       }
-      console.log('[WEBHOOK] Credits granted via RPC. Prior balance:', priorBalance, 'New balance (reported):', newBal);
-      var newBalance = newBal; // expose for response payload
-    } catch (e:any) {
-      throw new Error(`Failed to grant credit difference: ${e.message}`);
+      if (typeof creditResult.data === 'number') {
+        newBalance = creditResult.data;
+      }
+      console.log(
+        '[WEBHOOK] Credits granted via RPC. Prior balance:',
+        priorBalance,
+        'New balance (reported):',
+        creditResult.data,
+      );
+    } catch (grantError) {
+      const grantMessage =
+        grantError instanceof Error ? grantError.message : String(grantError);
+      throw new Error(`Failed to grant credit difference: ${grantMessage}`);
     }
 
     // =========================================================================
     // UPDATE SUBSCRIPTION (use upsert_subscription RPC)
     // =========================================================================
-    const { error: upsertErr } = await (supabaseAdmin as any).rpc('upsert_subscription', {
+    const upsertResult = await supabaseAdmin.rpc('upsert_subscription', {
       p_user_id: customId,
       p_plan_id: whalePlan.id,
       p_paypal_subscription_id: newPaypalSubscriptionId,
       p_status: 'active',
-      p_current_period_end: null
+      p_current_period_end: null,
     });
-    if (upsertErr) {
-      throw new Error(`Failed to upsert subscription via RPC: ${upsertErr.message}`);
+    if (upsertResult.error) {
+      throw new Error(`Failed to upsert subscription via RPC: ${upsertResult.error.message}`);
     }
 
     // ============================================================================

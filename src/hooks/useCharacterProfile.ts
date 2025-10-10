@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/client';
-import { Tags } from '@/data';
+import { Tags, CharacterInteractions } from '@/data';
 
 const sbAny: any = supabase;
 
@@ -139,13 +139,7 @@ export const useCharacterLikeStatus = (characterId: string | undefined) => {
     queryKey: ['character', 'like-status', characterId, user?.id],
     queryFn: async () => {
       if (!user || !characterId) return false;
-      const { data } = await supabase
-        .from('character_likes')
-        .select('id')
-        .eq('character_id', characterId)
-        .eq('user_id', user.id)
-        .single();
-      return !!data;
+      return CharacterInteractions.isCharacterLiked(characterId, user.id);
     },
     enabled: !!user && !!characterId,
     staleTime: 5 * 60 * 1000,
@@ -158,24 +152,9 @@ export const useToggleCharacterLike = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ characterId, isLiked }: { characterId: string; isLiked: boolean }) => {
+    mutationFn: async ({ characterId }: { characterId: string; isLiked: boolean }) => {
       if (!user) throw new Error('User not authenticated');
-
-      if (isLiked) {
-        const { error } = await supabase
-          .from('character_likes')
-          .delete()
-          .eq('character_id', characterId)
-          .eq('user_id', user.id);
-        if (error) throw error;
-        return false;
-      } else {
-        const { error } = await supabase
-          .from('character_likes')
-          .insert([{ character_id: characterId, user_id: user.id }]);
-        if (error) throw error;
-        return true;
-      }
+      return CharacterInteractions.toggleCharacterLike(characterId, user.id);
     },
     onMutate: async ({ characterId, isLiked }) => {
       await queryClient.cancelQueries({ queryKey: ['character', 'like-status', characterId, user?.id] });

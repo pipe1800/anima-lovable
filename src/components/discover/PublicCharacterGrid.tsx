@@ -12,24 +12,13 @@ import {
   Eye
 } from 'lucide-react';
 import { usePublicCharacters } from '@/hooks/useCharacters';
+import type { PublicCharacterCard } from '@/data/characters/queries';
 
 interface PublicCharacterGridProps {
   searchQuery: string;
   sortBy: string;
   filterBy: string;
 }
-
-type PublicCharacter = {
-  id: string;
-  name: string;
-  short_description: string | null;
-  avatar_url: string | null;
-  interaction_count: number;
-  created_at: string;
-  creator: any;
-  chats_count: number;
-  likes_count: number;
-};
 
 export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCharacterGridProps) {
   const navigate = useNavigate();
@@ -43,7 +32,7 @@ export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCha
     navigate('/auth?mode=signup');
   };
 
-  const handleViewCharacter = (character: PublicCharacter) => {
+  const handleViewCharacter = (character: PublicCharacterCard) => {
     navigate(`/characters/${character.id}`);
   };
 
@@ -81,9 +70,10 @@ export function PublicCharacterGrid({ searchQuery, sortBy, filterBy }: PublicCha
   }
 
   if (error) {
+    const message = error instanceof Error ? error.message : 'Something went wrong';
     return (
       <div className="text-center py-16">
-        <div className="text-red-400 text-lg mb-2">{error.message}</div>
+        <div className="text-red-400 text-lg mb-2">{message}</div>
         <div className="text-gray-500 text-sm">Please try again later</div>
       </div>
     );

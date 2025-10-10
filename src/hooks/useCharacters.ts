@@ -35,30 +35,22 @@ export const useCharacterLike = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const checkLikeStatus = (characterId: string) => {
-    return useQuery({
+  const useCheckLikeStatus = (characterId?: string) =>
+    useQuery({
       queryKey: ['character', 'like-status', characterId, user?.id],
       queryFn: async () => {
-        if (!user) return false;
+        if (!user || !characterId) return false;
         return CharacterInteractions.isCharacterLiked(characterId, user.id);
       },
       enabled: !!user && !!characterId,
       staleTime: 5 * 60 * 1000, // 5 minutes
       gcTime: 10 * 60 * 1000,
     });
-  };
 
   const toggleLike = useMutation({
-    mutationFn: async ({ characterId, isLiked }: { characterId: string; isLiked: boolean }) => {
+    mutationFn: async ({ characterId }: { characterId: string; isLiked: boolean }) => {
       if (!user) throw new Error('User not authenticated');
-
-      if (isLiked) {
-        // Remove like
-        return await CharacterInteractions.toggleCharacterLike(characterId, user.id);
-      } else {
-        // Add like
-        return await CharacterInteractions.toggleCharacterLike(characterId, user.id);
-      }
+      return CharacterInteractions.toggleCharacterLike(characterId, user.id);
     },
     onSuccess: (newLikeStatus, { characterId }) => {
       // Update like status cache
@@ -80,7 +72,8 @@ export const useCharacterLike = () => {
   });
 
   return {
-    checkLikeStatus,
+    checkLikeStatus: useCheckLikeStatus,
+    useCheckLikeStatus,
     toggleLike,
   };
 };
@@ -89,30 +82,22 @@ export const useCharacterFavorite = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const checkFavoriteStatus = (characterId: string) => {
-    return useQuery({
+  const useCheckFavoriteStatus = (characterId?: string) =>
+    useQuery({
       queryKey: ['character', 'favorite-status', characterId, user?.id],
       queryFn: async () => {
-        if (!user) return false;
+        if (!user || !characterId) return false;
         return CharacterInteractions.isCharacterFavorited(characterId, user.id);
       },
       enabled: !!user && !!characterId,
       staleTime: 5 * 60 * 1000, // 5 minutes
       gcTime: 10 * 60 * 1000,
     });
-  };
 
   const toggleFavorite = useMutation({
-    mutationFn: async ({ characterId, isFavorited }: { characterId: string; isFavorited: boolean }) => {
+    mutationFn: async ({ characterId }: { characterId: string; isFavorited: boolean }) => {
       if (!user) throw new Error('User not authenticated');
-
-      if (isFavorited) {
-        // Remove favorite
-        return await CharacterInteractions.toggleCharacterFavorite(characterId, user.id);
-      } else {
-        // Add favorite
-        return await CharacterInteractions.toggleCharacterFavorite(characterId, user.id);
-      }
+      return CharacterInteractions.toggleCharacterFavorite(characterId, user.id);
     },
     onSuccess: (newFavoriteStatus, { characterId }) => {
       // Update favorite status cache
@@ -134,7 +119,8 @@ export const useCharacterFavorite = () => {
   });
 
   return {
-    checkFavoriteStatus,
+    checkFavoriteStatus: useCheckFavoriteStatus,
+    useCheckFavoriteStatus,
     toggleFavorite,
   };
 };

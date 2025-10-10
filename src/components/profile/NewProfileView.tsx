@@ -16,53 +16,153 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Profile as ProfileQueries, Billing } from '@/data';
+import { supabase } from '@/db/client';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getUserDashboardOverview } from '@/data/dashboard/queries';
 import { AccountSettings } from '@/components/settings/categories/AccountSettings';
 import BillingSettings from '@/components/settings/categories/BillingSettings';
 import { ProfileHeader } from '@/components/profile/NewProfileHeader';
 import { StatsBar } from '@/components/profile/StatsBar';
+import type { ProfileOverview } from '@/components/profile/NewProfileHeader';
+import type { SupabaseDatabaseClient } from '@/db/rpc';
+import type { Database } from '@/integrations/supabase/types';
 
-// Consolidated data fetching hook (refactored to unified RPC)
-const useUserProfileData = (userId: string, isOwnProfile: boolean, subscriptionFromContext: any) => {
-  return useQuery({
+interface SubscriptionDetails {
+  planName: string | null;
+}
+
+interface ProfileStatsCounts {
+  chats: number;
+  characters: number;
+  favorites: number;
+  personas: number;
+}
+
+interface ProfileStatsSummary {
+  totalChats: number;
+  totalCharacters: number;
+  totalFavorites: number;
+  totalPersonas: number;
+  memberSince: string;
+}
+
+interface ProfileQueryResult {
+  profile: ProfileOverview | null;
+  subscription: SubscriptionDetails | null;
+  stats: ProfileStatsSummary;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const toProfileOverview = (value: unknown): ProfileOverview | null => {
+  if (!isRecord(value)) return null;
+  return {
+    id: typeof value.id === 'string' ? value.id : undefined,
+    username: typeof value.username === 'string' ? value.username : null,
+    avatar_url: typeof value.avatar_url === 'string' ? value.avatar_url : null,
+    banner_url: typeof value.banner_url === 'string' ? value.banner_url : null,
+    bio: typeof value.bio === 'string' ? value.bio : null,
+    created_at: typeof value.created_at === 'string' ? value.created_at : null,
+    timezone: typeof value.timezone === 'string' ? value.timezone : null,
+  };
+};
+
+const normalizeCounts = (value: unknown): ProfileStatsCounts => {
+  if (!isRecord(value)) {
+    return { chats: 0, characters: 0, favorites: 0, personas: 0 };
+  }
+  return {
+    chats: typeof value.chats === 'number' ? value.chats : 0,
+    characters: typeof value.characters === 'number' ? value.characters : 0,
+    favorites: typeof value.favorites === 'number' ? value.favorites : 0,
+    personas: typeof value.personas === 'number' ? value.personas : 0,
+  };
+};
+
+const extractMemberSince = (profile: ProfileOverview | null): string =>
+  profile?.created_at ?? new Date().toISOString();
+
+const extractSubscriptionDetails = (value: unknown): SubscriptionDetails | null => {
+  if (!isRecord(value)) return null;
+  const plan = value.plan;
+  if (!isRecord(plan)) {
+    return { planName: null };
+  }
+  return { planName: typeof plan.name === 'string' ? plan.name : null };
+};
+
+const normalizePublicProfileOverview = (value: unknown) => {
+  if (!isRecord(value)) {
+    return { profile: null, counts: normalizeCounts(null) };
+  }
+  return {
+    profile: toProfileOverview(value.profile ?? null),
+    counts: normalizeCounts(value.counts ?? null),
+  };
+};
+
+// Consolidated data fetching hook for profile + stats
+const useUserProfileData = (userId: string | null, isOwnProfile: boolean, subscriptionFromContext: unknown) => {
+  return useQuery<ProfileQueryResult>({
     queryKey: ['user-profile-complete', userId],
     queryFn: async () => {
+      if (!userId) {
+        throw new Error('User ID is required to fetch profile data');
+      }
+
       if (isOwnProfile) {
-        const { data, error } = await ProfileQueries.getUserBootstrap(userId);
-        if (error) throw error;
-        const bootstrap = data || ({} as any);
-        const profile = bootstrap.profile || null;
-        const counts = bootstrap.counts || { chats: 0, characters: 0, favorites: 0, personas: 0 };
+        const supabaseDatabaseClient = supabase as SupabaseDatabaseClient;
+  const supabasePublicClient = supabase as SupabaseClient<Database, '__InternalSupabase'>;
+        const subscriptionPromise: Promise<{ data: unknown; error: unknown }> =
+          subscriptionFromContext !== null && subscriptionFromContext !== undefined
+            ? Promise.resolve({ data: subscriptionFromContext, error: null })
+            : Billing.getUserSubscription(supabaseDatabaseClient, userId).then(({ data, error }) => ({ data, error }));
+
+        const [profileRes, overviewRes, subscriptionRes] = await Promise.all([
+          ProfileQueries.getPrivateProfile(userId),
+          getUserDashboardOverview(supabasePublicClient, userId),
+          subscriptionPromise,
+        ]);
+
+        if (profileRes.error) throw profileRes.error;
+        if (overviewRes.error) throw overviewRes.error;
+        if (subscriptionRes.error) throw subscriptionRes.error;
+
+        const profile = toProfileOverview(profileRes.data ?? null);
+        const counts = normalizeCounts(overviewRes.data?.counts);
+        const subscriptionDetails = extractSubscriptionDetails(subscriptionRes.data ?? null);
+
         return {
           profile,
-          subscription: subscriptionFromContext || bootstrap.subscription,
+          subscription: subscriptionDetails,
           stats: {
             totalChats: counts.chats,
             totalCharacters: counts.characters,
             totalFavorites: counts.favorites,
             totalPersonas: counts.personas,
-            memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
-          }
-        };
-      } else {
-        const { data, error } = await ProfileQueries.getPublicProfileOverview(userId);
-        if (error) throw error;
-        const overview = data || ({} as any);
-        const profile = overview.profile || null;
-        const counts = overview.counts || { chats: 0, characters: 0, favorites: 0, personas: 0 };
-        return {
-          profile,
-            subscription: undefined,
-            stats: {
-              totalChats: counts.chats,
-              totalCharacters: counts.characters,
-              totalFavorites: counts.favorites,
-              totalPersonas: counts.personas,
-              memberSince: (profile && typeof profile === 'object' && 'created_at' in profile) ? profile.created_at : new Date().toISOString()
-            }
+            memberSince: extractMemberSince(profile),
+          },
         };
       }
+
+      const { data, error } = await ProfileQueries.getPublicProfileOverview(userId);
+      if (error) throw error;
+      const overview = normalizePublicProfileOverview(data);
+
+      return {
+        profile: overview.profile,
+        subscription: null,
+        stats: {
+          totalChats: overview.counts.chats,
+          totalCharacters: overview.counts.characters,
+          totalFavorites: overview.counts.favorites,
+          totalPersonas: overview.counts.personas,
+          memberSince: extractMemberSince(overview.profile),
+        },
+      };
     },
-    enabled: !!userId,
+    enabled: Boolean(userId),
     staleTime: 1000 * 60 * 5,
   });
 };
@@ -82,7 +182,7 @@ export const NewProfileView = () => {
   // For public profile access, don't redirect to auth if no user is logged in
   const shouldRedirectToAuth = !profileUserId && !userId;
 
-  const { data, isLoading, error } = useUserProfileData(profileUserId!, isOwnProfile, subscription);
+  const { data, isLoading, error } = useUserProfileData(profileUserId ?? null, isOwnProfile, subscription);
 
   // Profile update mutation
   const updateProfileMutation = useMutation({
@@ -155,10 +255,12 @@ export const NewProfileView = () => {
     await updateProfileMutation.mutateAsync({ field, value });
   };
 
+  const profileUsername = data?.profile?.username ?? 'User';
+
   return (
     <div className="min-h-screen bg-background">
       <TopBar
-        title={isOwnProfile ? "My Profile" : `${(data?.profile && 'username' in data.profile) ? data.profile.username : 'User'}'s Profile`}
+        title={isOwnProfile ? "My Profile" : `${profileUsername}'s Profile`}
         rightContent={
           <div className="flex items-center gap-2">
             <Button
@@ -206,8 +308,8 @@ export const NewProfileView = () => {
             </div>
           ) : (
             <ProfileHeader
-              profile={data?.profile}
-              subscription={data?.subscription}
+              profile={data?.profile ?? null}
+              subscriptionPlanName={data?.subscription?.planName ?? null}
               isOwnProfile={isOwnProfile}
               isEditing={isEditing}
               onEditToggle={() => setIsEditing(!isEditing)}
@@ -256,7 +358,7 @@ export const NewProfileView = () => {
             <CardContent className="py-12 text-center">
               <h3 className="text-lg font-semibold mb-2">Public Profile</h3>
               <p className="text-muted-foreground">
-                This is {(data?.profile && 'username' in data.profile) ? data.profile.username : 'this user'}'s public profile. 
+                This is {profileUsername}'s public profile. 
                 Account settings and personal information are private.
               </p>
             </CardContent>

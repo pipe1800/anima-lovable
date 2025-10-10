@@ -9,7 +9,13 @@ import type {
   CancelSubscriptionResponse,
   ReviseSubscriptionRequest,
   SaveSubscriptionRequest,
-  PlanRecord
+  PlanRecord,
+  SubscriptionRecord,
+  PayPalSupabaseClient,
+  PayPalSupabaseAdminClient,
+  PayPalAuthenticatedUser,
+  PayPalSubscription,
+  PayPalSubscriptionListResponse
 } from '../types/index.ts';
 import { cancelPayPalSubscription } from './paypal-client.ts';
 import {
@@ -18,6 +24,8 @@ import {
   updateSubscriptionStatus,
   upsertSubscription,
 } from './database.ts';
+
+type SubscriptionWithPlan = SubscriptionRecord & { plan?: PlanRecord | null };
 
 /**
  * Subscription Operations Handler
@@ -37,8 +45,8 @@ import {
  */
 export async function handleCreateSubscription(
   request: PayPalManagementRequest & CreateSubscriptionRequest,
-  user: any,
-  supabase: any,
+  user: PayPalAuthenticatedUser,
+  supabase: PayPalSupabaseClient,
   req: Request
 ): Promise<PayPalResponse> {
   
@@ -80,7 +88,7 @@ export async function handleCreateSubscription(
     
     const { data: plan, error: planError } = await supabase
       .from('plans')
-      .select('*')
+      .select<PlanRecord>('*')
       .eq('id', planId)
       .single();
 
@@ -188,7 +196,7 @@ export async function handleCreateSubscription(
       throw new Error(`Failed to create PayPal subscription: ${errorData}`);
     }
 
-  const subscription: any = await subscriptionResponse.json();
+    const subscription = (await subscriptionResponse.json()) as PayPalSubscription;
 
     // --------------------------------------------------------------------------
     // Generate & persist state nonce (ties user + provisional subscription id)
@@ -207,7 +215,12 @@ export async function handleCreateSubscription(
         console.warn('[CREATE-SUBSCRIPTION] Failed to persist state nonce (still proceeding):', nonceError.message);
       }
     } catch (nonceInsertErr) {
-      console.warn('[CREATE-SUBSCRIPTION] Exception inserting state nonce (proceeding):', (nonceInsertErr as any)?.message || nonceInsertErr);
+      const fallbackMessage =
+        nonceInsertErr instanceof Error ? nonceInsertErr.message : String(nonceInsertErr);
+      console.warn(
+        '[CREATE-SUBSCRIPTION] Exception inserting state nonce (proceeding):',
+        fallbackMessage,
+      );
     }
     
     console.log('[CREATE-SUBSCRIPTION] PayPal subscription created', {
@@ -218,7 +231,7 @@ export async function handleCreateSubscription(
     // ============================================================================
     // APPROVAL URL EXTRACTION
     // ============================================================================
-    const approvalLink = subscription.links?.find((link: any) => link.rel === 'approve')?.href;
+    const approvalLink = subscription.links?.find((link) => link.rel === 'approve')?.href;
     
     if (!approvalLink) {
       throw new Error("No approval link found in PayPal response");
@@ -268,9 +281,9 @@ export async function handleCreateSubscription(
  */
 export async function handleVerifySubscription(
   request: PayPalManagementRequest & VerifySubscriptionRequest,
-  user: any,
-  supabase: any,
-  supabaseAdmin: any
+  user: PayPalAuthenticatedUser,
+  supabase: PayPalSupabaseClient,
+  supabaseAdmin: PayPalSupabaseAdminClient
 ): Promise<PayPalResponse> {
   
   console.log('[VERIFY-SUBSCRIPTION] Starting subscription verification');
@@ -355,7 +368,7 @@ export async function handleVerifySubscription(
     }
 
     const paypalBaseUrl = "https://api-m.sandbox.paypal.com";
-    let subscription: any;
+    let subscription: PayPalSubscription | undefined;
 
   if (subscriptionId) {
       // Direct subscription lookup by ID
@@ -408,10 +421,11 @@ export async function handleVerifySubscription(
       });
 
       if (searchResponse.ok) {
-  const searchData: any = await searchResponse.json();
-  subscription = searchData.subscriptions?.find((sub: any) => 
-          sub.subscriber?.email_address?.toLowerCase() === user.email?.toLowerCase() && 
-          sub.status === 'ACTIVE'
+        const searchData = (await searchResponse.json()) as PayPalSubscriptionListResponse;
+        subscription = searchData.subscriptions?.find(
+          (sub) =>
+            sub.subscriber?.email_address?.toLowerCase() === user.email.toLowerCase() &&
+            sub.status === 'ACTIVE',
         );
         
         if (!subscription) {
@@ -521,35 +535,53 @@ export async function handleVerifySubscription(
     console.log('[VERIFY-SUBSCRIPTION] Upserting subscription into database...');
     
     // Use RPC instead of direct table upsert helper for central logic enforcement
-    const { data: upsertedId, error: upsertErr } = await (supabase as any).rpc('upsert_subscription', {
+    const upsertResult = await supabase.rpc('upsert_subscription', {
       p_user_id: user.id,
       p_plan_id: planData.id,
       p_paypal_subscription_id: subscription.id,
       p_status: subscription.status,
-      p_current_period_end: subscription.billing_info?.next_billing_time || null
+      p_current_period_end: subscription.billing_info?.next_billing_time || null,
     });
-    if (upsertErr) {
-      console.error('[VERIFY-SUBSCRIPTION] upsert_subscription RPC failed:', upsertErr);
+    if (upsertResult.error) {
+      console.error('[VERIFY-SUBSCRIPTION] upsert_subscription RPC failed:', upsertResult.error);
       throw new Error('Failed to persist subscription');
     }
-    const newSubscription = { id: upsertedId, status: subscription.status } as any;
+    const subscriptionRecordId =
+      typeof upsertResult.data === 'string' && upsertResult.data.length > 0
+        ? upsertResult.data
+        : subscription.id;
+    const newSubscription = {
+      id: subscriptionRecordId,
+      status: subscription.status,
+    };
 
     // Grant credits only if status indicates activation (no duplicate grants)
     if (['ACTIVE', 'active'].includes(subscription.status) && planData.monthly_credits_allowance) {
       try {
-        const { data: grantedBalance, error: grantErr } = await (supabase as any).rpc('add_user_credits', {
+        const creditResult = await supabase.rpc('add_user_credits', {
           p_user_id: user.id,
           p_amount: planData.monthly_credits_allowance,
           p_transaction_type: 'subscription_allowance',
-          p_reference_id: newSubscription.id,
+          p_reference_id: subscriptionRecordId,
         });
-        if (grantErr) {
-          console.warn('[VERIFY-SUBSCRIPTION] Credit grant failed (continuing):', grantErr.message);
+        if (creditResult.error) {
+          console.warn(
+            '[VERIFY-SUBSCRIPTION] Credit grant failed (continuing):',
+            creditResult.error.message,
+          );
         } else {
-          console.log('[VERIFY-SUBSCRIPTION] Credits granted via RPC. New balance:', grantedBalance);
+          console.log(
+            '[VERIFY-SUBSCRIPTION] Credits granted via RPC. New balance:',
+            creditResult.data,
+          );
         }
-      } catch (e:any) {
-        console.warn('[VERIFY-SUBSCRIPTION] Exception during credit grant (continuing):', e.message || e);
+      } catch (grantError) {
+        const grantErrorMessage =
+          grantError instanceof Error ? grantError.message : String(grantError);
+        console.warn(
+          '[VERIFY-SUBSCRIPTION] Exception during credit grant (continuing):',
+          grantErrorMessage,
+        );
       }
     }
 
@@ -580,9 +612,9 @@ export async function handleVerifySubscription(
  */
 export async function handleCancelSubscription(
   request: PayPalManagementRequest & CancelSubscriptionRequest,
-  user: any,
-  supabase: any,
-  supabaseAdmin: any
+  user: PayPalAuthenticatedUser,
+  supabase: PayPalSupabaseClient,
+  supabaseAdmin: PayPalSupabaseAdminClient
 ): Promise<PayPalResponse> {
   
   console.log('[CANCEL-SUBSCRIPTION] Starting subscription cancellation');
@@ -595,7 +627,7 @@ export async function handleCancelSubscription(
     
     const { data: subscription, error: fetchError } = await supabase
       .from('billing.subscriptions')
-      .select('id, plan_id, status, paypal_subscription_id')
+      .select<SubscriptionWithPlan>('id, plan_id, status, paypal_subscription_id, plan:plans(*)')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .maybeSingle();
@@ -611,8 +643,8 @@ export async function handleCancelSubscription(
 
     console.log('[CANCEL-SUBSCRIPTION] Active subscription found', {
       subscriptionId: subscription.paypal_subscription_id,
-      planName: subscription.plan.name,
-      planPrice: subscription.plan.price_monthly
+      planName: subscription.plan?.name,
+      planPrice: subscription.plan?.price_monthly,
     });
 
     // ============================================================================
@@ -646,34 +678,38 @@ export async function handleCancelSubscription(
     console.log('[CANCEL-SUBSCRIPTION] PayPal subscription cancelled successfully');
 
     // Use RPC to mark subscription canceled (does not auto-downgrade). Then optionally ensure a Guest Pass exists.
-    const { data: cancelData, error: cancelErr } = await (supabaseAdmin as any).rpc('cancel_subscription', {
+    const cancelResult = await supabaseAdmin.rpc('cancel_subscription', {
       p_user_id: user.id,
       p_subscription_id: subscription.id,
-      p_cancel_immediately: false
+      p_cancel_immediately: false,
     });
-    if (cancelErr) {
-      console.error('[CANCEL-SUBSCRIPTION] cancel_subscription RPC failed:', cancelErr);
+    if (cancelResult.error) {
+      console.error('[CANCEL-SUBSCRIPTION] cancel_subscription RPC failed:', cancelResult.error);
       throw new Error('Failed to mark subscription canceled');
     }
 
     // Ensure Guest Pass (free) plan subscription if needed by creating new active one via upsert_subscription
     const { data: guestPassPlan, error: planError } = await supabaseAdmin
       .from('plans')
-      .select('*')
+      .select<PlanRecord>('*')
       .eq('name', 'Guest Pass')
       .single();
     if (planError || !guestPassPlan) {
-      console.warn('[CANCEL-SUBSCRIPTION] Guest Pass plan lookup failed (continuing):', planError?.message);
+      const warningMessage = planError?.message ?? 'Guest Pass plan not found';
+      console.warn('[CANCEL-SUBSCRIPTION] Guest Pass plan lookup failed (continuing):', warningMessage);
     } else {
-      const { error: guestUpsertErr } = await (supabaseAdmin as any).rpc('upsert_subscription', {
+      const guestUpsertResult = await supabaseAdmin.rpc('upsert_subscription', {
         p_user_id: user.id,
         p_plan_id: guestPassPlan.id,
         p_paypal_subscription_id: null,
         p_status: 'active',
-        p_current_period_end: null
+        p_current_period_end: null,
       });
-      if (guestUpsertErr) {
-        console.warn('[CANCEL-SUBSCRIPTION] Guest Pass upsert failed (continuing):', guestUpsertErr.message);
+      if (guestUpsertResult.error) {
+        console.warn(
+          '[CANCEL-SUBSCRIPTION] Guest Pass upsert failed (continuing):',
+          guestUpsertResult.error.message,
+        );
       }
     }
 
@@ -706,9 +742,9 @@ export async function handleCancelSubscription(
  */
 export async function handleReviseSubscription(
   request: PayPalManagementRequest & ReviseSubscriptionRequest,
-  user: any,
-  supabase: any,
-  supabaseAdmin: any,
+  user: PayPalAuthenticatedUser,
+  supabase: PayPalSupabaseClient,
+  supabaseAdmin: PayPalSupabaseAdminClient,
   req?: Request
 ): Promise<PayPalResponse> {
   
@@ -847,13 +883,13 @@ export async function handleReviseSubscription(
       throw new Error(`Failed to revise PayPal subscription: ${reviseResponse.status} - ${errorText}`);
     }
 
-    const paypalRevisionResponse = await reviseResponse.json();
+    const paypalRevisionResponse = (await reviseResponse.json()) as PayPalSubscription;
     console.log('[REVISE-SUBSCRIPTION] PayPal revision response received');
 
     // ============================================================================
     // CHECK FOR APPROVAL REQUIREMENT
     // ============================================================================
-  const approvalLink = (paypalRevisionResponse as any).links?.find((link: any) => link.rel === 'approve');
+    const approvalLink = paypalRevisionResponse.links?.find((link) => link.rel === 'approve');
     if (approvalLink) {
       console.log('[REVISE-SUBSCRIPTION] Approval needed:', approvalLink.href);
       return {
@@ -868,16 +904,20 @@ export async function handleReviseSubscription(
     // =========================================================================
     // UPDATE DATABASE - PLAN CHANGE (use upsert_subscription RPC)
     // =========================================================================
-    const { data: rpcSubId, error: reviseErr } = await (supabaseAdmin as any).rpc('upsert_subscription', {
+    const reviseResult = await supabaseAdmin.rpc('upsert_subscription', {
       p_user_id: user.id,
       p_plan_id: newPlan.id,
       p_paypal_subscription_id: subscriptionId,
       p_status: 'active',
-      p_current_period_end: null
+      p_current_period_end: null,
     });
-    if (reviseErr) {
-      throw new Error(`Failed to persist revised subscription: ${reviseErr.message}`);
+    if (reviseResult.error) {
+      throw new Error(`Failed to persist revised subscription: ${reviseResult.error.message}`);
     }
+    const rpcSubId =
+      typeof reviseResult.data === 'string' && reviseResult.data.length > 0
+        ? reviseResult.data
+        : subscriptionId;
 
     // =========================================================================
     // CREDIT ADJUSTMENT (use deduct/add RPCs instead of raw table updates)
@@ -888,14 +928,22 @@ export async function handleReviseSubscription(
 
     if (creditDifference > 0) {
       try {
-        await (supabaseAdmin as any).rpc('add_user_credits', {
+        const creditGrantResult = await supabaseAdmin.rpc('add_user_credits', {
           p_user_id: user.id,
-            p_amount: creditDifference,
-            p_transaction_type: 'subscription_allowance',
-            p_reference_id: rpcSubId
+          p_amount: creditDifference,
+          p_transaction_type: 'subscription_allowance',
+          p_reference_id: rpcSubId,
         });
-      } catch (e:any) {
-        console.warn('[REVISE-SUBSCRIPTION] Failed to grant additional credits:', e.message);
+        if (creditGrantResult.error) {
+          console.warn(
+            '[REVISE-SUBSCRIPTION] add_user_credits RPC failed:',
+            creditGrantResult.error.message,
+          );
+        }
+      } catch (creditGrantError) {
+        const creditGrantMessage =
+          creditGrantError instanceof Error ? creditGrantError.message : String(creditGrantError);
+        console.warn('[REVISE-SUBSCRIPTION] Failed to grant additional credits:', creditGrantMessage);
       }
     }
     // (If negative difference we intentionally do not claw back past credits)
@@ -931,9 +979,9 @@ export async function handleReviseSubscription(
  */
 export async function handleSaveSubscription(
   request: PayPalManagementRequest & SaveSubscriptionRequest,
-  user: any,
-  supabase: any,
-  supabaseAdmin: any
+  user: PayPalAuthenticatedUser,
+  supabase: PayPalSupabaseClient,
+  supabaseAdmin: PayPalSupabaseAdminClient
 ): Promise<PayPalResponse> {
   
   console.log('[SAVE-SUBSCRIPTION] Starting subscription save');
@@ -975,15 +1023,15 @@ export async function handleSaveSubscription(
       throw new Error(`Failed to verify subscription with PayPal: ${subscriptionResponse.status}`);
     }
 
-    const subscriptionData = await subscriptionResponse.json();
+    const subscriptionData = (await subscriptionResponse.json()) as PayPalSubscription;
     console.log('[SAVE-SUBSCRIPTION] PayPal subscription verified:', {
-  status: (subscriptionData as any).status,
-  id: (subscriptionData as any).id
+      status: subscriptionData.status,
+      id: subscriptionData.id,
     });
 
     // Check if subscription is active
-    if ((subscriptionData as any).status !== "ACTIVE") {
-      throw new Error(`Subscription is not active. Status: ${(subscriptionData as any).status}`);
+    if (subscriptionData.status !== 'ACTIVE') {
+      throw new Error(`Subscription is not active. Status: ${subscriptionData.status}`);
     }
 
     // ============================================================================
@@ -991,7 +1039,7 @@ export async function handleSaveSubscription(
     // ============================================================================
     const { data: planData, error: planError } = await supabaseAdmin
       .from('plans')
-      .select('id, name, monthly_credits_allowance')
+      .select<PlanRecord>('id, name, monthly_credits_allowance')
       .eq('id', planId)
       .single();
 
@@ -1113,12 +1161,10 @@ export async function handleSaveSubscription(
 
 // Removed bare '@supabase/supabase-js' import (not supported in Edge bundling)
 // import { User } from '@supabase/supabase-js';
-import { PayPalSubscription } from '../types/index.ts';
-
 async function handleSubscriptionCreated(
-  subscription: any,
-  supabaseAdmin: any,
-  user: any,
+  subscription: PayPalSubscription,
+  supabaseAdmin: PayPalSupabaseAdminClient,
+  user: PayPalAuthenticatedUser,
 ) {
   const planId = subscription.plan_id;
   if (!planId) {
@@ -1136,35 +1182,53 @@ async function handleSubscriptionCreated(
   }
 
   // Use upsert_subscription RPC
-  const { data: rpcId, error: rpcErr } = await (supabaseAdmin as any).rpc('upsert_subscription', {
+  const rpcResult = await supabaseAdmin.rpc('upsert_subscription', {
     p_user_id: user.id,
     p_plan_id: plan.id,
     p_paypal_subscription_id: subscription.id,
     p_status: subscription.status,
-    p_current_period_end: subscription.billing_info?.next_billing_time || null
+    p_current_period_end: subscription.billing_info?.next_billing_time || null,
   });
-  if (rpcErr) {
-    console.error('[WEBHOOK subscription.created] upsert_subscription failed:', rpcErr.message);
+  if (rpcResult.error) {
+    console.error(
+      '[WEBHOOK subscription.created] upsert_subscription failed:',
+      rpcResult.error.message,
+    );
     return;
   }
+  const rpcId =
+    typeof rpcResult.data === 'string' && rpcResult.data.length > 0
+      ? rpcResult.data
+      : subscription.id;
 
   if (['ACTIVE', 'active'].includes(subscription.status) && plan.monthly_credits_allowance) {
     try {
-      await (supabaseAdmin as any).rpc('add_user_credits', {
+      const creditResult = await supabaseAdmin.rpc('add_user_credits', {
         p_user_id: user.id,
         p_amount: plan.monthly_credits_allowance,
         p_transaction_type: 'subscription_allowance',
         p_reference_id: rpcId,
       });
-    } catch (e:any) {
-      console.warn('[WEBHOOK subscription.created] Exception during credit grant:', e.message || e);
+      if (creditResult.error) {
+        console.warn(
+          '[WEBHOOK subscription.created] add_user_credits RPC failed:',
+          creditResult.error.message,
+        );
+      }
+    } catch (creditError) {
+      const creditErrorMessage =
+        creditError instanceof Error ? creditError.message : String(creditError);
+      console.warn(
+        '[WEBHOOK subscription.created] Exception during credit grant:',
+        creditErrorMessage,
+      );
     }
   }
 }
 
 async function handleSubscriptionCancelled(
   subscription: PayPalSubscription,
-  supabaseAdmin: any,
+  supabaseAdmin: PayPalSupabaseAdminClient,
 ) {
   await updateSubscriptionStatus(
     supabaseAdmin,

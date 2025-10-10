@@ -27,6 +27,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
+import type { ImportedWorldInfoPayload, ImportedWorldInfoEntry } from '@/types/world-info';
+import type { Tag } from '@/data/tags/queries';
 import {
   createWorldInfo as createWorldInfoRaw,
   updateWorldInfoCore,
@@ -38,12 +40,40 @@ import {
 // Minimal local types to decouple from legacy module
 interface WorldInfoEditorProps { mode: 'create' | 'edit'; worldInfoId?: string; }
 interface WorldInfoEntry { id: string; world_info_id: string; keywords: string[]; entry_text: string; created_at: string; updated_at: string; }
-interface Tag { id: number; name: string; }
 
 // Hooks (ensure they remain imported elsewhere)
 import { useWorldInfoWithEntries, useWorldInfoTags } from '@/hooks/useWorldInfos';
 import { useAllTags } from '@/hooks/useTags';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+
+const isImportedWorldInfoPayload = (value: unknown): value is ImportedWorldInfoPayload => {
+  if (!value || typeof value !== 'object') return false;
+  return 'name' in value || 'description' in value || 'entries' in value;
+};
+
+const normalizeImportedEntries = (entries?: ImportedWorldInfoEntry[] | null): WorldInfoEntry[] => {
+  if (!Array.isArray(entries)) return [];
+  return entries.map((entry: ImportedWorldInfoEntry | undefined, index: number) => {
+    const rawKeywords: string[] = Array.isArray(entry?.keywords)
+      ? entry.keywords
+      : typeof entry?.keywords === 'string'
+        ? entry.keywords.split(',')
+        : [];
+
+    const keywords = rawKeywords.map((keyword: string) => keyword.trim()).filter(Boolean);
+    const entryText = entry?.entry_text ?? entry?.text ?? entry?.content ?? '';
+
+    const timestamp = new Date().toISOString();
+    return {
+      id: `temp-${index}`,
+      world_info_id: '',
+      keywords,
+      entry_text: entryText,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+  });
+};
 
 export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorProps) {
   const navigate = useNavigate();
@@ -53,7 +83,10 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
   const queryClient = useQueryClient();
 
   // Get imported world info from location state
-  const importedWorldInfo = location.state?.importedWorldInfo;
+  const locationState = (location.state ?? {}) as { importedWorldInfo?: unknown };
+  const importedWorldInfo = isImportedWorldInfoPayload(locationState.importedWorldInfo)
+    ? locationState.importedWorldInfo
+    : undefined;
 
   // Form state
   const [formData, setFormData] = useState({
@@ -63,16 +96,7 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
   });
 
   // Entries state
-  const [entries, setEntries] = useState<WorldInfoEntry[]>(
-    importedWorldInfo?.entries?.map((entry: any, index: number) => ({
-      id: `temp-${index}`,
-      world_info_id: '',
-      keywords: Array.isArray(entry.keywords) ? entry.keywords : entry.keywords?.split(',').map((k: string) => k.trim()) || [],
-      entry_text: entry.entry_text || entry.text || '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    })) || []
-  );
+  const [entries, setEntries] = useState<WorldInfoEntry[]>(normalizeImportedEntries(importedWorldInfo?.entries));
   const [newEntry, setNewEntry] = useState({ keywords: '', text: '' });
   const [editingEntry, setEditingEntry] = useState<{ id: string; keywords: string; text: string } | null>(null);
   const [entriesSearch, setEntriesSearch] = useState('');
@@ -92,16 +116,24 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
   const { data: worldInfoTags = [] } = useWorldInfoTags(worldInfoId || null);
 
   const { data: allTagsRaw = [] } = useAllTags();
-  const allTags: Tag[] = (allTagsRaw as any[]).filter(t => t && typeof t === 'object' && 'id' in t && 'name' in t) as Tag[];
+  const allTags: Tag[] = Array.isArray(allTagsRaw)
+    ? allTagsRaw.filter((tag): tag is Tag => !!tag && typeof tag === 'object' && 'id' in tag && 'name' in tag)
+    : [];
 
   // Track initial snapshot for dirty state
-  const initialSnapshotRef = useRef<{ form: typeof formData; entries: any[]; tagIds: number[] } | null>(null);
+  const initialSnapshotRef = useRef<{
+    form: typeof formData;
+    entries: Array<{ keywords: string[]; entry_text: string }>;
+    tagIds: number[];
+  } | null>(null);
 
   // Helper to create a comparable snapshot
   const createSnapshot = () => ({
     form: formData,
-    entries: entries.map(e => ({ keywords: [...e.keywords].sort(), entry_text: e.entry_text })).sort((a,b)=>a.entry_text.localeCompare(b.entry_text)),
-    tagIds: selectedTags.map(t => t.id).sort()
+    entries: entries
+      .map((entry: WorldInfoEntry) => ({ keywords: [...entry.keywords].sort(), entry_text: entry.entry_text }))
+      .sort((a, b) => a.entry_text.localeCompare(b.entry_text)),
+    tagIds: selectedTags.map((tag: Tag) => tag.id).sort()
   });
 
   // Initialize snapshot after data load (edit) or first mount (create)
@@ -203,9 +235,12 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
   const handleUpdateEntry = () => {
     if (!editingEntry || !editingEntry.keywords.trim() || !editingEntry.text.trim()) return;
 
-    const keywords = editingEntry.keywords.split(',').map(k => k.trim()).filter(k => k);
+    const keywords = editingEntry.keywords
+      .split(',')
+      .map((keyword: string) => keyword.trim())
+      .filter((keyword: string) => Boolean(keyword));
     
-    setEntries(prev => prev.map(entry => 
+    setEntries(prev => prev.map((entry: WorldInfoEntry) => 
       entry.id === editingEntry.id 
         ? { ...entry, keywords, entry_text: editingEntry.text }
         : entry
@@ -215,7 +250,7 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
   };
 
   const handleDeleteEntry = (entryId: string) => {
-    setEntries(prev => prev.filter(entry => entry.id !== entryId));
+  setEntries(prev => prev.filter((entry: WorldInfoEntry) => entry.id !== entryId));
   };
 
   const handleSave = async () => {
@@ -230,7 +265,7 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
 
     setIsSaving(true);
     try {
-      const worldInfoData: any = {
+      const worldInfoData = {
         name: formData.name.trim(),
         short_description: formData.description.trim(),
         visibility: formData.visibility
@@ -298,11 +333,11 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
     }
   };
 
-  const filteredEntries = entries.filter(entry => {
+  const filteredEntries = entries.filter((entry: WorldInfoEntry) => {
     if (!entriesSearch) return true;
     const searchLower = entriesSearch.toLowerCase();
     return (
-      entry.keywords.some(k => k.toLowerCase().includes(searchLower)) ||
+      entry.keywords.some((keyword: string) => keyword.toLowerCase().includes(searchLower)) ||
       entry.entry_text.toLowerCase().includes(searchLower)
     );
   });
@@ -458,22 +493,22 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
                 <div>
                   <Label className="text-white mb-2 block">Tags</Label>
                   <div className="flex flex-wrap gap-2 mb-3">
-                    {selectedTags.map(tag => (
+                    {selectedTags.map((tag: Tag) => (
                       <Badge
                         key={tag.id}
                         variant="secondary"
                         className="cursor-pointer"
-                        onClick={() => setSelectedTags(prev => prev.filter(t => t.id !== tag.id))}
+                        onClick={() => setSelectedTags(prev => prev.filter((existing: Tag) => existing.id !== tag.id))}
                       >
                         {tag.name}
                         <X className="w-3 h-3 ml-1" />
                       </Badge>
                     ))}
                   </div>
-                  {allTags.filter(tag => !selectedTags.some(t => t.id === tag.id)).length > 0 && (
+                  {allTags.filter((tag: Tag) => !selectedTags.some((selected: Tag) => selected.id === tag.id)).length > 0 && (
                     <Select
                       onValueChange={(value) => {
-                        const tag = allTags.find(t => t.id.toString() === value);
+                        const tag = allTags.find((candidate: Tag) => candidate.id.toString() === value);
                         if (tag) setSelectedTags(prev => [...prev, tag]);
                       }}
                     >
@@ -482,8 +517,8 @@ export default function WorldInfoEditor({ mode, worldInfoId }: WorldInfoEditorPr
                       </SelectTrigger>
                       <SelectContent>
                         {allTags
-                          .filter(tag => !selectedTags.some(t => t.id === tag.id))
-                          .map(tag => (
+                          .filter((tag: Tag) => !selectedTags.some((selected: Tag) => selected.id === tag.id))
+                          .map((tag: Tag) => (
                             <SelectItem key={tag.id} value={tag.id.toString()}>
                               {tag.name}
                             </SelectItem>

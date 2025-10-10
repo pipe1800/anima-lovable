@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CharacterGrid } from './CharacterGrid';
+import type { PublicCharacter } from './CharacterGrid';
+import type { Character } from '@/types/chat';
 import { useAuth } from '@/contexts/AuthContext';
 import { preloadDashboardData } from '@/hooks/useDashboard';
 import { useDashboardOverview } from '@/hooks/useDashboardProgressive';
@@ -46,7 +48,7 @@ export function DiscoverContent() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [initialAccumulated, setInitialAccumulated] = useState<any[]>([]);
+  const [initialAccumulated, setInitialAccumulated] = useState<PublicCharacter[]>([]);
 
   // Hydrate filters from URL
   useEffect(() => {
@@ -109,12 +111,16 @@ export function DiscoverContent() {
 
   // Initial characters with offset
   const initialOffset = hasSearched ? 0 : (currentPage - 1) * 20;
-  const { 
-    data: initialCharacters = [], 
+  const {
+    data: rawInitialCharacters = [], 
     isLoading: isInitialLoading,
     isFetching: isInitialFetching,
-    isPlaceholderData: isInitialPlaceholder,
   } = usePublicCharacters(20, initialOffset);
+
+  const initialCharacters = useMemo<PublicCharacter[]>(
+    () => (rawInitialCharacters as PublicCharacter[]),
+    [rawInitialCharacters]
+  );
 
   // Accumulate initial characters
   useEffect(() => {
@@ -122,9 +128,11 @@ export function DiscoverContent() {
     if (currentPage === 1) setInitialAccumulated(initialCharacters);
     else if (initialCharacters?.length) {
       setInitialAccumulated(prev => {
-        const ids = new Set(prev.map((c: any) => c.id));
+        const ids = new Set(prev.map((c) => c.id));
         const merged = [...prev];
-        initialCharacters.forEach((c: any) => { if (!ids.has(c.id)) merged.push(c); });
+        initialCharacters.forEach((character) => {
+          if (!ids.has(character.id)) merged.push(character);
+        });
         return merged;
       });
     }
@@ -170,6 +178,18 @@ export function DiscoverContent() {
     'Supernatural', 'Magic', 'School', 'Work', 'Family', 'Friends'
   ];
 
+  const searchCharacters = (searchResults?.data ?? []) as PublicCharacter[];
+
+  const toChatCharacter = (character: PublicCharacter): Character => ({
+    id: character.id,
+    name: character.name,
+    avatar: character.avatar_url ?? undefined,
+    avatar_url: character.avatar_url,
+    short_description: character.short_description,
+    interaction_count: character.interaction_count,
+    created_at: character.created_at,
+  });
+
   // Handle search button click
   const handleSearch = () => {
     setHasSearched(true);
@@ -203,26 +223,38 @@ export function DiscoverContent() {
 
   // Handle surprise me - open chat with random character or view if logged out
   const handleSurpriseMe = async () => {
-    const charactersToChooseFrom = hasSearched && searchResults?.data ? searchResults.data : initialAccumulated.length ? initialAccumulated : initialCharacters;
+    const charactersToChooseFrom: PublicCharacter[] = hasSearched && searchCharacters.length
+      ? searchCharacters
+      : initialAccumulated.length
+        ? initialAccumulated
+        : initialCharacters;
     if (!charactersToChooseFrom?.length) return;
     const randomCharacter = charactersToChooseFrom[Math.floor(Math.random() * charactersToChooseFrom.length)];
-    if (randomCharacter) await startChat(randomCharacter);
+    if (randomCharacter) await startChat(toChatCharacter(randomCharacter));
   };
 
   // Defer dashboard preload so discover paints first
   useEffect(() => {
     if (!user?.id) return;
     const run = () => preloadDashboardData(user.id, queryClient);
-    const win: any = window as any;
-    const id = win.requestIdleCallback ? win.requestIdleCallback(run, { timeout: 1500 }) : setTimeout(run, 800);
+    const win = window as typeof window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const id = win.requestIdleCallback ? win.requestIdleCallback(run, { timeout: 1500 }) : window.setTimeout(run, 800);
     return () => {
-      if (win.cancelIdleCallback && id) win.cancelIdleCallback(id);
-      else clearTimeout(id);
+      if (win.cancelIdleCallback && typeof id === 'number') {
+        win.cancelIdleCallback(id);
+      } else {
+        clearTimeout(id);
+      }
     };
   }, [user?.id, queryClient]);
 
   // Display data
-  const displayCharacters = hasSearched && searchResults?.data ? searchResults.data : (initialAccumulated.length ? initialAccumulated : initialCharacters);
+  const displayCharacters: PublicCharacter[] = hasSearched && searchCharacters.length
+    ? searchCharacters
+    : (initialAccumulated.length ? initialAccumulated : initialCharacters);
 
   // Determine grid loading state: show skeletons when fetching and nothing to display yet
   const isGridLoading = hasSearched
@@ -257,7 +289,7 @@ export function DiscoverContent() {
               placeholder="Search characters by name or description... (Press Enter to search)"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => { if ((e as any).key === 'Enter') handleSearch(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
               className="pl-9 bg-[#121212] border-gray-700 text-white placeholder-gray-400 focus:border-[#FF7A00] focus:ring-[#FF7A00]/20"
             />
           </div>
